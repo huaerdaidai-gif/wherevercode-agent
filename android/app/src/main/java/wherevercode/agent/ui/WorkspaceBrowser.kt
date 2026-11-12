@@ -194,6 +194,8 @@ class WorkspaceBrowser(
         val parts = normalized.split('/').filter { it.isNotEmpty() && it != "." }
         if (".." in parts) return null
         val candidate = if (parts.isEmpty()) rootDir else File(rootDir, parts.joinToString("/"))
+        // 2026-11-13 安全加固：悬空符号链接 / 根外链接按真实路径复核。
+        if (wherevercode.agent.core.security.SafePaths.resolveInside(rootDir, candidate) == null) return null
         val canonical = try {
             candidate.canonicalFile
         } catch (_: Exception) {

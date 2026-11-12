@@ -90,7 +90,10 @@ abstract class BaseDeviceAdapter(
                 root
             }
             if (targetPath == anchor) return false
+            // 2026-11-13 安全加固：canonicalPath 解不开时不再回退到未规范化的
+            // absolutePath（`..`、悬空链接会因此漏网）；真实路径不在任一根下即拒绝。
             for (root in allowedRoots) {
+                if (wherevercode.agent.core.security.SafePaths.resolveInside(root, target) == null) continue
                 val rootPath = root.canonicalPath
                 val resolved = try {
                     target.canonicalPath

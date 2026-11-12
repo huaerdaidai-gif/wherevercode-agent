@@ -40,6 +40,80 @@ private val CODE_FLAGS: Map<String, Set<String>> = mapOf(
 
 class LimitError(val code: String, message: String) : IllegalArgumentException(message)
 
+/**
+ * 2026-11-13 安全加固：白名单命令自身就能执行任意程序或写任意文件的参数。
+ * 白名单只看 argv[0] 时，`find . -exec sh -c …` 等于绕过整张白名单；
+ * `git diff --output=/任意路径` 能把文件写到工作区之外。
+ */
+private val FIND_DANGEROUS_ACTIONS: Set<String> = setOf(
+    "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fls", "-fprint", "-fprint0", "-fprintf",
+)
+
+/** git 只读子命令里仍会写文件 / 调外部程序的选项：精确匹配或 `选项=值`。 */
+private val GIT_DANGEROUS_OPTIONS: Set<String> = setOf(
+    "--output", "--exec", "--upload-pack", "--receive-pack",
+)
+
+/** git 前缀匹配的危险选项（没有同前缀的无害选项）。`--no-ext-diff` 等否定形式不受影响。 */
+private val GIT_DANGEROUS_OPTION_PREFIXES: List<String> = listOf("--ext-diff", "--textconv")
+
+/**
+ * 命令参数级拒绝原因（null = 通过）。与 argv[0] 白名单、git 子命令白名单
+ * 叠加生效，ToolRegistry 与 HandServer 共用（经 [CommandLimits.checkCommand]）。
+ */
+fun dangerousArgumentReason(argv: List<String>): String? {
+    if (argv.isEmpty()) return null
+    val name = argv[0].substringAfterLast("/")
+    val rest = argv.drop(1)
+    when (name) {
+        "find" -> {
+            val hit = rest.firstOrNull { it in FIND_DANGEROUS_ACTIONS }
+            if (hit != null) return "不允许的命令：find 不允许 $hit（会执行其它程序或删除/写入文件）"
+        }
+        "git" -> {
+            val hit = rest.firstOrNull { arg ->
+                arg.substringBefore('=') in GIT_DANGEROUS_OPTIONS ||
+                    GIT_DANGEROUS_OPTION_PREFIXES.any { arg.startsWith(it) }
+            }
+            if (hit != null) return "不允许的 git 参数：${hit.substringBefore('=')}（可能写文件或调用外部程序）"
+        }
+        "python", "python3" -> {
+            // `-c` 的合并写法：`-cprint(1)`、`-uc`、`-Bc` 等短选项簇。只看
+            // 脚本/模块名之前的选项（之后的参数属于脚本自己）。
+            var i = 0
+            scan@ while (i < rest.size) {
+                val arg = rest[i]
+                i++
+                if (!arg.startsWith("-") || arg.startsWith("--") || arg == "-") break
+                // 短选项簇逐字符看：c = 内联代码；m = 模块（其后都是模块参数）；
+                // W / X 带参数：簇里余下的字符是它的值；簇以 W/X 结尾时下一个
+                // argv 是它的值，跳过。
+                for ((pos, ch) in arg.drop(1).withIndex()) {
+                    when (ch) {
+                        'c' -> return "不允许的命令：$name 不允许内联代码执行"
+                        'm' -> break@scan
+                        'W', 'X' -> {
+                            if (pos == arg.length - 2) i++
+                            continue@scan
+                        }
+                    }
+                }
+            }
+        }
+        "node" -> {
+            for (arg in rest) {
+                if (!arg.startsWith("-")) break
+                val evalFlag = arg == "-e" || arg == "-p" || arg == "--eval" || arg == "--print" ||
+                    arg.startsWith("--eval=") || arg.startsWith("--print=") ||
+                    (!arg.startsWith("--") && arg.length > 2 && arg.drop(1).all { it.isLetter() } &&
+                        (arg.contains('e') || arg.contains('p')))
+                if (evalFlag) return "不允许的命令：node 不允许内联代码执行"
+            }
+        }
+    }
+    return null
+}
+
 /** Returns (allowed, chineseReasonOrNull) for one `run` argv. */
 fun validateCommand(argv: List<String>?): Pair<Boolean, String?> {
     if (argv == null || argv.isEmpty() || argv.any { it.isEmpty() }) {
@@ -59,6 +133,7 @@ fun validateCommand(argv: List<String>?): Pair<Boolean, String?> {
     if (argv.drop(1).any { it in flags }) {
         return false to "不允许的命令：$name 不允许内联代码执行"
     }
+    dangerousArgumentReason(argv)?.let { return false to it }
     return true to null
 }
 
@@ -95,6 +170,7 @@ class CommandLimits(
         if (argv.drop(1).any { it in flags }) {
             throw LimitError("hand_command_not_allowed", "不允许的命令：$name 不允许内联代码执行")
         }
+        dangerousArgumentReason(argv)?.let { throw LimitError("hand_command_not_allowed", it) }
     }
 
     /** Resolve the effective timeout, or raise LimitError. A larger requested timeout is refused, not silently clamped. */

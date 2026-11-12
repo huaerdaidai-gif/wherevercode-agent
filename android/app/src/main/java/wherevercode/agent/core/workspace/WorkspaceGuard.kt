@@ -39,6 +39,9 @@ object WorkspaceGuard {
         val parts = splitShell(command) ?: return true
         if (parts.isEmpty()) return false
         val executable = parts[0].substringAfterLast("/")
+        // 2026-11-13：`git diff --output=…`、`git log --ext-diff` 等会写文件 /
+        // 调外部程序；与 CommandLimits 同一份危险参数表，判为可能写。
+        if (wherevercode.agent.core.security.dangerousArgumentReason(parts) != null) return true
         if (executable == "env" || executable == "printenv") return parts.size > 1
         if (executable == "find") {
             val dangerous = setOf("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls")
