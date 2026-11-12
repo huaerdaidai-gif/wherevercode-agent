@@ -43,7 +43,11 @@ class PlatformChannelTransportTest {
     }
 
     private fun transport(http: PlatformHttpClient) =
-        PlatformChannelMcpTransport(tokenProvider = { "test-token-not-real" }, httpClient = http)
+        PlatformChannelMcpTransport(
+            tokenProvider = { "test-token-not-real" },
+            httpClient = http,
+            endpoint = "https://example.invalid/api/open/v1/mcp",
+        )
 
     @Test
     fun `post sends channel id and text and returns the posted id`() = runBlocking {

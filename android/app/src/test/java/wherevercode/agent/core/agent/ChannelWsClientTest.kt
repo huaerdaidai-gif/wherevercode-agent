@@ -45,7 +45,7 @@ class ChannelWsClientTest {
         assertTrue(request.startsWith("GET /api/open/v1/channel/ws?channel_id=$channelId "))
         assertTrue(request.contains("Host: 192.0.2.10:443\r\n"))
         assertTrue(request.contains("Authorization: Bearer $token\r\n"))
-        assertTrue(request.contains("test-fixture-value"))
+        assertTrue(request.contains("Sec-WebSocket-Key: test-websocket-key\r\n"))
         assertTrue(request.contains("Upgrade: websocket\r\n"))
     }
 

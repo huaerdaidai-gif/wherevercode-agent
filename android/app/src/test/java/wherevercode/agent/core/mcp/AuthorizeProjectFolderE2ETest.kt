@@ -21,7 +21,7 @@ import wherevercode.agent.core.transport.DiscoveredPeer
 /**
  * D2 集成验证（2026-11-12）：App → 真 Hand 授权全流程，真实密封连接。
  *
- * 本地起工作区的 hand/v5-hand-server.py（不动 live Hand、不部署），
+ * 本地起当前仓库随 App 分发的 install/hand_server.py（不动 live Hand、不部署），
  * 走 App 自己的 HandClient + DirectTransport + 密封信封路径：
  *  1. 阴性对照：未授权时拿项目文件夹列目录 → Blocked wrong_folder；
  *  2. authorizeProjectFolder → Result authorized=true, already=false；
@@ -31,8 +31,7 @@ import wherevercode.agent.core.transport.DiscoveredPeer
  *
  * 两边单测各自绿不算数——本测试是唯一覆盖 App 信封形状与 Hand 落盘
  * 拼起来的测试。Hand 服务路径由系统属性 v5.hand.server.py 指定，
- * 默认 ~/workspace/appdev-impl/v5-task-project-folder/hand/v5-hand-server.py；
- * 文件不存在时直接失败（绝不静默跳过，否则验证是假的）。
+ * 从仓库源码路径解析；文件不存在时直接失败（绝不静默跳过，否则验证是假的）。
  */
 class AuthorizeProjectFolderE2ETest {
 
@@ -48,13 +47,18 @@ class AuthorizeProjectFolderE2ETest {
         val fromProp = System.getProperty("v5.hand.server.py")
         val candidates = listOfNotNull(
             fromProp?.takeIf { it.isNotBlank() }?.let { File(it) },
-            System.getenv("HOME")?.let { File(it, "workspace/appdev-impl/v5-task-project-folder/hand/v5-hand-server.py") },
-            File(System.getProperty("user.home"), "workspace/appdev-impl/v5-task-project-folder/hand/v5-hand-server.py"),
-            File("/home/hatch/workspace/appdev-impl/v5-task-project-folder/hand/v5-hand-server.py"),
-        )
+        ).toMutableList()
+        var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (dir != null) {
+            for (relative in listOf(
+                "app/src/main/assets/install/hand_server.py",
+                "android/app/src/main/assets/install/hand_server.py",
+            )) candidates += File(dir, relative)
+            dir = dir.parentFile
+        }
         val found = candidates.firstOrNull { it.isFile }
         return found ?: throw AssertionError(
-            "Hand 服务端文件不存在，集成验证无法跑（试过：${candidates.joinToString { it.absolutePath }}；" +
+            "仓库 Hand 服务端文件不存在，集成验证无法跑（试过：${candidates.joinToString { it.absolutePath }}；" +
                 "可用 -Dv5.hand.server.py=<路径> 指定）",
         )
     }

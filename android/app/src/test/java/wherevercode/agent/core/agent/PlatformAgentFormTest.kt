@@ -108,7 +108,9 @@ class PlatformAgentFormTest {
         val first = (build(platformChannelId = "chan-v5-dedicated") as PlatformAgentForm.Result.Ok).record
         val second = (build(platformChannelId = "  ", existing = first) as PlatformAgentForm.Result.Ok).record
         assertEquals(null, second.platformChannelId)
-        assertTrue(PlatformAgent.isSharedChannel(second.platformChannelId))
+        // Public builds have no configured shared-channel id. Clearing the
+        // dedicated value must stay empty rather than inventing a fallback.
+        assertTrue(!PlatformAgent.isSharedChannel(second.platformChannelId))
     }
 
     @Test

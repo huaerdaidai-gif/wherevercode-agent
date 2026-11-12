@@ -136,11 +136,14 @@ class TeamChannelTest {
             record("example-agent", "Example Agent", kind = AgentKind.CLOUD, brainKind = BrainKind.PLATFORM_AGENT, adapterId = "platform-agent"),
         )
         val members = buildChannelMembers(agents)
-        assertEquals(9, members.size)
+        // Duplicate agentId values are intentionally collapsed by the member
+        // projection, so the registry's second example-agent row is not a
+        // second channel participant.
+        assertEquals(8, members.size)
         assertEquals("local-app", members.first().agentId)
         assertTrue(members.first().isLocalApp)
         assertEquals(
-            listOf("manus", "codebuddy", "opencode", "claude", "example-agent", "agy", "codex", "example-agent"),
+            listOf("manus", "codebuddy", "opencode", "claude", "example-agent", "agy", "codex"),
             members.drop(1).map { it.agentId },
         )
         // 只有平台 Agent 标出来（端点直连，中转时跳过它）。
