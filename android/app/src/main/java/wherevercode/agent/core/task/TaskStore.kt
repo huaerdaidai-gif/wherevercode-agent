@@ -110,6 +110,10 @@ data class TaskEntity(
     /** M2 control counters (snapshot taken at claim time; only ControlPlane bumps them). */
     val goalVersion: Long = 1,
     val authEpoch: Long = 1,
+    /** Selected Hand route; the grant reference is not itself a credential. */
+    val handDeviceId: String? = null,
+    val handAuthorizationId: String? = null,
+    val handFolder: String? = null,
 )
 
 @Dao
@@ -139,7 +143,9 @@ interface TaskDao {
             "brainId = :brainId, needsAttention = :needsAttention, " +
             "leaseOwner = :leaseOwner, leaseExpiresAt = :leaseExpiresAt, " +
             "memberId = :memberId, attempt = :attempt, attemptId = :attemptId, " +
-            "goalVersion = :goalVersion, authEpoch = :authEpoch " +
+            "goalVersion = :goalVersion, authEpoch = :authEpoch, " +
+            "handDeviceId = :handDeviceId, handAuthorizationId = :handAuthorizationId, " +
+            "handFolder = :handFolder " +
             "WHERE taskId = :taskId AND version = :expectedVersion",
     )
     fun updateAll(
@@ -166,6 +172,9 @@ interface TaskDao {
         expectedVersion: Long,
         goalVersion: Long,
         authEpoch: Long,
+        handDeviceId: String?,
+        handAuthorizationId: String?,
+        handFolder: String?,
     ): Int
 
     /**
@@ -273,7 +282,7 @@ interface TaskDao {
         DecompositionStateEntity::class,
         DecompositionSubtaskEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class TaskDatabase : RoomDatabase() {
@@ -825,6 +834,15 @@ abstract class TaskDatabase : RoomDatabase() {
             }
         }
 
+        /** P1: persist the selected Hand route alongside its App task. */
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN handDeviceId TEXT")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN handAuthorizationId TEXT")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN handFolder TEXT")
+            }
+        }
+
         /**
          * File-based database. Main-thread queries stay forbidden by
          * default (production callers must use a background thread);
@@ -837,7 +855,7 @@ abstract class TaskDatabase : RoomDatabase() {
             allowMainThreadQueries: Boolean = false,
         ): TaskDatabase =
             Room.databaseBuilder(context, TaskDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .apply { if (allowMainThreadQueries) allowMainThreadQueries() }
                 .build()
 
@@ -884,6 +902,10 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
     override fun createTask(record: TaskRecord): TaskRecord {
         TaskStates.checkTransition(null, record.state)
         if (record.taskId.isBlank()) throw IllegalArgumentException("task_id 不能为空")
+        val routeFields = listOf(record.handDeviceId, record.handAuthorizationId, record.handFolder)
+        if (routeFields.any { it != null } && routeFields.any { it.isNullOrBlank() }) {
+            throw IllegalArgumentException("Hand 目标、授权引用和授权目录必须同时提供")
+        }
         // 锁顺序（2026-11-12 第 5 轮死锁教训）：先 synchronized(lock) 再开
         // 事务。反过来（事务里再取锁）与 getTask/listTasks（先锁后查库）
         // 构成死锁：内存库连接池只有 1 个连接，getTask 拿着锁等连接、
@@ -1024,6 +1046,9 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
                 expectedVersion = expectedVersion,
                 goalVersion = entity.goalVersion,
                 authEpoch = entity.authEpoch,
+                handDeviceId = entity.handDeviceId,
+                handAuthorizationId = entity.handAuthorizationId,
+                handFolder = entity.handFolder,
             )
             if (updated == 0) throw StaleTaskUpdate(taskId, expectedVersion, current.version)
             val written = toRecord(entity.copy(version = current.version + 1))
@@ -1224,6 +1249,9 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
                         expectedVersion = current.version,
                         goalVersion = current.goalVersion,
                         authEpoch = current.authEpoch,
+                        handDeviceId = current.handDeviceId,
+                        handAuthorizationId = current.handAuthorizationId,
+                        handFolder = current.handFolder,
                     )
                     if (updated == 1) {
                         eventDao.insert(
@@ -1297,6 +1325,9 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
                         expectedVersion = current.version,
                         goalVersion = current.goalVersion,
                         authEpoch = current.authEpoch,
+                        handDeviceId = current.handDeviceId,
+                        handAuthorizationId = current.handAuthorizationId,
+                        handFolder = current.handFolder,
                     )
                     eventDao.insert(
                         TaskEvent(
@@ -1383,6 +1414,9 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
             attemptId = record.attemptId,
             goalVersion = record.goalVersion,
             authEpoch = record.authEpoch,
+            handDeviceId = record.handDeviceId,
+            handAuthorizationId = record.handAuthorizationId,
+            handFolder = record.handFolder,
         )
     }
 
@@ -1422,6 +1456,9 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
             attemptId = entity.attemptId,
             goalVersion = entity.goalVersion,
             authEpoch = entity.authEpoch,
+            handDeviceId = entity.handDeviceId,
+            handAuthorizationId = entity.handAuthorizationId,
+            handFolder = entity.handFolder,
         )
     }
 }

@@ -28,7 +28,9 @@ package wherevercode.agent.core.task
  * this is, and the attempt's id — the old ExecutionHostTaskStore
  * `attempt` / `attempt_id` binding, same 600s lease semantics; P0
  * made the plain claim path bump attempt too, so both runners are
- * fenced by attemptId).
+ * fenced by attemptId). Optional `handDeviceId`, `handAuthorizationId`,
+ * and `handFolder` persist the user's selected Hand route on the same
+ * task row. These are routing references only; they are not credentials.
  * The old TASK_STATES `waiting`/`ready` must be mapped through
  * TaskStates.canonical() first; do not build a second state machine.
  */
@@ -152,6 +154,10 @@ data class TaskRecord(
     /** M2 control counters (snapshot taken at claim time). */
     val goalVersion: Long = 1,
     val authEpoch: Long = 1,
+    /** Optional Hand executor selected in the App; correlation fields only. */
+    val handDeviceId: String? = null,
+    val handAuthorizationId: String? = null,
+    val handFolder: String? = null,
 ) {
     /**
      * 该任务所在的看板列（主流 Kanban，见 [KanbanStatus]）。

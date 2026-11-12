@@ -223,6 +223,7 @@ class TaskDatabaseMigrationTest {
                 TaskDatabase.MIGRATION_7_8,
                 TaskDatabase.MIGRATION_8_9,
                 TaskDatabase.MIGRATION_9_10,
+                TaskDatabase.MIGRATION_10_11,
             )
             .allowMainThreadQueries()
             .build()
@@ -232,7 +233,7 @@ class TaskDatabaseMigrationTest {
         // and validates the resulting schema against the v10 entities;
         // reaching this line already proves the migration SQL matches
         // the entities.
-        assertEquals(10, db.openHelper.readableDatabase.version)
+        assertEquals(11, db.openHelper.readableDatabase.version)
 
         // Old rows are untouched.
         assertEquals("旧任务", db.taskDao().getById("t1")!!.title)

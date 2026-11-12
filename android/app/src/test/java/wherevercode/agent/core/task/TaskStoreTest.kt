@@ -52,6 +52,32 @@ class TaskStoreTest {
     }
 
     @Test
+    fun `selected Hand route is persisted with the task and survives task updates`() {
+        val created = store.createTask(
+            record("t-hand").copy(
+                handDeviceId = "device-b",
+                handAuthorizationId = "grant-b-project",
+                handFolder = "/authorized/project",
+            ),
+        )
+        assertEquals("device-b", created.handDeviceId)
+        assertEquals("grant-b-project", created.handAuthorizationId)
+        assertEquals("/authorized/project", created.handFolder)
+
+        val updated = store.updateTask("t-hand", mapOf("title" to "updated"), 1, 1, 1)
+        assertEquals("device-b", updated?.handDeviceId)
+        assertEquals("grant-b-project", updated?.handAuthorizationId)
+        assertEquals("/authorized/project", updated?.handFolder)
+    }
+
+    @Test
+    fun `partial Hand route is rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            store.createTask(record("t-partial").copy(handDeviceId = "device-b"))
+        }
+    }
+
+    @Test
     fun `duplicate create throws TaskAlreadyExists`() {
         store.createTask(record("t1"))
         assertThrows(TaskAlreadyExists::class.java) { store.createTask(record("t1")) }
