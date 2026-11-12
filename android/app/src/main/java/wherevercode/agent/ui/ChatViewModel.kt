@@ -1466,24 +1466,45 @@ class ChatViewModel : ViewModel() {
         // 真机事故：两次 run 调用 e7690865 / 21504781 在 K70 任务
         // 表里无行）。建行失败时中止轮次、如实报错，绝不发 Hand。
         // 任务行的 goalVersion/authEpoch 即本次调用的栅栏快照。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
-            active.set(false)
-            val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
-            timeline.beginSystemTurn(message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        // 大脑/Agent 边界修订：镜像按真正干活的远端 Agent 认领，本轮挂任务归属。
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        val snapshot = comps.taskStore.getTask(taskId)
-        val goalVersion = snapshot?.goalVersion ?: 1L
-        val epoch = snapshot?.authEpoch ?: 1L
-        remoteTurnTaskId = taskId
-        remoteTurnTarget = target
-        val remoteTaskId = taskId
-        remoteRunTaskId = remoteTaskId
+        //
+        // 2026-11-13 单兵直连修（20:48 事故实证）：建行必须在 IO
+        // 线程。生产 Room 禁主线程访问（TaskDatabase.create 默认不
+        // 开 allowMainThreadQueries），send() 在主线程调本函数，
+        // 旧代码同步建行必抛 IllegalStateException，被
+        // beginRemoteRound 的 catch 吞掉回 null → 真机报“轮次任务
+        // 建行失败（任务库不可用）”、消息发不出去（K70 实证：
+        // 20:48 那次任务表 0 行、WAL 无写入；脑轮次与回退轮次早已
+        // 在 scope.launch 里建行，只有远端/Manus/平台三条轮次在主
+        // 线程同步建行）。turnRecorder 为 null 不是原因：attach()
+        // 里 components 与 turnRecorder 同一次赋值，send() 又以
+        // components 非空为前置——走到这里时 recorder 一定非空，
+        // null 只能来自建行本身抛错。整轮进 scope.launch（与
+        // startBrainTurn 同款），建不出行时照旧如实报错、绝不发
+        // Hand、不留表外活；getTask 快照读也是 Room，同样进 launch。
         remoteTurnJob = scope.launch {
+            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            if (taskId == null) {
+                remoteTurnJob = null
+                active.set(false)
+                val reason = turnRecorder?.lastFailureMessage()
+                val message = "轮次任务建行失败，消息未发出（${reason ?: "任务库不可用"}），请重试。"
+                timeline.beginSystemTurn(message)
+                publish(true)
+                return@launch
+            }
+            // 大脑/Agent 边界修订：镜像按真正干活的远端 Agent 认领，本轮挂任务归属。
+            timeline.setTaskAttribution(turnId, taskId, prompt)
+            val snapshot = try {
+                comps.taskStore.getTask(taskId)
+            } catch (_: Exception) {
+                null
+            }
+            val goalVersion = snapshot?.goalVersion ?: 1L
+            val epoch = snapshot?.authEpoch ?: 1L
+            remoteTurnTaskId = taskId
+            remoteTurnTarget = target
+            val remoteTaskId = taskId
+            remoteRunTaskId = remoteTaskId
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -1656,171 +1677,224 @@ class ChatViewModel : ViewModel() {
         if (!active.compareAndSet(false, true)) {
             return SendResult(false, "上一轮还在执行。")
         }
-        val taskId = ChatTaskDispatcher.dispatch(
-            taskStore = comps.taskStore,
-            agent = agent,
-            prompt = modelPrompt,
-            brainId = null,
-            projectId = currentProjectId(),
-        )
-        if (taskId == null) {
-            // 建行失败（任务库不可用）：回落到普通远端轮次，聊天不断。
-            active.set(false)
-            return startRemoteTurn(comps, agent, prompt, modelPrompt, attachments, imageNote)
-        }
-        // P1 路由决策绑定：用户点了建议行、且本任务就是派给被建议的
-        // Agent——把决策与任务绑起来（eval 回看“建议准不准”用）。
-        // Agent 不对上号就不绑；无论绑不绑，用一次就清掉，不留给下一条任务。
-        // 绑上的 decisionId 也记下来，供端侧小模型分流（v1）成功时附加
-        // 分流记录；没绑上就是手动选 Agent，分流只有聊天备注、不记决策。
-        var boundDecisionId: String? = null
-        pendingRouting?.takeIf { it.agentId == agent.agentId }?.let { pending ->
-            boundDecisionId = pending.decisionId
-            try {
-                comps.routingDecisionLog.attachTask(pending.decisionId, taskId)
-            } catch (_: Exception) {
-                // 绑定失败不影响任务执行。
-            }
-        }
-        pendingRouting = null
-        val target = remoteTargetResolver?.invoke(agent)
-        if (target == null) {
-            // 路由已核实可达，这里再拿不到目标是竞态：任务行已建
-            // （泵会标 needs_attention），聊天如实说，不静默等。
-            active.set(false)
-            val message = "该远程设备上的 Agent 未接入：设备未配对或未连接，任务已进 queued 等认领，详见任务页。"
-            timeline.beginSystemTurn(message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        pausedTurn = false
-        taskTurnPaused = false
-        taskTurnGoalChanged = false
-        val convId = conversationId ?: UUID.randomUUID().toString().also {
-            conversationId = it
-        }
-        val turnId = timeline.beginUserTurn(prompt, agent.displayName, false)
-        attachToTurn(turnId, attachments, imageNote)
-        // 自然对话与任务的边界（maintainer 2026-11-12）：这条消息被识别为
-        // 任务——状态行明确写出来（“已识别为任务”），不是悄悄建行。
-        // 分类错了用户能纠正：删任务（任务页已有）或重发时标任务。
-        timeline.appendStatusNote(turnId, "已识别为任务：任务已创建，进入 queued 等 ${agent.displayName} 执行；进度与结果会回填到这里。")
-        // 大脑/Agent 边界（maintainer 2026-11-12）：本轮挂任务归属——Agent
-        // 的回复回填到这里时带任务编号/标题，不许裸贴进无关对话。
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        publish(true)
-        taskTurnTaskId = taskId
-        taskTurnAgent = agent
-        taskTurnTarget = target
-        // 端侧小模型路由 v1（可选，默认关闭）：任务已建行、P1 决策已绑定
-        // 之后才跑；小模型只给模式建议，不改派单、不挡任务；失败一律
-        // 无声回落。分流在后台协程里跑，任务观察不受影响。
-        maybeRunTriage(comps, taskId, turnId, modelPrompt, boundDecisionId)
-        val assistantText = StringBuilder()
+        // 2026-11-13 单兵直连修：dispatch 建行是 Room 写，与
+        // beginRemoteRound 同款主线程问题——send() 在主线程调本
+        // 函数，同步 dispatch 必抛 IllegalStateException，被
+        // dispatch 的 catch 吞掉回 null → 回落的 startRemoteTurn
+        // 也在主线程建行、同样失败。整轮进 scope.launch（与
+        // startRemoteTurn 同款）；建不出行时回落普通远端轮次
+        // （它自己也在 launch 里建行），绝不发无任务行的活。
         taskTurnJob = scope.launch {
-            var cancelled = false
-            var terminalStatus: TurnStatus? = null
-            var terminalError: String? = null
-            val seenStepIds = HashSet<String>()
-            val deadlineMs = System.currentTimeMillis() + TASK_TURN_OBSERVE_TIMEOUT_MS
+            var createdTaskId: String? = null
+            var openTurnId: String? = null
             try {
-                while (System.currentTimeMillis() < deadlineMs) {
-                    val task = try {
-                        comps.taskStore.getTask(taskId)
+                val taskId = ChatTaskDispatcher.dispatch(
+                    taskStore = comps.taskStore,
+                    agent = agent,
+                    prompt = modelPrompt,
+                    brainId = null,
+                    projectId = currentProjectId(),
+                )
+                if (taskId == null) {
+                    // 建行失败（任务库不可用）：回落到普通远端轮次，聊天不断。
+                    taskTurnJob = null
+                    active.set(false)
+                    startRemoteTurn(comps, agent, prompt, modelPrompt, attachments, imageNote)
+                    return@launch
+                }
+                createdTaskId = taskId
+                // P1 路由决策绑定：用户点了建议行、且本任务就是派给被建议的
+                // Agent——把决策与任务绑起来（eval 回看“建议准不准”用）。
+                // Agent 不对上号就不绑；无论绑不绑，用一次就清掉，不留给下一条任务。
+                // 绑上的 decisionId 也记下来，供端侧小模型分流（v1）成功时附加
+                // 分流记录；没绑上就是手动选 Agent，分流只有聊天备注、不记决策。
+                var boundDecisionId: String? = null
+                pendingRouting?.takeIf { it.agentId == agent.agentId }?.let { pending ->
+                    boundDecisionId = pending.decisionId
+                    try {
+                        comps.routingDecisionLog.attachTask(pending.decisionId, taskId)
+                    } catch (_: Exception) {
+                        // 绑定失败不影响任务执行。
+                    }
+                }
+                pendingRouting = null
+                val target = remoteTargetResolver?.invoke(agent)
+                if (target == null) {
+                    // 路由已核实可达，这里再拿不到目标是竞态：任务行已建
+                    // （泵会标 needs_attention），聊天如实说，不静默等。
+                    taskTurnJob = null
+                    active.set(false)
+                    val message = "该远程设备上的 Agent 未接入：设备未配对或未连接，任务已进 queued 等认领，详见任务页。"
+                    timeline.beginSystemTurn(message)
+                    publish(true)
+                    return@launch
+                }
+                pausedTurn = false
+                taskTurnPaused = false
+                taskTurnGoalChanged = false
+                val convId = conversationId ?: UUID.randomUUID().toString().also {
+                    conversationId = it
+                }
+                val turnId = timeline.beginUserTurn(prompt, agent.displayName, false)
+                openTurnId = turnId
+                attachToTurn(turnId, attachments, imageNote)
+                // 自然对话与任务的边界（maintainer 2026-11-12）：这条消息被识别为
+                // 任务——状态行明确写出来（“已识别为任务”），不是悄悄建行。
+                // 分类错了用户能纠正：删任务（任务页已有）或重发时标任务。
+                timeline.appendStatusNote(turnId, "已识别为任务：任务已创建，进入 queued 等 ${agent.displayName} 执行；进度与结果会回填到这里。")
+                // 大脑/Agent 边界（maintainer 2026-11-12）：本轮挂任务归属——Agent
+                // 的回复回填到这里时带任务编号/标题，不许裸贴进无关对话。
+                timeline.setTaskAttribution(turnId, taskId, prompt)
+                publish(true)
+                taskTurnTaskId = taskId
+                taskTurnAgent = agent
+                taskTurnTarget = target
+                // 端侧小模型路由 v1（可选，默认关闭）：任务已建行、P1 决策已绑定
+                // 之后才跑；小模型只给模式建议，不改派单、不挡任务；失败一律
+                // 无声回落。分流在后台协程里跑，任务观察不受影响。
+                maybeRunTriage(comps, taskId, turnId, modelPrompt, boundDecisionId)
+                val assistantText = StringBuilder()
+
+                var cancelled = false
+                var terminalStatus: TurnStatus? = null
+                var terminalError: String? = null
+                val seenStepIds = HashSet<String>()
+                val deadlineMs = System.currentTimeMillis() + TASK_TURN_OBSERVE_TIMEOUT_MS
+                try {
+                    while (System.currentTimeMillis() < deadlineMs) {
+                        val task = try {
+                            comps.taskStore.getTask(taskId)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (task == null) {
+                            terminalStatus = TurnStatus.ERROR
+                            terminalError = "任务行丢失：任务可能已被删除，详见任务页。"
+                            break
+                        }
+                        // 进度：新步骤的结果摘要回填为备注（只写一次）。
+                        try {
+                            val steps = comps.taskStepStore.listSteps(taskId)
+                            for (step in steps) {
+                                if (seenStepIds.add(step.stepId)) {
+                                    val summary = step.resultSummary?.takeIf { it.isNotBlank() }
+                                        ?: step.argsSummary.takeIf { it.isNotBlank() }
+                                        ?: continue
+                                    timeline.appendNote(turnId, summary)
+                                    publish()
+                                }
+                            }
+                        } catch (_: Exception) {
+                            // 步骤读失败不打断观察。
+                        }
+                        // 泵标了 needs_attention：目标不可达，任务不会执行——
+                        // 聊天如实报错并结束本轮（任务行留在 queued，配对后可重试）。
+                        if (task.needsAttention && task.error != null) {
+                            terminalStatus = TurnStatus.ERROR
+                            terminalError = task.error
+                            break
+                        }
+                        when (task.state) {
+                            "completed" -> {
+                                val result = task.result.orEmpty()
+                                if (result.isNotBlank()) {
+                                    timeline.appendAssistantText(turnId, result)
+                                    assistantText.append(result)
+                                } else {
+                                    timeline.appendNote(turnId, "任务已完成（无文字结果，详见任务页）。")
+                                }
+                                terminalStatus = TurnStatus.DONE
+                                break
+                            }
+                            "failed" -> {
+                                terminalStatus = TurnStatus.ERROR
+                                terminalError = task.error ?: "任务执行失败，未返回原因。"
+                                break
+                            }
+                            "cancelled" -> {
+                                terminalStatus = TurnStatus.CANCELLED
+                                break
+                            }
+                        }
+                        delay(TASK_TURN_POLL_MS)
+                    }
+                    if (terminalStatus == null) {
+                        // 观察超时：任务仍在后台跑（任务页可见），聊天先行结束，
+                        // 不伪造完成、不杀任务。
+                        timeline.appendNote(turnId, "任务仍在后台执行（已超过观察时限），详见任务页。")
+                        terminalStatus = TurnStatus.DONE
+                    }
+                } catch (_: CancellationException) {
+                    cancelled = true
+                } catch (e: Exception) {
+                    terminalStatus = TurnStatus.ERROR
+                    terminalError = "观察任务失败：${e.message ?: "未知错误"}"
+                } finally {
+                    timeline.cancelRunningTools(turnId)
+                    val resolvedStatus = when {
+                        taskTurnGoalChanged -> TurnStatus.GOAL_CHANGED
+                        cancelled -> TurnStatus.CANCELLED
+                        terminalStatus != null -> terminalStatus!!
+                        assistantText.isBlank() -> TurnStatus.EMPTY
+                        else -> TurnStatus.DONE
+                    }
+                    val resolutionMessage = when (resolvedStatus) {
+                        TurnStatus.EMPTY ->
+                            "该 Agent 没有返回可显示的内容（空响应）。请重试；若持续出现，请检查该 Agent 与远端设备的连接。"
+                        TurnStatus.CANCELLED -> "本轮已取消。"
+                        TurnStatus.GOAL_CHANGED -> "本轮已改目标，剩余步骤未执行。"
+                        else -> terminalError
+                    }
+                    if (resolvedStatus == TurnStatus.EMPTY ||
+                        resolvedStatus == TurnStatus.CANCELLED ||
+                        resolvedStatus == TurnStatus.GOAL_CHANGED
+                    ) {
+                        timeline.appendNote(turnId, resolutionMessage.orEmpty())
+                    }
+                    timeline.finishTurn(
+                        turnId = turnId,
+                        status = resolvedStatus,
+                        error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
+                    )
+                    persistRemoteTurn(convId, prompt, assistantText.toString(), taskId)
+                    pausedTurn = resolvedStatus == TurnStatus.PAUSED
+                    taskTurnJob = null
+                    taskTurnTaskId = null
+                    taskTurnAgent = null
+                    taskTurnTarget = null
+                    taskTurnPaused = false
+                    active.set(false)
+                    publish(true)
+                    onTurnFinished?.invoke()
+                    // V5 修复（2026-11-11，能用的 Agent 显示“未验证”）：
+                    // 任务完成且真回了结果 = 一次真实往返成功，同 startRemoteTurn。
+                    if (resolvedStatus == TurnStatus.DONE && assistantText.isNotBlank()) {
+                        onRemoteRoundSucceeded?.invoke(agent)
+                    }
+                }
+            } catch (_: CancellationException) {
+                // 建行/建目标阶段被取消（观察循环自己的取消由它自
+                // 己的 catch 接，不到这里）：已建的行若还在 queued
+                // 就取消，不留孤儿；轮次已开就记一笔；active 一定清掉。
+                val orphan = createdTaskId
+                if (orphan != null) {
+                    val current = try {
+                        comps.taskStore.getTask(orphan)
                     } catch (_: Exception) {
                         null
                     }
-                    if (task == null) {
-                        terminalStatus = TurnStatus.ERROR
-                        terminalError = "任务行丢失：任务可能已被删除，详见任务页。"
-                        break
+                    if (current?.state == "queued") {
+                        updateTaskRow(
+                            comps,
+                            orphan,
+                            mapOf("state" to "cancelled", "result" to "轮次开始前被取消，未执行。"),
+                        )
                     }
-                    // 进度：新步骤的结果摘要回填为备注（只写一次）。
-                    try {
-                        val steps = comps.taskStepStore.listSteps(taskId)
-                        for (step in steps) {
-                            if (seenStepIds.add(step.stepId)) {
-                                val summary = step.resultSummary?.takeIf { it.isNotBlank() }
-                                    ?: step.argsSummary.takeIf { it.isNotBlank() }
-                                    ?: continue
-                                timeline.appendNote(turnId, summary)
-                                publish()
-                            }
-                        }
-                    } catch (_: Exception) {
-                        // 步骤读失败不打断观察。
-                    }
-                    // 泵标了 needs_attention：目标不可达，任务不会执行——
-                    // 聊天如实报错并结束本轮（任务行留在 queued，配对后可重试）。
-                    if (task.needsAttention && task.error != null) {
-                        terminalStatus = TurnStatus.ERROR
-                        terminalError = task.error
-                        break
-                    }
-                    when (task.state) {
-                        "completed" -> {
-                            val result = task.result.orEmpty()
-                            if (result.isNotBlank()) {
-                                timeline.appendAssistantText(turnId, result)
-                                assistantText.append(result)
-                            } else {
-                                timeline.appendNote(turnId, "任务已完成（无文字结果，详见任务页）。")
-                            }
-                            terminalStatus = TurnStatus.DONE
-                            break
-                        }
-                        "failed" -> {
-                            terminalStatus = TurnStatus.ERROR
-                            terminalError = task.error ?: "任务执行失败，未返回原因。"
-                            break
-                        }
-                        "cancelled" -> {
-                            terminalStatus = TurnStatus.CANCELLED
-                            break
-                        }
-                    }
-                    delay(TASK_TURN_POLL_MS)
                 }
-                if (terminalStatus == null) {
-                    // 观察超时：任务仍在后台跑（任务页可见），聊天先行结束，
-                    // 不伪造完成、不杀任务。
-                    timeline.appendNote(turnId, "任务仍在后台执行（已超过观察时限），详见任务页。")
-                    terminalStatus = TurnStatus.DONE
+                openTurnId?.let {
+                    timeline.appendNote(it, "本轮已取消。")
+                    timeline.finishTurn(it, TurnStatus.CANCELLED, null)
                 }
-            } catch (_: CancellationException) {
-                cancelled = true
-            } catch (e: Exception) {
-                terminalStatus = TurnStatus.ERROR
-                terminalError = "观察任务失败：${e.message ?: "未知错误"}"
-            } finally {
-                timeline.cancelRunningTools(turnId)
-                val resolvedStatus = when {
-                    taskTurnGoalChanged -> TurnStatus.GOAL_CHANGED
-                    cancelled -> TurnStatus.CANCELLED
-                    terminalStatus != null -> terminalStatus!!
-                    assistantText.isBlank() -> TurnStatus.EMPTY
-                    else -> TurnStatus.DONE
-                }
-                val resolutionMessage = when (resolvedStatus) {
-                    TurnStatus.EMPTY ->
-                        "该 Agent 没有返回可显示的内容（空响应）。请重试；若持续出现，请检查该 Agent 与远端设备的连接。"
-                    TurnStatus.CANCELLED -> "本轮已取消。"
-                    TurnStatus.GOAL_CHANGED -> "本轮已改目标，剩余步骤未执行。"
-                    else -> terminalError
-                }
-                if (resolvedStatus == TurnStatus.EMPTY ||
-                    resolvedStatus == TurnStatus.CANCELLED ||
-                    resolvedStatus == TurnStatus.GOAL_CHANGED
-                ) {
-                    timeline.appendNote(turnId, resolutionMessage.orEmpty())
-                }
-                timeline.finishTurn(
-                    turnId = turnId,
-                    status = resolvedStatus,
-                    error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
-                )
-                persistRemoteTurn(convId, prompt, assistantText.toString(), taskId)
-                pausedTurn = resolvedStatus == TurnStatus.PAUSED
                 taskTurnJob = null
                 taskTurnTaskId = null
                 taskTurnAgent = null
@@ -1829,13 +1903,9 @@ class ChatViewModel : ViewModel() {
                 active.set(false)
                 publish(true)
                 onTurnFinished?.invoke()
-                // V5 修复（2026-11-11，能用的 Agent 显示“未验证”）：
-                // 任务完成且真回了结果 = 一次真实往返成功，同 startRemoteTurn。
-                if (resolvedStatus == TurnStatus.DONE && assistantText.isNotBlank()) {
-                    onRemoteRoundSucceeded?.invoke(agent)
-                }
             }
         }
+
         return SendResult(true)
     }
 
@@ -1976,20 +2046,25 @@ class ChatViewModel : ViewModel() {
         // 用 beginRemoteRound 只建行、不经调度器认领门禁；建不出行
         // 就中止轮次、如实报错，绝不让回复没有任务行可归属。
         // 镜像按 Manus 认领、本轮挂归属（大脑/Agent 边界修订）。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
-            active.set(false)
-            val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
-            timeline.beginSystemTurn(message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        manusTurnTaskId = taskId
-        manusTurnConversationId = convId
-        manusTurnAgent = agent
-        val assistantText = StringBuilder()
+        //
+        // 2026-11-13 单兵直连修：同款主线程建行问题，整轮进
+        // scope.launch（详见 startRemoteTurn 的注释）。
         manusTurnJob = scope.launch {
+            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            if (taskId == null) {
+                manusTurnJob = null
+                active.set(false)
+                val reason = turnRecorder?.lastFailureMessage()
+                val message = "轮次任务建行失败，消息未发出（${reason ?: "任务库不可用"}），请重试。"
+                timeline.beginSystemTurn(message)
+                publish(true)
+                return@launch
+            }
+            timeline.setTaskAttribution(turnId, taskId, prompt)
+            manusTurnTaskId = taskId
+            manusTurnConversationId = convId
+            manusTurnAgent = agent
+            val assistantText = StringBuilder()
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -2123,19 +2198,24 @@ class ChatViewModel : ViewModel() {
         // 同款，用 beginRemoteRound 只建行、不经调度器认领门禁；
         // 建不出行就中止轮次、如实报错，绝不让回复没有任务行可归属。
         // 镜像按该平台 Agent 认领、本轮挂归属（大脑/Agent 边界修订）。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
-            active.set(false)
-            val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
-            timeline.beginSystemTurn(message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        platformTurnTaskId = taskId
-        platformTurnAgent = agent
-        val assistantText = StringBuilder()
+        //
+        // 2026-11-13 单兵直连修：同款主线程建行问题，整轮进
+        // scope.launch（详见 startRemoteTurn 的注释）。
         platformTurnJob = scope.launch {
+            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            if (taskId == null) {
+                platformTurnJob = null
+                active.set(false)
+                val reason = turnRecorder?.lastFailureMessage()
+                val message = "轮次任务建行失败，消息未发出（${reason ?: "任务库不可用"}），请重试。"
+                timeline.beginSystemTurn(message)
+                publish(true)
+                return@launch
+            }
+            timeline.setTaskAttribution(turnId, taskId, prompt)
+            platformTurnTaskId = taskId
+            platformTurnAgent = agent
+            val assistantText = StringBuilder()
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -2260,144 +2340,195 @@ class ChatViewModel : ViewModel() {
         if (!active.compareAndSet(false, true)) {
             return SendResult(false, "上一轮还在执行。")
         }
-        val taskId = ChatTaskDispatcher.dispatch(
-            taskStore = comps.taskStore,
-            agent = agent,
-            prompt = modelPrompt,
-            brainId = null,
-            projectId = currentProjectId(),
-        )
-        if (taskId == null) {
-            // 建行失败（任务库不可用）：回落到普通 Manus 轮次，聊天不断。
-            active.set(false)
-            return startManusTurn(comps, agent, prompt, modelPrompt, attachments, imageNote)
-        }
-        pausedTurn = false
-        manusTurnPaused = false
-        manusTurnGoalChanged = false
-        // 认领并启动（本轮自己就是执行者，不等远端泵）。认领失败说明
-        // 已有其他任务在手（一次一任务）或任务库异常：行若还在 queued
-        // 就取消（它是本轮刚建的孤儿行），再回落普通聊天并明说。
-        val claimed = comps.taskScheduler.claimTask(taskId, agent.agentId)
-        val started = claimed?.let { comps.taskScheduler.startTask(taskId) }
-        if (started == null) {
-            val current = try {
-                comps.taskStore.getTask(taskId)
-            } catch (_: Exception) {
-                null
-            }
-            if (current?.state == "queued") {
-                updateTaskRow(
-                    comps,
-                    taskId,
-                    mapOf("state" to "cancelled", "error" to "任务认领失败，已取消。"),
-                )
-            }
-            active.set(false)
-            val reason = if (!comps.taskScheduler.canClaim()) "已有其他任务在手" else "任务库异常"
-            timeline.beginSystemTurn("任务行认领失败（$reason），已改走普通聊天（本轮只对话、不执行任务）。")
-            publish(true)
-            return startManusTurn(comps, agent, prompt)
-        }
-        val convId = conversationId ?: UUID.randomUUID().toString().also {
-            conversationId = it
-        }
-        val turnId = timeline.beginUserTurn(prompt, agent.displayName, false)
-        attachToTurn(turnId, attachments, imageNote)
-        timeline.appendStatusNote(turnId, "任务已创建，正在由 ${agent.displayName} 执行；进度与结果会实时流到这里。")
-        publish(true)
-        manusTaskTurnTaskId = taskId
-        manusTurnTaskId = taskId
-        manusTurnConversationId = convId
-        manusTurnAgent = agent
-        val assistantText = StringBuilder()
-        val startedAtMs = System.currentTimeMillis()
+        // 2026-11-13 单兵直连修：dispatch 建行与认领/启动全是
+        // Room 操作，与 beginRemoteRound 同款主线程问题——send()
+        // 在主线程调本函数，同步建行必抛 IllegalStateException，
+        // 被 dispatch 的 catch 吞掉回 null → 回落的 startManusTurn
+        // 也在主线程建行、同样失败。整轮进 scope.launch（与
+        // startManusTurn 同款）；建不出行时回落普通 Manus 轮次
+        // （它自己也在 launch 里建行），绝不发无任务行的活。
         manusTurnJob = scope.launch {
-            var cancelled = false
-            var terminalStatus: TurnStatus? = null
-            var terminalError: String? = null
-            val stream = ManusStreamState()
+            var createdTaskId: String? = null
+            var openTurnId: String? = null
             try {
-                port.runChat(convId, agent, modelPrompt).collect { event ->
-                    when (event) {
-                        is ManusChatEvent.Failed -> {
-                            terminalStatus = TurnStatus.ERROR
-                            terminalError = event.message
-                            publish(true)
+                val taskId = ChatTaskDispatcher.dispatch(
+                    taskStore = comps.taskStore,
+                    agent = agent,
+                    prompt = modelPrompt,
+                    brainId = null,
+                    projectId = currentProjectId(),
+                )
+                if (taskId == null) {
+                    // 建行失败（任务库不可用）：回落到普通 Manus 轮次，聊天不断。
+                    manusTurnJob = null
+                    active.set(false)
+                    startManusTurn(comps, agent, prompt, modelPrompt, attachments, imageNote)
+                    return@launch
+                }
+                createdTaskId = taskId
+                pausedTurn = false
+                manusTurnPaused = false
+                manusTurnGoalChanged = false
+                // 认领并启动（本轮自己就是执行者，不等远端泵）。认领失败说明
+                // 已有其他任务在手（一次一任务）或任务库异常：行若还在 queued
+                // 就取消（它是本轮刚建的孤儿行），再回落普通聊天并明说。
+                val claimed = comps.taskScheduler.claimTask(taskId, agent.agentId)
+                val started = claimed?.let { comps.taskScheduler.startTask(taskId) }
+                if (started == null) {
+                    val current = try {
+                        comps.taskStore.getTask(taskId)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (current?.state == "queued") {
+                        updateTaskRow(
+                            comps,
+                            taskId,
+                            mapOf("state" to "cancelled", "error" to "任务认领失败，已取消。"),
+                        )
+                    }
+                    manusTurnJob = null
+                    active.set(false)
+                    val reason = if (!comps.taskScheduler.canClaim()) "已有其他任务在手" else "任务库异常"
+                    timeline.beginSystemTurn("任务行认领失败（$reason），已改走普通聊天（本轮只对话、不执行任务）。")
+                    publish(true)
+                    startManusTurn(comps, agent, prompt)
+                    return@launch
+                }
+                val convId = conversationId ?: UUID.randomUUID().toString().also {
+                    conversationId = it
+                }
+                val turnId = timeline.beginUserTurn(prompt, agent.displayName, false)
+                openTurnId = turnId
+                attachToTurn(turnId, attachments, imageNote)
+                timeline.appendStatusNote(turnId, "任务已创建，正在由 ${agent.displayName} 执行；进度与结果会实时流到这里。")
+                publish(true)
+                manusTaskTurnTaskId = taskId
+                manusTurnTaskId = taskId
+                manusTurnConversationId = convId
+                manusTurnAgent = agent
+                val assistantText = StringBuilder()
+                val startedAtMs = System.currentTimeMillis()
+
+                var cancelled = false
+                var terminalStatus: TurnStatus? = null
+                var terminalError: String? = null
+                val stream = ManusStreamState()
+                try {
+                    port.runChat(convId, agent, modelPrompt).collect { event ->
+                        when (event) {
+                            is ManusChatEvent.Failed -> {
+                                terminalStatus = TurnStatus.ERROR
+                                terminalError = event.message
+                                publish(true)
+                            }
+                            else -> applyManusStreamEvent(
+                                event = event,
+                                stream = stream,
+                                turnId = turnId,
+                                assistantText = assistantText,
+                                taskId = taskId,
+                                taskComponents = comps,
+                            )
                         }
-                        else -> applyManusStreamEvent(
-                            event = event,
-                            stream = stream,
-                            turnId = turnId,
-                            assistantText = assistantText,
-                            taskId = taskId,
-                            taskComponents = comps,
+                    }
+                } catch (_: CancellationException) {
+                    cancelled = true
+                } catch (e: Exception) {
+                    terminalStatus = TurnStatus.ERROR
+                    terminalError = "调用${agent.displayName}失败：${e.message ?: "未知错误"}"
+                } finally {
+                    timeline.cancelRunningTools(turnId)
+                    val resolvedStatus = when {
+                        manusTurnGoalChanged -> TurnStatus.GOAL_CHANGED
+                        manusTurnPaused -> TurnStatus.PAUSED
+                        cancelled -> TurnStatus.CANCELLED
+                        terminalStatus != null -> terminalStatus!!
+                        assistantText.isBlank() && stream.attachments.isEmpty() -> TurnStatus.EMPTY
+                        else -> TurnStatus.DONE
+                    }
+                    val resolutionMessage = when (resolvedStatus) {
+                        TurnStatus.EMPTY ->
+                            "该 Agent 没有返回可显示的内容（空响应）。请重试；若持续出现，请检查该 Agent 的配置与网络。"
+                        TurnStatus.CANCELLED -> "本轮已取消。"
+                        TurnStatus.PAUSED -> "本轮已暂停：Manus 任务已停止，发送新消息可继续同一任务。"
+                        TurnStatus.GOAL_CHANGED -> "本轮已改目标，剩余步骤未执行。"
+                        else -> terminalError
+                    }
+                    if (resolvedStatus == TurnStatus.EMPTY ||
+                        resolvedStatus == TurnStatus.CANCELLED ||
+                        resolvedStatus == TurnStatus.PAUSED ||
+                        resolvedStatus == TurnStatus.GOAL_CHANGED
+                    ) {
+                        timeline.appendNote(turnId, resolutionMessage.orEmpty())
+                    }
+                    if (resolvedStatus == TurnStatus.DONE || resolvedStatus == TurnStatus.EMPTY) {
+                        timeline.appendNote(turnId, "用时 ${formatElapsed(System.currentTimeMillis() - startedAtMs)}。")
+                    }
+                    timeline.finishTurn(
+                        turnId = turnId,
+                        status = resolvedStatus,
+                        error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
+                    )
+                    // 任务行落终态（与 LocalTaskRunner 同款：working→review→
+                    // completed；review 不可直达 completed 以外的终态，故
+                    // failed/cancelled 从 working 直落）。
+                    finishManusTaskRow(
+                        comps = comps,
+                        taskId = taskId,
+                        status = resolvedStatus,
+                        assistantText = assistantText.toString(),
+                        error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
+                    )
+                    persistRemoteTurn(convId, prompt, assistantText.toString(), taskId, source = "manus")
+                    pausedTurn = resolvedStatus == TurnStatus.PAUSED
+                    manusTurnJob = null
+                    manusTurnTaskId = null
+                    manusTaskTurnTaskId = null
+                    manusTurnConversationId = null
+                    manusTurnAgent = null
+                    // 已暂停时保留 manusTurnPaused（resume() 靠它认出可恢复
+                    // 的 Manus 轮次）；其他终态才复位。
+                    if (resolvedStatus != TurnStatus.PAUSED) manusTurnPaused = false
+                    active.set(false)
+                    publish(true)
+                    onTurnFinished?.invoke()
+                }
+            } catch (_: CancellationException) {
+                // 建行/认领/建目标阶段被取消（流式循环自己的取消由
+                // 它自己的 catch 接，不到这里）：已建的行若还在
+                // queued 就取消，不留孤儿；轮次已开就记一笔并落终态。
+                val orphan = createdTaskId
+                if (orphan != null) {
+                    val current = try {
+                        comps.taskStore.getTask(orphan)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (current?.state == "queued") {
+                        updateTaskRow(
+                            comps,
+                            orphan,
+                            mapOf("state" to "cancelled", "result" to "轮次开始前被取消，未执行。"),
                         )
                     }
                 }
-            } catch (_: CancellationException) {
-                cancelled = true
-            } catch (e: Exception) {
-                terminalStatus = TurnStatus.ERROR
-                terminalError = "调用${agent.displayName}失败：${e.message ?: "未知错误"}"
-            } finally {
-                timeline.cancelRunningTools(turnId)
-                val resolvedStatus = when {
-                    manusTurnGoalChanged -> TurnStatus.GOAL_CHANGED
-                    manusTurnPaused -> TurnStatus.PAUSED
-                    cancelled -> TurnStatus.CANCELLED
-                    terminalStatus != null -> terminalStatus!!
-                    assistantText.isBlank() && stream.attachments.isEmpty() -> TurnStatus.EMPTY
-                    else -> TurnStatus.DONE
+                openTurnId?.let {
+                    timeline.appendNote(it, "本轮已取消。")
+                    timeline.finishTurn(it, TurnStatus.CANCELLED, null)
                 }
-                val resolutionMessage = when (resolvedStatus) {
-                    TurnStatus.EMPTY ->
-                        "该 Agent 没有返回可显示的内容（空响应）。请重试；若持续出现，请检查该 Agent 的配置与网络。"
-                    TurnStatus.CANCELLED -> "本轮已取消。"
-                    TurnStatus.PAUSED -> "本轮已暂停：Manus 任务已停止，发送新消息可继续同一任务。"
-                    TurnStatus.GOAL_CHANGED -> "本轮已改目标，剩余步骤未执行。"
-                    else -> terminalError
-                }
-                if (resolvedStatus == TurnStatus.EMPTY ||
-                    resolvedStatus == TurnStatus.CANCELLED ||
-                    resolvedStatus == TurnStatus.PAUSED ||
-                    resolvedStatus == TurnStatus.GOAL_CHANGED
-                ) {
-                    timeline.appendNote(turnId, resolutionMessage.orEmpty())
-                }
-                if (resolvedStatus == TurnStatus.DONE || resolvedStatus == TurnStatus.EMPTY) {
-                    timeline.appendNote(turnId, "用时 ${formatElapsed(System.currentTimeMillis() - startedAtMs)}。")
-                }
-                timeline.finishTurn(
-                    turnId = turnId,
-                    status = resolvedStatus,
-                    error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
-                )
-                // 任务行落终态（与 LocalTaskRunner 同款：working→review→
-                // completed；review 不可直达 completed 以外的终态，故
-                // failed/cancelled 从 working 直落）。
-                finishManusTaskRow(
-                    comps = comps,
-                    taskId = taskId,
-                    status = resolvedStatus,
-                    assistantText = assistantText.toString(),
-                    error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
-                )
-                persistRemoteTurn(convId, prompt, assistantText.toString(), taskId, source = "manus")
-                pausedTurn = resolvedStatus == TurnStatus.PAUSED
                 manusTurnJob = null
                 manusTurnTaskId = null
                 manusTaskTurnTaskId = null
                 manusTurnConversationId = null
                 manusTurnAgent = null
-                // 已暂停时保留 manusTurnPaused（resume() 靠它认出可恢复
-                // 的 Manus 轮次）；其他终态才复位。
-                if (resolvedStatus != TurnStatus.PAUSED) manusTurnPaused = false
+                manusTurnPaused = false
                 active.set(false)
                 publish(true)
                 onTurnFinished?.invoke()
             }
         }
+
         return SendResult(true)
     }
 

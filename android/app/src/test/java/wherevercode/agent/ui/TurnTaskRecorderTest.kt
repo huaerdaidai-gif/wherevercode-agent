@@ -12,8 +12,10 @@ import org.robolectric.RuntimeEnvironment
 import wherevercode.agent.AgentDiscovery
 import wherevercode.agent.core.task.DispatchFakeTaskStore
 import wherevercode.agent.core.task.InMemoryTaskStepStore
+import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskScheduler
 import wherevercode.agent.core.task.TaskStepStatus
+import wherevercode.agent.core.task.TaskStore
 
 /**
  * Turn -> task mirror (phase 1, U3): a chat turn opens a working task,
@@ -228,5 +230,47 @@ class TurnTaskRecorderTest {
         assertEquals("completed", task?.state)
         assertEquals("可靠性修复已做完", task?.result)
         assertNull(recorder.currentTaskId())
+    }
+
+    @Test
+    fun `beginRemoteRound records the real failure reason instead of only null`() {
+        // 2026-11-12 20:48 事故：建行失败只剩 null，界面只能说“任务库
+        // 不可用”，根因无从得知。失败原因要留下来，调用方才能向用户
+        // 说明真实原因。
+        taskStore.failCreate = true
+        val taskId = recorder.beginRemoteRound("在吗", "conv-1", "example-agent")
+        assertNull(taskId)
+        assertEquals("fake store down", recorder.lastFailureMessage())
+    }
+
+    @Test
+    fun `beginRemoteRound translates the Room main thread ban into plain words`() {
+        // 生产 Room 在主线程抛 IllegalStateException（"Cannot access
+        // database on the main thread ..."）：这是 20:48 事故的真实
+        // 异常，消息要翻成人话，不能把 Room 原文贴给用户。
+        val mainThreadStore = object : TaskStore by taskStore {
+            override fun createTask(record: TaskRecord): TaskRecord {
+                throw IllegalStateException(
+                    "Cannot access database on the main thread since it may potentially lock the UI for a long period of time.",
+                )
+            }
+        }
+        val throwingRecorder = TurnTaskRecorder(mainThreadStore, scheduler, stepStore)
+        assertNull(throwingRecorder.beginRemoteRound("在吗", "conv-1", "example-agent"))
+        assertEquals(
+            "任务库禁止主线程访问（建行必须在后台线程）",
+            throwingRecorder.lastFailureMessage(),
+        )
+    }
+
+    @Test
+    fun `beginRemoteRound clears the last failure on success`() {
+        taskStore.failCreate = true
+        assertNull(recorder.beginRemoteRound("在吗", "conv-1", "example-agent"))
+        assertNotNull(recorder.lastFailureMessage())
+        taskStore.failCreate = false
+        val taskId = recorder.beginRemoteRound("在吗", "conv-1", "example-agent")
+        assertNotNull("失败原因不能残留到下一轮的报错里", taskId)
+        assertNull(recorder.lastFailureMessage())
     }
 }

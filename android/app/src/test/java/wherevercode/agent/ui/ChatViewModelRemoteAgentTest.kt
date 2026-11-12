@@ -3,6 +3,7 @@ package wherevercode.agent.ui
 import android.content.Context
 import java.io.File
 import java.nio.file.Files
+import java.util.Collections
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -89,6 +90,7 @@ import wherevercode.agent.core.task.TaskExecutionResult
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskScheduler
 import wherevercode.agent.core.task.TaskStepEvent
+import wherevercode.agent.core.task.TaskStore
 import wherevercode.agent.core.task.InMemoryTaskStepStore
 import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.workspace.FileWorkspaceAdapter
@@ -260,8 +262,25 @@ class ChatViewModelRemoteAgentTest {
     private lateinit var viewModel: ChatViewModel
     private lateinit var conversations: ConversationStore
     private lateinit var remotePort: ScriptedRemotePort
-    private lateinit var taskStore: FakeTaskStore
+    private lateinit var taskStore: ThreadRecordingTaskStore
     private lateinit var scheduler: TaskScheduler
+
+    /**
+     * 记下每次 createTask 的调用线程（2026-11-13 单兵直连修的回归
+     * 探针）：生产 Room 禁主线程访问，轮次建行必须发生在调用线程
+     * （send() 所在的 UI 线程）之外；旧代码在主线程同步建行，必抛
+     * IllegalStateException。委托给真的 [FakeTaskStore]，只多记线程。
+     */
+    private class ThreadRecordingTaskStore(
+        private val delegate: FakeTaskStore,
+    ) : TaskStore by delegate {
+        val createTaskThreads = Collections.synchronizedList(mutableListOf<String>())
+
+        override fun createTask(record: TaskRecord): TaskRecord {
+            createTaskThreads += Thread.currentThread().name
+            return delegate.createTask(record)
+        }
+    }
 
     private val peer = DiscoveredPeer(
         deviceId = "remote-host",
@@ -355,7 +374,7 @@ class ChatViewModelRemoteAgentTest {
         val taskRoot = File(tmpDir, "task-root").apply { mkdirs() }
         val workspaceAdapter = FileWorkspaceAdapter(workspaceRoot, taskRoot)
         val deviceAdapter = JvmDeviceAdapter(listOf(workspaceRoot), workspaceAdapter)
-        taskStore = FakeTaskStore()
+        taskStore = ThreadRecordingTaskStore(FakeTaskStore())
         val auditLog: AuditLog = InMemoryAuditLog()
         val eventLog = InMemoryEventLog()
         val tools = ToolRegistry(deviceAdapter, workspaceAdapter, CommandLimits(), taskStore, auditLog)
@@ -829,5 +848,53 @@ class ChatViewModelRemoteAgentTest {
         assertTrue(viewModel.send("在吗").accepted)
         assertTrue(awaitIdle())
         assertTrue(assistantText().contains("在的，有什么可以帮你？"))
+    }
+
+    @Test
+    fun `remote round builds its task row off the calling thread`() {
+        // 2026-11-13 单兵直连修（20:48 事故）：生产 Room 禁主线程访问，
+        // send() 在主线程调 startRemoteTurn；旧代码同步建行必抛
+        // IllegalStateException，被 beginRemoteRound 吞掉回 null →
+        // 真机报“轮次任务建行失败”。断言：建行发生在调用线程之外
+        // 的线程上，且行真实存在、回复正常回填（不是“只走聊天”）。
+        viewModel.switchSession("session-grok", "Example Agent", grokAgent())
+        val callingThread = Thread.currentThread().name
+        assertTrue(viewModel.send("在吗").accepted)
+        assertTrue(awaitIdle())
+        assertTrue(assistantText().contains("在的，有什么可以帮你？"))
+        val runTaskId = remotePort.calls.single().taskId
+        val row = taskStore.getTask(runTaskId)
+        assertNotNull("远端轮次必须有真实任务行", row)
+        assertTrue("建行应发生过", taskStore.createTaskThreads.isNotEmpty())
+        assertTrue(
+            "建行必须在调用线程之外，实际：${taskStore.createTaskThreads}，调用线程：$callingThread",
+            taskStore.createTaskThreads.none { it == callingThread },
+        )
+    }
+
+    @Test
+    fun `task turn dispatch builds its row off the calling thread`() {
+        // 任务型指令走 startTaskTurn：dispatch 也是 Room 写，同样不能
+        // 在主线程同步跑。forceTask 强制走任务通道（直连开时任务型
+        // 也不例外）。行建出后停止本轮（测试里没有泵认领，不等 600 秒观察超时）。
+        viewModel.switchSession("session-grok", "Example Agent", grokAgent())
+        val callingThread = Thread.currentThread().name
+        assertTrue(viewModel.send("请把 README 翻译成英文", forceTask = true).accepted)
+        val deadline = System.currentTimeMillis() + 5_000
+        var row: TaskRecord? = null
+        while (System.currentTimeMillis() < deadline) {
+            row = taskStore.listTasks().firstOrNull { it.description?.contains("README") == true }
+            if (row != null) break
+            Thread.sleep(50)
+        }
+        assertNotNull("任务通道必须真的建出行", row)
+        assertEquals("example-agent", row?.assignedAgentId)
+        assertTrue("建行应发生过", taskStore.createTaskThreads.isNotEmpty())
+        assertTrue(
+            "dispatch 建行必须在调用线程之外，实际：${taskStore.createTaskThreads}，调用线程：$callingThread",
+            taskStore.createTaskThreads.none { it == callingThread },
+        )
+        viewModel.stop()
+        assertTrue("停止后轮次应终态", awaitIdle())
     }
 }
