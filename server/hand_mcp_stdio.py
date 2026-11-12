@@ -114,6 +114,20 @@ def load_config(path: str) -> dict[str, Any]:
     devices = config.get("devices")
     if not isinstance(devices, list) or not devices:
         raise AdapterError("configuration_error", "devices must be a non-empty list")
+    # App/Host may inject a task-scoped config when launching an Agent.
+    # task_id is correlation only: it never grants access. Pair approval,
+    # the selected authorization, the signed task credential, target/folder
+    # binding, and the Hand-side fence are still checked for every call.
+    if "task_id" in config:
+        task_id = config.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip() or len(task_id) > 128:
+            raise AdapterError("configuration_error", "task_id must be a non-empty string of at most 128 characters")
+        config["task_id"] = task_id.strip()
+    for key in ("epoch", "goal_version"):
+        if key in config:
+            value = config[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise AdapterError("configuration_error", f"{key} must be a positive integer")
     seen_devices: set[str] = set()
     for index, device in enumerate(devices):
         if not isinstance(device, dict):
@@ -144,6 +158,11 @@ def load_config(path: str) -> dict[str, Any]:
             if grant["authorization_id"] in seen_grants:
                 raise AdapterError("configuration_error", f"duplicate authorization_id on device {device['device_id']}")
             seen_grants.add(grant["authorization_id"])
+    if "task_id" in config and (len(devices) != 1 or len(devices[0]["authorizations"]) != 1):
+        raise AdapterError(
+            "configuration_error",
+            "task-scoped config must contain exactly one selected device and one folder authorization",
+        )
     return config
 
 
@@ -197,7 +216,7 @@ class HandMcpAdapter:
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         self.devices = {device["device_id"]: device for device in config["devices"]}
-        self.task_states: dict[tuple[str, str], dict[str, Any]] = {}
+        self.task_states: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     def _open_hand(self, target: dict[str, Any]):
         device_id = target["device_id"]
@@ -243,11 +262,12 @@ class HandMcpAdapter:
         return target, grants[authorization_id]
 
     def _task_state(self, target: dict[str, Any], grant: dict[str, Any]) -> dict[str, Any]:
-        key = (target["device_id"], grant["authorization_id"])
+        configured_task_id = self.config.get("task_id")
+        key = (target["device_id"], grant["authorization_id"], configured_task_id or "")
         return self.task_states.setdefault(key, {
-            "task_id": "mcp-task-" + uuid.uuid4().hex,
-            "goal_version": int(grant.get("goal_version", 1)),
-            "epoch": int(grant.get("epoch", 1)),
+            "task_id": configured_task_id or "mcp-task-" + uuid.uuid4().hex,
+            "goal_version": int(self.config.get("goal_version", grant.get("goal_version", 1))),
+            "epoch": int(self.config.get("epoch", grant.get("epoch", 1))),
             "stopped": False,
             "paused": False,
         })
@@ -278,7 +298,8 @@ class HandMcpAdapter:
             device_id = target["device_id"]
             session_key = hs.derive_session_key(identity["private_key"], identity["public_key"], peer_key)
             signing_key = hs.derive_signing_key(session_key)
-            wire_args = {k: v for k, v in args.items() if k not in {"device_id", "authorization_id"}}
+            wire_args = {k: v for k, v in args.items()
+                         if k not in {"device_id", "authorization_id", "task_id"}}
             if action == "run":
                 operation = wire_args.pop("operation")
                 operation_id = wire_args.pop("operation_id")

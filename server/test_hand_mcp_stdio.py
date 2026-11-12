@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import hand_server as hs
-from hand_mcp_stdio import AdapterError, HandMcpAdapter, init_identity, load_identity, serve_stdio
+from hand_mcp_stdio import AdapterError, HandMcpAdapter, init_identity, load_config, load_identity, serve_stdio
 
 
 class HandMcpStdioTest(unittest.TestCase):
@@ -67,6 +67,53 @@ class HandMcpStdioTest(unittest.TestCase):
         listing = json.loads(self.adapter.call_tool("device_list", self.route | {"path": ""}))
         self.assertEqual([entry["name"] for entry in listing], ["solo-test.txt"])
         self.assertEqual(len(self.server.state.load_json("paired_clients.json", {})), 1)
+
+    def test_task_scoped_config_correlates_app_task_without_granting_authority(self):
+        # The App/Host binds the MCP process to its persisted task ID. The
+        # bridge still signs a fresh v2 credential and Hand independently
+        # checks pairing, target, folder, expiry, replay, and the task fence.
+        self.config.update({"task_id": "app-task-7c23", "epoch": 3, "goal_version": 2})
+        adapter = HandMcpAdapter(self.config, self.identity, read_timeout=3)
+        adapter.call_tool("device_write", self.route | {
+            "path": "task-bound.txt", "content": "same task"})
+        self.assertIn("app-task-7c23", self.server.task_meta)
+        self.assertEqual(self.server.task_meta["app-task-7c23"]["epoch"], 3)
+        self.assertEqual(self.server.task_meta["app-task-7c23"]["goal_version"], 2)
+        self.assertEqual(Path(self.work, "task-bound.txt").read_text(encoding="utf-8"), "same task")
+        self.assertEqual(adapter.call_tool("device_read", self.route | {
+            "path": "task-bound.txt", "task_id": "attacker-selected-task"}), "same task")
+        self.assertNotIn("attacker-selected-task", self.server.task_meta)
+
+        # A task ID is not an authorization. Selecting an ungranted folder
+        # remains denied even when the task ID is valid and already bound.
+        with self.assertRaises(AdapterError) as error:
+            adapter.call_tool("device_write", {
+                "device_id": self.server.device_id, "authorization_id": "not-granted",
+                "path": "denied.txt", "content": "no"})
+        self.assertEqual(error.exception.code, "authorization_required")
+        self.assertFalse(Path(self.work, "denied.txt").exists())
+
+    def test_task_scoped_config_rejects_invalid_fence_values(self):
+        for field, value in (("epoch", 0), ("goal_version", True), ("task_id", "")):
+            with self.subTest(field=field, value=value):
+                config = dict(self.config)
+                config[field] = value
+                path = Path(self.tmp.name, "invalid-config.json")
+                path.write_text(json.dumps(config), encoding="utf-8")
+                with self.assertRaises(AdapterError) as error:
+                    load_config(str(path))
+                self.assertEqual(error.exception.code, "configuration_error")
+
+        config = dict(self.config, task_id="task-must-have-single-route")
+        config["devices"] = [dict(config["devices"][0], authorizations=[
+            *config["devices"][0]["authorizations"],
+            {"authorization_id": "second", "agent_id": "codex", "folder": self.work},
+        ])]
+        path = Path(self.tmp.name, "multi-route-task-config.json")
+        path.write_text(json.dumps(config), encoding="utf-8")
+        with self.assertRaises(AdapterError) as error:
+            load_config(str(path))
+        self.assertEqual(error.exception.code, "configuration_error")
 
     def test_wrong_device_route_is_rejected_before_network_call(self):
         with self.assertRaisesRegex(AdapterError, "configured Hand device") as error:

@@ -678,7 +678,14 @@ class HandServer:
                 return
             self.used_jtis[cred["jti"]] = int(cred["exp"])
             self.state.save_json("used_credentials.json", self.used_jtis)
-        meta = self.task_meta.setdefault(task_id, {"goal_version": 1, "epoch": 1})
+        # A newly scoped App task may start at counters above 1 (for example,
+        # after authorization was renewed before dispatch). Its signed task
+        # credential is the authority for the initial snapshot; later calls
+        # must match the Hand's stored counters and cannot roll them back.
+        meta = self.task_meta.setdefault(task_id, {
+            "goal_version": int(cred.get("goal_version", 1)),
+            "epoch": int(cred.get("epoch", 1)),
+        })
         is_control = False
         if action == "run":
             try:

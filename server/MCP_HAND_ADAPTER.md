@@ -98,6 +98,13 @@ remain independent of the Agent vendor.
 
 ## Safety and controls
 
+An Agent host may provide `task_id`, `epoch`, and `goal_version` in a
+task-scoped adapter config when launching one Agent run. These values correlate
+App, MCP, and Hand audit records and initialize the signed control snapshot;
+they do not grant authority. The tool arguments cannot override them. Pairing,
+the configured device/grant, the signed v2 credential, expiry, and Hand-side
+replay and stop fences are still checked independently on each call.
+
 - Every operation chooses from the configured device registry by `device_id`
   and a configured grant by `authorization_id`; no request can supply a route
   or path root.
