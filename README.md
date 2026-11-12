@@ -10,7 +10,7 @@ This repository is **wherevercode-agent**, the standalone app. It is not the old
 
 ## Android
 
-See [Android setup and architecture notes](android/README.md). The Android build uses Gradle, Kotlin and Chaquopy; local build instructions are in [android/README.md](android/README.md). This source repository does not include GitHub Actions workflows. An APK build may need network access to download dependencies and provision a Node runtime. The repository currently does not include a Gradle Wrapper; a compatible Gradle installation is required.
+See [Android setup and architecture notes](android/README.md). The Android build uses Gradle, Kotlin and Chaquopy. GitHub Actions runs the unit tests and builds a debug APK on pushes to development branches, pull requests to `main`, and manual dispatches; the APK and test reports are downloadable artifacts. The workflow configures JDK, Python, Android SDK and Gradle on `ubuntu-latest`, so a local Android SDK/JDK installation is not required. An APK build may need network access to download dependencies and provision a Node runtime. The repository currently does not include a Gradle Wrapper; the workflow installs the pinned Gradle version.
 
 Debug APKs built from this source use local debug signing. They may **not** update APKs signed with the historical shared debug key; an uninstall or separate migration strategy may be needed. Do not treat a debug-signed APK as a production release.
 

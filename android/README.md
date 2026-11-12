@@ -21,9 +21,8 @@
 | 3 | 改沙箱内文件夹里的文件 + 前台服务切后台不被杀 | **文件读写成立；“不被杀”只能做到尽量，不能保证** | 文件操作是普通 Java IO；保活受系统电池策略限制，见下 |
 | 4 | 复用 `execution_host_agents.available_agents()` 的发现逻辑 | **逻辑可复用，二进制不可复用** | 注册表与探针形状已按原样移植；Termux 里的 CLI 与 App 沙箱互不可见 |
 
-**APK 大小 / 内存占用：本轮没有数字。** 本机无 Android 构建环境、GitHub 项目无
-`project_run`，编不出 APK；CI 出包后看 artifact 大小，K70 安装后实测内存。
-这里不编数字。
+**APK 大小 / 内存占用：本轮尚无数字。** Android CI 会上传可下载的 Debug APK；
+安装与运行时内存需要在 Android 真机上单独验收，不由 CI 推断。
 
 ## 1. 内置运行环境
 
@@ -64,7 +63,7 @@ Android 10 行为变更（developer.android.com，`Behavior changes: apps target
 
 ### Python 3：Chaquopy（已定）
 
-- Chaquopy 14.0 + Python 3.11（多个来源一致的稳定组合；更新的 17.0/Python 3.14
+- Chaquopy 15.0.1 + Python 3.11（与 Gradle 配置一致；更新的 17.0/Python 3.14
   说法只见于内容农场页，未采信）。Gradle 插件把 CPython 嵌进 APK，
   Kotlin 直接调 Python，不需要 exec，**不受 W^X 限制**。
 - `app/src/main/python/spike_probe.py` 是探针：报 Python 版本、跑一条 shell 命令、
@@ -154,21 +153,16 @@ Android 10 行为变更（developer.android.com，`Behavior changes: apps target
 
 ## 构建
 
-- `.github/workflows/android.yml`：GitHub Actions 出 debug APK，产物放 Actions artifact，
-  不进仓库签名钥匙。触发条件：`android/**` 或 workflow 本身有 push、或手动 dispatch。
-  **注意：本文件本次没能直接写进 `.github/workflows/`**——写它两次都报
-  `github_project_write_failed`，而同分支下 `android/` 的文件一次就写成功了；
-  原因是 GitHub API 写 workflow 文件需要 Workflow 权限，Muse 的钥匙只有 Contents
-  读写，没有 Workflow 权限。所以 workflow 的完整内容暂存在
-  `android/workflow-android.yml.txt`，请有 Workflow 权限的人（maintainer 或总管）
-  把它移到 `.github/workflows/android.yml` 再跑 CI；内容一字未改。
-- 任务里提到的“旧分支里 android.yml（任务 0ea7f093）”：任务文本没给分支名，
-  仓库 main 上也没有这个文件，没能定位到它；新 workflow 是按本仓库
-  `.github/workflows/main.yml` 的惯例（ubuntu-latest、checkout v4、固定版本、
-  超时、并发组）重写的，不是抄旧文件。
-- 注意：workflow 用的不是 gradle wrapper（本分支未提交 wrapper 的 jar），
-  而是 `gradle/actions/setup-gradle` 装指定版本 Gradle。能跑，但正式化之前
-  建议还是补一个 wrapper。
+- `.github/workflows/android.yml`：GitHub Actions 在 `ubuntu-latest` 上配置 JDK 17、
+  Python 3.11、Android SDK 34 和 Gradle 8.0；先运行 `testDebugUnitTest`，再构建
+  `assembleDebug`。测试报告与 Debug APK/SHA-256 作为 Actions artifacts 上传，保留
+  14 天。workflow 不读取生产签名或私有平台配置；APK 使用标准 Debug 签名。
+- 触发条件：推送 `main`、`fix/**`、`feat/**`、`codex/**`、`ci/**` 分支，
+  向 `main` 提 PR，或从 Actions 手动触发。
+- 仓库没有 Gradle Wrapper；workflow 通过 `gradle/actions/setup-gradle` 安装固定的
+  Gradle 8.0。
+- Chaquopy 的 app Python 与本地构建 Python 小版本必须一致。workflow 固定 Python 3.11，
+  Gradle 中也指定 `buildPython("python3.11")`，避免 Runner 默认 Python 版本漂移。
 
 ## 文件清单
 
@@ -176,7 +170,7 @@ Android 10 行为变更（developer.android.com，`Behavior changes: apps target
 |---|---|
 | `android/README.md` | 本文件：可行性结论 |
 | `android/settings.gradle.kts`、`android/build.gradle.kts`、`android/gradle.properties` | Gradle 工程骨架（AGP 8.1.4、Gradle 8.0、Kotlin 1.9.0） |
-| `android/app/build.gradle.kts` | targetSdk 28、minSdk 26、arm64-v8a、Chaquopy 14.0 + Python 3.11 |
+| `android/app/build.gradle.kts` | targetSdk 28、minSdk 26、arm64-v8a、Chaquopy 15.0.1 + Python 3.11 |
 | `android/app/src/main/AndroidManifest.xml` | 权限、前台服务、MainActivity |
 | `android/app/src/main/java/.../MainActivity.kt` | 最简界面 |
 | `android/app/src/main/java/.../AgentDiscovery.kt` | 移植的发现逻辑 |
@@ -185,7 +179,7 @@ Android 10 行为变更（developer.android.com，`Behavior changes: apps target
 | `android/app/src/main/java/.../AgentService.kt` | 前台服务保活 |
 | `android/app/src/main/python/spike_probe.py` | Python 探针（标准库 only） |
 | `android/app/src/main/res/layout/activity_main.xml` | 界面布局 |
-| `.github/workflows/android.yml` | CI 出 debug APK（**本次因钥匙无 Workflow 权限未能写入，完整内容暂存于 `android/workflow-android.yml.txt`，见上**） |
+| `.github/workflows/android.yml` | 云端运行单元测试、构建并上传 Debug APK 与测试报告 |
 
 ## 下一步建议（按顺序）
 

@@ -110,8 +110,12 @@ android {
 
 chaquopy {
     defaultConfig {
-        // Chaquopy 14.0 stable combo; see android/README.md for the version note.
+        // Match the Chaquopy plugin version pinned in android/build.gradle.kts.
         version = "3.11"
+        // Keep the build interpreter aligned with the embedded Python minor
+        // version. GitHub's ubuntu-latest default `python3` may be 3.12, which
+        // prevents Chaquopy from compiling the app's Python sources to bytecode.
+        buildPython("python3.11")
     }
 }
 
