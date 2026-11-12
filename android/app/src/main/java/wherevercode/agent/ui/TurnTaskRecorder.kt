@@ -9,6 +9,7 @@ import wherevercode.agent.core.task.TaskStep
 import wherevercode.agent.core.task.TaskStepStatus
 import wherevercode.agent.core.task.TaskStepStore
 import wherevercode.agent.core.task.TaskStore
+import wherevercode.agent.core.task.TaskHandRoute
 import wherevercode.agent.core.team.RemoteMemberVerdict
 import wherevercode.agent.core.team.RemoteMemberVerdictClassifier
 import wherevercode.agent.core.team.classifyRemoteMemberOutput
@@ -184,6 +185,7 @@ class TurnTaskRecorder(
         sessionId: String,
         agentId: String,
         projectId: String? = null,
+        handRoute: TaskHandRoute? = null,
     ): String? {
         val taskId = UUID.randomUUID().toString()
         val now = nowSeconds()
@@ -198,6 +200,9 @@ class TurnTaskRecorder(
             createdAt = now,
             updatedAt = now,
             version = 1,
+            handDeviceId = handRoute?.deviceId,
+            handAuthorizationId = handRoute?.authorizationId,
+            handFolder = handRoute?.folder,
         )
         return try {
             taskStore.createTask(record)

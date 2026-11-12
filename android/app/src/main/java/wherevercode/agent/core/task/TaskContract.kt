@@ -85,6 +85,19 @@ object TaskContract {
     }
 }
 
+/** User-selected Hand route stored with a task; it never authorizes a call. */
+data class TaskHandRoute(
+    val deviceId: String,
+    val authorizationId: String,
+    val folder: String,
+) {
+    init {
+        require(deviceId.isNotBlank()) { "Hand device id is required" }
+        require(authorizationId.isNotBlank()) { "Hand authorization reference is required" }
+        require(folder.isNotBlank()) { "Hand folder is required" }
+    }
+}
+
 class TaskAlreadyExists(val taskId: String) :
     IllegalStateException("task already exists: $taskId")
 

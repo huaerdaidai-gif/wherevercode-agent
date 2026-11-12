@@ -88,6 +88,7 @@ import wherevercode.agent.core.task.LocalTaskRunner
 import wherevercode.agent.core.task.TaskExecutor
 import wherevercode.agent.core.task.TaskExecutionResult
 import wherevercode.agent.core.task.TaskRecord
+import wherevercode.agent.core.task.TaskHandRoute
 import wherevercode.agent.core.task.TaskScheduler
 import wherevercode.agent.core.task.TaskStore
 import wherevercode.agent.core.task.TaskStepEvent
@@ -799,6 +800,27 @@ class ChatViewModelRemoteAgentTest {
         assertTrue("停止后轮次应终态", awaitIdle())
         assertEquals("停止指令必须用实际发给 Hand 的任务 id", listOf(runTaskId), controlSender.taskIds)
         assertEquals("停止应掐断该任务的远端连接", listOf(runTaskId), stuck.aborted)
+    }
+
+    @Test
+    fun `remote round persists the selected Hand device authorization and folder`() {
+        viewModel.taskHandRouteProvider = {
+            TaskHandRoute(
+                deviceId = "hand-device-b",
+                authorizationId = "hand-agent-b",
+                folder = "/authorized/work",
+            )
+        }
+        viewModel.switchSession("session-grok", "Example Agent", grokAgent())
+        assertTrue(viewModel.send("在另一台设备操作文件").accepted)
+        assertTrue(awaitIdle())
+
+        val taskId = remotePort.calls.single().taskId
+        val task = taskStore.getTask(taskId)
+        assertNotNull(task)
+        assertEquals("hand-device-b", task?.handDeviceId)
+        assertEquals("hand-agent-b", task?.handAuthorizationId)
+        assertEquals("/authorized/work", task?.handFolder)
     }
 
     @Test

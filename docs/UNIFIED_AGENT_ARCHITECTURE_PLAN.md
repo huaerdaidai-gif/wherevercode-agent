@@ -33,6 +33,26 @@ consumption is idempotent and replay-safe. A disconnected worker can query
 missed work after reconnecting; a stopped task or revoked grant cannot be
 restarted by a delayed assignment event.
 
+The event contract follows the older project's provider-neutral event and
+delivery patterns without importing its server or storage. The new task ledger
+is the source of truth; `task.assigned` and `review.assigned` are durable
+notifications keyed by task ID, assignment/review round, and recipient. A
+worker must claim an assignment with an idempotency key before execution. The
+same key cannot create a second run, and delivery retries cannot advance task
+state twice. Progress, delivery, approval, rejection, rework, and stop are
+ledger transitions with an actor identity and monotonically increasing task
+version. Consumers resume from an authorized cursor and query outstanding
+assignments after reconnecting. Stop, revocation, or a newer assignment
+version invalidates stale events before a worker starts or commits results.
+
+Internal Agent subscriptions are a pull/claim mechanism backed by the durable
+queue. Optional outbound webhooks may wake an already configured receiver, but
+they carry no execution authority and do not replace claim, task authorization,
+or result submission. ChatGPT MCP access is interactive unless a supported
+trigger or polling integration is separately verified. A successful event
+subscription or webhook delivery must never be described as background
+ChatGPT execution.
+
 Internal Agent event subscriptions mean an authorized, capable, online runtime
 may claim work from the app-owned queue. They do not imply that ChatGPT or
 another cloud client will be woken in the background. External-client
@@ -85,6 +105,13 @@ integration. Persist assignment and review events, deduplicate claims and
 delivery retries, support cursor-based recovery, and make stop/revocation
 authoritative over delayed events.
 
+The older project's `task.assigned` / `review.assigned` flow is a behavioral
+reference only. Port its event envelope, subscription filters, retry and
+idempotency rules, and tests into the new Room-backed task/event stores and
+app-owned dispatcher. Do not call the older project's webhook, queue, or
+production endpoints. App and external MCP actions must enter the same
+scheduler, state transitions, approvals, and audit log.
+
 ### P3 — Independent channels and bidirectional MCP
 
 The app's MCP client continues to discover tools dynamically across configured
@@ -95,6 +122,15 @@ Replace platform-backed channel storage/transport with app-owned local
 persistence and direct device or optional coordinator synchronization. Public
 HTTPS access is an optional authenticated forwarding layer, not a scheduler.
 
+The server tools must have real handlers for Agent and device capability
+discovery; task create, assignment, parallel fan-out, dependencies, status,
+progress, event cursors, artifacts, and pending assignments; pause, resume,
+stop, goal change, approval, review, rework, and integration; and authorized
+channel history and send. Publishing tool schemas alone is not support. App
+actions and MCP calls must invoke the same scheduler, state transitions,
+authorization checks, and audit records. A channel message cannot substitute
+for task creation or assignment.
+
 ### P4 — Offline-first and optional remote access
 
 Verify core task and device operation with old platform endpoints and public
@@ -102,6 +138,12 @@ gateway disabled, including disconnect/reconnect, deduplication, and state
 recovery. Separately verify an explicitly enabled HTTPS gateway and accurately
 document which operations require an online coordinator. Do not claim
 round-the-clock reachability without a reachable always-on node.
+
+With no always-on coordinator, a cloud client cannot receive notifications
+while the App is offline. The local queue and event history remain durable and
+are available to an authorized client after reconnecting. Any ChatGPT trigger,
+webhook receiver, or polling mode is an independent integration and must be
+verified before claiming background execution.
 
 ## Evidence gates
 

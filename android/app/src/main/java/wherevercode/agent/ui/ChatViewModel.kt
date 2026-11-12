@@ -41,6 +41,7 @@ import wherevercode.agent.core.agent.PlatformChatPort
 import wherevercode.agent.core.task.EvalLogRecorder
 import wherevercode.agent.core.task.EvalOutcome
 import wherevercode.agent.core.task.TaskRecord
+import wherevercode.agent.core.task.TaskHandRoute
 import wherevercode.agent.core.task.TaskStep
 import wherevercode.agent.core.task.TaskStepStatus
 import wherevercode.agent.core.task.TriageMode
@@ -537,6 +538,18 @@ class ChatViewModel : ViewModel() {
      * 要写清项目名；未注入或查不到时备注用项目 id，未绑定时写“未绑定项目”。
      */
     var projectNameProvider: ((String) -> String?)? = null
+
+    /** Selected Hand route for the next direct remote-Agent task, if configured. */
+    var taskHandRouteProvider: (() -> TaskHandRoute?)? = null
+    private val handRoutesBySession = LinkedHashMap<String, TaskHandRoute>()
+
+    fun selectedHandRoute(): TaskHandRoute? = conversationId?.let(handRoutesBySession::get)
+
+    fun selectHandRoute(route: TaskHandRoute?) {
+        val sessionId = conversationId ?: UUID.randomUUID().toString().also { conversationId = it }
+        if (route == null) handRoutesBySession.remove(sessionId) else handRoutesBySession[sessionId] = route
+        publish(true)
+    }
 
     /** GitHub 闭环（2026-11-11）：新对话时调用方清空聊天项目。 */
     var onNewConversation: (() -> Unit)? = null
@@ -1505,7 +1518,13 @@ class ChatViewModel : ViewModel() {
             // TaskStore is Room-backed. send() is called by the Android
             // UI thread, so open the task row only from this IO scope before
             // any message is dispatched to the remote Agent.
-            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            val taskId = turnRecorder?.beginRemoteRound(
+                prompt,
+                convId,
+                agent.agentId,
+                currentProjectId(),
+                handRoute = try { taskHandRouteProvider?.invoke() } catch (_: Exception) { null },
+            )
             if (taskId == null) {
                 remoteTurnJob = null
                 active.set(false)
