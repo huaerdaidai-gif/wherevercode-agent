@@ -60,11 +60,11 @@ jobs:
         working-directory: android
         run: gradle :app:testDebugUnitTest --no-daemon
 
-      - name: Build debug APK
+      - name: Build debug and compatibility APKs
         id: apk_build
         if: ${{ !cancelled() }}
         working-directory: android
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug :app:assembleCompat --no-daemon
 
       - name: Verify and checksum APK
         if: ${{ !cancelled() && steps.apk_build.outcome == 'success' }}
@@ -95,5 +95,26 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/debug/app-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify and checksum compatibility APK
+        if: ${{ !cancelled() && steps.apk_build.outcome == 'success' }}
+        working-directory: android
+        run: |
+          apk='app/build/outputs/apk/compat/app-compat.apk'
+          test -s "$apk"
+          sha256sum "$apk" | tee "$apk.sha256"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$apk" | sed -n '1p'
+          du -h "$apk"
+
+      - name: Upload compatibility APK
+        if: ${{ !cancelled() && steps.apk_build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: wherevercode-agent-compat-apk-${{ github.sha }}
+          path: |
+            android/app/build/outputs/apk/compat/app-compat.apk
+            android/app/build/outputs/apk/compat/app-compat.apk.sha256
           if-no-files-found: error
           retention-days: 14

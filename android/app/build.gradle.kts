@@ -56,7 +56,7 @@ android {
         // Cost: no Google Play (Play requires targetSdk 35 since 2025-08-31).
         // This spike ships as a sideloaded APK, per the task.
         targetSdk = 28
-        versionCode = 2
+        versionCode = 3
         versionName = "0.2.0-ui2"
 
         // V5 C1：真实版本信息（commitSha / buildTimeUtc 见文件顶部）。
@@ -80,16 +80,19 @@ android {
         buildConfig = true
     }
 
-    // Open-source builds use Android Gradle Plugin's standard local debug signing.
-    // No shared private key or signing password is stored in this repository.
-    // APKs signed with a new key cannot update installations signed by the
-    // historical pinned debug key; users may need to uninstall first.
-    
+    // CI's ordinary debug APK stays side-by-side with a user's installed app.
+    // The compat variant keeps the production package ID and is re-signed
+    // locally with the matching historical debug certificate before install.
     buildTypes {
         debug {
             // Keep the CI/dev APK side-by-side with any existing installation
             // signed with a different key; never require uninstalling its data.
             applicationIdSuffix = ".ci"
+        }
+        create("compat") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ""
+            matchingFallbacks += listOf("debug")
         }
         release {
             isMinifyEnabled = false
