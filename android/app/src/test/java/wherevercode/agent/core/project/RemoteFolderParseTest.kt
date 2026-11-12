@@ -53,7 +53,7 @@ class RemoteFolderParseTest {
         assertEquals("example-project", folderBasename("/workspace/example-project"))
         assertEquals("example-project", folderBasename("/workspace/example-project/"))
         assertEquals("/", folderBasename("/"))
-        assertEquals("work", folderBasename("/workspace"))
+        assertEquals("workspace", folderBasename("/workspace"))
     }
 
     @Test

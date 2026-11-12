@@ -168,14 +168,16 @@ class PlatformAgentChatBridgeTest {
     }
 
     @Test
-    fun `blank agent host uses no public-build endpoint default`() = runBlocking {
+    fun `blank agent host fails before dispatch without a public-build endpoint default`() = runBlocking {
         val transport = ScriptedTransport()
         var seenEndpoint: String? = null
         val agent = grokBotAgent().copy(platformHost = null)
-        bridge(transport, onFactory = { seenEndpoint = it })
+        val events = bridge(transport, onFactory = { seenEndpoint = it })
             .runChat("conv-1", agent, "在吗").toList()
 
-        assertEquals("", seenEndpoint)
+        assertEquals(null, seenEndpoint)
+        assertTrue(events.filterIsInstance<PlatformChatEvent.Failed>().single().message.contains("未配置平台地址"))
+        assertTrue(transport.posts.isEmpty())
     }
 
     @Test

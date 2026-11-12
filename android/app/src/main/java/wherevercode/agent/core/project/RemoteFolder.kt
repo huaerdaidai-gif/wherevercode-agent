@@ -36,7 +36,7 @@ fun parseFolderListJson(output: String): List<RemoteFolderEntry> {
     return out
 }
 
-/** 文件夹 basename：`/workspace/example-project` → `fenshen`；`/` → `/`。 */
+/** 文件夹 basename：`/workspace/example-project` → `example-project`；`/` → `/`。 */
 fun folderBasename(path: String): String {
     val trimmed = path.trim().trimEnd('/')
     if (trimmed.isEmpty()) return "/"
