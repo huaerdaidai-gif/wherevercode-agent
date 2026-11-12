@@ -3,7 +3,11 @@ package wherevercode.agent.ui
 import android.content.Context
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -149,10 +153,25 @@ class ChatViewModelProjectBindingTest {
     }
 
     private class ScriptedRemotePort(
-        private val events: List<HandEvent>,
+        private var events: List<HandEvent>,
+        private var holdUntilReleased: Boolean = false,
     ) : RemoteAgentChatPort {
         data class Call(val target: RemoteTarget, val taskId: String, val text: String)
         val calls = mutableListOf<Call>()
+        private val callStarted = CountDownLatch(1)
+        private val releaseEvents = CompletableDeferred<Unit>()
+
+        fun awaitCall(): Boolean = callStarted.await(10, TimeUnit.SECONDS)
+
+        fun releaseEvents() {
+            releaseEvents.complete(Unit)
+        }
+
+        fun configure(events: List<HandEvent>, holdUntilReleased: Boolean) {
+            this.events = events
+            this.holdUntilReleased = holdUntilReleased
+        }
+
         override fun runAgent(
             target: RemoteTarget,
             taskId: String,
@@ -162,7 +181,12 @@ class ChatViewModelProjectBindingTest {
             epoch: Long,
         ): Flow<HandEvent> {
             calls += Call(target, taskId, text)
-            return flowOf(*events.toTypedArray())
+            callStarted.countDown()
+            if (!holdUntilReleased) return flowOf(*events.toTypedArray())
+            return flow {
+                releaseEvents.await()
+                events.forEach { emit(it) }
+            }
         }
 
         override fun sendControl(
@@ -360,17 +384,6 @@ class ChatViewModelProjectBindingTest {
         return !viewModel.isRunning()
     }
 
-    private fun completeOnlyTask(result: String) {
-        val task = taskStore.listTasks(null, null).single()
-        taskStore.updateTask(
-            task.taskId,
-            mapOf("state" to "completed", "result" to result),
-            task.version,
-            task.goalVersion,
-            task.authEpoch,
-        )
-    }
-
     @Test
     fun `global chat binding fills missing session binding`() {
         // 20106890 回归：会话从来没经过“打开项目浏览家文件夹”，会话级
@@ -423,38 +436,59 @@ class ChatViewModelProjectBindingTest {
     @Test
     fun `bound chat dispatch carries projectId`() {
         // 端到端：已绑定项目的对话发任务型指令，任务行必须带 projectId。
+        remotePort.configure(
+            events = listOf(
+                HandEvent.Result(
+                    1,
+                    "分支 test/team-check-20261111 已建，提交 abc123",
+                ),
+            ),
+            holdUntilReleased = true,
+        )
         assertTrue(viewModel.switchSession("session-codex", "Codex", codexAgent()))
         viewModel.chatProjectIdProvider = { "wherevercode-agent-2" }
         val result = viewModel.send("新建分支 test/team-check-20261111 并提交文件 team-check-20261111.txt，内容为团队任务测试 2026-11-11")
         assertTrue(result.accepted)
+        assertTrue("远端调用应在任务行建好后发出", remotePort.awaitCall())
 
         val task = taskStore.listTasks(null, null).single()
         assertEquals("wherevercode-agent-2", task.projectId)
         assertEquals("codex", task.assignedAgentId)
-        // 直连默认开（大脑/Agent 边界）：消息走 startRemoteTurn，轮次行由
-        // beginRemoteRound 直接落 working（非派活任务的 queued）。
-        assertEquals("working", task.state)
-
-        // 让观察轮次看到终态、正常结束（否则它会等 600 秒超时）。
-        completeOnlyTask("分支 test/team-check-20261111 已建，提交 abc123")
-        assertTrue(awaitIdle())
+        assertEquals("远端消息发出后任务应处于执行中", "working", task.state)
+        assertEquals("远端调用应真实发出", 1, remotePort.calls.size)
+        remotePort.releaseEvents()
+        assertTrue("远端返回终态后轮次应结束", awaitIdle())
+        val completedTask = taskStore.listTasks(null, null).single()
+        assertEquals("completed", completedTask.state)
+        assertTrue(completedTask.result.contains("已建，提交 abc123"))
     }
 
     @Test
     fun `unbound chat dispatch carries no projectId`() {
         // 端到端：无绑定时任务行 projectId 为 null，仍允许派活走回落。
+        remotePort.configure(
+            events = listOf(
+                HandEvent.Result(
+                    1,
+                    "分支 test/team-check-20261111 已建，提交 abc123",
+                ),
+            ),
+            holdUntilReleased = true,
+        )
         assertTrue(viewModel.switchSession("session-codex", "Codex", codexAgent()))
         val result = viewModel.send("新建分支 test/team-check-20261111 并提交文件 team-check-20261111.txt，内容为团队任务测试 2026-11-11")
         assertTrue(result.accepted)
+        assertTrue("远端调用应在任务行建好后发出", remotePort.awaitCall())
 
         val task = taskStore.listTasks(null, null).single()
         assertNull(task.projectId)
         assertEquals("codex", task.assignedAgentId)
-        // 直连默认开（大脑/Agent 边界）：消息走 startRemoteTurn，轮次行由
-        // beginRemoteRound 直接落 working（非派活任务的 queued）。
-        assertEquals("working", task.state)
-
-        completeOnlyTask("分支 test/team-check-20261111 已建，提交 abc123")
-        assertTrue(awaitIdle())
+        assertEquals("远端消息发出后任务应处于执行中", "working", task.state)
+        assertEquals("远端调用应真实发出", 1, remotePort.calls.size)
+        remotePort.releaseEvents()
+        assertTrue("远端返回终态后轮次应结束", awaitIdle())
+        val completedTask = taskStore.listTasks(null, null).single()
+        assertEquals("completed", completedTask.state)
+        assertTrue(completedTask.result.contains("已建，提交 abc123"))
     }
 }
