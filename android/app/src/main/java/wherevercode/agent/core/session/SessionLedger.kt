@@ -296,7 +296,12 @@ class SessionLedgerImpl(
         // router re-checks with the delegation switch before acting).
         val senderAuthorized =
             input.senderId == session.ownerId || authStore.deviceAuthorized()
-        val classification = classify(cleaned, senderAuthorized)
+        // Classify against the same redacted body that is persisted. Otherwise
+        // a secret-bearing message could be reclassified as control text after
+        // redaction, and the unredacted body would also remain in the audit
+        // metadata path.
+        val safeContent = redactMessageContent(cleaned)
+        val classification = classify(safeContent, senderAuthorized)
 
         val kind = when (classification) {
             is Classification.Control -> MessageKind.CONTROL
@@ -321,7 +326,7 @@ class SessionLedgerImpl(
         val message = newSessionMessage(
             conversationId = input.conversationId,
             senderId = input.senderId,
-            content = redactMessageContent(cleaned),
+            content = safeContent,
             recipientId = input.recipientId,
             taskId = input.taskId,
             attemptId = input.attemptId,
