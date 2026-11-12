@@ -1,0 +1,96 @@
+name: Android CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+      - 'feat/**'
+      - 'codex/**'
+      - 'ci/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-apk:
+    name: Unit tests and debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.11 for Chaquopy
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android platform packages
+        run: sdkmanager --install 'platforms;android-34' 'build-tools;34.0.0' 'platform-tools'
+
+      - name: Set up Gradle 8.0
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.0'
+
+      - name: Run Android unit tests
+        id: unit_tests
+        working-directory: android
+        run: gradle :app:testDebugUnitTest --no-daemon
+
+      - name: Build debug APK
+        id: apk_build
+        if: ${{ !cancelled() }}
+        working-directory: android
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Verify and checksum APK
+        if: ${{ !cancelled() && steps.apk_build.outcome == 'success' }}
+        working-directory: android
+        run: |
+          apk='app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          sha256sum "$apk" | tee "$apk.sha256"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$apk" | sed -n '1p'
+          du -h "$apk"
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-unit-test-reports-${{ github.sha }}
+          path: |
+            android/app/build/test-results/testDebugUnitTest/**/*.xml
+            android/app/build/reports/tests/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload debug APK
+        if: ${{ !cancelled() && steps.apk_build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: wherevercode-agent-debug-apk-${{ github.sha }}
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/app-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
