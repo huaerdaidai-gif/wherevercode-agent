@@ -1,6 +1,7 @@
 package wherevercode.agent.ui
 
 import android.content.Context
+import android.os.Looper
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.CancellationException
@@ -88,6 +89,7 @@ import wherevercode.agent.core.task.TaskExecutor
 import wherevercode.agent.core.task.TaskExecutionResult
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskScheduler
+import wherevercode.agent.core.task.TaskStore
 import wherevercode.agent.core.task.TaskStepEvent
 import wherevercode.agent.core.task.InMemoryTaskStepStore
 import wherevercode.agent.core.transport.DiscoveredPeer
@@ -262,6 +264,7 @@ class ChatViewModelRemoteAgentTest {
     private lateinit var remotePort: ScriptedRemotePort
     private lateinit var taskStore: FakeTaskStore
     private lateinit var scheduler: TaskScheduler
+    private var requireTaskStoreIoThread = false
 
     private val peer = DiscoveredPeer(
         deviceId = "remote-host",
@@ -356,6 +359,21 @@ class ChatViewModelRemoteAgentTest {
         val workspaceAdapter = FileWorkspaceAdapter(workspaceRoot, taskRoot)
         val deviceAdapter = JvmDeviceAdapter(listOf(workspaceRoot), workspaceAdapter)
         taskStore = FakeTaskStore()
+        val recorderTaskStore = object : TaskStore by taskStore {
+            override fun createTask(record: TaskRecord): TaskRecord {
+                if (requireTaskStoreIoThread && Looper.myLooper() == Looper.getMainLooper()) {
+                    throw IllegalStateException("Cannot access database on the main thread")
+                }
+                return taskStore.createTask(record)
+            }
+
+            override fun getTask(taskId: String): TaskRecord? {
+                if (requireTaskStoreIoThread && Looper.myLooper() == Looper.getMainLooper()) {
+                    throw IllegalStateException("Cannot access database on the main thread")
+                }
+                return taskStore.getTask(taskId)
+            }
+        }
         val auditLog: AuditLog = InMemoryAuditLog()
         val eventLog = InMemoryEventLog()
         val tools = ToolRegistry(deviceAdapter, workspaceAdapter, CommandLimits(), taskStore, auditLog)
@@ -428,7 +446,7 @@ class ChatViewModelRemoteAgentTest {
             workspaceAdapter = workspaceAdapter,
             pythonRuntime = PreferEmbeddedPythonRuntime(UnavailablePython()),
             turnController = TurnController(),
-            taskStore = taskStore,
+            taskStore = recorderTaskStore,
             taskScheduler = scheduler,
             taskStepStore = taskStepStore,
             pairingTrustStore = InMemoryPairingTrustStore(),
@@ -458,6 +476,19 @@ class ChatViewModelRemoteAgentTest {
             listOfNotNull(it.error, it.assistantText.takeIf { s -> s.isNotBlank() })
                 .joinToString("\n")
         }
+
+    @Test
+    fun `remote round opens its Room task row off the main thread before dispatch`() {
+        requireTaskStoreIoThread = true
+        viewModel.switchSession("session-grok", "Example Agent", grokAgent())
+
+        assertTrue(viewModel.send("在吗").accepted)
+        assertTrue("异步建行和远端往返应结束", awaitIdle())
+
+        assertEquals("远端消息应在任务行建好后发送", 1, remotePort.calls.size)
+        assertTrue("任务行应真实写入 fake store", taskStore.listTasks().any { it.sessionId == "session-grok" })
+        assertFalse("主线程数据库错误不应出现", visibleErrorText().contains("main thread"))
+    }
 
     @Test
     fun `selecting grok build sends to remote not the global chatgpt brain`() {
@@ -727,6 +758,7 @@ class ChatViewModelRemoteAgentTest {
 
     @Test
     fun `remote round creates a real task row even when another task is in hand`() {
+        requireTaskStoreIoThread = true
         // 2026-11-12 回复归属修复：远端轮次不再走 beginTurn（调度器
         // 全局单任务门禁，一脑在手时认领失败回 null，旧代码拿 null
         // 就改用随机 UUID 发 Hand，活跑在任务表外面——真机事故

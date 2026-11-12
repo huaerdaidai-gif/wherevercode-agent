@@ -8,11 +8,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import wherevercode.agent.AgentRunner
@@ -186,6 +189,10 @@ class ChatViewModel : ViewModel() {
      */
     @Volatile
     private var remoteRunTaskId: String? = null
+
+    /** Counters captured with the Room row on IO; control-button handlers run on main. */
+    @Volatile
+    private var remoteTurnCounters: Pair<Long, Long> = 1L to 1L
 
     @Volatile
     private var remoteTurnTarget: RemoteTarget? = null
@@ -1432,6 +1439,10 @@ class ChatViewModel : ViewModel() {
         pausedTurn = false
         remoteTurnPaused = false
         remoteTurnGoalChanged = false
+        remoteTurnTaskId = null
+        remoteRunTaskId = null
+        remoteTurnTarget = null
+        remoteTurnCounters = 1L to 1L
         val convId = conversationId ?: UUID.randomUUID().toString().also {
             conversationId = it
         }
@@ -1466,29 +1477,35 @@ class ChatViewModel : ViewModel() {
         // 真机事故：两次 run 调用 e7690865 / 21504781 在 K70 任务
         // 表里无行）。建行失败时中止轮次、如实报错，绝不发 Hand。
         // 任务行的 goalVersion/authEpoch 即本次调用的栅栏快照。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
-            active.set(false)
-            val detail = turnRecorder?.lastBeginFailure()
-            val message = if (detail.isNullOrBlank()) {
-                "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
-            } else {
-                "轮次任务建行失败，消息未发出：$detail"
+        val remoteJob = scope.launch(start = CoroutineStart.LAZY) {
+            // TaskStore is Room-backed. send() is called by the Android
+            // UI thread, so open the task row only from this IO scope before
+            // any message is dispatched to the remote Agent.
+            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            if (taskId == null) {
+                remoteTurnJob = null
+                active.set(false)
+                val detail = turnRecorder?.lastBeginFailure()
+                val message = if (detail.isNullOrBlank()) {
+                    "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
+                } else {
+                    "轮次任务建行失败，消息未发出：$detail"
+                }
+                timeline.finishTurn(turnId, TurnStatus.ERROR, message)
+                publish(true)
+                onTurnFinished?.invoke()
+                return@launch
             }
-            timeline.finishTurn(turnId, TurnStatus.ERROR, message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        // 大脑/Agent 边界修订：镜像按真正干活的远端 Agent 认领，本轮挂任务归属。
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        val snapshot = comps.taskStore.getTask(taskId)
-        val goalVersion = snapshot?.goalVersion ?: 1L
-        val epoch = snapshot?.authEpoch ?: 1L
-        remoteTurnTaskId = taskId
-        remoteTurnTarget = target
-        val remoteTaskId = taskId
-        remoteRunTaskId = remoteTaskId
-        remoteTurnJob = scope.launch {
+            // 大脑/Agent 边界修订：镜像按真正干活的远端 Agent 认领，本轮挂任务归属。
+            timeline.setTaskAttribution(turnId, taskId, prompt)
+            val snapshot = comps.taskStore.getTask(taskId)
+            val goalVersion = snapshot?.goalVersion ?: 1L
+            val epoch = snapshot?.authEpoch ?: 1L
+            remoteTurnCounters = goalVersion to epoch
+            remoteTurnTaskId = taskId
+            remoteTurnTarget = target
+            val remoteTaskId = taskId
+            remoteRunTaskId = remoteTaskId
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -1511,6 +1528,9 @@ class ChatViewModel : ViewModel() {
                 }
             }
             try {
+                currentCoroutineContext().ensureActive()
+                // A stop can arrive while the Room insert is in progress. The
+                // cancelled preparation job must never start remote work.
                 port.runAgent(
                     target = target,
                     taskId = remoteTaskId,
@@ -1627,6 +1647,27 @@ class ChatViewModel : ViewModel() {
                 }
             }
         }
+        remoteTurnJob = remoteJob
+        remoteJob.invokeOnCompletion { cause ->
+            // LAZY jobs can be cancelled before their first instruction runs.
+            // In that case the coroutine body has no finally block to release
+            // the active turn, so close the visible turn here.
+            if (cause is CancellationException && remoteTurnJob === remoteJob &&
+                active.get() && remoteRunTaskId == null
+            ) {
+                remoteTurnJob = null
+                val status = if (remoteTurnGoalChanged) TurnStatus.GOAL_CHANGED else TurnStatus.CANCELLED
+                active.set(false)
+                timeline.finishTurn(turnId, status)
+                timeline.appendNote(
+                    turnId,
+                    if (status == TurnStatus.GOAL_CHANGED) "旧目标已作废，远端未收到消息。" else "本轮已停止，远端未收到消息。",
+                )
+                publish(true)
+                onTurnFinished?.invoke()
+            }
+        }
+        remoteJob.start()
         return SendResult(true)
     }
 
@@ -1721,7 +1762,7 @@ class ChatViewModel : ViewModel() {
         // 之后才跑；小模型只给模式建议，不改派单、不挡任务；失败一律
         // 无声回落。分流在后台协程里跑，任务观察不受影响。
         maybeRunTriage(comps, taskId, turnId, modelPrompt, boundDecisionId)
-        val assistantText = StringBuilder()
+            val assistantText = StringBuilder()
         taskTurnJob = scope.launch {
             var cancelled = false
             var terminalStatus: TurnStatus? = null
@@ -1981,25 +2022,30 @@ class ChatViewModel : ViewModel() {
         // 用 beginRemoteRound 只建行、不经调度器认领门禁；建不出行
         // 就中止轮次、如实报错，绝不让回复没有任务行可归属。
         // 镜像按 Manus 认领、本轮挂归属（大脑/Agent 边界修订）。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
-            active.set(false)
-            val detail = turnRecorder?.lastBeginFailure()
-            val message = if (detail.isNullOrBlank()) {
-                "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
-            } else {
-                "轮次任务建行失败，消息未发出：$detail"
-            }
-            timeline.finishTurn(turnId, TurnStatus.ERROR, message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        manusTurnTaskId = taskId
         manusTurnConversationId = convId
         manusTurnAgent = agent
-        val assistantText = StringBuilder()
-        manusTurnJob = scope.launch {
+        val manusJob = scope.launch(start = CoroutineStart.LAZY) {
+            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            if (taskId == null) {
+                manusTurnJob = null
+                manusTurnTaskId = null
+                manusTurnConversationId = null
+                manusTurnAgent = null
+                active.set(false)
+                val detail = turnRecorder?.lastBeginFailure()
+                val message = if (detail.isNullOrBlank()) {
+                    "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
+                } else {
+                    "轮次任务建行失败，消息未发出：$detail"
+                }
+                timeline.finishTurn(turnId, TurnStatus.ERROR, message)
+                publish(true)
+                onTurnFinished?.invoke()
+                return@launch
+            }
+            timeline.setTaskAttribution(turnId, taskId, prompt)
+            manusTurnTaskId = taskId
+            val assistantText = StringBuilder()
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -2087,6 +2133,23 @@ class ChatViewModel : ViewModel() {
                 onTurnFinished?.invoke()
             }
         }
+        manusTurnJob = manusJob
+        manusJob.invokeOnCompletion { cause ->
+            if (cause is CancellationException && manusTurnJob === manusJob &&
+                active.get() && manusTurnTaskId == null
+            ) {
+                manusTurnJob = null
+                manusTurnConversationId = null
+                manusTurnAgent = null
+                val status = if (manusTurnGoalChanged) TurnStatus.GOAL_CHANGED else TurnStatus.CANCELLED
+                active.set(false)
+                timeline.finishTurn(turnId, status)
+                timeline.appendNote(turnId, "本轮已取消，Manus 尚未收到消息。")
+                publish(true)
+                onTurnFinished?.invoke()
+            }
+        }
+        manusJob.start()
         return SendResult(true)
     }
 
@@ -2133,24 +2196,28 @@ class ChatViewModel : ViewModel() {
         // 同款，用 beginRemoteRound 只建行、不经调度器认领门禁；
         // 建不出行就中止轮次、如实报错，绝不让回复没有任务行可归属。
         // 镜像按该平台 Agent 认领、本轮挂归属（大脑/Agent 边界修订）。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
-            active.set(false)
-            val detail = turnRecorder?.lastBeginFailure()
-            val message = if (detail.isNullOrBlank()) {
-                "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
-            } else {
-                "轮次任务建行失败，消息未发出：$detail"
-            }
-            timeline.finishTurn(turnId, TurnStatus.ERROR, message)
-            publish(true)
-            return SendResult(false, message)
-        }
-        timeline.setTaskAttribution(turnId, taskId, prompt)
-        platformTurnTaskId = taskId
         platformTurnAgent = agent
+        val platformJob = scope.launch(start = CoroutineStart.LAZY) {
+            val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            if (taskId == null) {
+                platformTurnJob = null
+                platformTurnTaskId = null
+                platformTurnAgent = null
+                active.set(false)
+                val detail = turnRecorder?.lastBeginFailure()
+                val message = if (detail.isNullOrBlank()) {
+                    "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
+                } else {
+                    "轮次任务建行失败，消息未发出：$detail"
+                }
+                timeline.finishTurn(turnId, TurnStatus.ERROR, message)
+                publish(true)
+                onTurnFinished?.invoke()
+                return@launch
+            }
+            timeline.setTaskAttribution(turnId, taskId, prompt)
+            platformTurnTaskId = taskId
         val assistantText = StringBuilder()
-        platformTurnJob = scope.launch {
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -2241,6 +2308,22 @@ class ChatViewModel : ViewModel() {
                 }
             }
         }
+        platformTurnJob = platformJob
+        platformJob.invokeOnCompletion { cause ->
+            if (cause is CancellationException && platformTurnJob === platformJob &&
+                active.get() && platformTurnTaskId == null
+            ) {
+                platformTurnJob = null
+                platformTurnAgent = null
+                val status = if (platformTurnGoalChanged) TurnStatus.GOAL_CHANGED else TurnStatus.CANCELLED
+                active.set(false)
+                timeline.finishTurn(turnId, status)
+                timeline.appendNote(turnId, "本轮已取消，平台尚未收到消息。")
+                publish(true)
+                onTurnFinished?.invoke()
+            }
+        }
+        platformJob.start()
         return SendResult(true)
     }
 
@@ -2761,8 +2844,7 @@ class ChatViewModel : ViewModel() {
     // 流本身只在停止/改目标时取消；暂停不断流（服务端 SIGSTOP）。--
 
     private fun currentRemoteCounters(): Pair<Long, Long> {
-        val task = remoteTurnTaskId?.let { components?.taskStore?.getTask(it) }
-        return (task?.goalVersion ?: 1L) to (task?.authEpoch ?: 1L)
+        return remoteTurnCounters
     }
 
     private fun sendRemoteControl(action: ControlAction): String? {
@@ -2794,6 +2876,12 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun pauseRemoteTurn(): String {
+        if (remoteRunTaskId == null) {
+            val message = "任务记录仍在准备，远端尚未收到消息；请稍候再暂停。"
+            timeline.appendNote(null, message)
+            publish(true)
+            return message
+        }
         val error = sendRemoteControl(ControlAction.PAUSE)
         if (error != null) {
             timeline.appendNote(null, error)
@@ -2824,6 +2912,14 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun stopRemoteTurn(): String {
+        if (remoteRunTaskId == null) {
+            remoteTurnGoalChanged = false
+            remoteTurnJob?.cancel()
+            val message = "已停止：远端尚未收到消息，正在取消本地任务准备。"
+            timeline.appendNote(null, message)
+            publish(true)
+            return message
+        }
         val error = sendRemoteControl(ControlAction.STOP)
         if (error != null) {
             // 控制发不出去也照常取消本地流（不让界面卡住），但如实说明
@@ -2844,6 +2940,14 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun changeGoalRemoteTurn(): String {
+        if (remoteRunTaskId == null) {
+            remoteTurnGoalChanged = true
+            remoteTurnJob?.cancel()
+            val message = "旧目标已作废：远端尚未收到消息；请在输入框写下新目标并发送。"
+            timeline.appendNote(null, message)
+            publish(true)
+            return message
+        }
         // 改目标时新目标用户还没输入：先发 STOP 停掉在途执行（线级
         // STOP；服务端侧的 goal_version 涨幅走 ControlPlane 的
         // CHANGE_GOAL，不走聊天轮次），新目标随下一条消息发。
