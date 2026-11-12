@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V5 C2-3-R1: 聊天首页发送按钮——紫渐变圆形（原型图深色霓虹）。
+     图标本身用 @color/on_accent（浅色主题白、深色主题深），两档都有对比。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <gradient
+        android:startColor="@color/home_gradient_start"
+        android:endColor="@color/home_gradient_end"
+        android:angle="45"
+        android:type="linear" />
+</shape>

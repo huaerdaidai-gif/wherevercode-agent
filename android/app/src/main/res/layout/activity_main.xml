@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI V2 shell: one activity, a single minimal chat home plus a nestable
+     left drawer (V5-UI.md). The screens are inflated into screenContainer
+     (see MainActivity); there is no bottom navigation bar (removed in
+     V5 Phase B C2 batch 2, step 4). The top bar follows v4.3-01 (left
+     screen, V5 C2-3-R4): hamburger + purple infinity mark + WhereverCode
+     + V5 + search + notification bell (no badge: no real notifications
+     exist, a badge would be fake state). The brain pill and the New
+     button are removed here: brain state lives on the settings page
+     (brain section, see MainActivity.refreshBrainStatus); new
+     conversations go through the drawer "对话" entry.
+     Sized for a K70-class 360dp-wide portrait screen.
+     V5 Phase B C2 (batch 2): the root is a FrameLayout so the drawer
+     (drawerContainer + drawerScrim) can overlay the shell; the drawer
+     opens only from the hamburger button (buttonMenu), no edge swipe. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:orientation="horizontal"
+        android:background="@color/home_bg"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <!-- V5 Phase B C2 (batch 2): hamburger opens the drawer. Text glyph:
+             no hamburger drawable exists in this tree; do not reference one.
+             V5 C2-3-R4 (v4.3-01): top bar is the brand row — hamburger /
+             purple infinity mark (same TextView "∞" approach as the drawer
+             brand header, DrawerView.addBrandHeader) / WhereverCode / V5 /
+             search / bell. The session title/subtitle, brain pill and New
+             button are removed: session state is shown in the chat itself,
+             brain state lives on the settings page, new conversations go
+             through the drawer "对话" entry. -->
+        <TextView
+            android:id="@+id/buttonMenu"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="☰"
+            android:textColor="@color/home_text"
+            android:textSize="20sp"
+            android:contentDescription="打开抽屉"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <TextView
+            android:id="@+id/topBrandLogo"
+            android:layout_width="28dp"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="∞"
+            android:textColor="@color/home_gradient_start"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/topBrandName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="WhereverCode"
+            android:textColor="@color/home_text"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/topBrandVersion"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="6dp"
+            android:paddingTop="4dp"
+            android:text="V5"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+
+        <!-- V5 C2-3-R1c：顶栏搜索（v4.3-01）：点按进会话（真实入口，
+             非装饰）。V5 C2-3-R4：铃铛只有图标、没有红点——App 内没有
+             通知功能，带红点的铃铛是伪造状态；点按只给“通知中心待开发”
+             提示（见 MainActivity.bindShell）。 -->
+        <ImageView
+            android:id="@+id/buttonSearch"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="6dp"
+            android:src="@drawable/ic_search"
+            android:contentDescription="会话"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <ImageView
+            android:id="@+id/buttonBell"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="6dp"
+            android:src="@drawable/ic_bell"
+            android:contentDescription="通知中心"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/screenContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    </LinearLayout>
+
+    <!-- V5 Phase B C2 (batch 2): drawer overlay. The scrim dims the shell
+         and closes the drawer on tap; the panel slides in from the left
+         (translationX animation in MainActivity). -->
+    <View
+        android:id="@+id/drawerScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#80000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:id="@+id/drawerContainer"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@color/nav_bg"
+        android:elevation="16dp"
+        android:visibility="gone" />
+</FrameLayout>

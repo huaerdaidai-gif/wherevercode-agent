@@ -1,0 +1,1 @@
+{"example-agent":{"capabilities":["dev"],"command":["/workspace/example-project/run-grok.sh","{prompt}"],"display_name":"Example Agent","env":{},"folder":"/workspace/example-project","kind":"agent"}}

@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/home_bg">
+
+<!-- V5 Phase B C2 (batch 2, step 4): 内标题行已删——V5 C2-3-R4 起
+         顶栏是品牌行（汉堡 / ∞ / WhereverCode / V5 / 搜索 / 铃铛），
+         留着内标题行就是双顶栏。 -->
+    <!-- 阶段 3（U4）：审批等待提示条（含剩余秒数倒计时），由 MainActivity 每秒刷新；无等待审批时隐藏。 -->
+    <TextView
+        android:id="@+id/approvalBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/bg_chip_home"
+        android:padding="10dp"
+        android:textColor="@color/home_warning"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- 阶段 A（V5 紧急开发）：聊天顶部“当前设备 · 对话方”横幅。
+         选了 Agent 却不知道消息发给谁就是本次 bug 的表象；横幅由
+         MainActivity.updateChatRouteBanner() 每次渲染时刷新。
+         内标题行已删（C2 双顶栏），这行是状态显示，不是标题。 -->
+    <TextView
+        android:id="@+id/chatRouteBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/bg_chip_home"
+        android:padding="10dp"
+        android:textColor="@color/home_text"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- 阶段 3（U4）：聊天页内控制行。运行中显示暂停/停止/改目标/控制台；
+         已暂停显示继续/改目标/控制台；空闲时隐藏。
+         V5 C2-3-R1: 照 v2-02 / V5 原型图，一行等宽 pill；停止红字红边。 -->
+    <LinearLayout
+        android:id="@+id/chatControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/buttonChatPause"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center"
+            android:text="暂停"
+            android:textColor="@color/home_text"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/buttonChatStop"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_chip_danger_outline"
+            android:gravity="center"
+            android:text="停止"
+            android:textColor="@color/home_danger"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/buttonChatResume"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center"
+            android:text="继续"
+            android:textColor="@color/home_link"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/buttonChatChangeGoal"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center"
+            android:text="改目标"
+            android:textColor="@color/home_text"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/buttonChatConsole"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center"
+            android:text="控制台"
+            android:textColor="@color/home_text"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:id="@+id/chatScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:clipToPadding="false"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/messageList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="16dp" />
+        </ScrollView>
+
+        <!-- 阶段 3（U6）：回到底部按钮；仅在用户上滑离开底部时显示。 -->
+        <TextView
+            android:id="@+id/buttonScrollBottom"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="↓ 回到底部"
+            android:textColor="@color/home_link"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <!-- V5 C2-3-R4（v4.3-01 左半屏）：双层输入区——上层只有输入框
+         （hint 与发送逻辑不动），下层一行：+ / 团队下拉 / 发送。
+         附件 / 文件夹 / 参数·权限三个隐藏按钮已随“+”菜单重做删掉
+         （V5 输入框 + 菜单重做，Claude 参照，maintainer 2026-11-11）：
+         附件与参数·权限没有真实接线（只会 toast 死提示），文件夹
+         是项目入口的重复副本且从未接线——项目入口在“+”菜单的项目
+         格子与抽屉里。每个控件要么接真实动作，要么不存在，绝无死
+         按钮。窄屏适配：下层固定 36dp 控件 + 团队下拉 + 发送，
+         320dp 宽下不溢出（见 MainLayoutTest 的 320dp 布局测试）。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp">
+
+        <LinearLayout
+            android:id="@+id/inputBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_input_home"
+            android:padding="4dp">
+
+            <EditText
+                android:id="@+id/inputPrompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@null"
+                android:hint="输入消息…"
+                android:imeOptions="actionSend"
+                android:inputType="textMultiLine|textCapSentences"
+                android:maxLines="5"
+                android:minHeight="36dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:textColor="@color/home_text"
+                android:textColorHint="@color/home_text_secondary"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:id="@+id/inputLowerRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="4dp">
+
+                <!-- V5 Phase B C2 (batch 2): + 号开上下文菜单；麦克风不做
+                     （V5-UI.md §二原文“可选麦克风”），不留假按钮。 -->
+                <TextView
+                    android:id="@+id/buttonPlus"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:gravity="center"
+                    android:text="＋"
+                    android:textColor="@color/home_text_secondary"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_chip_home"
+                    android:contentDescription="更多操作" />
+
+                <!-- V5 C2-3-R1: 原型图输入行里的 Agent 选择器（点开已有选 Agent
+                     对话框，见 showSelectAgentDialog；不新增功能）。 --><!-- V5 聊天清理 20261111：设备/Agent 胶囊（参考 Claude 输入框
+                     里“Sonnet 5.5 中等”胶囊的做法）——常驻显示当前对话方，
+                     点按打开选 Agent 对话框（见 showSelectAgentDialog）。
+                     多设备多 Agent 切换是 V5 真实需要的，不藏起来，只做干净。
+                     文案由 MainActivity.updateChatRouteBanner() 随路由刷新：
+                     未选 Agent 显示“团队 ⌄”，选了显示展示名 + ⌄。 -->
+                <TextView
+                    android:id="@+id/buttonAgentSelect"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_chip_home"
+                    android:gravity="center"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="团队 ⌄"
+                    android:textColor="@color/home_text"
+                    android:textSize="12sp"
+                    android:maxWidth="160dp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:contentDescription="选择 Agent" />
+
+                <!-- 设置清理 2（2026-11-11，Claude 标准）：当前大脑胶囊，
+                     点按打开设置页大脑列表切换。 -->
+                <TextView
+                    android:id="@+id/brainCapsule"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_chip_home"
+                    android:gravity="center"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="未连接"
+                    android:textColor="@color/home_text"
+                    android:textSize="12sp"
+                    android:contentDescription="当前大脑，点按切换" />
+
+                <!-- 大脑/Agent 边界（maintainer 2026-11-12）：显式标任务开关——
+                     发消息时明确说“这句是任务”，不用靠 App 猜。点按切换，
+                     置起时下一条消息一定建派活任务行（走泵）；发完自动
+                     复位。只影响下一条消息，不持久化。 -->
+                <TextView
+                    android:id="@+id/buttonTaskMark"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_chip_home"
+                    android:gravity="center"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="任务"
+                    android:textColor="@color/home_text_secondary"
+                    android:textSize="12sp"
+                    android:contentDescription="标为任务：下一条消息按任务处理" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <ImageView
+                    android:id="@+id/buttonSend"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_send_home"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_send"
+                    android:contentDescription="发送" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- V5 聊天清理 20261111：底部常驻小字已删（“同一时刻只跑一轮 ·
+             写文件/命令执行前会弹审批”）——审批提示只在真正要审批时弹，
+             不常驻占位置；上一轮还在执行时发送门控会如实提示。 -->
+    </LinearLayout>
+</LinearLayout>

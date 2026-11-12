@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V5 一键安装：FileProvider 只暴露 cache/install/（分享安装包用），不暴露其他文件。 -->
+<!-- V5 应用更新（2026-11-11）：只分享 cacheDir/app-update/ 里的下载包给系统安装器。 -->
+<!-- V5 按主流改（maintainer 2026-11-11）：“+”菜单附件——相机照片暂存 cacheDir/camera/，
+     附件私有拷贝 filesDir/chat-attachments/（点卡片用系统查看器打开时分享）。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="install" path="install/" />
+    <cache-path name="app-update" path="app-update/" />
+    <cache-path name="camera" path="camera/" />
+    <files-path name="chat-attachments" path="chat-attachments/" />
+</paths>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI V2 semantic palette (dark). Same names as values/colors.xml. -->
+<resources>
+    <color name="bg">#0D0F14</color>
+    <color name="surface">#171A21</color>
+    <color name="surface_alt">#1F2430</color>
+    <color name="surface_strong">#2A303D</color>
+    <color name="text_primary">#ECEEF4</color>
+    <color name="text_secondary">#A6AEBD</color>
+    <color name="text_tertiary">#7B8495</color>
+    <color name="accent">#7DA2FF</color>
+    <color name="accent_pressed">#6A8FE8</color>
+    <color name="accent_soft">#1B2A4D</color>
+    <color name="on_accent">#0B1222</color>
+    <color name="user_bubble">#2F5FCC</color>
+    <color name="user_text">#FFFFFF</color>
+    <color name="agent_bubble">#171A21</color>
+    <color name="divider">#2A303C</color>
+    <color name="success">#5AD091</color>
+    <color name="success_soft">#153325</color>
+    <color name="warning">#F0B75E</color>
+    <color name="warning_soft">#3A2C14</color>
+    <color name="danger">#FF8A8A</color>
+    <color name="danger_soft">#3D1D20</color>
+    <color name="code_bg">#10141B</color>
+    <color name="code_text">#DCE3EF</color>
+    <color name="nav_bg">#12151C</color>
+    <color name="tool_bg">#141821</color>
+    <color name="tool_header">#1C212C</color>
+    <color name="scrim">#99000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="white">#FFFFFF</color>
+
+    <!-- V5 首页配色 token（深色档 = V5 原型图深色霓虹；浅色档见 values/）。 -->
+    <color name="home_bg">#0B0E1D</color>
+    <color name="home_card">#171B31</color>
+    <color name="home_card_border">#2E3560</color>
+    <color name="home_text">#F2F4FF</color>
+    <color name="home_text_secondary">#9AA3C7</color>
+    <color name="home_link">#8AA6FF</color>
+    <color name="home_gradient_start">#7B5CFF</color>
+    <color name="home_gradient_end">#C44DFF</color>
+    <color name="home_success">#3ED598</color>
+    <color name="home_warning">#F5A524</color>
+    <color name="home_danger">#FF7A7A</color>
+    <color name="home_log_bg">#12162A</color>
+    <color name="home_log_text">#C9D2F2</color>
+</resources>

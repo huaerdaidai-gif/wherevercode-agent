@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI V2 semantic palette (light). Every colour has a values-night twin;
+     views reference these names, never hard-coded ARGB. -->
+<resources>
+    <color name="bg">#F6F7F9</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_alt">#EEF1F5</color>
+    <color name="surface_strong">#E2E7EF</color>
+    <color name="text_primary">#15181E</color>
+    <color name="text_secondary">#5A6270</color>
+    <color name="text_tertiary">#8B93A1</color>
+    <color name="accent">#2E63E8</color>
+    <color name="accent_pressed">#2450C4</color>
+    <color name="accent_soft">#E6EDFF</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="user_bubble">#2E63E8</color>
+    <color name="user_text">#FFFFFF</color>
+    <color name="agent_bubble">#FFFFFF</color>
+    <color name="divider">#E2E6ED</color>
+    <color name="success">#157F4A</color>
+    <color name="success_soft">#E1F4E9</color>
+    <color name="warning">#A86200</color>
+    <color name="warning_soft">#FFF1D8</color>
+    <color name="danger">#BE3535</color>
+    <color name="danger_soft">#FCE8E8</color>
+    <color name="code_bg">#F1F3F7</color>
+    <color name="code_text">#202531</color>
+    <color name="nav_bg">#FFFFFF</color>
+    <color name="tool_bg">#FBFCFE</color>
+    <color name="tool_header">#F1F4F9</color>
+    <color name="scrim">#66000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="white">#FFFFFF</color>
+
+    <!-- V5 首页配色 token（maintainer 2026-11-10 02:40 定：一步只做引导三屏+
+         聊天首页+抽屉；视觉结构按 V5 原型图照抄，默认主题浅色极简
+         （V4.3 图第一屏 Claude 风格），主题/布局/字体按开关与 token 做、
+         不写死；一套 UI 加开关，不做 5 套 UI）。
+         浅色档 = Claude 极简（暖白底、深字、紫渐变按钮）；深色档见
+         values-night（原型图深色霓虹）。日志面板两档都用深色（v2-02）。 -->
+    <color name="home_bg">#FAF8F5</color>
+    <color name="home_card">#FFFFFF</color>
+    <color name="home_card_border">#E6E1D8</color>
+    <color name="home_text">#15181E</color>
+    <color name="home_text_secondary">#5A6270</color>
+    <color name="home_link">#2E63E8</color>
+    <color name="home_gradient_start">#7B5CFF</color>
+    <color name="home_gradient_end">#C44DFF</color>
+    <color name="home_success">#157F4A</color>
+    <color name="home_warning">#A86200</color>
+    <color name="home_danger">#BE3535</color>
+    <color name="home_log_bg">#202531</color>
+    <color name="home_log_text">#E8ECF3</color>
+</resources>

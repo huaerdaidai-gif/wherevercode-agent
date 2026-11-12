@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WhereverCode Android spike (step 0). Sideload-only: targetSdk 28, no Play. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Foreground service keeps the agent process alive while in background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Lets the app ask the user to exempt it from battery optimization. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Agent CLIs talk to their vendors over HTTPS (CodeBuddy / Codex login). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- V5 应用更新：安装下载的 APK 需要声明（系统“允许安装未知应用”开关另由用户开）。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- mDNS device discovery needs a multicast lock (LanTransport, stage 2). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Notification permission (API 33+); harmless on targetSdk 28. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- V5 按主流改（maintainer 2026-11-11）：“+”菜单相机拍照需要相机权限（运行时再弹窗要）。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- extractNativeLibs=true: the app EXECUTES libnode.so from nativeLibraryDir,
+         so the .so files must be extracted as real files at install. Without it,
+         AGP's default (false) leaves nativeLibraryDir empty: Chaquopy still works
+         (it dlopens straight from the APK) but node is reported missing. -->
+    <application
+        android:allowBackup="false"
+        android:extractNativeLibs="true"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="WhereverCode"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.WhereverCode">
+        <!-- U6（阶段 3）：横屏布局未适配，明确锁定竖屏（K70 竖屏单手使用）。 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- No foregroundServiceType: only required when targetSdk >= 29.
+             If the target is ever raised, a type (e.g. dataSync) becomes mandatory. -->
+        <service
+            android:name=".AgentService"
+            android:exported="false" />
+
+        <!-- V5 一键安装：分享安装包（hand_server.py + 安装脚本）给目标机。
+             只读 cache/install/，不暴露其他文件。 -->
+        <!-- V5 应用更新：把 cacheDir/app-update/ 里的 APK 以 content URI 分享给系统安装器。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

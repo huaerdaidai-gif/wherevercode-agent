@@ -1,0 +1,7 @@
+WhereverCode
+Copyright 2026 WhereverCode contributors
+
+This product includes or can provision third-party software. See
+THIRD_PARTY_NOTICES/README.md and THIRD_PARTY_NOTICES/ for applicable notices.
+The Android Node runtime provisioner downloads the specific Termux package
+versions listed there. Those binaries are not included in this source snapshot.

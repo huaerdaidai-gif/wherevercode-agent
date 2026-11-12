@@ -1,0 +1,7 @@
+local.properties
+*.iml
+.gradle/
+build/
+app/build/
+# Node runtime is provisioned by CI on every build, never committed.
+app/src/main/jniLibs/

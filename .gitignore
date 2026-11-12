@@ -1,0 +1,22 @@
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.key
+*.mobileprovision
+*.provisionprofile
+**/local.properties
+**/.gradle/
+**/build/
+**/.DS_Store
+**/node_modules/
+__pycache__/
+*.pyc
+# Local secrets / logs
+secrets/
+*.log

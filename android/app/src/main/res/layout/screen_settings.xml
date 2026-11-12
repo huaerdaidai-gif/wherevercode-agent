@@ -1,0 +1,1589 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToPadding="false"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:id="@+id/buttonSettingsBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="9dp"
+                android:src="@drawable/ic_back"
+                android:contentDescription="返回"
+                android:background="?attr/selectableItemBackgroundBorderless" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="设置"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-medium" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="大脑、密钥与本机配置；密钥只存 Android Keystore。"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 阶段 3（U6）：设置分节——大脑 / 工作区 / 关于。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="大脑"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_card"
+            android:padding="14dp">
+
+            <TextView
+                android:id="@+id/brainStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="大脑：加载中…"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/buttonSignInChatGpt"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_chip_accent"
+                android:text="ChatGPT 登录"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonSignOut"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_chip"
+                android:text="退出"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- V5 C3-C：SIWC 换号 / 取消登录。切换账号只在已登录时显示；
+             取消登录只在登录等待中显示（见 MainActivity.updateSiwcSignInButtons）。 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/buttonSwitchChatGptAccount"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:text="切换账号"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/buttonCancelSignIn"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="取消登录"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- V5 C3-C：统一大脑列表（点按一行切换）。行由 MainActivity
+             按 BrainLoginRows.buildRows() 程序化渲染，状态取真实值。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="已添加的大脑（点按一行切换）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/brainListContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <!-- V5 C3-C：SIWC 模型选择器。目录来自账号 GET /v1/models
+            （SiwcM2BrainAdapter.listModels），选后写回 BrainConfig.model。 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="14dp">
+
+            <TextView
+                android:id="@+id/siwcModelStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="当前模型：未选择"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/buttonRefreshSiwcModels"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:text="刷新模型列表"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/buttonPickSiwcModel"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_chip_accent"
+                    android:text="选择模型"
+                    android:textAllCaps="false"
+                    android:textColor="@color/accent"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- V5 C2-3-R4c：大脑显示名（默认 WhereverCode），点按弹出编辑框；留空恢复默认。 -->
+        <LinearLayout
+            android:id="@+id/brainNameRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_card"
+            android:padding="14dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="大脑名称"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/brainDisplayName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="WhereverCode"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- 设置清理 2（2026-11-11，Claude 极简标准）：高级配置折叠——
+             Cloudflare / DeepSeek / 通用表单 / CLI 四节全收在这里，默认
+             不展开；设置页首屏只留干净的大脑切换器。 -->
+        <TextView
+            android:id="@+id/buttonBrainAdvanced"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_chip"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="10dp"
+            android:text="高级配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:id="@+id/brainAdvancedContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Cloudflare Workers AI（免费层）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="用你自己的 Cloudflare 账号 + API Token，只服务你自己。Token 只存本机 Keystore，不进仓库、不上传。Dashboard → Workers AI → Use REST API → Create Token。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/cloudflareStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Cloudflare：未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/cfAccountId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Account ID（32 位字符）"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/cfApiToken"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="API Token（只显示一次）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/cfModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="模型 ID，如 @cf/&lt;厂商&gt;/&lt;模型名&gt;"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveCloudflare"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存并选用"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearCloudflare"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除密钥"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="DeepSeek API（可配置）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="用你自己的 DeepSeek API Key，只存本机 Keystore。Base URL 默认 https://api.deepseek.com；模型从账户 /models 列表选择。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/deepseekStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="DeepSeek：未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/dsBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Base URL，如 https://api.deepseek.com"
+            android:inputType="textUri"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/dsModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="模型，如 deepseek-flash"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/dsApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="API Key（只显示一次）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/deepseekModels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="点“刷新模型列表”从账户读取可用模型。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/buttonRefreshDeepSeekModels"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="刷新模型列表"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveDeepSeek"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存并选用"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearDeepSeek"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除密钥"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Grok API（2026-11-12，大脑登陆方式补全）：与 DeepSeek 节同形。
+             此前播种了但设置页没有填 Key 的入口，用户没法完成登陆。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Grok API（可配置）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="用你自己的 xAI API Key，只存本机 Keystore。Base URL 默认 https://api.x.ai/v1；模型从账户 /models 列表选择。注意：这是 Grok 模型 API（单独计费），不走 Grok 会员额度；想用会员额度请用 example-agent CLI 大脑。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/grokStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Grok：未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/grokBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Base URL，如 https://api.x.ai/v1"
+            android:inputType="textUri"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/grokModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="模型，如 grok-4.7"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/grokApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="API Key（只显示一次）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/grokModels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="点“刷新模型列表”从账户读取可用模型。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/buttonRefreshGrokModels"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="刷新模型列表"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveGrok"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存并选用"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearGrok"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除密钥"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Muse Spark（2026-11-12，大脑登陆方式补全）：与 DeepSeek 节同形。
+             此前播种了但设置页没有填 Key 的入口，用户没法完成登陆。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Muse Spark（可配置）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="用你自己的 Meta Muse Spark API Key，只存本机 Keystore。Base URL 默认 https://api.meta.ai/v1；模型从账户 /models 列表选择。注意：Muse Spark API 是另外单独计费的付费 API，不走 Muse App 订阅的额度；不另外付费就没法用。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/museStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Muse Spark：未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/museBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Base URL，如 https://api.meta.ai/v1"
+            android:inputType="textUri"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/museModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="模型，如 muse-spark-1.3"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/museApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="API Key（只显示一次）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/museModels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="点“刷新模型列表”从账户读取可用模型。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/buttonRefreshMuseModels"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="刷新模型列表"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveMuse"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存并选用"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearMuse"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除密钥"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Claude API（2026-11-12，大脑登陆方式补全）：与 DeepSeek 节同形。
+             Anthropic 没有 OpenAI 兼容端点，这里走原生 Messages API
+             （ClaudeBrainAdapter），Key 只存本机 Keystore。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Claude API（可配置）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="用你自己的 Anthropic API Key，只存本机 Keystore。Base URL 默认 https://api.anthropic.com；模型从账户 /v1/models 列表选择。Anthropic 没有 OpenAI 兼容端点，这里走原生 Messages API。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/claudeStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Claude：未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/claudeBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Base URL，如 https://api.anthropic.com"
+            android:inputType="textUri"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/claudeModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="模型，如 claude-sonnet-4-5"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/claudeApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="API Key（只显示一次）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/claudeModels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="点“刷新模型列表”从账户读取可用模型。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/buttonRefreshClaudeModels"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="刷新模型列表"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveClaude"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存并选用"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearClaude"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除密钥"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- V5 C3-C：通用 MODEL_API 添加表单（OpenAI 兼容）。Cloudflare /
+             DeepSeek 两节保持不动；通用表单是第四路及以后的唯一入口。
+             Key 只存本机 Keystore，配置只存 authRef 引用名；推理已接线
+             （GenericOpenAiBrainAdapter 已注册）：保存后去 Agent 页添加
+             同名 Agent 即可对话；设为全局大脑的选项已藏起（设置清理 2，
+             通用适配器第一阶段不支持工具调用）。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="添加模型 API 大脑（OpenAI 兼容）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="填服务地址、模型与 API Key；Key 只存本机 Keystore。保存后去 Agent 页添加同名 Agent（适配器 id 填 model-api-generic），选它即可对话。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <EditText
+            android:id="@+id/genericBrainLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="大脑名称，如 自建模型"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/genericBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Base URL，如 https://api.example.com"
+            android:inputType="textUri"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/genericModel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="模型，如 llama-3"
+            android:inputType="textNoSuggestions"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/genericApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="API Key（只显示一次）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/genericModels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="点“测试连接”从服务读取可用模型。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonTestGenericModels"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:text="测试连接"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonSaveGenericBrain"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- V5 C3-C：CLI 会员额度大脑行。无 Key 框、无 Base URL 框：
+             身份是 CLI 二进制名（cliBinary），不是模型名；“验证一次”
+             只在用户点按时跑一次最小真实调用。
+             设置清理 2（2026-11-11）：未配 CLI 二进制时本节隐藏
+             （见 refreshCliRow），不拿“未配置/未发现”占着设置页。 -->
+        <LinearLayout
+            android:id="@+id/cliBrainSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="CLI 会员额度（已登录 CLI 的会员额度）"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="借已登录 CLI 的会员额度作大脑：无 Key、无服务地址、无模型目录。"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/cliBrainStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="CLI 会员额度：未配置"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/cliBrainBinary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="提供方：未发现"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/cliBrainNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="验证说明：加载中…"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10sp" />
+
+            <Button
+                android:id="@+id/buttonVerifyCli"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_chip_accent"
+                android:text="验证一次（会消耗一次会员调用）"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- GitHub 闭环（2026-11-11）：设置页 GitHub 授权行。放在高级配置
+             折叠之外，常驻可见——用户在设置里找得到。token 只存本机
+             Keystore，状态只显示“已配/未配”，绝不显示 token 值。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="GitHub 授权"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="GitHub 家项目的读/写、推分支、开 PR 都用它。授权只存本机 Keystore。GitHub 网页：头像 → Settings → Developer settings → Personal access tokens，新建一个能读该仓库的 token（repo 权限），粘贴进来。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/githubAuthStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="GitHub 授权：未配"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/githubTokenInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="GitHub 授权（token），如 ghp_…"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveGithubToken"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存授权"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearGithubToken"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除授权"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- GitLab 家授权（2026-11-11）：与 GitHub 行同款，常驻可见。
+             token 只存本机 Keystore，状态只显示“已配/未配”，绝不显示 token 值。
+             私有仓库用它进，不写“即将支持”。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="GitLab 授权"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="GitLab 家项目的读/写、推分支、开合并请求都用它。授权只存本机 Keystore。GitLab 网页：头像 → Preferences → Access Tokens，新建一个 token（读仓库用 read_api，写/开合并请求用 api），粘贴进来。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/gitlabAuthStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="GitLab 授权：未配"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/gitlabTokenInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="GitLab 授权（token）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveGitlabToken"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存授权"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearGitlabToken"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除授权"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Gitee 家授权（2026-11-11）：与 GitHub 行同款，常驻可见。
+             token 只存本机 Keystore，状态只显示“已配/未配”，绝不显示 token 值。
+             私有仓库用它进，不写“即将支持”。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Gitee 授权"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Gitee 家项目的读/写、推分支、开 PR 都用它。授权只存本机 Keystore。Gitee 网页：头像 → 个人设置 → 安全设置 → 私人令牌，新建一个能读写仓库的 token（projects 权限），粘贴进来。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/giteeAuthStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Gitee 授权：未配"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/giteeTokenInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Gitee 授权（token）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonSaveGiteeToken"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存授权"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearGiteeToken"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="清除授权"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 平台令牌（2026-11-12，maintainer：App 没有 token 生成按钮）：
+             给 ChatGPT 这类外部客户端签发 V5 平台令牌。签发用 App 自己
+             的平台凭证（须 owner 权限），不用去终端；令牌只显示一次，
+             马上复制收好，关闭后不再显示、不存任何地方。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="平台令牌"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="给 ChatGPT 这类外部客户端签发一个 V5 平台令牌。签发用 App 自己的平台凭证（须 owner 权限），不用去终端；令牌只显示一次，马上复制收好，关闭后不再显示。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/platformTokenStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="平台：未连接"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/platformTokenAgentId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="签发给哪个 Agent（如 chatgpt）"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="chatgpt"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/platformTokenName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="令牌名称（如 ChatGPT 登陆）"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="App 生成"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/buttonGeneratePlatformToken"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip_accent"
+            android:text="生成 Token"
+            android:textAllCaps="false"
+            android:textColor="@color/accent"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="工作区"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/workspacePath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="12dp"
+            android:text="本机工作区已配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <!-- 自主度（2026-11-11，maintainer 22:43 两种模式）：模式 + 三档。
+             点按行走 ListDialog 选一项；切换立刻对进行中的任务生效，
+             已批过的决定不动。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="自主度（大脑总管）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/autonomyModeRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="模式：监督模式（点按切换）"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/autonomyInitiativeRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="主动性：建议（点按切换）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/autonomyExecutionRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="执行权限：L0 · 只读审批（点按切换）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/autonomyUiFreedomRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="界面自由度：标准（点按切换）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <!-- Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接
+             设备的 Hand）。自动同步默认关：每次更新前弹确认框；打开后
+             跳过确认框（进度与结果照常显示）。旧版 Hand 不支持自更新，
+             首次部署走一键安装。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Hand 同步"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/handAutoSyncRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="自动同步 Hand：关（点按切换）"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/handCheckAllRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="检查全部设备更新（点按检查）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_system_note"
+            android:padding="12dp"
+            android:text="App 更新后，已连接设备的 Hand 还是旧版，App 发新东西旧 Hand 会拒收。设备卡上有 Hand 版本与“更新 Hand”按钮；更新前先备份旧版，失败自动回滚。旧版 Hand（版本未知）不支持自更新，首次部署请走一键安装。"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_system_note"
+            android:padding="12dp"
+            android:text="监督模式：plan 批准、派发确认、审查 verdict 每一道都等你点；全权模式：大脑总管自动批、自动派、自动采纳，返工上限 2 轮不变，超限升级给你。自动决定记在任务详情页“自动决定”里，可查可打回。"
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="关于"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/aboutVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="WhereverCode 超级 Agent"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <!-- V5 应用更新（2026-11-11）：检查更新 / 下载并安装 / 连接 Google Drive。 -->
+        <TextView
+            android:id="@+id/appUpdateStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:padding="12dp"
+            android:text="应用更新未配置。"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/driveClientIdRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="Google OAuth 客户端 ID：未设置（点按填写）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/driveClientSecretRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="Google OAuth 客户端密钥：未设置（点按填写）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/buttonCheckUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="检查更新"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/buttonDownloadUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip_accent"
+            android:padding="10dp"
+            android:text="下载并安装"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/buttonDriveSignIn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="连接 Google Drive"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/buttonDriveSignOut"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="断开 Google Drive"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:id="@+id/buttonAdvancedInfo"
+            android:background="@drawable/bg_chip"
+            android:padding="10dp"
+            android:text="高级信息"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/workspaceAdvancedDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_system_note"
+            android:padding="12dp"
+            android:text="高级信息加载中…"
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</ScrollView>
