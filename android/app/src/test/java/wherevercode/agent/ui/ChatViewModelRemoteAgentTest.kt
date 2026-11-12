@@ -265,6 +265,7 @@ class ChatViewModelRemoteAgentTest {
     private lateinit var taskStore: FakeTaskStore
     private lateinit var scheduler: TaskScheduler
     private var requireTaskStoreIoThread = false
+    private var failTaskCreation = false
 
     private val peer = DiscoveredPeer(
         deviceId = "remote-host",
@@ -361,6 +362,7 @@ class ChatViewModelRemoteAgentTest {
         taskStore = FakeTaskStore()
         val recorderTaskStore = object : TaskStore by taskStore {
             override fun createTask(record: TaskRecord): TaskRecord {
+                if (failTaskCreation) throw IllegalStateException("test task persistence failure")
                 if (requireTaskStoreIoThread && Looper.myLooper() == Looper.getMainLooper()) {
                     throw IllegalStateException("Cannot access database on the main thread")
                 }
@@ -488,6 +490,18 @@ class ChatViewModelRemoteAgentTest {
         assertEquals("远端消息应在任务行建好后发送", 1, remotePort.calls.size)
         assertTrue("任务行应真实写入 fake store", taskStore.listTasks().any { it.sessionId == "session-grok" })
         assertFalse("主线程数据库错误不应出现", visibleErrorText().contains("main thread"))
+    }
+
+    @Test
+    fun `task persistence failure never starts an untracked remote execution`() {
+        failTaskCreation = true
+        viewModel.switchSession("session-grok", "Example Agent", grokAgent())
+
+        val result = viewModel.send("在授权设备创建验收文件", forceTask = true)
+
+        assertFalse(result.accepted)
+        assertTrue("任务不能持久化时不得下发给远端", remotePort.calls.isEmpty())
+        assertTrue("必须明确显示任务记录失败", visibleErrorText().contains("任务未能写入本机任务记录"))
     }
 
     @Test

@@ -50,6 +50,7 @@ data class McpServerStatus(
     val lastCheckedAtEpochMillis: Long? = null,
     val serverName: String? = null,
     val protocolVersion: String? = null,
+    val resourceTemplateCount: Int = 0,
 )
 
 data class McpServerView(
@@ -98,6 +99,7 @@ class McpServerManager(
     private val clients = mutableMapOf<String, McpClient>()
     private val cachedTools = mutableMapOf<String, List<McpTool>>()
     private val cachedResources = mutableMapOf<String, List<McpResource>>()
+    private val cachedResourceTemplates = mutableMapOf<String, List<McpResourceTemplate>>()
     private val cachedPrompts = mutableMapOf<String, List<McpPrompt>>()
     private val statuses = mutableMapOf<String, McpServerStatus>()
     /** 待重连的任务（serverId → Job）；重连成功/停用/断开时取消。 */
@@ -105,6 +107,7 @@ class McpServerManager(
 
     /** 已订阅资源的内容变了（服务端 notifications/resources/updated）。 */
     var onResourceUpdated: ((serverId: String, uri: String) -> Unit)? = null
+    var onProgress: ((serverId: String, progress: McpProgress) -> Unit)? = null
 
     fun servers(): List<McpServerView> =
         registry.all(ExtensionKind.MCP).map { entry ->
@@ -148,6 +151,11 @@ class McpServerManager(
             } catch (_: Exception) {
                 emptyList()
             }
+            val resourceTemplates = try {
+                client.listResourceTemplates()
+            } catch (_: Exception) {
+                emptyList()
+            }
             val prompts = try {
                 client.listPrompts()
             } catch (_: Exception) {
@@ -156,6 +164,7 @@ class McpServerManager(
             clients[serverId] = client
             cachedTools[serverId] = tools
             cachedResources[serverId] = resources
+            cachedResourceTemplates[serverId] = resourceTemplates
             cachedPrompts[serverId] = prompts
             client.onCatalogRefreshed = { syncCaches(serverId, client) }
             client.onResourceUpdated = { uri ->
@@ -169,6 +178,7 @@ class McpServerManager(
                 toolCount = tools.size,
                 resourceCount = resources.size,
                 promptCount = prompts.size,
+                resourceTemplateCount = resourceTemplates.size,
                 lastCheckedAtEpochMillis = System.currentTimeMillis(),
                 serverName = info.name,
                 protocolVersion = info.protocolVersion,
@@ -199,12 +209,14 @@ class McpServerManager(
         if (!clients.containsKey(serverId)) return
         cachedTools[serverId] = client.tools
         cachedResources[serverId] = client.resources
+        cachedResourceTemplates[serverId] = client.resourceTemplates
         cachedPrompts[serverId] = client.prompts
         val old = statuses[serverId] ?: return
         statuses[serverId] = old.copy(
             toolCount = client.tools.size,
             resourceCount = client.resources.size,
             promptCount = client.prompts.size,
+            resourceTemplateCount = client.resourceTemplates.size,
             lastCheckedAtEpochMillis = System.currentTimeMillis(),
         )
     }
@@ -212,6 +224,10 @@ class McpServerManager(
     /** 已连服务器缓存的资源（未连接时为空列表）。 */
     fun resources(serverId: String): List<McpResource> =
         cachedResources[serverId] ?: emptyList()
+
+    /** 已连服务器缓存的资源 URI 模板（未连接时为空列表）。 */
+    fun resourceTemplates(serverId: String): List<McpResourceTemplate> =
+        cachedResourceTemplates[serverId] ?: emptyList()
 
     /** 已连服务器缓存的提示模板（未连接时为空列表）。 */
     fun prompts(serverId: String): List<McpPrompt> =
@@ -231,6 +247,17 @@ class McpServerManager(
         return client.getPrompt(name, arguments)
     }
 
+    suspend fun complete(
+        serverId: String,
+        reference: org.json.JSONObject,
+        argumentName: String,
+        argumentValue: String,
+    ): McpCompletion {
+        val client = clients[serverId]
+            ?: throw McpException("MCP 服务器未连接：$serverId（请先在扩展页连接）", "mcp_not_connected")
+        return client.complete(reference, argumentName, argumentValue)
+    }
+
     /** 订阅一台已连服务器上的资源（内容变时 onResourceUpdated 回调）。 */
     suspend fun subscribeResource(serverId: String, uri: String) {
         val client = clients[serverId]
@@ -247,6 +274,7 @@ class McpServerManager(
     private fun failed(serverId: String, message: String): McpServerStatus {
         cachedTools.remove(serverId)
         cachedResources.remove(serverId)
+        cachedResourceTemplates.remove(serverId)
         cachedPrompts.remove(serverId)
         clients.remove(serverId)
         return McpServerStatus(
@@ -266,6 +294,7 @@ class McpServerManager(
         val client = clients.remove(serverId)
         cachedTools.remove(serverId)
         cachedResources.remove(serverId)
+        cachedResourceTemplates.remove(serverId)
         cachedPrompts.remove(serverId)
         if (client != null) {
             try {
@@ -374,7 +403,12 @@ class McpServerManager(
         val client = clients[serverId]
             ?: return ToolOutcome(ok = false, summary = "MCP 服务器未连接：$serverId（请先在扩展页连接）", errorCode = "mcp_not_connected")
         return try {
-            val result = client.callTool(tool, args, toolCallTimeoutMs)
+            val result = client.callTool(tool, args, toolCallTimeoutMs) { progress ->
+                try {
+                    onProgress?.invoke(serverId, progress)
+                } catch (_: Exception) {
+                }
+            }
             ToolOutcome(
                 ok = !result.isError,
                 summary = if (result.isError) {
@@ -382,7 +416,7 @@ class McpServerManager(
                 } else {
                     "MCP 工具 $tool 已执行"
                 },
-                data = result.text.take(ToolRegistryMaxOutput.MAX_OUTPUT_CHARS),
+                data = result.toAgentData().take(ToolRegistryMaxOutput.MAX_OUTPUT_CHARS),
                 errorCode = if (result.isError) "mcp_tool_error" else null,
             )
         } catch (e: McpException) {

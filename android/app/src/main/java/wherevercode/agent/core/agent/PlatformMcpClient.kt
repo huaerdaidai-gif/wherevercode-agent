@@ -139,6 +139,9 @@ class PlatformMcpClient(
 
     fun isConnected(): Boolean = client != null
 
+    /** Whether a platform credential is configured, without exposing its value. */
+    fun hasConfiguredCredential(): Boolean = tokenProvider()?.isNotBlank() == true
+
     /**
      * 连接：initialize → tools/list，全程真实走协议。凭证缺失、
      * 401、建连失败都返回 `connected=false` + 原因，不抛错（调用方

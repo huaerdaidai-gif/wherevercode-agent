@@ -1,11 +1,17 @@
 package wherevercode.agent.brain.siwc
 
 import java.net.URLDecoder
+import java.security.MessageDigest
+import android.content.Context
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import wherevercode.agent.brain.BrainKeyStore
 import wherevercode.agent.core.extension.ExtensionEntry
 import wherevercode.agent.core.extension.mcp.InMemoryMcpTokenStore
 import wherevercode.agent.core.extension.mcp.McpAuthProvider
+import wherevercode.agent.core.extension.mcp.McpTokenStore
+import wherevercode.agent.core.extension.mcp.McpTokens
 import wherevercode.agent.core.extension.mcp.OAuthMcpAuthProvider
 
 /**
@@ -23,9 +29,8 @@ import wherevercode.agent.core.extension.mcp.OAuthMcpAuthProvider
  * 的 state；对不上就是伪造/串了的回调，码不能用，直接失败。
  * 用户拒绝（回调带 error）同样失败，不冒充成功。
  *
- * token 存取：本版用内存版 [InMemoryMcpTokenStore]（随客户端断开
- * 而失效；下次连接重新走浏览器授权）。Keystore 持久化是已知缺口，
- * 见 DELIVERY——refresh_token 不落盘，App 重启后要重新授权一次。
+ * token 存取：生产 wiring 通过 [KeystoreMcpTokenStore] 复用 Android
+ * Keystore 加密存储，按服务器 ID 隔离；测试仍可注入内存版。
  *
  * 线程：[awaitCode] 在 Dispatchers.IO 上等回调；[openUrl] 由调用
  * 方负责切到主线程（Custom Tabs 要 Activity 上下文）。
@@ -125,7 +130,12 @@ class McpOAuthWiring(
  * 注意：OAuth 认证方是按服务器建的（一个服务器一个 wiring、一个
  * 回环服务器），不在多台服务器之间共用。
  */
-fun mcpOAuthProviderFor(entry: ExtensionEntry, serverUrl: String, wiring: McpOAuthWiring): McpAuthProvider? {
+fun mcpOAuthProviderFor(
+    entry: ExtensionEntry,
+    serverUrl: String,
+    wiring: McpOAuthWiring,
+    tokenStore: McpTokenStore = InMemoryMcpTokenStore(),
+): McpAuthProvider? {
     if (entry.extra["oauth"] != "true") return null
     val clientId = entry.extra["oauthClientId"]?.takeIf { it.isNotBlank() } ?: "wherevercode-agent"
     val scopes = entry.extra["oauthScopes"]?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
@@ -135,9 +145,67 @@ fun mcpOAuthProviderFor(entry: ExtensionEntry, serverUrl: String, wiring: McpOAu
         // 构造值不用：redirectUriProvider 每次授权现取真实地址。
         redirectUri = "",
         scopes = scopes,
-        tokenStore = InMemoryMcpTokenStore(),
+        tokenStore = tokenStore,
         codeProvider = { url -> wiring.awaitCode(url) },
         redirectUriProvider = { wiring.redirectUri() },
         onClose = { wiring.close() },
     )
+}
+
+/** Keystore encrypted MCP OAuth token store, partitioned by MCP server ID. */
+class KeystoreMcpTokenStore(
+    private val secrets: McpSecretStore,
+    serverId: String,
+) : McpTokenStore {
+    private val authRef = "mcp-oauth:" + MessageDigest.getInstance("SHA-256")
+        .digest(serverId.toByteArray(Charsets.UTF_8))
+        .copyOfRange(0, 16)
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    override fun load(): McpTokens? {
+        val raw = secrets.get(authRef) ?: return null
+        return try {
+            val json = JSONObject(raw)
+            val access = json.optString("access_token", "")
+            if (access.isBlank()) return null
+            McpTokens(
+                accessToken = access,
+                refreshToken = json.optString("refresh_token", "").ifBlank { null },
+                expiresAtEpochMillis = if (json.has("expires_at_ms")) json.optLong("expires_at_ms") else null,
+                tokenType = json.optString("token_type", "Bearer").ifBlank { "Bearer" },
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    override fun save(tokens: McpTokens) {
+        val json = JSONObject().apply {
+            put("access_token", tokens.accessToken)
+            tokens.refreshToken?.let { put("refresh_token", it) }
+            tokens.expiresAtEpochMillis?.let { put("expires_at_ms", it) }
+            put("token_type", tokens.tokenType)
+        }
+        secrets.put(authRef, json.toString())
+    }
+
+    override fun clear() = secrets.delete(authRef)
+
+    companion object {
+        fun create(context: Context, serverId: String): KeystoreMcpTokenStore =
+            KeystoreMcpTokenStore(BrainMcpSecretStore(BrainKeyStore(context.applicationContext)), serverId)
+    }
+}
+
+/** Secret port keeps OAuth token serialization testable without Android Keystore. */
+interface McpSecretStore {
+    fun put(authRef: String, value: String)
+    fun get(authRef: String): String?
+    fun delete(authRef: String)
+}
+
+private class BrainMcpSecretStore(private val keys: BrainKeyStore) : McpSecretStore {
+    override fun put(authRef: String, value: String) = keys.putSecret(authRef, value)
+    override fun get(authRef: String): String? = keys.getSecret(authRef)
+    override fun delete(authRef: String) = keys.deleteSecret(authRef)
 }

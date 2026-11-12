@@ -8,6 +8,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import wherevercode.agent.core.extension.mcp.McpJsonRpc.McpNotification
 
 /**
@@ -16,15 +18,17 @@ import wherevercode.agent.core.extension.mcp.McpJsonRpc.McpNotification
  * 协议面 MCP 2025-11-25（连接器设计报告、SPEC §2.1）：
  * 一次会话：initialize → notifications/initialized → tools/list →
  * tools/call（可多次）→ close。三大原语全实现：
- * - 工具：tools/list、tools/call（结果 `{content:[{type:text}],
- *   isError}`；未知工具走 `isError=true`，不抛错）。
- * - 资源：resources/list、resources/read、resources/subscribe /
- *   resources/unsubscribe（URI 寻址，内容在 `contents[]`）。
- * - 提示：prompts/list、prompts/get（模板 + 参数 → messages[]）。
+ * - 工具：分页 tools/list、tools/call；保留 annotations/outputSchema、
+ *   structuredContent 和完整多模态 content blocks。
+ * - 资源：分页 resources/list、resources/templates/list、resources/read、
+ *   resources/subscribe / resources/unsubscribe。
+ * - 提示：分页 prompts/list、prompts/get（模板 + 参数 → messages[]）。
+ * - Argument completion：completion/complete。
  * - 通知：服务端发来的 notifications/…（目录变化、资源更新）由
  *   传输层交给本类的回调：tools/list_changed → 自动重拉工具；
  *   resources/list_changed → 自动重拉资源；prompts/list_changed →
- *   自动重拉提示；resources/updated → 交给 [onResourceUpdated]。
+ *   自动重拉提示；resources/updated → 交给 [onResourceUpdated]；
+ *   notifications/progress 根据 progressToken 回传给在途工具调用。
  *
  * 能力门（主流做法，实测验证：官方 filesystem 服务器对未声明的
  * prompts/resources/subscribe 直接回 -32601）：先看 initialize
@@ -56,12 +60,31 @@ data class McpTool(
     val inputSchema: JSONObject,
     /** 人类可读的显示名（2025-11-25 新增字段；没有时为空）。 */
     val title: String = "",
+    /** Server supplied MCP annotations; retained so approval/UI policy can inspect them. */
+    val annotations: JSONObject? = null,
+    /** Optional result schema advertised by the server. */
+    val outputSchema: JSONObject? = null,
 )
 
 data class McpToolResult(
     val text: String,
     val isError: Boolean,
-)
+    /** Preserve every content block, including image/audio/resource blocks. */
+    val content: List<JSONObject> = emptyList(),
+    /** Structured tool output from servers using the newer MCP result shape. */
+    val structuredContent: JSONObject? = null,
+) {
+    /** Keep the legacy plain-text path, while retaining rich blocks for Agent consumers. */
+    fun toAgentData(): String {
+        val hasRichContent = content.any { it.optString("type", "text") != "text" }
+        if (!hasRichContent && structuredContent == null) return text
+        return JSONObject().apply {
+            put("text", text)
+            put("content", org.json.JSONArray().apply { content.forEach { put(JSONObject(it.toString())) } })
+            structuredContent?.let { put("structuredContent", JSONObject(it.toString())) }
+        }.toString()
+    }
+}
 
 data class McpServerInfo(
     val name: String,
@@ -73,6 +96,14 @@ data class McpServerInfo(
 
 data class McpResource(
     val uri: String,
+    val name: String,
+    val title: String = "",
+    val description: String = "",
+    val mimeType: String = "",
+)
+
+data class McpResourceTemplate(
+    val uriTemplate: String,
     val name: String,
     val title: String = "",
     val description: String = "",
@@ -102,11 +133,26 @@ data class McpPrompt(
 data class McpPromptMessage(
     val role: String,
     val text: String,
+    /** Full prompt content, retained for image/audio/resource content blocks. */
+    val content: JSONObject? = null,
 )
 
 data class McpPromptResult(
     val description: String = "",
     val messages: List<McpPromptMessage> = emptyList(),
+)
+
+data class McpProgress(
+    val progressToken: String,
+    val progress: Double,
+    val total: Double? = null,
+    val message: String? = null,
+)
+
+data class McpCompletion(
+    val values: List<String>,
+    val total: Int? = null,
+    val hasMore: Boolean = false,
 )
 
 class McpClient(
@@ -130,6 +176,8 @@ class McpClient(
         private set
     var resources: List<McpResource> = emptyList()
         private set
+    var resourceTemplates: List<McpResourceTemplate> = emptyList()
+        private set
     var prompts: List<McpPrompt> = emptyList()
         private set
 
@@ -141,6 +189,12 @@ class McpClient(
 
     /** 已订阅资源的内容变了（notifications/resources/updated 的 uri）。 */
     var onResourceUpdated: ((String) -> Unit)? = null
+
+    /** MCP progress notifications for calls that supplied a progress callback. */
+    var onProgress: ((McpProgress) -> Unit)? = null
+
+    private val progressSequence = AtomicLong(0)
+    private val activeProgressCallbacks = ConcurrentHashMap<String, (McpProgress) -> Unit>()
 
     /** 订阅中的资源 URI（resources/subscribe 成功后记在这里）。 */
     val subscribedResources: Set<String>
@@ -204,20 +258,16 @@ class McpClient(
 
     /** 列出工具；结果缓存到 [tools]。幂等读：瞬时传输失败重试一次。 */
     suspend fun listTools(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpTool> {
-        val result = retryIdempotentRead(timeoutMs) { t ->
-            requestWithSessionRetry("tools/list", JSONObject(), t) as? JSONObject
-                ?: throw McpException("tools/list 回包不是对象", "mcp_bad_response")
-        }
-        val array = result.optJSONArray("tools") ?: return emptyList<McpTool>().also { tools = it }
-        val parsed = (0 until array.length()).mapNotNull { i ->
-            val item = array.optJSONObject(i) ?: return@mapNotNull null
+        val parsed = collectPages("tools/list", "tools", timeoutMs) { item ->
             val name = item.optString("name", "")
-            if (name.isBlank()) return@mapNotNull null
+            if (name.isBlank()) return@collectPages null
             McpTool(
                 name = name,
                 description = item.optString("description", ""),
                 inputSchema = item.optJSONObject("inputSchema") ?: JSONObject(),
                 title = item.optString("title", ""),
+                annotations = item.optJSONObject("annotations"),
+                outputSchema = item.optJSONObject("outputSchema"),
             )
         }
         tools = parsed
@@ -235,26 +285,42 @@ class McpClient(
         name: String,
         arguments: Map<String, Any?>,
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        progress: ((McpProgress) -> Unit)? = null,
     ): McpToolResult {
+        val progressToken = progress?.let {
+            "${clientName}-${progressSequence.incrementAndGet()}".also { token ->
+                activeProgressCallbacks[token] = it
+            }
+        }
         val params = JSONObject().apply {
             put("name", name)
             put("arguments", McpJsonRpc.mapToJson(arguments))
+            progressToken?.let { token -> put("_meta", JSONObject().put("progressToken", token)) }
         }
-        val result = requestWithSessionRetry("tools/call", params, timeoutMs) as? JSONObject
-            ?: throw McpException("tools/call 回包不是对象", "mcp_bad_response")
+        val result = try {
+            requestWithSessionRetry("tools/call", params, timeoutMs) as? JSONObject
+                ?: throw McpException("tools/call 回包不是对象", "mcp_bad_response")
+        } finally {
+            progressToken?.let(activeProgressCallbacks::remove)
+        }
         val content = result.optJSONArray("content")
+        val blocks = if (content == null) emptyList() else (0 until content.length()).mapNotNull { i ->
+            content.optJSONObject(i)?.let { JSONObject(it.toString()) }
+        }
         val text = buildString {
-            if (content != null) {
-                for (i in 0 until content.length()) {
-                    val part = content.optJSONObject(i) ?: continue
-                    if (part.optString("type", "") == "text") {
-                        if (isNotEmpty()) append("\n")
-                        append(part.optString("text", ""))
-                    }
+            for (part in blocks) {
+                if (part.optString("type", "") == "text") {
+                    if (isNotEmpty()) append("\n")
+                    append(part.optString("text", ""))
                 }
             }
         }
-        return McpToolResult(text = text, isError = result.optBoolean("isError", false))
+        return McpToolResult(
+            text = text,
+            isError = result.optBoolean("isError", false),
+            content = blocks,
+            structuredContent = result.optJSONObject("structuredContent")?.let { JSONObject(it.toString()) },
+        )
     }
 
     // -- 资源（resources）：MCP 三大原语之一 ---------------------------
@@ -271,31 +337,44 @@ class McpClient(
     /** 列出资源；结果缓存到 [resources]。服务端没声明该能力时直接返回空列表。幂等读：瞬时传输失败重试一次。 */
     suspend fun listResources(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpResource> {
         if (!supportsResources()) return emptyList<McpResource>().also { resources = it }
-        val result = try {
-            retryIdempotentRead(timeoutMs) { t ->
-                requestWithSessionRetry("resources/list", JSONObject(), t) as? JSONObject
+        val parsed = try {
+            collectPages("resources/list", "resources", timeoutMs) { item ->
+                val uri = item.optString("uri", "")
+                if (uri.isBlank()) null else McpResource(
+                    uri = uri,
+                    name = item.optString("name", ""),
+                    title = item.optString("title", ""),
+                    description = item.optString("description", ""),
+                    mimeType = item.optString("mimeType", ""),
+                )
             }
         } catch (e: McpException) {
-            if (e.code == "mcp_rpc_error") {
-                // 服务端没声明却调了（或谎报能力）：按“没有资源”处理。
-                return emptyList<McpResource>().also { resources = it }
-            }
+            if (e.code == "mcp_rpc_error") return emptyList<McpResource>().also { resources = it }
             throw e
-        } ?: throw McpException("resources/list 回包不是对象", "mcp_bad_response")
-        val array = result.optJSONArray("resources") ?: return emptyList<McpResource>().also { resources = it }
-        val parsed = (0 until array.length()).mapNotNull { i ->
-            val item = array.optJSONObject(i) ?: return@mapNotNull null
-            val uri = item.optString("uri", "")
-            if (uri.isBlank()) return@mapNotNull null
-            McpResource(
-                uri = uri,
-                name = item.optString("name", ""),
-                title = item.optString("title", ""),
-                description = item.optString("description", ""),
-                mimeType = item.optString("mimeType", ""),
-            )
         }
         resources = parsed
+        return parsed
+    }
+
+    /** List URI templates with the same cursor handling as resources/list. */
+    suspend fun listResourceTemplates(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpResourceTemplate> {
+        if (!supportsResources()) return emptyList<McpResourceTemplate>().also { resourceTemplates = it }
+        val parsed = try {
+            collectPages("resources/templates/list", "resourceTemplates", timeoutMs) { item ->
+                val uriTemplate = item.optString("uriTemplate", "")
+                if (uriTemplate.isBlank()) null else McpResourceTemplate(
+                    uriTemplate = uriTemplate,
+                    name = item.optString("name", ""),
+                    title = item.optString("title", ""),
+                    description = item.optString("description", ""),
+                    mimeType = item.optString("mimeType", ""),
+                )
+            }
+        } catch (e: McpException) {
+            if (e.code == "mcp_rpc_error") return emptyList<McpResourceTemplate>().also { resourceTemplates = it }
+            throw e
+        }
+        resourceTemplates = parsed
         return parsed
     }
 
@@ -359,41 +438,34 @@ class McpClient(
     /** 列出提示模板；结果缓存到 [prompts]。服务端没声明该能力时直接返回空列表。幂等读：瞬时传输失败重试一次。 */
     suspend fun listPrompts(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpPrompt> {
         if (!supportsPrompts()) return emptyList<McpPrompt>().also { prompts = it }
-        val result = try {
-            retryIdempotentRead(timeoutMs) { t ->
-                requestWithSessionRetry("prompts/list", JSONObject(), t) as? JSONObject
+        val parsed = try {
+            collectPages("prompts/list", "prompts", timeoutMs) { item ->
+                val name = item.optString("name", "")
+                if (name.isBlank()) return@collectPages null
+                val argsJson = item.optJSONArray("arguments")
+                val args = if (argsJson == null) {
+                    emptyList()
+                } else {
+                    (0 until argsJson.length()).mapNotNull { j ->
+                        val arg = argsJson.optJSONObject(j) ?: return@mapNotNull null
+                        val argName = arg.optString("name", "")
+                        if (argName.isBlank()) return@mapNotNull null
+                        McpPromptArgument(
+                            name = argName,
+                            description = arg.optString("description", ""),
+                            required = arg.optBoolean("required", false),
+                        )
+                    }
+                }
+                McpPrompt(
+                    name = name,
+                    description = item.optString("description", ""),
+                    arguments = args,
+                )
             }
         } catch (e: McpException) {
-            if (e.code == "mcp_rpc_error") {
-                return emptyList<McpPrompt>().also { prompts = it }
-            }
+            if (e.code == "mcp_rpc_error") return emptyList<McpPrompt>().also { prompts = it }
             throw e
-        } ?: throw McpException("prompts/list 回包不是对象", "mcp_bad_response")
-        val array = result.optJSONArray("prompts") ?: return emptyList<McpPrompt>().also { prompts = it }
-        val parsed = (0 until array.length()).mapNotNull { i ->
-            val item = array.optJSONObject(i) ?: return@mapNotNull null
-            val name = item.optString("name", "")
-            if (name.isBlank()) return@mapNotNull null
-            val argsJson = item.optJSONArray("arguments")
-            val args = if (argsJson == null) {
-                emptyList()
-            } else {
-                (0 until argsJson.length()).mapNotNull { j ->
-                    val arg = argsJson.optJSONObject(j) ?: return@mapNotNull null
-                    val argName = arg.optString("name", "")
-                    if (argName.isBlank()) return@mapNotNull null
-                    McpPromptArgument(
-                        name = argName,
-                        description = arg.optString("description", ""),
-                        required = arg.optBoolean("required", false),
-                    )
-                }
-            }
-            McpPrompt(
-                name = name,
-                description = item.optString("description", ""),
-                arguments = args,
-            )
         }
         prompts = parsed
         return parsed
@@ -425,12 +497,45 @@ class McpClient(
                     ""
                 }
                 if (role.isBlank()) return@mapNotNull null
-                McpPromptMessage(role = role, text = text)
+                McpPromptMessage(role = role, text = text, content = JSONObject(content.toString()))
             }
         }
         return McpPromptResult(
             description = result.optString("description", ""),
             messages = messages,
+        )
+    }
+
+    /** Request MCP completion suggestions for a prompt or resource argument. */
+    suspend fun complete(
+        reference: JSONObject,
+        argumentName: String,
+        argumentValue: String,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): McpCompletion {
+        require(argumentName.isNotBlank()) { "completion argument name is required" }
+        require(reference.has("type")) { "completion reference type is required" }
+        val params = JSONObject().apply {
+            put("ref", JSONObject(reference.toString()))
+            put("argument", JSONObject().put("name", argumentName).put("value", argumentValue))
+        }
+        val result = try {
+            retryIdempotentRead(timeoutMs) { t ->
+                requestWithSessionRetry("completion/complete", params, t) as? JSONObject
+                    ?: throw McpException("completion/complete 回包不是对象", "mcp_bad_response")
+            }
+        } catch (e: McpException) {
+            if (e.code == "mcp_rpc_error") throw McpException("MCP 服务器不支持 completion/complete", "mcp_not_supported")
+            throw e
+        }
+        val completion = result.optJSONObject("completion") ?: JSONObject()
+        val values = completion.optJSONArray("values")?.let { array ->
+            (0 until array.length()).mapNotNull { i -> array.optString(i, "").takeIf(String::isNotEmpty) }
+        } ?: emptyList()
+        return McpCompletion(
+            values = values,
+            total = if (completion.has("total")) completion.optInt("total") else null,
+            hasMore = completion.optBoolean("hasMore", false),
         )
     }
 
@@ -487,6 +592,21 @@ class McpClient(
                         onResourceUpdated?.invoke(uri)
                     } catch (_: Exception) {
                     }
+                }
+            }
+            "notifications/progress" -> {
+                val params = notification.params ?: return
+                val token = params.opt("progressToken")?.toString()?.takeIf { it.isNotBlank() } ?: return
+                val progress = McpProgress(
+                    progressToken = token,
+                    progress = params.optDouble("progress", 0.0),
+                    total = if (params.has("total")) params.optDouble("total") else null,
+                    message = params.optString("message", "").takeIf { it.isNotBlank() },
+                )
+                try {
+                    activeProgressCallbacks[token]?.invoke(progress)
+                    onProgress?.invoke(progress)
+                } catch (_: Exception) {
                 }
             }
             else -> {
@@ -569,6 +689,37 @@ class McpClient(
         }
     }
 
+    /** Transparently follows MCP opaque cursors; repeated cursors fail closed. */
+    private suspend fun <T> collectPages(
+        method: String,
+        arrayKey: String,
+        timeoutMs: Long,
+        parse: (JSONObject) -> T?,
+    ): List<T> {
+        val collected = mutableListOf<T>()
+        val seenCursors = mutableSetOf<String>()
+        var cursor: String? = null
+        repeat(MAX_CATALOG_PAGES) {
+            val params = JSONObject().apply { cursor?.let { put("cursor", it) } }
+            val result = retryIdempotentRead(timeoutMs) { t ->
+                requestWithSessionRetry(method, params, t) as? JSONObject
+                    ?: throw McpException("$method 回包不是对象", "mcp_bad_response")
+            }
+            val array = result.optJSONArray(arrayKey)
+            if (array != null) {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    parse(item)?.let(collected::add)
+                }
+            }
+            val next = result.optString("nextCursor", "").takeIf { it.isNotBlank() }
+            if (next == null) return collected
+            if (!seenCursors.add(next)) throw McpException("$method 返回重复分页游标", "mcp_bad_pagination")
+            cursor = next
+        }
+        throw McpException("$method 超过分页上限", "mcp_bad_pagination")
+    }
+
     // -- 会话过期重试 ---------------------------------------------------
 
     /**
@@ -603,6 +754,8 @@ class McpClient(
         const val DEFAULT_TIMEOUT_MS: Long = 60_000
         /** 幂等读重试前等多久（毫秒）。 */
         const val READ_RETRY_DELAY_MS: Long = 500
+        /** Prevent a malicious or broken server from making catalog sync unbounded. */
+        const val MAX_CATALOG_PAGES: Int = 100
         /** 幂等读值得重试一次的瞬时传输失败码（会话过期除外，由重建会话负责）。 */
         val TRANSIENT_READ_RETRY_CODES: Set<String> = setOf(
             "mcp_connect_failed",

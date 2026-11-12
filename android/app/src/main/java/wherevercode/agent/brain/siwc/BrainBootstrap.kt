@@ -42,6 +42,8 @@ import wherevercode.agent.brain.generic.KeystoreGenericOpenAiCredentialStore
 import wherevercode.agent.brain.muse.KeystoreMuseCredentialStore
 import wherevercode.agent.brain.muse.MuseBrainAdapter
 import wherevercode.agent.core.agent.AgentLoginState
+import wherevercode.agent.core.agent.PlatformAgentCredentialStore
+import wherevercode.agent.core.agent.PlatformMcpClient
 import wherevercode.agent.brain.ContextManager
 import wherevercode.agent.brain.ConversationStore
 import wherevercode.agent.brain.DenyApprovalGate
@@ -69,6 +71,7 @@ import wherevercode.agent.core.extension.ExtensionToolBridge
 import wherevercode.agent.core.extension.InMemoryExtensionStore
 import wherevercode.agent.core.extension.SharedPreferencesExtensionStore
 import wherevercode.agent.core.extension.mcp.McpRoot
+import wherevercode.agent.core.extension.mcp.CompositeMcpToolSource
 import wherevercode.agent.core.extension.mcp.McpServerManager
 import wherevercode.agent.core.extension.mcp.StaticMcpRootsProvider
 import wherevercode.agent.core.extension.plugin.LocalUtilsPlugin
@@ -537,6 +540,7 @@ object BrainBootstrap {
         val extensionRegistry: ExtensionRegistry = ExtensionRegistry(InMemoryExtensionStore()),
         val pluginRegistry: PluginRegistry = PluginRegistry(),
         val mcpServerManager: McpServerManager = McpServerManager(extensionRegistry),
+        val platformMcpClient: PlatformMcpClient? = null,
         /**
          * P1 确定性自动派活（2026-11-11）：eval 日志、路由决策日志、
          * 能力卡 hello 快照。默认值是内存版（只在直接构造
@@ -851,14 +855,28 @@ object BrainBootstrap {
                 if (factory == null) {
                     null
                 } else {
-                    mcpOAuthProviderFor(entry, entry.extra["url"].orEmpty(), factory())
+                    mcpOAuthProviderFor(
+                        entry,
+                        entry.extra["url"].orEmpty(),
+                        factory(),
+                        KeystoreMcpTokenStore.create(appContext, entry.id),
+                    )
                 }
             },
             rootsProvider = StaticMcpRootsProvider(
                 listOf(McpRoot(uri = workspaceDir.toURI().toString(), name = "workspace")),
             ),
         )
-        val extensionTools = ExtensionToolBridge(pluginRegistry, mcpServerManager)
+        val platformCredentialStore = PlatformAgentCredentialStore.create(appContext)
+        val platformMcpClient = PlatformMcpClient(
+            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+            localTaskProject = { taskId -> taskStore.getTask(taskId)?.projectId },
+            currentProjectId = currentProjectId,
+        )
+        val extensionTools = ExtensionToolBridge(
+            pluginRegistry,
+            CompositeMcpToolSource(mcpServerManager, platformMcpClient),
+        )
 
         // 自主度门（2026-11-11，maintainer 22:43 两种模式）：档位存本机
         // SharedPreferences；自动决定记 Room control_audit_log（与
@@ -1477,6 +1495,7 @@ object BrainBootstrap {
             extensionRegistry = extensionRegistry,
             pluginRegistry = pluginRegistry,
             mcpServerManager = mcpServerManager,
+            platformMcpClient = platformMcpClient,
             evalLogStore = evalLogStore,
             routingDecisionLog = routingDecisionLog,
             routerSettings = routerSettings,

@@ -245,6 +245,132 @@ class McpGenericTest {
         }
     }
 
+    private class PaginatedCatalogTransport : McpTransport {
+        val cursors = mutableMapOf<String, MutableList<String?>>()
+        var repeatToolCursor = false
+        private var notificationListener: ((McpJsonRpc.McpNotification) -> Unit)? = null
+        private val init = JSONObject().apply {
+            put("protocolVersion", "2025-11-25")
+            put("capabilities", JSONObject().apply {
+                put("tools", JSONObject())
+                put("resources", JSONObject().apply { put("subscribe", true) })
+                put("prompts", JSONObject())
+            })
+            put("serverInfo", JSONObject().apply { put("name", "pages"); put("version", "1") })
+        }
+
+        override suspend fun start() {}
+        override suspend fun request(method: String, params: JSONObject?, timeoutMillis: Long): Any? {
+            if (method == "initialize") return init
+            val cursor = params?.optString("cursor")?.takeIf { it.isNotBlank() }
+            cursors.getOrPut(method) { mutableListOf() }.add(cursor)
+            return when (method) {
+                "tools/list" -> if (cursor == null) JSONObject().apply {
+                    put("tools", JSONArray().put(JSONObject().apply {
+                        put("name", "first")
+                        put("annotations", JSONObject().put("readOnlyHint", true))
+                        put("outputSchema", JSONObject().put("type", "object"))
+                    }))
+                    put("nextCursor", "tool-page-2")
+                } else JSONObject().apply {
+                    put("tools", JSONArray().put(JSONObject().put("name", "second")))
+                    if (repeatToolCursor) put("nextCursor", "tool-page-2")
+                }
+                "resources/list" -> if (cursor == null) JSONObject().apply {
+                    put("resources", JSONArray().put(JSONObject().apply {
+                        put("uri", "file:///a"); put("name", "a")
+                    }))
+                    put("nextCursor", "resource-page-2")
+                } else JSONObject().put("resources", JSONArray().put(JSONObject().apply {
+                    put("uri", "file:///b"); put("name", "b")
+                }))
+                "resources/templates/list" -> JSONObject().put("resourceTemplates", JSONArray().put(JSONObject().apply {
+                    put("uriTemplate", "file:///{path}"); put("name", "file")
+                }))
+                "prompts/list" -> if (cursor == null) JSONObject().apply {
+                    put("prompts", JSONArray().put(JSONObject().put("name", "first-prompt")))
+                    put("nextCursor", "prompt-page-2")
+                } else JSONObject().put("prompts", JSONArray().put(JSONObject().put("name", "second-prompt")))
+                "tools/call" -> {
+                    val token = params?.optJSONObject("_meta")?.opt("progressToken")?.toString()
+                    if (token != null) notificationListener?.invoke(
+                        McpJsonRpc.McpNotification(
+                            "notifications/progress",
+                            JSONObject().put("progressToken", token).put("progress", 2).put("total", 3)
+                                .put("message", "working"),
+                        ),
+                    )
+                    JSONObject().apply {
+                        put("content", JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", "done"))
+                            .put(JSONObject().put("type", "image").put("data", "aW1n").put("mimeType", "image/png")))
+                        put("structuredContent", JSONObject().put("ok", true))
+                    }
+                }
+                "completion/complete" -> JSONObject().put("completion", JSONObject().apply {
+                    put("values", JSONArray().put("suggestion")); put("total", 1); put("hasMore", false)
+                })
+                else -> throw McpException("unexpected $method", "mcp_error")
+            }
+        }
+
+        override suspend fun notify(method: String, params: JSONObject?) {}
+        override suspend fun close() {}
+        override fun setNotificationListener(listener: ((McpJsonRpc.McpNotification) -> Unit)?) {
+            notificationListener = listener
+        }
+        override fun setServerRequestListener(listener: ((McpJsonRpc.Response.ServerRequest) -> Unit)?) {}
+        override suspend fun respond(id: Long, result: JSONObject) {}
+        override suspend fun respondError(id: Long, code: Int, message: String) {}
+    }
+
+    @Test
+    fun `catalog pagination and rich tool results are preserved`() = runBlocking {
+        val transport = PaginatedCatalogTransport()
+        val client = McpClient(transport)
+        try {
+            client.initialize()
+            assertEquals(listOf("first", "second"), client.listTools().map { it.name })
+            assertTrue(client.tools.first().annotations!!.getBoolean("readOnlyHint"))
+            assertEquals("object", client.tools.first().outputSchema!!.getString("type"))
+            assertEquals(listOf(null, "tool-page-2"), transport.cursors["tools/list"])
+            assertEquals(listOf("file:///a", "file:///b"), client.listResources().map { it.uri })
+            assertEquals(listOf(null, "resource-page-2"), transport.cursors["resources/list"])
+            assertEquals("file:///{path}", client.listResourceTemplates().single().uriTemplate)
+            assertEquals(listOf("first-prompt", "second-prompt"), client.listPrompts().map { it.name })
+            val progressEvents = mutableListOf<McpProgress>()
+            val result = client.callTool("first", emptyMap(), progress = progressEvents::add)
+            assertEquals("done", result.text)
+            assertEquals(2, result.content.size)
+            assertEquals("image", result.content[1].getString("type"))
+            assertTrue(result.structuredContent!!.getBoolean("ok"))
+            assertEquals("working", progressEvents.single().message)
+            assertEquals(2.0, progressEvents.single().progress, 0.0)
+            val completions = client.complete(JSONObject().put("type", "ref/prompt").put("name", "greet"), "name", "ma")
+            assertEquals(listOf("suggestion"), completions.values)
+            assertEquals(1, completions.total)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun `catalog pagination rejects a repeated cursor`() = runBlocking {
+        val transport = PaginatedCatalogTransport().apply { repeatToolCursor = true }
+        val client = McpClient(transport)
+        try {
+            client.initialize()
+            try {
+                client.listTools()
+                error("repeated cursor must be rejected")
+            } catch (e: McpException) {
+                assertEquals("mcp_bad_pagination", e.code)
+            }
+        } finally {
+            client.close()
+        }
+    }
+
     @Test
     fun `initialize declares roots capability when provider set`() = runBlocking {
         val withRoots = FakeTransport()

@@ -1173,6 +1173,17 @@ class ChatViewModel : ViewModel() {
             // 记实际执行的大脑（Agent 会话是 override 的大脑，不是全局选择）。
             val taskId = turnRecorder?.beginTurn(prompt, convId, effectiveBrainId, currentProjectId())
             try {
+                val platformMcp = comps.platformMcpClient
+                if (platformMcp != null && platformMcp.hasConfiguredCredential() && !platformMcp.isConnected()) {
+                    val status = platformMcp.connect()
+                    if (!status.connected) {
+                        timeline.appendNote(
+                            turnId,
+                            "平台 MCP 未连接：${status.lastError ?: "工具目录不可用"}。本轮继续使用其他已连接工具。",
+                        )
+                        publish(true)
+                    }
+                }
                 comps.engine.chat(
                     convId,
                     prompt,
@@ -1710,9 +1721,13 @@ class ChatViewModel : ViewModel() {
             projectId = currentProjectId(),
         )
         if (taskId == null) {
-            // 建行失败（任务库不可用）：回落到普通远端轮次，聊天不断。
+            // App-managed task is the execution boundary. If persistence fails,
+            // never bypass task history/control by starting an untracked remote run.
             active.set(false)
-            return startRemoteTurn(comps, agent, prompt, modelPrompt, attachments, imageNote)
+            val message = "任务未能写入本机任务记录，未向 ${agent.displayName} 发送执行请求。请检查任务存储后重试。"
+            timeline.beginSystemTurn(message)
+            publish(true)
+            return SendResult(false, message)
         }
         // P1 路由决策绑定：用户点了建议行、且本任务就是派给被建议的
         // Agent——把决策与任务绑起来（eval 回看“建议准不准”用）。
