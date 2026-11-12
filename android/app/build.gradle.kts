@@ -86,6 +86,11 @@ android {
     // historical pinned debug key; users may need to uninstall first.
     
     buildTypes {
+        debug {
+            // Keep the CI/dev APK side-by-side with any existing installation
+            // signed with a different key; never require uninstalling its data.
+            applicationIdSuffix = ".ci"
+        }
         release {
             isMinifyEnabled = false
         }
