@@ -219,7 +219,7 @@ class TurnTaskRecorderTest {
         taskStore.failCreate = true
         val taskId = recorder.beginRemoteRound("你自己领啊", "conv-codex", "codex")
         assertNull("写库失败时 beginRemoteRound 返回 null，不抛异常", taskId)
-        assertEquals("IllegalStateException: fake store down", recorder.lastBeginFailure())
+        assertEquals("fake store down", recorder.lastFailureMessage())
         assertTrue("不留 queued 僵尸行", taskStore.listTasks().none { it.state == "queued" })
     }
 
