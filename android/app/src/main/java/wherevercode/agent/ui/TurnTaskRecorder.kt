@@ -66,6 +66,12 @@ class TurnTaskRecorder(
     @Volatile
     private var currentTaskId: String? = null
 
+    /** Last safe diagnostic for a failed row open; never includes task text. */
+    @Volatile
+    private var lastBeginFailure: String? = null
+
+    fun lastBeginFailure(): String? = lastBeginFailure
+
     fun currentTaskId(): String? = currentTaskId
 
     /**
@@ -158,6 +164,7 @@ class TurnTaskRecorder(
         agentId: String,
         projectId: String? = null,
     ): String? {
+        lastBeginFailure = null
         val taskId = UUID.randomUUID().toString()
         val now = nowSeconds()
         val record = TaskRecord(
@@ -177,17 +184,22 @@ class TurnTaskRecorder(
             // 记录行：不经调度器认领门禁，直接按状态机转移。任一
             // 步失败即取消本行并返回 null（调用方中止轮次）。
             if (updateTask(taskId, mapOf("state" to "assigned")) == null) {
+                lastBeginFailure = "任务记录未能进入 assigned 状态"
                 updateTask(taskId, mapOf("state" to "cancelled", "result" to "轮次建行失败，未执行。"))
                 return null
             }
             if (updateTask(taskId, mapOf("state" to "working")) == null) {
+                lastBeginFailure = "任务记录未能进入 working 状态"
                 updateTask(taskId, mapOf("state" to "cancelled", "result" to "轮次建行失败，未执行。"))
                 return null
             }
             currentTaskId = taskId
             taskId
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             currentTaskId = null
+            // Keep the actual persistence failure diagnosable without logging
+            // prompt, credentials, project contents, or task arguments.
+            lastBeginFailure = "${e.javaClass.simpleName}: ${e.message.orEmpty().take(180)}"
             null
         }
     }

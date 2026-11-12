@@ -1469,8 +1469,13 @@ class ChatViewModel : ViewModel() {
         val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
         if (taskId == null) {
             active.set(false)
-            val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
-            timeline.beginSystemTurn(message)
+            val detail = turnRecorder?.lastBeginFailure()
+            val message = if (detail.isNullOrBlank()) {
+                "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
+            } else {
+                "轮次任务建行失败，消息未发出：$detail"
+            }
+            timeline.finishTurn(turnId, TurnStatus.ERROR, message)
             publish(true)
             return SendResult(false, message)
         }
@@ -1979,8 +1984,13 @@ class ChatViewModel : ViewModel() {
         val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
         if (taskId == null) {
             active.set(false)
-            val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
-            timeline.beginSystemTurn(message)
+            val detail = turnRecorder?.lastBeginFailure()
+            val message = if (detail.isNullOrBlank()) {
+                "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
+            } else {
+                "轮次任务建行失败，消息未发出：$detail"
+            }
+            timeline.finishTurn(turnId, TurnStatus.ERROR, message)
             publish(true)
             return SendResult(false, message)
         }
@@ -2126,8 +2136,13 @@ class ChatViewModel : ViewModel() {
         val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
         if (taskId == null) {
             active.set(false)
-            val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
-            timeline.beginSystemTurn(message)
+            val detail = turnRecorder?.lastBeginFailure()
+            val message = if (detail.isNullOrBlank()) {
+                "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
+            } else {
+                "轮次任务建行失败，消息未发出：$detail"
+            }
+            timeline.finishTurn(turnId, TurnStatus.ERROR, message)
             publish(true)
             return SendResult(false, message)
         }
