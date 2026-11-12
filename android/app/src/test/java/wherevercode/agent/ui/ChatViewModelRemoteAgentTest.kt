@@ -501,7 +501,8 @@ class ChatViewModelRemoteAgentTest {
 
         assertFalse(result.accepted)
         assertTrue("任务不能持久化时不得下发给远端", remotePort.calls.isEmpty())
-        assertTrue("必须明确显示任务记录失败", visibleErrorText().contains("任务未能写入本机任务记录"))
+        val notes = viewModel.stateNow().turns.flatMap { it.notes }.joinToString("\n")
+        assertTrue("必须明确显示任务记录失败", notes.contains("任务未能写入本机任务记录"))
     }
 
     @Test
