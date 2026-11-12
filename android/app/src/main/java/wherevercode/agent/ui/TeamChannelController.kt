@@ -351,7 +351,7 @@ class TeamChannelController(
         }
         // 组合顺序：任务头 → 引用行 → 正文（归属头必须在正文开头，读回才认得出任务）。
         var composed = body
-        pendingQuote?.let { composed = ChannelQuote.encode(it, composed) }
+        pendingQuote?.let { composed = ChannelQuoteCodec.encode(it, composed) }
         val taskId = if (taskInput.visibility == View.VISIBLE) {
             taskInput.text.toString().trim()
         } else {
@@ -687,8 +687,8 @@ class TeamChannelController(
             UiKit.text(context, "${message.senderName} · $time", 11f, R.color.text_tertiary, bold = true),
         )
         // 引用回复：引用行不跟正文混在一起，渲染成引用块。
-        val quote = ChannelQuote.parse(message.text)
-        val body = ChannelQuote.strip(message.text)
+        val quote = ChannelQuoteCodec.parse(message.text)
+        val body = ChannelQuoteCodec.strip(message.text)
         quote?.let {
             col.addView(
                 UiKit.text(context, "↩ 回复 ${it.senderName}：${it.excerpt}", 11f, R.color.text_tertiary)
@@ -703,7 +703,7 @@ class TeamChannelController(
                         pendingQuote = ChannelQuote(
                             messageId = message.messageId,
                             senderName = message.senderName,
-                            excerpt = ChannelQuote.excerptOf(body),
+                            excerpt = ChannelQuoteCodec.excerptOf(body),
                         )
                         updateQuoteBar()
                     },

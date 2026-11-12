@@ -24,18 +24,18 @@ class ChannelQuoteTest {
             senderName = "Codex",
             excerpt = "行，先补测试。",
         )
-        val encoded = ChannelQuote.encode(quote, "那就这么办。")
+        val encoded = ChannelQuoteCodec.encode(quote, "那就这么办。")
         assertEquals("> 回复 #m123 Codex：行，先补测试。\n那就这么办。", encoded)
-        val parsed = ChannelQuote.parse(encoded)
+        val parsed = ChannelQuoteCodec.parse(encoded)
         assertEquals("m123", parsed?.messageId)
         assertEquals("Codex", parsed?.senderName)
         assertEquals("行，先补测试。", parsed?.excerpt)
-        assertEquals("那就这么办。", ChannelQuote.strip(encoded))
+        assertEquals("那就这么办。", ChannelQuoteCodec.strip(encoded))
     }
 
     @Test
     fun `quote parse accepts sender names with spaces`() {
-        val parsed = ChannelQuote.parse("> 回复 #m9 Example Agent：大家早。\n收到。")
+        val parsed = ChannelQuoteCodec.parse("> 回复 #m9 Example Agent：大家早。\n收到。")
         assertEquals("m9", parsed?.messageId)
         assertEquals("Example Agent", parsed?.senderName)
         assertEquals("大家早。", parsed?.excerpt)
@@ -43,19 +43,19 @@ class ChannelQuoteTest {
 
     @Test
     fun `quote parse rejects malformed lines`() {
-        assertNull(ChannelQuote.parse("大家早。"))
-        assertNull(ChannelQuote.parse("> 回复 Codex：没有 id。"))
-        assertNull(ChannelQuote.parse("> 回复 #m1：没有发送者。"))
-        assertNull(ChannelQuote.parse("> 回复 #m1 Codex 没有冒号"))
+        assertNull(ChannelQuoteCodec.parse("大家早。"))
+        assertNull(ChannelQuoteCodec.parse("> 回复 Codex：没有 id。"))
+        assertNull(ChannelQuoteCodec.parse("> 回复 #m1：没有发送者。"))
+        assertNull(ChannelQuoteCodec.parse("> 回复 #m1 Codex 没有冒号"))
         // 没有引用行时 strip 原样返回。
-        assertEquals("大家早。", ChannelQuote.strip("大家早。"))
+        assertEquals("大家早。", ChannelQuoteCodec.strip("大家早。"))
     }
 
     @Test
     fun `quote encode truncates a long excerpt to eighty chars`() {
         val long = "x".repeat(200)
-        val encoded = ChannelQuote.encode(ChannelQuote("m1", "Codex", long), "正文")
-        val parsed = ChannelQuote.parse(encoded)
+        val encoded = ChannelQuoteCodec.encode(ChannelQuote("m1", "Codex", long), "正文")
+        val parsed = ChannelQuoteCodec.parse(encoded)
         assertEquals(80, parsed?.excerpt?.length)
     }
 
@@ -63,11 +63,11 @@ class ChannelQuoteTest {
     fun `excerptOf strips the attribution header and quote line`() {
         val text = teamAttributionHeader("Codex", "abc12345-def0", "修登录闪退") +
             "\n行，先补测试。\n第二行不进摘要。"
-        assertEquals("行，先补测试。", ChannelQuote.excerptOf(text))
-        assertEquals("", ChannelQuote.excerptOf(""))
+        assertEquals("行，先补测试。", ChannelQuoteCodec.excerptOf(text))
+        assertEquals("", ChannelQuoteCodec.excerptOf(""))
         // 已带引用行的不再重复引。
-        val quoted = ChannelQuote.encode(ChannelQuote("m1", "Codex", "行。"), "那就这么办。")
-        assertEquals("那就这么办。", ChannelQuote.excerptOf(quoted))
+        val quoted = ChannelQuoteCodec.encode(ChannelQuote("m1", "Codex", "行。"), "那就这么办。")
+        assertEquals("那就这么办。", ChannelQuoteCodec.excerptOf(quoted))
     }
 }
 
@@ -114,12 +114,12 @@ class ChannelTaskLinkTest {
         // 组合顺序（发送时）：任务头 → 引用行 → 正文；归属头必须在
         // 正文开头，读回解析才认得出任务。
         val quote = ChannelQuote("m7", "Codex", "行。")
-        var composed = ChannelQuote.encode(quote, "那就这么办。")
+        var composed = ChannelQuoteCodec.encode(quote, "那就这么办。")
         composed = ChannelTaskLink.encode("abc12345", null, composed)
         val expectedHeader = teamAttributionHeader("本机 App", "abc12345", null)
         assertTrue(composed.startsWith("$expectedHeader\n> 回复 #m7 Codex：行。\n那就这么办。"))
         assertEquals("abc12345", ChannelTaskLink.linkedTaskId(composed))
         // 引用行在任务头后面：先去任务头，再解析引用行。
-        assertEquals("m7", ChannelQuote.parse(stripTeamAttributionHeader(composed))?.messageId)
+        assertEquals("m7", ChannelQuoteCodec.parse(stripTeamAttributionHeader(composed))?.messageId)
     }
 }

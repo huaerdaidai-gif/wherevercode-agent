@@ -21,7 +21,7 @@ data class ChannelQuote(
     val excerpt: String,
 )
 
-object ChannelQuote {
+object ChannelQuoteCodec {
     const val MAX_EXCERPT_CHARS: Int = 80
 
     private const val PREFIX: String = "> 回复 #"
