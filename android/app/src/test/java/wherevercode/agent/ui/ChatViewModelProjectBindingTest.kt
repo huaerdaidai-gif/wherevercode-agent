@@ -460,7 +460,7 @@ class ChatViewModelProjectBindingTest {
         assertTrue("远端返回终态后轮次应结束", awaitIdle())
         val completedTask = taskStore.listTasks(null, null).single()
         assertEquals("completed", completedTask.state)
-        assertTrue(completedTask.result.contains("已建，提交 abc123"))
+        assertTrue(completedTask.result?.contains("已建，提交 abc123") == true)
     }
 
     @Test
@@ -489,6 +489,6 @@ class ChatViewModelProjectBindingTest {
         assertTrue("远端返回终态后轮次应结束", awaitIdle())
         val completedTask = taskStore.listTasks(null, null).single()
         assertEquals("completed", completedTask.state)
-        assertTrue(completedTask.result.contains("已建，提交 abc123"))
+        assertTrue(completedTask.result?.contains("已建，提交 abc123") == true)
     }
 }
