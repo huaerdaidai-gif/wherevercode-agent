@@ -21,12 +21,13 @@ App → VPS：
  "device_id": "<app 设备 id>", "public_key_b64": "<X25519 公钥 base64>"}
 ```
 
-VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
+VPS → App（同 type/version，另附设备名、公钥、配对状态与 agent 列表）：
 
 ```json
 {"type": "wherevercode_hello", "version": 1,
  "device_id": "<vps 设备 id>", "display_name": "<显示名>",
  "public_key_b64": "<X25519 公钥 base64>",
+ "client_status": "PENDING|APPROVED|REVOKED",
  "agents": [{"agent_id": "example-agent", "display_name": "Example Agent",
    "kind": "agent", "capabilities": ["dev"],
    "folder": "/workspace/example-project", "available": true,
@@ -41,6 +42,8 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
   此字段，App 按未知处理，绝不编造分支/commit。
 - hello 只交换公钥与 agent 列表；agent 列表不是秘密（执行仍需配对 +
   凭证），但绝不能仅凭 hello 就执行任何操作。
+- MCP 适配器必须要求 `client_status == APPROVED`；PENDING/REVOKED 不得
+  发送密封工具调用。
 
 ## 密钥推导（双方各自算出同一份密钥，不交换秘密）
 
@@ -88,6 +91,8 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 - `control` 是执行栅栏快照（JSON 字符串）：改目标/撤销后服务端
   goal_version / epoch 已涨，旧快照的调用以 `stale_goal_version` /
   `stale_epoch` 拒绝，旧执行不复活。
+- 每次调用使用新凭证（新 `jti`）。Hand 服务端把未过期 jti 保存在
+  `used_credentials.json`；同一凭证重放以 `replayed_request` 拒绝。
 - run 的 argv 只接受两种：`["agent", agentId, 文本]`（调注册的 agent
   命令）与 `["__control__", pause|resume|stop|change_goal,
   operationId, 新目标?]`（控制在途进程）。不接受任意 shell 命令。
@@ -122,6 +127,9 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 | `revoked_credential` | 凭证已被收回（当次运行被 stop/change_goal 撤销） |
 | `wrong_task` | 凭证不属于本任务 |
 | `wrong_target` | 凭证不属于本设备 |
+| `wrong_source` | 来源设备或凭证与配对客户端不一致 |
+| `wrong_agent` | v2 凭证绑定的 Agent 与授权目标不一致 |
+| `wrong_scope` | v2 凭证的 agent/folder scope 与文件夹授权不一致 |
 | `wrong_folder` | 文件夹未授权给该 agent |
 | `command_not_allowed` | 不支持的操作 / argv 格式不对 |
 | `path_not_allowed` | 路径越界、文件太大或不可读 |
@@ -130,6 +138,8 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 | `agent_not_found` | 该设备上没有这个 Agent 或入口不存在 |
 | `agent_timeout` | Agent 执行超时（已终止） |
 | `remote_controlled_stop` | 运行被控制指令停掉（App 侧落 cancelled） |
+| `replayed_request` | 凭证已用于一次调用，重放拒绝 |
+| `task_stopped` | 任务已停止，后续执行/写入拒绝；需改目标后重派 |
 
 ## 执行语义（服务端）
 
@@ -146,7 +156,9 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
   凭证、密钥与命令正文密钥。
 - 状态文件（`--state-dir`，默认 `~/.wherevercode/hand-server`）：
   `server_key.json`（0600）、`paired_clients.json`、
-  `auth.json`、`agents.json`、`tasks.json`、`audit.jsonl`。
+  `auth.json`、`agents.json`、`tasks.json`、`used_credentials.json`、
+  `audit.jsonl`。`used_credentials.json` 仅存未过期的已消费 jti 与过期
+  时间，不含凭证、密钥或调用内容。
 
 ## 配对流程
 

@@ -12,7 +12,7 @@ SSH 凭据；请在你管理的主机和网络中配置远程连接。
 ## 1. 安装依赖
 
 ```sh
-pip3 install --user cryptography
+python3 -m pip install --user -r requirements.txt
 ```
 
 ## 2. 初始化 agent 注册表
@@ -95,6 +95,13 @@ python3 hand_server.py agents        # 已注册 agent 及其可用性
 - 审计日志：`~/.wherevercode/hand-server/audit.jsonl`（只记元数据，
   不含凭证与密钥）。
 - 服务日志：启动时的标准输出（监听地址、指纹、state 目录）。
+
+## MCP 客户端适配
+
+Mac 或其他 MCP host 可通过 [`hand_mcp_stdio.py`](hand_mcp_stdio.py) 调用
+已配对设备的 list/read/write 和安全控制工具；不需要在执行设备上启动
+第二个 Agent。多设备路由与授权配置见
+[`MCP_HAND_ADAPTER.md`](MCP_HAND_ADAPTER.md)。
 
 ## 运行前检查
 

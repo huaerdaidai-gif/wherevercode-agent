@@ -41,12 +41,13 @@ def b64e(data: bytes) -> str:
 
 
 def make_credential(signing_key: bytes, task_id: str, target: str, folder: str,
-                    agent_id: str = "", now: int | None = None) -> str:
+                    agent_id: str = "", now: int | None = None,
+                    source_device_id: str = "") -> str:
     """按 App 侧 legacy issue 签发一个 v2 凭证（user/attempt/source/agent 为空）。"""
     now = now if now is not None else int(time.time())
     cred = {
         "user_id": "", "task_id": task_id, "attempt": "",
-        "source_device_id": "", "target_device_id": target,
+        "source_device_id": source_device_id, "target_device_id": target,
         "agent_id": agent_id, "folder": folder,
         "iat": now, "exp": now + 900, "jti": str(uuid.uuid4()),
         "scope": {"agent_id": agent_id, "folder": folder},
@@ -363,6 +364,78 @@ class HandServerTest(unittest.TestCase):
         self.assertEqual(events[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
         self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "escape.txt")))
 
+    def test_replayed_credential_is_rejected_without_second_write(self):
+        self.approve_client()
+        credential = make_credential(self.client.signing_key, "treplay", "test-vps", self.work)
+        envelope = {
+            "type": "cross_device_tool_call", "version": 1, "seq": 1,
+            "task_id": "treplay", "agent_id": "fake-agent",
+            "source_device_id": self.client.device_id, "target_device_id": "test-vps",
+            "folder": self.work, "action": "write",
+            "args": {"path": "replay.txt", "content": "once", "credential": credential},
+        }
+        first = self.client.call(envelope)
+        second = self.client.call(envelope)
+        self.assertEqual(first[-1]["type"], "cross_device_result")
+        self.assertEqual(second[-1]["type"], "cross_device_error")
+        self.assertEqual(second[-1]["args"]["code"], hs.ERR_REPLAYED_REQUEST)
+        parsed = hs.parse_wire_credential(credential)
+        restarted = hs.HandServer(os.path.join(self.tmp.name, "state"), "test-vps", "Test VPS")
+        self.assertIn(parsed["jti"], restarted.used_jtis)
+        with open(os.path.join(self.work, "replay.txt"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "once")
+
+    def test_stop_blocks_later_write_until_goal_changes(self):
+        self.approve_client()
+        stopped = self.client.tool_call(
+            "tstopped", "fake-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "stop", "op-stop"]),
+             "control": json.dumps({"goal_version": 1, "epoch": 1})},
+        )
+        self.assertEqual(stopped[-1]["type"], "cross_device_result")
+        blocked = self.client.tool_call("tstopped", "fake-agent", self.work, "write",
+                                        {"path": "after-stop.txt", "content": "blocked"})
+        self.assertEqual(blocked[-1]["type"], "cross_device_error")
+        self.assertEqual(blocked[-1]["args"]["code"], hs.ERR_TASK_STOPPED)
+        self.assertFalse(os.path.exists(os.path.join(self.work, "after-stop.txt")))
+        changed = self.client.tool_call(
+            "tstopped", "fake-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "change_goal", "op-change", "new goal"]),
+             "control": json.dumps({"goal_version": 1, "epoch": 1})},
+        )
+        self.assertEqual(changed[-1]["type"], "cross_device_result")
+        allowed = self.client.tool_call("tstopped", "fake-agent", self.work, "write",
+                                        {"path": "after-stop.txt", "content": "recovered"})
+        self.assertEqual(allowed[-1]["type"], "cross_device_result")
+
+    def test_wrong_device_route_is_rejected(self):
+        self.approve_client()
+        credential = make_credential(self.client.signing_key, "twrong", "test-vps", self.work)
+        envelope = {
+            "type": "cross_device_tool_call", "version": 1, "seq": 1,
+            "task_id": "twrong", "agent_id": "fake-agent",
+            "source_device_id": self.client.device_id, "target_device_id": "other-device",
+            "folder": self.work, "action": "write",
+            "args": {"path": "wrong-route.txt", "content": "no", "credential": credential},
+        }
+        events = self.client.call(envelope)
+        self.assertEqual(events[-1]["type"], "cross_device_error")
+        self.assertEqual(events[-1]["args"]["code"], hs.ERR_WRONG_TARGET)
+        self.assertFalse(os.path.exists(os.path.join(self.work, "wrong-route.txt")))
+
+    def test_source_device_is_bound_to_approved_pairing(self):
+        self.approve_client()
+        credential = make_credential(
+            self.client.signing_key, "twrong-source", "test-vps", self.work,
+            agent_id="fake-agent", source_device_id="spoofed-client",
+        )
+        events = self.client.tool_call(
+            "twrong-source", "fake-agent", self.work, "write",
+            {"path": "wrong-source.txt", "content": "no", "credential": credential},
+        )
+        self.assertEqual(events[-1]["args"]["code"], hs.ERR_WRONG_SOURCE)
+        self.assertFalse(os.path.exists(os.path.join(self.work, "wrong-source.txt")))
+
     def test_unauthorized_folder_rejected(self):
         self.approve_client()
         events = self.client.tool_call("t1", "fake-agent", "/tmp", "list",
@@ -386,6 +459,19 @@ class HandServerTest(unittest.TestCase):
         messages = [e["args"]["message"] for e in events
                     if e["type"] == "cross_device_progress"]
         self.assertIn("step one", messages)
+
+    def test_agent_timeout_terminates_and_returns_timeout_error(self):
+        self.approve_client()
+        events = self.client.tool_call(
+            "ttimeout", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["agent", "slow-agent", "time out"]),
+             "timeout": "1",
+             "control": json.dumps({"goal_version": 1, "epoch": 1})},
+            timeout=8,
+        )
+        self.assertEqual(events[-1]["type"], "cross_device_error")
+        self.assertEqual(events[-1]["args"]["code"], hs.ERR_AGENT_TIMEOUT)
+        self.assertNotIn("ttimeout", self.server.processes)
 
     def test_control_pause_resume_stop(self):
         self.approve_client()

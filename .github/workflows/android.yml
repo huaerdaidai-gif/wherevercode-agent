@@ -44,6 +44,9 @@ jobs:
       - name: Install Hand integration test dependency
         run: "python -m pip install --only-binary=:all: 'cryptography>=41,<47'"
 
+      - name: Run Hand protocol and MCP adapter tests
+        run: python -m unittest server.test_hand_server server.test_hand_mcp_stdio -v
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 

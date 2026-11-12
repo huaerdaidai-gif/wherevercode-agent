@@ -112,6 +112,9 @@ ERR_EXPIRED_CREDENTIAL = "expired_credential"
 ERR_REVOKED_CREDENTIAL = "revoked_credential"
 ERR_WRONG_TASK = "wrong_task"
 ERR_WRONG_TARGET = "wrong_target"
+ERR_WRONG_SOURCE = "wrong_source"
+ERR_WRONG_AGENT = "wrong_agent"
+ERR_WRONG_SCOPE = "wrong_scope"
 ERR_WRONG_FOLDER = "wrong_folder"
 ERR_COMMAND_NOT_ALLOWED = "command_not_allowed"
 ERR_PATH_NOT_ALLOWED = "path_not_allowed"
@@ -120,6 +123,8 @@ ERR_STALE_EPOCH = "stale_epoch"
 ERR_AGENT_NOT_FOUND = "agent_not_found"
 ERR_REMOTE_CONTROLLED_STOP = "remote_controlled_stop"
 ERR_AGENT_TIMEOUT = "agent_timeout"
+ERR_REPLAYED_REQUEST = "replayed_request"
+ERR_TASK_STOPPED = "task_stopped"
 
 
 # --------------------------------------------------------------------------
@@ -295,6 +300,7 @@ def verify_credential(
     revoked_jtis: set[str],
     revoked_tasks: set[str],
     now: int,
+    expected_source_device_id: str = "",
 ) -> str | None:
     """返回 None 表示通过，否则返回错误码。校验顺序与 App 侧一致：
     签名 → 过期 → 撤销 → 绑定（任务/目标/文件夹）→ 授权仍存在。
@@ -318,8 +324,17 @@ def verify_credential(
         return ERR_WRONG_TASK
     if cred["target_device_id"] != expected_target_device_id:
         return ERR_WRONG_TARGET
+    if cred["source_device_id"] and expected_source_device_id and cred["source_device_id"] != expected_source_device_id:
+        return ERR_WRONG_SOURCE
     if canonical_folder(cred["folder"]) != canonical_folder(expected_folder):
         return ERR_WRONG_FOLDER
+    if cred["agent_id"] and cred["agent_id"] != expected_agent_id:
+        return ERR_WRONG_AGENT
+    scope = cred.get("scope", {})
+    if scope.get("agent_id") and scope["agent_id"] != expected_agent_id:
+        return ERR_WRONG_SCOPE
+    if scope.get("folder") and canonical_folder(scope["folder"]) != canonical_folder(expected_folder):
+        return ERR_WRONG_SCOPE
     if canonical_folder(expected_folder) not in [canonical_folder(f) for f in authorized_folders]:
         return ERR_WRONG_FOLDER
     return None
@@ -409,6 +424,13 @@ class HandServer:
         self.task_meta: dict[str, dict] = {}  # task_id → {goal_version, epoch}
         self.revoked_jtis: set[str] = set()
         self.revoked_tasks: set[str] = set()
+        loaded_jtis = self.state.load_json("used_credentials.json", {})
+        now = int(time.time())
+        self.used_jtis: dict[str, int] = {
+            str(jti): int(exp) for jti, exp in loaded_jtis.items()
+            if isinstance(exp, (int, float)) and int(exp) > now
+        } if isinstance(loaded_jtis, dict) else {}
+        self.used_jtis_lock = threading.Lock()
 
     # -- 密钥与状态 -------------------------------------------------------
 
@@ -542,6 +564,7 @@ class HandServer:
             "device_id": self.device_id,
             "display_name": self.display_name,
             "public_key_b64": b64e(self.public_key),
+            "client_status": status,
             "agents": self.agents(),
         }
         write_frame(conn, json.dumps(reply, ensure_ascii=False).encode("utf-8"))
@@ -607,6 +630,10 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TARGET,
                         "连接凭证不属于本设备，请重新选择设备。")
             return
+        if str(envelope.get("source_device_id", "")) != client_id:
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_SOURCE,
+                        "来源设备 ID 与已配对的客户端不匹配。")
+            return
         # 凭证校验。
         wire = args.get("credential", "")
         cred = parse_wire_credential(wire) if wire else None
@@ -624,18 +651,44 @@ class HandServer:
             revoked_jtis=self.revoked_jtis,
             revoked_tasks=self.revoked_tasks,
             now=int(time.time()),
+            expected_source_device_id=client_id,
         )
         if err is not None:
             self._error(conn, session_key, envelope, seq + 1, err,
                         _credential_error_message(err))
             return
         # 执行栅栏：args["control"] 快照必须不旧于服务端记录。
-        # 先记下本次调用的凭证 jti：stop/change_goal 只撤销当次凭证。
-        self.task_meta.setdefault(task_id, {})["credential_jti"] = cred["jti"]
         control_err = self._check_fence(task_id, args)
         if control_err is not None:
             code, message = control_err
             self._error(conn, session_key, envelope, seq + 1, code, message)
+            return
+        # HandClient issues a fresh jti for each call. Consume it once so a
+        # captured sealed request cannot replay a write or a control operation.
+        with self.used_jtis_lock:
+            now = int(time.time())
+            for old_jti, expires in list(self.used_jtis.items()):
+                if expires <= now:
+                    self.used_jtis.pop(old_jti, None)
+            if cred["jti"] in self.used_jtis:
+                self.state.audit({"event": "replay_rejected", "task": task_id,
+                                  "agent": agent_id, "action": action, "client": client_id})
+                self._error(conn, session_key, envelope, seq + 1, ERR_REPLAYED_REQUEST,
+                            "该任务凭证已使用：重复请求已拒绝。")
+                return
+            self.used_jtis[cred["jti"]] = int(cred["exp"])
+            self.state.save_json("used_credentials.json", self.used_jtis)
+        meta = self.task_meta.setdefault(task_id, {"goal_version": 1, "epoch": 1})
+        is_control = False
+        if action == "run":
+            try:
+                argv = json.loads(args.get("argv", "[]"))
+                is_control = isinstance(argv, list) and bool(argv) and argv[0] == "__control__"
+            except Exception:
+                pass
+        if meta.get("stopped") and (action == "write" or (action == "run" and not is_control)):
+            self._error(conn, session_key, envelope, seq + 1, ERR_TASK_STOPPED,
+                        "任务已停止：执行与写入已拒绝，请先修改目标并重新授权。")
             return
         self.state.audit({"event": "call", "task": task_id, "agent": agent_id,
                           "action": action, "client": client_id})
@@ -646,6 +699,7 @@ class HandServer:
         elif action == "write":
             self._do_write(conn, session_key, envelope, seq, folder, args)
         else:
+            args["_credential_jti"] = cred["jti"]
             self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args)
 
     def _check_fence(self, task_id: str, args: dict) -> tuple[str, str] | None:
@@ -796,12 +850,13 @@ class HandServer:
         ]
         env = dict(os.environ)
         env.update(cfg.get("env", {}) or {})
-        self.task_meta[task_id] = {
-            "goal_version": self.task_meta.get(task_id, {}).get("goal_version", 1),
-            "epoch": self.task_meta.get(task_id, {}).get("epoch", 1),
+        meta = self.task_meta.setdefault(task_id, {"goal_version": 1, "epoch": 1})
+        meta.update({
             "agent_id": run_agent_id,
             "folder": folder,
-        }
+            "active_credential_jti": args.get("_credential_jti", ""),
+            "control_stopped": False,
+        })
         try:
             proc = subprocess.Popen(
                 full_argv,
@@ -831,8 +886,6 @@ class HandServer:
             buf = ""
             timed_out = False
             while True:
-                if proc.poll() is not None and not buf:
-                    break
                 if time.time() > deadline:
                     timed_out = True
                     break
@@ -849,8 +902,9 @@ class HandServer:
                         self._send(conn, session_key, envelope, "cross_device_progress",
                                    {"message": line.rstrip("\n")[-1000:]}, next_seq)
                         next_seq += 1
-                elif proc.poll() is not None:
-                    break
+                # A process may exit while bytes are still buffered in its
+                # pipe. Keep selecting until read() observes EOF so the last
+                # progress/result lines are not dropped.
             if buf:
                 output_lines.append(buf)
                 self._send(conn, session_key, envelope, "cross_device_progress",
@@ -873,6 +927,8 @@ class HandServer:
         finally:
             with self.process_lock:
                 self.processes.pop(task_id, None)
+            if proc.stdout is not None:
+                proc.stdout.close()
         if proc.returncode is not None and proc.returncode < 0:
             # 负退出码 = 被信号杀死。SIGTERM/SIGKILL 且是控制停掉的，
             # 走 remote_controlled_stop；否则按失败。
@@ -959,12 +1015,14 @@ class HandServer:
                 message = "远端执行已停止。"
             else:
                 message = "任务未在运行，无需停止。"
+            self.task_meta.setdefault(task_id, {})["stopped"] = True
         else:  # change_goal
             if running:
                 self._kill_process(task_id)
                 self.task_meta.setdefault(task_id, {})["control_stopped"] = True
             meta = self.task_meta.setdefault(task_id, {})
             meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
+            meta["stopped"] = False
             if new_goal:
                 meta["new_goal"] = new_goal
             message = f"目标已更新（goal_version={meta['goal_version']}），旧执行已停止，请按新目标重新派发。"
@@ -975,7 +1033,7 @@ class HandServer:
             # 只撤销当次运行的凭证（jti），不撤销整个任务：改目标后
             # 任务要能凭新凭证、新 goal_version 快照重新派发；整任务
             # 撤销会让重派永远失败。
-            jti = self.task_meta.get(task_id, {}).get("credential_jti")
+            jti = self.task_meta.get(task_id, {}).get("active_credential_jti")
             if jti:
                 self.revoked_jtis.add(jti)
         result = {"control": action, "confirmed": confirmed, "message": message}
@@ -1045,6 +1103,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("serve", help="启动 Hand 服务")
     sub.add_parser("fingerprint", help="打印服务端公钥指纹（SHA-256）")
+    sub.add_parser("public-key", help="打印服务端公钥（标准 Base64；不含私钥）")
     sub.add_parser("pair-list", help="列出已记录的客户端配对")
     approve = sub.add_parser("pair-approve", help="批准一个待配对的客户端")
     approve.add_argument("device_id")
@@ -1064,6 +1123,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "fingerprint":
         print(hand.fingerprint())
+        return 0
+    if args.command == "public-key":
+        print(b64e(hand.public_key))
         return 0
     if args.command == "pair-list":
         clients = hand.state.load_json("paired_clients.json", {})

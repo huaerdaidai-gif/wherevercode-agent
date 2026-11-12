@@ -1,0 +1,21 @@
+{
+  "identity_file": "~/.config/wherevercode-agent/mcp-client-identity.json",
+  "timeout_seconds": 30,
+  "devices": [
+    {
+      "device_id": "configured-hand-device-id",
+      "host": "192.0.2.12",
+      "port": 18743,
+      "target_public_key_b64": "REPLACE_WITH_HAND_PUBLIC_KEY_BASE64",
+      "authorizations": [
+        {
+          "authorization_id": "solo-folder",
+          "agent_id": "mcp-tools",
+          "folder": "/path/authorized/on/device",
+          "epoch": 1,
+          "goal_version": 1
+        }
+      ]
+    }
+  ]
+}
