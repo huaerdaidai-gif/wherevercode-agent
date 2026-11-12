@@ -63,7 +63,8 @@ class AgentRunner(private val context: Context, private val runtime: RuntimeEnv)
         }
         val reader = proc.inputStream.bufferedReader()
         val lastLines = ArrayDeque<String>()
-        Thread {
+        val outputLock = Any()
+        val readerThread = Thread {
             try {
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
@@ -72,26 +73,46 @@ class AgentRunner(private val context: Context, private val runtime: RuntimeEnv)
                     // its historic 500-char truncation for the chat timeline.
                     onRawLine(text)
                     onLine(text.take(500))
-                    lastLines.addLast(text)
-                    if (lastLines.size > 20) lastLines.removeFirst()
+                    synchronized(outputLock) {
+                        lastLines.addLast(text)
+                        if (lastLines.size > 20) lastLines.removeFirst()
+                    }
                 }
             } catch (_: Exception) {
             }
-        }.start()
+        }.apply {
+            name = "agent-cli-output-reader"
+            isDaemon = true
+            start()
+        }
         val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
         if (!finished) {
             proc.destroyForcibly()
+            // The process may still have buffered output after destroyForcibly()
+            // returns. Reap it and let the reader publish that output before
+            // taking the timeout snapshot.
+            proc.waitFor()
+            readerThread.join(5_000)
+            val tail = synchronized(outputLock) { lastLines.toList() }
+            val captureNote = if (readerThread.isAlive) "\n[输出流未关闭，当前尾部可能不完整]" else ""
             return AgentRunResult.Timeout(
-                "Agent 超时（>${timeoutSeconds}s），已杀掉",
-                lastLines.toList(),
+                "Agent 超时（>${timeoutSeconds}s），已杀掉$captureNote",
+                tail,
             )
         }
+        // waitFor() only observes the process exit; it does not wait for the
+        // independent stdout reader. Without this join, a fast CLI can exit
+        // while its final lines are still queued, so the returned transcript
+        // (and final chat result) is intermittently empty or truncated.
+        readerThread.join(5_000)
+        val tail = synchronized(outputLock) { lastLines.toList() }
+        val captureNote = if (readerThread.isAlive) "\n[输出流未关闭，当前尾部可能不完整]" else ""
         val code = proc.exitValue()
-        val tail = lastLines.joinToString("\n").take(3000)
+        val tailText = tail.joinToString("\n").take(3000) + captureNote
         return if (code == 0) {
-            AgentRunResult.Success("Agent 完成（exit=0）。最后输出：\n$tail", lastLines.toList())
+            AgentRunResult.Success("Agent 完成（exit=0）。最后输出：\n$tailText", tail)
         } else {
-            AgentRunResult.Failed(code, "Agent 失败（exit=$code）。最后输出：\n$tail", lastLines.toList())
+            AgentRunResult.Failed(code, "Agent 失败（exit=$code）。最后输出：\n$tailText", tail)
         }
     }
 
