@@ -36,6 +36,12 @@ object SecretRedactor {
 
     // Same 8 patterns as _EVENT_SECRET_PATTERNS, same order.
     private val SECRET_PATTERNS: List<PatternRule> = listOf(
+        // Natural-language disclosures in chat need protection too; limiting
+        // redaction to assignment syntax misses phrases such as "my key is …".
+        PatternRule(
+            Regex("(?i)(\\b(?:my|我的)\\s+(?:api\\s+)?(?:key|密钥|口令|token|令牌)\\s+(?:is|是)\\s*)([^\\s,;}]+)"),
+            2,
+        ),
         PatternRule(
             Regex("(?is)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
             0,
