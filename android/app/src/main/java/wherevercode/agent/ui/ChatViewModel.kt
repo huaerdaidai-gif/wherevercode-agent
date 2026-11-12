@@ -1496,7 +1496,7 @@ class ChatViewModel : ViewModel() {
             if (taskId == null) {
                 remoteTurnJob = null
                 active.set(false)
-                val detail = turnRecorder?.lastBeginFailure()
+                val detail = turnRecorder?.lastFailureMessage()
                 val message = if (detail.isNullOrBlank()) {
                     "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
                 } else {
@@ -2047,7 +2047,7 @@ class ChatViewModel : ViewModel() {
                 manusTurnConversationId = null
                 manusTurnAgent = null
                 active.set(false)
-                val detail = turnRecorder?.lastBeginFailure()
+                val detail = turnRecorder?.lastFailureMessage()
                 val message = if (detail.isNullOrBlank()) {
                     "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
                 } else {
@@ -2219,7 +2219,7 @@ class ChatViewModel : ViewModel() {
                 platformTurnTaskId = null
                 platformTurnAgent = null
                 active.set(false)
-                val detail = turnRecorder?.lastBeginFailure()
+                val detail = turnRecorder?.lastFailureMessage()
                 val message = if (detail.isNullOrBlank()) {
                     "轮次任务建行失败，消息未发出（任务记录器不可用），请重试。"
                 } else {
