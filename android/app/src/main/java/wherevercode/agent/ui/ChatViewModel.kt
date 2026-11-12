@@ -51,6 +51,7 @@ import wherevercode.agent.core.mcp.RemoteAgentChatPort
 import wherevercode.agent.core.mcp.RemoteControlCommand
 import wherevercode.agent.core.mcp.RemoteControlSender
 import wherevercode.agent.core.mcp.RemoteTarget
+import wherevercode.agent.core.extension.mcp.McpProgress
 
 data class SendResult(
     val accepted: Boolean,
@@ -1173,6 +1174,16 @@ class ChatViewModel : ViewModel() {
             // 记实际执行的大脑（Agent 会话是 override 的大脑，不是全局选择）。
             val taskId = turnRecorder?.beginTurn(prompt, convId, effectiveBrainId, currentProjectId())
             try {
+                val reportMcpProgress: (String, McpProgress) -> Unit = { source, progress ->
+                    val fraction = progress.total?.takeIf { it > 0.0 }
+                        ?.let { " (${progress.progress.toInt()}/${it.toInt()})" }.orEmpty()
+                    val detail = progress.message?.take(300)?.takeIf { it.isNotBlank() }
+                        ?: "工具仍在执行"
+                    timeline.appendStatusNote(turnId, "MCP $source：$detail$fraction")
+                    publish()
+                }
+                comps.mcpServerManager.onProgress = reportMcpProgress
+                comps.platformMcpClient?.onProgress = { progress -> reportMcpProgress("platform", progress) }
                 val platformMcp = comps.platformMcpClient
                 if (platformMcp != null && platformMcp.hasConfiguredCredential() && !platformMcp.isConnected()) {
                     val status = platformMcp.connect()
@@ -1251,6 +1262,8 @@ class ChatViewModel : ViewModel() {
                 terminalStatus = TurnStatus.ERROR
                 terminalError = "调用${displayLabel}失败：${e.message ?: "未知错误"}"
             } finally {
+                comps.mcpServerManager.onProgress = null
+                comps.platformMcpClient?.onProgress = null
                 timeline.cancelRunningTools(turnId)
                 val snapshot = timeline.snapshot()
                 val turn = snapshot.turns.lastOrNull { it.id == turnId }

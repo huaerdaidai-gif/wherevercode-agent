@@ -9,6 +9,7 @@ import wherevercode.agent.core.extension.mcp.McpClient
 import wherevercode.agent.core.extension.mcp.McpException
 import wherevercode.agent.core.extension.mcp.McpJsonRpc
 import wherevercode.agent.core.extension.mcp.McpJsonRpc.toMap
+import wherevercode.agent.core.extension.mcp.McpProgress
 import wherevercode.agent.core.extension.mcp.McpTool
 import wherevercode.agent.core.extension.mcp.McpToolResult
 import wherevercode.agent.core.extension.mcp.McpToolSource
@@ -131,6 +132,9 @@ class PlatformMcpClient(
     private val toolCallTimeoutMs: Long = McpClient.DEFAULT_TIMEOUT_MS,
 ) : McpToolSource {
 
+    /** Progress from an in-flight platform tool call, routed to the active App turn. */
+    var onProgress: ((McpProgress) -> Unit)? = null
+
     private var client: McpClient? = null
 
     /** 最近一次真实 tools/list 的结果（连接成功后才有效）。 */
@@ -228,7 +232,12 @@ class PlatformMcpClient(
         ensureToolPresent(tool, timeoutMs)
         val c = requireClient()
         return try {
-            c.callTool(tool, arguments, timeoutMs)
+            c.callTool(tool, arguments, timeoutMs) { progress ->
+                try {
+                    onProgress?.invoke(progress)
+                } catch (_: Exception) {
+                }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: McpException) {
