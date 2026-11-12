@@ -42,4 +42,14 @@ class ChatHistoryStoreSessionIdTest {
         s.clearCurrentSessionId()
         assertNull(s.loadCurrentSessionId())
     }
+
+    @Test
+    fun `active single agent session survives restart and explicit exit clears it`() {
+        val s = store()
+        assertNull(s.loadActiveSingleAgentSession())
+        s.saveActiveSingleAgentSession("agent-session-7")
+        assertEquals("agent-session-7", reopenedStore().loadActiveSingleAgentSession())
+        s.clearActiveSingleAgentSession()
+        assertNull(reopenedStore().loadActiveSingleAgentSession())
+    }
 }

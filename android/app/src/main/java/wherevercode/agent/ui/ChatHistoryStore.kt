@@ -93,6 +93,9 @@ class ChatHistoryStore(context: Context) {
          */
         const val KEY_CURRENT_SESSION: String = "current_session_id_v1"
 
+        /** Last explicitly active single-agent conversation, restored on cold start. */
+        const val KEY_ACTIVE_SINGLE_AGENT_SESSION: String = "active_single_agent_session_v1"
+
         /** 快照只留最近 50 轮，避免 SharedPreferences 膨胀。 */
         const val MAX_TURNS: Int = 50
 
@@ -189,5 +192,17 @@ class ChatHistoryStore(context: Context) {
 
     fun clearCurrentSessionId() {
         prefs.edit().remove(KEY_CURRENT_SESSION).apply()
+    }
+
+    fun saveActiveSingleAgentSession(sessionId: String) {
+        if (sessionId.isBlank()) return
+        prefs.edit().putString(KEY_ACTIVE_SINGLE_AGENT_SESSION, sessionId).apply()
+    }
+
+    fun loadActiveSingleAgentSession(): String? =
+        prefs.getString(KEY_ACTIVE_SINGLE_AGENT_SESSION, null)
+
+    fun clearActiveSingleAgentSession() {
+        prefs.edit().remove(KEY_ACTIVE_SINGLE_AGENT_SESSION).apply()
     }
 }

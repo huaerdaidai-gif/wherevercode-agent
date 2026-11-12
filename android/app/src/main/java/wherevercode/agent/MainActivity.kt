@@ -1298,6 +1298,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun newConversationAndShow() {
         if (chatViewModel.newConversation()) {
+            // A deliberate exit to a fresh brain conversation must survive process death.
+            chatHistoryStore.clearActiveSingleAgentSession()
             // V5 C3 chat-bugfix：新对话不再是旧默认会话，旧 id 作废。
             chatHistoryStore.clearCurrentSessionId()
             homeScreenController.reset()
@@ -1754,6 +1756,8 @@ class MainActivity : AppCompatActivity() {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 val (conversationId, turns, agent) = restored
                 if (!chatViewModel.switchSession(conversationId, label, agent)) return@runOnUiThread
+                if (agent != null) chatHistoryStore.saveActiveSingleAgentSession(conversationId)
+                else chatHistoryStore.clearActiveSingleAgentSession()
                 chatViewModel.replaceSessionTurns(turns)
                 if (turns.isEmpty()) {
                     toast("这是一个空会话，没有保存的消息。")
@@ -1762,6 +1766,33 @@ class MainActivity : AppCompatActivity() {
                 showEntry(DrawerController.ID_NEW_CONVERSATION)
             }
         }.start()
+    }
+
+    private fun restoreLastDefaultConversation(components: BrainBootstrap.BrainComponents) {
+        val savedId = chatHistoryStore.loadCurrentSessionId()
+        if (savedId != null) {
+            Thread {
+                val turns = try {
+                    ChatSessionRestore.messagesToTurns(
+                        components.conversationStore.listMessages(savedId),
+                    )
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (turns.isNotEmpty()) {
+                        chatViewModel.adoptRestoredSession(savedId, turns)
+                    } else {
+                        val saved = chatHistoryStore.load()
+                        if (saved.isNotEmpty()) chatViewModel.restoreDefaultTurns(saved)
+                    }
+                }
+            }.start()
+        } else {
+            val saved = chatHistoryStore.load()
+            if (saved.isNotEmpty()) chatViewModel.restoreDefaultTurns(saved)
+        }
     }
 
     private fun showSessionReadError(message: String, diagnosticCode: String) {
@@ -2139,7 +2170,10 @@ class MainActivity : AppCompatActivity() {
                 when (modes[which]) {
                     ChatMode.BRAIN -> newConversationAndShow()
                     ChatMode.SINGLE_AGENT -> showSelectAgentDialog()
-                    ChatMode.TEAM -> showEntry(DrawerController.ID_TEAM_CHANNEL)
+                    ChatMode.TEAM -> {
+                        chatHistoryStore.clearActiveSingleAgentSession()
+                        showEntry(DrawerController.ID_TEAM_CHANNEL)
+                    }
                 }
             }
             .setNegativeButton("取消", null)
@@ -7921,6 +7955,7 @@ class MainActivity : AppCompatActivity() {
                     val fresh = chatViewModel.currentSessionId() == null &&
                         chatViewModel.stateNow().turns.isEmpty()
                     if (chatViewModel.switchSession(session.sessionId, agent.displayName, agent, fresh)) {
+                        chatHistoryStore.saveActiveSingleAgentSession(session.sessionId)
                         inConversation = true
                         showEntry(DrawerController.ID_NEW_CONVERSATION)
                         if (isNew) {
@@ -8634,33 +8669,41 @@ class MainActivity : AppCompatActivity() {
                     // V5 C3 chat-bugfix：默认会话历史恢复优先走 Room（完整
                     // 历史，含助手正文）；快照是回退（修前建的对话没有 id）。
                     if (chatViewModel.stateNow().turns.isEmpty()) {
-                        val savedId = chatHistoryStore.loadCurrentSessionId()
-                        if (savedId != null) {
+                        val savedAgentSessionId = chatHistoryStore.loadActiveSingleAgentSession()
+                        if (savedAgentSessionId != null) {
                             Thread {
-                                val turns = try {
-                                    ChatSessionRestore.messagesToTurns(
-                                        components.conversationStore.listMessages(savedId),
+                                val restored = try {
+                                    val session = components.sessionLedger.getSession(savedAgentSessionId)
+                                    val agent = session?.members?.firstOrNull { it != "user" }
+                                        ?.let { agentStore.getAgent(it) }
+                                    val turns = ChatSessionRestore.messagesToTurns(
+                                        components.conversationStore.listMessages(savedAgentSessionId),
                                     )
+                                    if (agent != null && turns.isNotEmpty()) Triple(session, agent, turns) else null
                                 } catch (_: Exception) {
-                                    emptyList()
+                                    null
                                 }
                                 runOnUiThread {
                                     if (isFinishing || isDestroyed) return@runOnUiThread
-                                    if (turns.isNotEmpty()) {
-                                        chatViewModel.adoptRestoredSession(savedId, turns)
-                                    } else {
-                                        val saved = chatHistoryStore.load()
-                                        if (saved.isNotEmpty()) {
-                                            chatViewModel.restoreDefaultTurns(saved)
+                                    if (restored != null && chatViewModel.stateNow().turns.isEmpty()) {
+                                        val (_, agent, turns) = restored
+                                        if (chatViewModel.switchSession(
+                                                savedAgentSessionId,
+                                                agent.displayName,
+                                                agent,
+                                            )
+                                        ) {
+                                            chatViewModel.replaceSessionTurns(turns)
+                                            inConversation = true
+                                            showEntry(DrawerController.ID_NEW_CONVERSATION)
                                         }
+                                    } else if (chatViewModel.stateNow().turns.isEmpty()) {
+                                        restoreLastDefaultConversation(components)
                                     }
                                 }
                             }.start()
                         } else {
-                            val saved = chatHistoryStore.load()
-                            if (saved.isNotEmpty()) {
-                                chatViewModel.restoreDefaultTurns(saved)
-                            }
+                            restoreLastDefaultConversation(components)
                         }
                     }
                     // 阶段 1（U3）：分派任务状态变化 -> 刷新任务列表；启动本地认领循环。
