@@ -86,6 +86,12 @@ class McpServerManager(
     scope: CoroutineScope? = null,
     /** 断线重连的退避间隔（第 1..N 次）；超过 N 次就停，不无限重试。 */
     private val reconnectDelays: List<Long> = ReconnectPolicy.DEFAULT_DELAYS,
+    /**
+     * 大脑调工具的单次超时（毫秒；2026-11-13 补齐）：透传给
+     * [McpClient.callTool]（传输层读超时同值）。超时后按真实错误
+     * 返回，不自动重发（tools/call 非幂等）；传输层掉线才走断线重连。
+     */
+    private val toolCallTimeoutMs: Long = McpClient.DEFAULT_TIMEOUT_MS,
 ) : McpToolSource {
 
     private val scope: CoroutineScope = scope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -368,7 +374,7 @@ class McpServerManager(
         val client = clients[serverId]
             ?: return ToolOutcome(ok = false, summary = "MCP 服务器未连接：$serverId（请先在扩展页连接）", errorCode = "mcp_not_connected")
         return try {
-            val result = client.callTool(tool, args)
+            val result = client.callTool(tool, args, toolCallTimeoutMs)
             ToolOutcome(
                 ok = !result.isError,
                 summary = if (result.isError) {
