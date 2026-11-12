@@ -5,7 +5,7 @@ package wherevercode.agent.core.team
  *
  * 服务端 `agent_channel_post` 支持结构化 `reply_to`（消息 id），但 App
  * 的传输层目前只发 `channel_id` + `text`（传输层属 MCP 工人，
- * core/agent/*，接线见 DELIVERY）。在结构化接线落地前，引用用正文
+ * core/agent，接线见 DELIVERY）。在结构化接线落地前，引用用正文
  * 编码——第一行写引用行，正文照常跟在后面：
  *
  * `> 回复 #<消息id> <发送者>：<被引正文摘要>`
