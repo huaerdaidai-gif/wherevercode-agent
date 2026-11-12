@@ -22,6 +22,7 @@ import wherevercode.agent.core.team.ChannelHistory
 import wherevercode.agent.core.team.ChannelKeyValueStore
 import wherevercode.agent.core.team.ChannelMuteStore
 import wherevercode.agent.core.team.ChannelQuote
+import wherevercode.agent.core.team.ChannelQuoteCodec
 import wherevercode.agent.core.team.ChannelSendTracker
 import wherevercode.agent.core.team.ChannelTaskLink
 import wherevercode.agent.core.team.FanoutBranchStatus
