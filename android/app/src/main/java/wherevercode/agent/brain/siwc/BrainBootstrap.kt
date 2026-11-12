@@ -768,7 +768,9 @@ object BrainBootstrap {
         // 会话账本共用同一 TaskDatabase（会话表与任务表同一库，见
         // TaskDatabase MIGRATION_1_2 注释）。
         val taskDb = TaskDatabase.create(appContext)
-        val taskStore = RoomTaskStore(taskDb)
+        // 2026-11-13 停止后写入防护：终态任务上拒绝迟到的 result/error/续租等
+        // 业务写（见 TerminalWriteGuardTaskStore）；RoomTaskStore 本体不改。
+        val taskStore = wherevercode.agent.core.task.TerminalWriteGuardTaskStore(RoomTaskStore(taskDb))
         // V5 Phase B C1（W2）：会话历史、任务步骤、配对记录改走 Room
         // （与任务库同一 TaskDatabase，version 3）。见 roomStoresOrMemory：
         // 探针打开失败时三者一起回退到内存实现，build() 绝不因此抛错、
@@ -828,7 +830,23 @@ object BrainBootstrap {
         // 服务器 → 工具桥），在 ToolRegistry 之前建好——桥要作为可选
         // 参数传进 ToolRegistry，扩展工具才能进大脑的工具调用链。
         // 启用开关以注册表为准：插件停用后大脑不再看到它的工具。
-        val extensionRegistry = ExtensionRegistry(SharedPreferencesExtensionStore(appContext))
+        // 2026-11-13 MCP 令牌保护：MCP 行里的明文凭证（Authorization /
+        // X-Api-Key / *_TOKEN 等）落盘前封存进 Keystore（EncryptedSharedPreferences），
+        // 行里只留 keystore: 引用；旧版明文在首次读取时就地迁移。
+        // 建客户端时由同一份密钥库解回（见下面 McpServerManager 的 credentialResolver）。
+        // 密钥库懒建：Keystore 异常不得让 build() 在启动时崩溃（封存失败时
+        // 保留原值，解析失败时如实报 mcp_credential_unresolved）。
+        val mcpSecretStore = wherevercode.agent.core.extension.mcp.LazyAgentSecretStore {
+            wherevercode.agent.core.agent.BrainKeyStoreAgentSecretStore(
+                wherevercode.agent.brain.BrainKeyStore(appContext),
+            )
+        }
+        val extensionRegistry = ExtensionRegistry(
+            wherevercode.agent.core.extension.mcp.SecretSealingExtensionStore(
+                SharedPreferencesExtensionStore(appContext),
+                wherevercode.agent.core.extension.mcp.McpSecretSealer(mcpSecretStore),
+            ),
+        )
         val pluginRegistry = PluginRegistry(
             isEnabled = { pluginId ->
                 extensionRegistry.get(ExtensionKind.PLUGIN, pluginId)?.enabled != false
@@ -846,6 +864,7 @@ object BrainBootstrap {
         }
         val mcpServerManager = McpServerManager(
             extensionRegistry,
+            credentialResolver = wherevercode.agent.core.extension.mcp.SecretStoreMcpCredentialResolver(mcpSecretStore),
             authProviderFactory = { entry ->
                 val factory = mcpOAuthWiringFactory
                 if (factory == null) {

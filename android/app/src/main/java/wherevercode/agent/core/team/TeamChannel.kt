@@ -366,10 +366,29 @@ object TeamVoice {
  * 归属。正文去掉归属头再展示（发送者与任务已由串头/发送者行写清）。
  * 频道消息一律是讨论（汇报不直接进频道，见 [TeamVoice]）。
  */
-fun teamMessageFromChannel(message: wherevercode.agent.core.agent.PlatformChannelMessage): TeamThreadMessage {
+fun teamMessageFromChannel(
+    message: wherevercode.agent.core.agent.PlatformChannelMessage,
+    /**
+     * 2026-11-13 频道权限：可以代别人署名的发帖者 agent_id（App 自己——
+     * 中转回帖带的是被 @ Agent 的名字）。其余发帖者正文里的署名只有与
+     * 真实发送者一致时才采信，否则显示真实发送者并标“自称 X”，防冒名。
+     * 默认只信 [TeamVoice.COORDINATOR_ID]。
+     */
+    trustedAttributionPosterIds: Set<String> = setOf(TeamVoice.COORDINATOR_ID),
+): TeamThreadMessage {
     val attr = parseTeamAttribution(message.text)
-    val senderName = attr?.senderName
-        ?: message.agentName.ifBlank { message.agentId.ifBlank { "未知" } }
+    val realSender = message.agentName.ifBlank { message.agentId.ifBlank { "未知" } }
+    val posterTrusted = message.agentId.isNotBlank() &&
+        trustedAttributionPosterIds.any { wherevercode.agent.core.agent.PlatformAgent.sameAgent(it, message.agentId) }
+    val claimMatches = attr != null && (
+        wherevercode.agent.core.agent.PlatformAgent.sameAgent(attr.senderName, message.agentName) ||
+            wherevercode.agent.core.agent.PlatformAgent.sameAgent(attr.senderName, message.agentId)
+        )
+    val senderName = when {
+        attr == null -> realSender
+        posterTrusted || claimMatches -> attr.senderName
+        else -> "$realSender（自称 ${attr.senderName.take(40)}）"
+    }
     return TeamThreadMessage(
         messageId = message.id,
         senderId = message.agentId,

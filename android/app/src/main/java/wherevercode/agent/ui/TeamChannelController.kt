@@ -40,6 +40,8 @@ data class TeamChannelSnapshot(
     val fanoutRuns: List<FanoutRun>,
     val fanoutRunning: Boolean,
     val notice: String?,
+    /** 2026-11-13 频道权限：可代人署名的发帖者（App 自己），见 teamMessageFromChannel。 */
+    val trustedAttributionPosterIds: Set<String> = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID),
 )
 
 /**
@@ -237,7 +239,9 @@ class TeamChannelController(
             // 的讨论不混进另一个任务里；每条带发送者 + 任务归属。
             // 归属头从正文解析（App 贴回的中转回复带的头），无头
             // 的消息进“综合讨论”串。
-            val threads = groupTeamMessages(snapshot.messages.map { teamMessageFromChannel(it) })
+            val threads = groupTeamMessages(
+                snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) },
+            )
             threads.forEach { thread ->
                 bodyContainer.addView(threadHeaderRow(thread))
                 thread.messages.forEach { bodyContainer.addView(messageRow(it)) }
