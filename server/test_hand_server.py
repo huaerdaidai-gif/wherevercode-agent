@@ -161,8 +161,8 @@ class HandServerTest(unittest.TestCase):
                     "while [ $i -lt 60 ]; do echo \"tick $i\"; sleep 1; i=$((i+1)); done\n"
                     "echo 'RESULT: slow done'\n")
         os.chmod(self.slow_agent, 0o755)
-        state_dir = os.path.join(self.tmp.name, "state")
-        self.server = hs.HandServer(state_dir, "test-vps", "Test VPS")
+        self.state_dir = os.path.join(self.tmp.name, "state")
+        self.server = hs.HandServer(self.state_dir, "test-vps", "Test VPS")
         self.server.state.save_json("agents.json", {
             "fake-agent": {
                 "display_name": "Fake Agent", "kind": "agent",
@@ -407,6 +407,38 @@ class HandServerTest(unittest.TestCase):
         allowed = self.client.tool_call("tstopped", "fake-agent", self.work, "write",
                                         {"path": "after-stop.txt", "content": "recovered"})
         self.assertEqual(allowed[-1]["type"], "cross_device_result")
+
+    def test_task_stop_fence_survives_hand_server_restart(self):
+        self.approve_client()
+        stopped = self.client.tool_call(
+            "t-persist-stop", "fake-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "stop", "stop-op"]),
+             "control": json.dumps({"goal_version": 1, "epoch": 1})})
+        self.assertTrue(json.loads(stopped[-1]["args"]["output"])["confirmed"])
+        persisted = self.server.state.load_json("tasks.json", {})
+        self.assertTrue(persisted["t-persist-stop"]["stopped"])
+        self.assertNotIn("folder", persisted["t-persist-stop"])
+
+        restarted = hs.HandServer(self.state_dir, "test-vps", "Test VPS")
+        self.assertTrue(restarted.task_meta["t-persist-stop"]["stopped"])
+        restarted_tcp = hs.ThreadedHandServer(
+            ("127.0.0.1", 0), hs.HandConnectionHandler, restarted)
+        restarted_thread = threading.Thread(target=restarted_tcp.serve_forever, daemon=True)
+        restarted_thread.start()
+        try:
+            self.client.port = restarted_tcp.server_address[1]
+            hello = self.client.hello()
+            self.assertEqual(hello["client_status"], "APPROVED")
+            blocked = self.client.tool_call(
+                "t-persist-stop", "fake-agent", self.work, "write",
+                {"path": "blocked-after-restart.txt", "content": "no"})
+            self.assertEqual(blocked[-1]["type"], "cross_device_error")
+            self.assertEqual(blocked[-1]["args"]["code"], hs.ERR_TASK_STOPPED)
+            self.assertFalse(os.path.exists(os.path.join(self.work, "blocked-after-restart.txt")))
+        finally:
+            restarted_tcp.shutdown()
+            restarted_tcp.server_close()
+            restarted_thread.join(timeout=2)
 
     def test_wrong_device_route_is_rejected(self):
         self.approve_client()

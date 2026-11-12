@@ -300,6 +300,10 @@ class HandMcpAdapter:
             signing_key = hs.derive_signing_key(session_key)
             wire_args = {k: v for k, v in args.items()
                          if k not in {"device_id", "authorization_id", "task_id"}}
+            wire_args["control"] = json.dumps(
+                {"goal_version": state["goal_version"], "epoch": state["epoch"]},
+                separators=(",", ":"),
+            )
             if action == "run":
                 operation = wire_args.pop("operation")
                 operation_id = wire_args.pop("operation_id")

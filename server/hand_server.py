@@ -64,7 +64,8 @@ cross_device_credentials.py 的协议思路，不复用其代码与 bug）。
   auth.json        agent_id → [folder, …]
   agents.json      agent_id → {display_name, kind, capabilities,
                     folder, command:[…], env:{…}}
-  tasks.json       task_id → {goal_version, epoch, agent_id, folder}
+  tasks.json       持久任务栅栏：task_id → {goal_version, epoch, stopped,
+                    control_stopped}；不存文件夹路径、凭证或正文
   audit.jsonl      审计日志（JSON 行，绝不写凭证、密钥与正文密钥）
 
 依赖：Python 3.10+ 标准库 + cryptography（pip install cryptography）。
@@ -421,7 +422,13 @@ class HandServer:
         self.private_key, self.public_key = self._load_or_create_key()
         self.processes: dict[str, subprocess.Popen] = {}  # task_id → 进程
         self.process_lock = threading.Lock()
-        self.task_meta: dict[str, dict] = {}  # task_id → {goal_version, epoch}
+        self.task_meta_lock = threading.RLock()
+        loaded_tasks = self.state.load_json("tasks.json", {})
+        self.task_meta: dict[str, dict] = {
+            str(task_id): dict(meta)
+            for task_id, meta in loaded_tasks.items()
+            if isinstance(task_id, str) and isinstance(meta, dict)
+        } if isinstance(loaded_tasks, dict) else {}
         self.revoked_jtis: set[str] = set()
         self.revoked_tasks: set[str] = set()
         loaded_jtis = self.state.load_json("used_credentials.json", {})
@@ -431,6 +438,18 @@ class HandServer:
             if isinstance(exp, (int, float)) and int(exp) > now
         } if isinstance(loaded_jtis, dict) else {}
         self.used_jtis_lock = threading.Lock()
+
+    def _persist_task_meta_locked(self) -> None:
+        """Persist task fences and stop state; caller holds task_meta_lock."""
+        durable = {
+            task_id: {
+                key: meta[key]
+                for key in ("goal_version", "epoch", "stopped", "control_stopped")
+                if key in meta
+            }
+            for task_id, meta in self.task_meta.items()
+        }
+        self.state.save_json("tasks.json", durable)
 
     # -- 密钥与状态 -------------------------------------------------------
 
@@ -682,10 +701,13 @@ class HandServer:
         # after authorization was renewed before dispatch). Its signed task
         # credential is the authority for the initial snapshot; later calls
         # must match the Hand's stored counters and cannot roll them back.
-        meta = self.task_meta.setdefault(task_id, {
-            "goal_version": int(cred.get("goal_version", 1)),
-            "epoch": int(cred.get("epoch", 1)),
-        })
+        with self.task_meta_lock:
+            meta = self.task_meta.setdefault(task_id, {
+                "goal_version": int(cred.get("goal_version", 1)),
+                "epoch": int(cred.get("epoch", 1)),
+            })
+            self._persist_task_meta_locked()
+            meta = dict(meta)
         is_control = False
         if action == "run":
             try:
@@ -718,9 +740,11 @@ class HandServer:
             snap = json.loads(raw)
         except Exception:
             return (ERR_STALE_GOAL_VERSION, "控制快照格式不对，请重新下达任务。")
-        meta = self.task_meta.get(task_id)
+        with self.task_meta_lock:
+            meta = self.task_meta.get(task_id)
         if meta is None:
             return None
+        meta = dict(meta)
         if int(snap.get("epoch", 1)) < int(meta.get("epoch", 1)):
             return (ERR_STALE_EPOCH, "凭证已过期（授权已变更）：授权版本已更新，请重新发起任务")
         if int(snap.get("goal_version", 1)) < int(meta.get("goal_version", 1)):
@@ -857,13 +881,15 @@ class HandServer:
         ]
         env = dict(os.environ)
         env.update(cfg.get("env", {}) or {})
-        meta = self.task_meta.setdefault(task_id, {"goal_version": 1, "epoch": 1})
-        meta.update({
-            "agent_id": run_agent_id,
-            "folder": folder,
-            "active_credential_jti": args.get("_credential_jti", ""),
-            "control_stopped": False,
-        })
+        with self.task_meta_lock:
+            meta = self.task_meta.setdefault(task_id, {"goal_version": 1, "epoch": 1})
+            meta.update({
+                "agent_id": run_agent_id,
+                "folder": folder,
+                "active_credential_jti": args.get("_credential_jti", ""),
+                "control_stopped": False,
+            })
+            self._persist_task_meta_locked()
         try:
             proc = subprocess.Popen(
                 full_argv,
@@ -956,8 +982,9 @@ class HandServer:
                    {"output": output[-MAX_OUTPUT_CHARS:]}, next_seq)
 
     def _was_control_stopped(self, task_id: str) -> bool:
-        meta = self.task_meta.get(task_id, {})
-        return bool(meta.get("control_stopped"))
+        with self.task_meta_lock:
+            meta = self.task_meta.get(task_id, {})
+            return bool(meta.get("control_stopped"))
 
     def _kill_process(self, task_id: str) -> None:
         with self.process_lock:
@@ -1018,20 +1045,27 @@ class HandServer:
             if running:
                 assert proc is not None
                 self._kill_process(task_id)
-                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
                 message = "远端执行已停止。"
             else:
                 message = "任务未在运行，无需停止。"
-            self.task_meta.setdefault(task_id, {})["stopped"] = True
+            with self.task_meta_lock:
+                meta = self.task_meta.setdefault(task_id, {})
+                if running:
+                    meta["control_stopped"] = True
+                meta["stopped"] = True
+                self._persist_task_meta_locked()
         else:  # change_goal
             if running:
                 self._kill_process(task_id)
-                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
-            meta = self.task_meta.setdefault(task_id, {})
-            meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
-            meta["stopped"] = False
-            if new_goal:
-                meta["new_goal"] = new_goal
+            with self.task_meta_lock:
+                meta = self.task_meta.setdefault(task_id, {})
+                if running:
+                    meta["control_stopped"] = True
+                meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
+                meta["stopped"] = False
+                if new_goal:
+                    meta["new_goal"] = new_goal
+                self._persist_task_meta_locked()
             message = f"目标已更新（goal_version={meta['goal_version']}），旧执行已停止，请按新目标重新派发。"
             self.state.audit({"event": "change_goal", "task": task_id,
                               "operation": operation_id,
@@ -1040,7 +1074,8 @@ class HandServer:
             # 只撤销当次运行的凭证（jti），不撤销整个任务：改目标后
             # 任务要能凭新凭证、新 goal_version 快照重新派发；整任务
             # 撤销会让重派永远失败。
-            jti = self.task_meta.get(task_id, {}).get("active_credential_jti")
+            with self.task_meta_lock:
+                jti = self.task_meta.get(task_id, {}).get("active_credential_jti")
             if jti:
                 self.revoked_jtis.add(jti)
         result = {"control": action, "confirmed": confirmed, "message": message}

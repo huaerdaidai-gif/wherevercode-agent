@@ -93,6 +93,16 @@ class HandMcpStdioTest(unittest.TestCase):
         self.assertEqual(error.exception.code, "authorization_required")
         self.assertFalse(Path(self.work, "denied.txt").exists())
 
+        adapter.call_tool("device_run", self.route | {
+            "operation": "change_goal", "operation_id": "app-change-goal",
+            "new_goal": "updated task"})
+        restarted_adapter = HandMcpAdapter(self.config, self.identity, read_timeout=3)
+        with self.assertRaises(AdapterError) as error:
+            restarted_adapter.call_tool("device_write", self.route | {
+                "path": "stale-write.txt", "content": "must be fenced"})
+        self.assertEqual(error.exception.code, hs.ERR_STALE_GOAL_VERSION)
+        self.assertFalse(Path(self.work, "stale-write.txt").exists())
+
     def test_task_scoped_config_rejects_invalid_fence_values(self):
         for field, value in (("epoch", 0), ("goal_version", True), ("task_id", "")):
             with self.subTest(field=field, value=value):
