@@ -109,8 +109,18 @@ jobs:
           fi
           rm -f "$RUNNER_TEMP/keystore.b64"
           echo "decoded keystore: $(wc -c < "$RUNNER_TEMP/maintainer.keystore") bytes"
-          keytool -list -keystore "$RUNNER_TEMP/maintainer.keystore" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > /dev/null \
-            || { echo "::error::keystore does not open with ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS"; exit 1; }
+          ks="$RUNNER_TEMP/maintainer.keystore"
+          # keytool prints errors on stdout; they never contain the password and
+          # GitHub masks secret values (alias) in logs.
+          if ! out=$(keytool -list -keystore "$ks" -storepass:env ANDROID_KEYSTORE_PASSWORD 2>&1); then
+            echo "::error::keystore does not open with ANDROID_KEYSTORE_PASSWORD: $(printf '%s' "$out" | grep -m1 -i 'keytool error' || echo unknown)"
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -E '^(Keystore type|Your keystore contains)' || true
+          if ! out=$(keytool -list -keystore "$ks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" 2>&1); then
+            echo "::error::ANDROID_KEY_ALIAS not found in keystore: $(printf '%s' "$out" | grep -m1 -i 'keytool error' || echo unknown)"
+            exit 1
+          fi
           echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/maintainer.keystore" >> "$GITHUB_ENV"
       - name: Build signed compat APK
         env:
