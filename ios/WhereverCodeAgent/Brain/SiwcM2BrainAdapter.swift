@@ -84,24 +84,33 @@ public final class SiwcM2BrainAdapter: BrainAdapter {
                     return
                 }
                 let brainRequest = Self.mapRequest(request)
-                for await event in provider.streamInfer(request: brainRequest) {
-                    switch event {
-                    case .delta(let text):
-                        continuation.yield(.textDelta(text))
-                    case .toolCall(let id, let name, let argumentsJson):
-                        continuation.yield(.toolCall(BrainToolCall(
-                            id: id, name: name, args: Self.parseToolArgs(argumentsJson))))
-                    case .completed(let response):
-                        if let usage = response.usage {
-                            continuation.yield(.usage(
-                                inputTokens: usage.inputTokens.map { Int($0) },
-                                outputTokens: usage.outputTokens.map { Int($0) }))
+                do {
+                    for try await event in provider.streamInfer(request: brainRequest) {
+                        switch event {
+                        case .delta(let text):
+                            continuation.yield(.textDelta(text))
+                        case .toolCall(let id, let name, let argumentsJson):
+                            continuation.yield(.toolCall(BrainToolCall(
+                                id: id, name: name, args: Self.parseToolArgs(argumentsJson))))
+                        case .completed(let response):
+                            if let usage = response.usage {
+                                continuation.yield(.usage(
+                                    inputTokens: usage.inputTokens.map { Int($0) },
+                                    outputTokens: usage.outputTokens.map { Int($0) }))
+                            }
+                            continuation.yield(.done(finishReason: "stop"))
+                        case .failed(let error):
+                            continuation.yield(Self.mapError(error))
+                            continuation.yield(.done(finishReason: "error"))
                         }
-                        continuation.yield(.done(finishReason: "stop"))
-                    case .failed(let error):
-                        continuation.yield(Self.mapError(error))
-                        continuation.yield(.done(finishReason: "error"))
                     }
+                } catch {
+                    // Providers must emit .failed, not throw. If one
+                    // throws anyway, the throw propagates: the engine
+                    // treats it as a retryable transport failure
+                    // (brain_call_failed), per the bridge contract.
+                    continuation.finish(throwing: error)
+                    return
                 }
                 continuation.finish()
             }
