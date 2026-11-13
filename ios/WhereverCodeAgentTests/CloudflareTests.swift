@@ -299,9 +299,9 @@ final class CloudflareTests: XCTestCase {
         }
         XCTAssertEqual(events.count, 3)
         XCTAssertEqual(events[0], .textDelta(CloudflareM2BrainAdapter.quotaNotice))
-        if case .error(let code, _, let retryable) = events[1] {
-            XCTAssertEqual(code, "quota_exceeded")
-            XCTAssertEqual(retryable, false)
+        if case .error(let info) = events[1] {
+            XCTAssertEqual(info.code, "quota_exceeded")
+            XCTAssertEqual(info.retryable, false)
         } else {
             XCTFail("expected quota error, got \(events[1])")
         }
