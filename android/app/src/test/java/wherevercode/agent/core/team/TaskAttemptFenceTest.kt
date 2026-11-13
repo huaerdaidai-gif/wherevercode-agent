@@ -151,7 +151,7 @@ class TaskAttemptFenceTest {
                 checkNotNull(reclaimed) { "回队后重认领应成功" }
             },
         )
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         val pump = RemoteTaskPump(
             taskStore = taskStore,
             scheduler = scheduler,

@@ -143,11 +143,16 @@ class TaskScheduler(
         }
     }
 
-    fun startTask(taskId: String): TaskRecord? = taskStore.withTaskLock {
+    fun startTask(taskId: String): TaskRecord? = startTask(taskId, expectedAttemptId = null)
+
+    /** Start only the claim attempt supplied by the caller, under the same
+     * task lock and control transaction used by pause/stop. */
+    fun startTask(taskId: String, expectedAttemptId: String?): TaskRecord? = taskStore.withTaskLock {
         freezePort.runDispatchTransaction {
             if (!isTaskRunnable(taskId)) return@runDispatchTransaction null
             val task = taskStore.getTask(taskId) ?: return@runDispatchTransaction null
             if (task.state != "assigned") return@runDispatchTransaction null
+            if (expectedAttemptId != null && task.attemptId != expectedAttemptId) return@runDispatchTransaction null
             try {
                 taskStore.updateTask(taskId, mapOf("state" to "working"), task.version, task.goalVersion, task.authEpoch)
             } catch (_: Exception) {

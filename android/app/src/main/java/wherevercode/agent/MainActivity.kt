@@ -146,6 +146,7 @@ import wherevercode.agent.core.project.GitHostCredentialStore
 import wherevercode.agent.core.project.GitHostProjectPort
 import wherevercode.agent.core.project.GitRepoRef
 import wherevercode.agent.core.project.KeystoreGitHostCredentialStore
+import wherevercode.agent.core.project.KeystoreProjectFolderAuthorizationReceiptStore
 import wherevercode.agent.core.project.OpenFolderLocationKind
 import wherevercode.agent.core.project.Project
 import wherevercode.agent.core.project.ProjectHomeKind
@@ -678,6 +679,11 @@ class MainActivity : AppCompatActivity() {
      */
     private val projectStore: ProjectStore by lazy {
         SharedPreferencesProjectStore(applicationContext)
+    }
+
+    /** Verified Hand grant evidence is encrypted at rest and excludes credentials/raw envelopes. */
+    private val handAuthorizationReceipts by lazy {
+        KeystoreProjectFolderAuthorizationReceiptStore.create(applicationContext)
     }
 
     /**
@@ -3358,10 +3364,18 @@ class MainActivity : AppCompatActivity() {
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
             is HandEvent.Result -> try {
-                parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
+                val ack = parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
+                handAuthorizationReceipts.record(
+                    peerFingerprintSha256 = target.peer.fingerprintSha256,
+                    agentId = target.agentId,
+                    requestedFolder = folder,
+                    rawAck = terminal.output,
+                    ack = ack,
+                    receivedAtEpochSeconds = System.currentTimeMillis() / 1000,
+                )
                 Result.success(Unit)
-            } catch (_: Exception) {
-                Result.failure(IllegalStateException("Hand 未返回与请求目录匹配的有效授权回执"))
+            } catch (e: Exception) {
+                Result.failure(IllegalStateException("Hand 回执验证或本机加密留存失败：${e.message ?: "未知原因"}"))
             }
             is HandEvent.Blocked -> Result.failure(IllegalStateException(terminal.reason))
             else -> Result.failure(IllegalStateException("未知回包"))

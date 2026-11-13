@@ -134,4 +134,27 @@ class LocalTaskRunnerVerdictTest {
             runner.stop()
         }
     }
+
+    @Test
+    fun `cooperative pause and stop safe point cancel task and acknowledge only after it returns`() = runBlocking {
+        for ((id, code, expected) in listOf(
+            Triple("local-pause", "turn_paused", "paused"),
+            Triple("local-stop", "turn_stopped", "stopped"),
+        )) {
+            queued(id)
+            val runner = runnerWith(TaskExecutionResult(success = false, summary = "", error = "$code：安全检查点"))
+            var acknowledged: String? = null
+            runner.onControlCheckpoint = { taskId, outcome ->
+                assertEquals(id, taskId)
+                acknowledged = outcome
+            }
+            try {
+                runner.pumpOnce()
+                assertEquals("cancelled", taskStore.getTask(id)!!.state)
+                assertEquals(expected, acknowledged)
+            } finally {
+                runner.stop()
+            }
+        }
+    }
 }

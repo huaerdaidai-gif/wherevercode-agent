@@ -127,7 +127,7 @@ class RemoteTaskPumpTest {
         val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = ScriptedPort(events, onRun)
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         // P1 eval 日志：泵配记录器；不配时行为与原来完全一致。
         val evalLogStore = InMemoryEvalLogStore()
         val pump = RemoteTaskPump(

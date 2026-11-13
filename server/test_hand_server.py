@@ -155,6 +155,58 @@ class Client:
 
 
 class BundledHandAuthorizationTest(unittest.TestCase):
+    def test_source_and_bundled_dispatch_authorization_accept_and_reject_matrix(self):
+        """Exercise the same authenticated _dispatch path shipped by both copies."""
+        modules = (hs, load_bundled_hand_server())
+        for module in modules:
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                base = os.path.join(temp, "agent-home")
+                project = os.path.join(temp, "project")
+                outside = os.path.join(temp, "outside")
+                for path in (base, project, outside):
+                    os.mkdir(path)
+                server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+                server.state.save_json("auth.json", {"agent": [base], "other": [base]})
+                events = []
+                server._send = lambda conn, key, envelope, kind, args, seq: events.append((kind, args))
+                signing_key = b"r" * 32
+
+                def dispatch(*, task, envelope_agent="agent", credential_agent="agent",
+                             envelope_folder=base, credential_folder=base, requested=project):
+                    env = {
+                        "type": "cross_device_tool_call", "version": 1, "seq": 1,
+                        "task_id": task, "agent_id": envelope_agent,
+                        "source_device_id": "client", "target_device_id": "device",
+                        "folder": envelope_folder, "action": "authorize_project_folder",
+                        "args": {
+                            "credential": make_credential(signing_key, task, "device",
+                                                           credential_folder, credential_agent),
+                            "folder": requested,
+                        },
+                    }
+                    server._dispatch(None, b"k" * 32, signing_key, "client", env)
+                    return events[-1]
+
+                kind, args = dispatch(task="ok")
+                self.assertEqual("cross_device_result", kind)
+                ack = json.loads(args["output"])
+                self.assertEqual(project, ack["requested_folder"])
+                self.assertEqual("agent", ack["agent_id"])
+                self.assertEqual(os.path.realpath(project), ack["folder"])
+
+                kind, args = dispatch(task="identity", envelope_agent="unknown-agent")
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_WRONG_FOLDER, args["code"])
+
+                kind, args = dispatch(task="folder", envelope_folder=project,
+                                      credential_folder=base, requested=outside)
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_WRONG_FOLDER, args["code"])
+
+                kind, args = dispatch(task="rejected", requested=os.path.join(temp, "missing"))
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_PATH_NOT_ALLOWED, args["code"])
+
     def test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized(self):
         bundled = load_bundled_hand_server()
         with tempfile.TemporaryDirectory() as temp:

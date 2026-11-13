@@ -167,6 +167,10 @@ class LocalTaskRunner(
     @Volatile
     var onTasksChanged: (() -> Unit)? = null
 
+    /** Called only after a cooperative pause/stop reached the engine safe point. */
+    @Volatile
+    var onControlCheckpoint: ((String, String) -> Unit)? = null
+
     fun isExecuting(): Boolean = executingTaskId != null
 
     fun isExecuting(taskId: String): Boolean = executingTaskId == taskId
@@ -411,6 +415,25 @@ class LocalTaskRunner(
 
     private fun finishTask(taskId: String, result: TaskExecutionResult, attemptId: String?, startedAtMs: Long) {
         stepStore.closeRunningSteps(taskId)
+        val controlCode = when {
+            result.error?.startsWith("turn_paused") == true -> "paused"
+            result.error?.startsWith("turn_stopped") == true -> "stopped"
+            else -> null
+        }
+        if (controlCode != null) {
+            // Pause and stop are confirmed only after the brain reports its
+            // next safe point. A blocked/non-cooperative tool remains in its
+            // real in-flight state until it returns; no false acknowledgement.
+            finishAsCancelled(
+                taskId,
+                if (controlCode == "paused") "任务已在安全检查点暂停；恢复需重新发起后续轮次。"
+                else "任务已在安全检查点停止。",
+                attemptId,
+                startedAtMs,
+            )
+            onControlCheckpoint?.invoke(taskId, controlCode)
+            return
+        }
         // 终态写真的落盘了才记技能、才刷 UI：围栏丢弃（任务已被回队
         // 重认领）时，本次执行的结果不是这行任务的终态，不记技能。
         // 2026-11-11（22:46 本地重试复现）：生产执行器只按“轮次跑完

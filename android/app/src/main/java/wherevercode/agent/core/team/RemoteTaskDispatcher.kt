@@ -17,6 +17,7 @@ import wherevercode.agent.core.task.TaskStep
 import wherevercode.agent.core.task.TaskStepStatus
 import wherevercode.agent.core.task.TaskStepStore
 import wherevercode.agent.core.task.TaskStore
+import wherevercode.agent.core.task.TaskScheduler
 
 /**
  * 阶段 B（V5 紧急开发）：远程任务执行——认领后真的发到远端并回传。
@@ -56,6 +57,7 @@ sealed class RemoteTaskOutcome {
 
 class RemoteTaskDispatcher(
     private val taskStore: TaskStore,
+    private val scheduler: TaskScheduler,
     private val stepStore: TaskStepStore,
     private val port: RemoteAgentChatPort,
     private val leaseRenewIntervalMs: Long = 180_000,
@@ -86,8 +88,11 @@ class RemoteTaskDispatcher(
         val startGoalVersion = task.goalVersion
         // P0 围栏令牌：本次执行认领到的 attemptId；全部状态写都按它核对。
         val attemptId = task.attemptId
-        val started = updateTask(task.taskId, mapOf("state" to "working"), attemptId)
-            ?: return RemoteTaskOutcome.Failed("任务状态更新失败：任务可能已被他人认领或已冻结")
+        // The claim-to-start gap is a control boundary: serialize start with
+        // pause/stop and verify the exact claim attempt under the shared
+        // TaskScheduler lock/transaction. Never write `working` directly here.
+        val started = scheduler.startTask(task.taskId, attemptId)
+            ?: return RemoteTaskOutcome.Cancelled("任务启动前收到暂停/停止或认领已失效，未发送到远端。")
         return try {
             coroutineScope {
                 val renewJob = launch {

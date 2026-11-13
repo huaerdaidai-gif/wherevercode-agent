@@ -94,6 +94,7 @@ class ControlPlane(
      */
     @Volatile private var remoteTargetResolver: ((String?) -> RemoteTarget?)? = null,
     @Volatile private var remoteControlSender: RemoteControlSender? = null,
+    @Volatile private var localExecutionControl: ((String, ControlAction) -> Boolean)? = null,
 ) : ControlCommandPort {
     private val counters: TaskControlCounterStore? =
         counterSync ?: (taskStore as? TaskControlCounterStore)
@@ -107,6 +108,11 @@ class ControlPlane(
     ) {
         remoteTargetResolver = targetResolver
         remoteControlSender = controlSender
+    }
+
+    /** Connect local task controls to the active executor's safe-point signal. */
+    fun configureLocalExecutionControl(handler: ((String, ControlAction) -> Boolean)?) {
+        localExecutionControl = handler
     }
 
     // -- ControlCommandPort -------------------------------------------------
@@ -149,6 +155,7 @@ class ControlPlane(
             }
         }
         maybeSendRemoteControl(ControlAction.PAUSE, taskId, operationId, result)
+        if (result.status == ControlStatus.PAUSING) localExecutionControl?.invoke(taskId, ControlAction.PAUSE)
         return result
     }
 
@@ -232,6 +239,7 @@ class ControlPlane(
             }
         }
         maybeSendRemoteControl(ControlAction.STOP, taskId, operationId, result)
+        if (result.status == ControlStatus.STOPPING) localExecutionControl?.invoke(taskId, ControlAction.STOP)
         return result
     }
 
@@ -509,6 +517,7 @@ class ControlPlane(
                 // The task ended naturally before the stop was confirmed:
                 // keep the result, do not overwrite it with a cancel.
                 token.confirm(taskId)
+                controlStore.setDispatchFrozen(taskId, false)
                 return@execute ControlResult(
                     ok = true, confirmed = true, status = ControlStatus.STOPPING,
                     reason = "任务已自然结束（${task.state}），保留结果",

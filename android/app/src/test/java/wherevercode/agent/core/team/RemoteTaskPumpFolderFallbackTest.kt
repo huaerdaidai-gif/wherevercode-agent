@@ -135,7 +135,7 @@ class RemoteTaskPumpFolderFallbackTest {
         val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = ScriptedPort(listOf(HandEvent.Result(3, "改好了，测试通过")))
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         val pump = RemoteTaskPump(
             taskStore = taskStore,
             scheduler = scheduler,

@@ -14,6 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import wherevercode.agent.AgentDiscovery
+import wherevercode.agent.core.control.InMemoryControlStore
 import wherevercode.agent.core.mcp.HandEvent
 import wherevercode.agent.core.mcp.RemoteAgentChatPort
 import wherevercode.agent.core.mcp.RemoteControlCommand
@@ -93,7 +94,7 @@ class RemoteTaskDispatcherVerdictTest {
         val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = ScriptedPort(events)
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         val pump = RemoteTaskPump(
             taskStore = taskStore,
             scheduler = scheduler,
@@ -213,5 +214,31 @@ class RemoteTaskDispatcherVerdictTest {
         assertEquals(copy.taskId, env.port.calls[0].taskId)
         assertEquals("example-agent", env.port.calls[0].target.agentId)
         assertEquals(original.taskId, retried.parentTaskId)
+    }
+
+    @Test
+    fun `pause after remote claim is checked atomically before execution`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val database = TaskDatabase.inMemory(context)
+        db = database
+        val taskStore = RoomTaskStore(database)
+        val controlStore = InMemoryControlStore()
+        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context), controlStore)
+        val stepStore = InMemoryTaskStepStore()
+        val port = ScriptedPort(listOf(HandEvent.Result(2, "should never run")))
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
+        val queued = queuedRemoteTask()
+        taskStore.createTask(queued)
+        val claimed = checkNotNull(scheduler.claimTaskForMember(queued.taskId, "example-agent", attemptId()))
+
+        // ControlPlane uses this same transaction/lock for pause. This models
+        // the claim -> user pause -> dispatcher start ordering explicitly.
+        controlStore.setDispatchFrozen(queued.taskId, true)
+        controlStore.setControlStatus(queued.taskId, wherevercode.agent.core.control.ControlStatus.PAUSING)
+        val outcome = dispatcher.execute(claimed, target)
+
+        assertTrue(outcome is RemoteTaskOutcome.Cancelled)
+        assertEquals(0, port.calls.size)
+        assertEquals("assigned", taskStore.getTask(queued.taskId)!!.state)
     }
 }
