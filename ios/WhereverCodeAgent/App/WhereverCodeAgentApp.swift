@@ -114,8 +114,58 @@ final class AppState: ObservableObject {
 
     private nonisolated let keychain = KeychainStore()
 
+    /// The local brain stack: the config store over the shared
+    /// local database's kv table, the Keychain-backed key store,
+    /// and the adapter registry BrainBootstrap assembles from
+    /// them. Built once at launch — the first launch seeds the
+    /// built-in brains (a user-deleted brain stays deleted, its
+    /// tombstone persists) — and rebuilt after every change made
+    /// in the brain settings, so the settings UI and the engine
+    /// always read the same stack.
+    let brainConfigStore: BrainConfigStore
+    let brainKeyStore: BrainKeyStore
+    @Published private(set) var brainRegistry: BrainAdapterRegistry
+    let brainSettingsModel: BrainSettingsModel
+
     init() {
         self.settings = SettingsStore.load()
+        let configStore = KeyValueBrainConfigStore(kv: LocalData.shared.kv)
+        let keyStore = BrainKeyStore()
+        self.brainConfigStore = configStore
+        self.brainKeyStore = keyStore
+        self.brainRegistry = BrainBootstrap.buildRegistry(
+            configStore: configStore, keyStore: keyStore)
+        let model = BrainSettingsModel(configStore: configStore, keyStore: keyStore)
+        self.brainSettingsModel = model
+        model.registryProvider = { [weak self] in
+            self?.brainRegistry ?? BrainAdapterRegistry()
+        }
+        model.onChange = { [weak self] in self?.rebuildBrainStack() }
+    }
+
+    /// Rebuild the adapter registry after a brain-settings
+    /// change (config saved/deleted/restored, current brain
+    /// switched). Cheap: adapters are thin holders over the
+    /// shared stores.
+    func rebuildBrainStack() {
+        brainRegistry = BrainBootstrap.buildRegistry(
+            configStore: brainConfigStore, keyStore: brainKeyStore)
+    }
+
+    /// The brain engine over the live stack, for the brain chat.
+    /// The tool registry is empty until the tool group lands —
+    /// the engine reports tool calls as unavailable rather than
+    /// faking execution.
+    func makeBrainEngine(
+        conversations: ConversationStore,
+        tools: ToolRegistry,
+        eventLog: EventLog,
+        approvalGate: ApprovalGate
+    ) -> BrainEngine {
+        BrainBootstrap.buildEngine(
+            configStore: brainConfigStore, registry: brainRegistry,
+            conversations: conversations, tools: tools,
+            eventLog: eventLog, approvalGate: approvalGate)
     }
 
     /// Switch to the Settings tab. This is the ONLY way in-app

@@ -92,6 +92,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("大脑") {
+                    NavigationLink {
+                        BrainSettingsView(model: appState.brainSettingsModel)
+                    } label: {
+                        HStack {
+                            Text("管理大脑")
+                            Spacer()
+                            Text(currentBrainSummary)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("大脑是可替换的推理后端（DeepSeek、Claude、Grok、Muse Spark、Cloudflare、通用模型 API、ChatGPT 会员）。Key 只存本机 Keychain。没有当前大脑时设备 Agent 与单兵对话不受影响。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("平台连接") {
                     TextField("平台地址（https://…）", text: $baseURLText)
                         .accessibilityIdentifier("settings.address")
@@ -203,7 +218,7 @@ struct SettingsView: View {
                     LabeledContent("版本", value: Self.versionString)
                     LabeledContent("Bundle ID", value: "wherevercode.agent")
                     LabeledContent("最低系统", value: "iOS 17.0")
-                    Text("可用：团队频道（读 / 发 / 实时推送）、我的任务（领取 / 汇报 / 心跳 / 交活 / 放手）、设置与连接状态、平台令牌生成（issue_agent_token，与安卓同接口；需服务端已部署该工具且本机凭证为 owner，未部署时点生成会如实报错）。阻塞中：审批、暂停 / 恢复 / 停止、改目标与设备管理——服务端无此接口，入口处有明确标注。大脑对话与单兵对话未实现。")
+                    Text("可用：团队频道（读 / 发 / 实时推送）、我的任务（领取 / 汇报 / 心跳 / 交活 / 放手）、设置与连接状态、大脑管理（内置大脑种子、通用模型 API、Key 存 Keychain、模型列表实时拉取、设当前大脑）、平台令牌生成（issue_agent_token，与安卓同接口；需服务端已部署该工具且本机凭证为 owner，未部署时点生成会如实报错）。阻塞中：审批、暂停 / 恢复 / 停止、改目标与设备管理——服务端无此接口，入口处有明确标注。大脑对话与单兵对话未实现。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -279,6 +294,15 @@ struct SettingsView: View {
         Button("刷新频道列表") {
             Task { await appState.loadChannels() }
         }
+    }
+
+    /// The current brain's label for the 大脑 section row, read
+    /// from the same config store the engine uses.
+    private var currentBrainSummary: String {
+        let store = appState.brainConfigStore
+        guard let id = store.currentBrainId(),
+              let config = store.getConfig(brainId: id) else { return "未设置" }
+        return config.label
     }
 
     /// Android's 平台令牌 status line, same semantics: "connected"
