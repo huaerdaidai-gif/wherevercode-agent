@@ -211,6 +211,54 @@ class BundledHandAuthorizationTest(unittest.TestCase):
                 self.assertEqual("cross_device_error", kind)
                 self.assertEqual(module.ERR_PATH_NOT_ALLOWED, args["code"])
 
+    def test_authorization_receipts_match_android_kotlin_fixtures(self):
+        """Pin the exact receipt bytes both Hands send to the fixtures in
+        android/.../core/project/ProjectFolderAuthorizationPathTest.kt, so the
+        App-side verification test cannot drift from what Hands really emit."""
+        expected = {
+            "hand_server": (
+                '{"authorized": true, "requested_folder": "/srv/project-link", "agent_id": "agent", "already": false, "folder": "/srv/real-project"}',
+                '{"authorized": true, "requested_folder": "/srv/project-link", "agent_id": "agent", "already": true, "folder": "/srv/real-project"}',
+            ),
+            "bundled_hand_server": (
+                '{"authorized": true, "agent_id": "agent", "requested_folder": "/srv/project-link", "folder": "/srv/real-project", "already": false}',
+                '{"authorized": true, "agent_id": "agent", "requested_folder": "/srv/project-link", "folder": "/srv/real-project", "already": true}',
+            ),
+        }
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                base = os.path.join(temp, "agent-home")
+                real = os.path.join(temp, "real-project")
+                link = os.path.join(temp, "project-link")
+                os.mkdir(base)
+                os.mkdir(real)
+                os.symlink(real, link)
+                server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+                server.state.save_json("auth.json", {"agent": [base]})
+                events = []
+                server._send = lambda conn, key, envelope, kind, args, seq: events.append((kind, args))
+                signing_key = b"r" * 32
+                outputs = []
+                for task in ("first", "repeat"):
+                    env = {
+                        "type": "cross_device_tool_call", "version": 1, "seq": 1,
+                        "task_id": task, "agent_id": "agent",
+                        "source_device_id": "client", "target_device_id": "device",
+                        "folder": base, "action": "authorize_project_folder",
+                        "args": {
+                            "credential": make_credential(signing_key, task, "device", base, "agent"),
+                            "folder": link,
+                        },
+                    }
+                    server._dispatch(None, b"k" * 32, signing_key, "client", env)
+                    kind, args = events[-1]
+                    self.assertEqual("cross_device_result", kind)
+                    output = args["output"]
+                    for root in (os.path.realpath(temp), temp):
+                        output = output.replace(root, "/srv")
+                    outputs.append(output)
+                self.assertEqual(expected[module.__name__], tuple(outputs))
+
     def test_console_http_upgrade_requires_a_live_paired_client_ticket(self):
         import http.client
         bundled = load_bundled_hand_server()

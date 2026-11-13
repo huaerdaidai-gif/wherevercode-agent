@@ -91,7 +91,7 @@ object DispatchTools {
             schema(listOf("task_id"), TASK_ID, REASON, IDEM), mutating = true,
         ),
         DispatchToolDef(
-            RESUME_TASK, "恢复已暂停的任务。", DispatchCapability.DISPATCH,
+            RESUME_TASK, "恢复已暂停的任务：会重新派单并重新执行本轮（不是从断点续跑），已完成的步骤可能再次执行。", DispatchCapability.DISPATCH,
             schema(listOf("task_id"), TASK_ID, REASON, IDEM), mutating = true,
         ),
         DispatchToolDef(

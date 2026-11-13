@@ -165,7 +165,7 @@ import wherevercode.agent.core.project.remoteFolderPickerListing
 import wherevercode.agent.core.project.isValidLocalWorkspacePath
 import wherevercode.agent.core.project.openFolderEntryOptions
 import wherevercode.agent.core.project.parseFolderListJson
-import wherevercode.agent.core.project.parseProjectFolderAuthorizationAck
+import wherevercode.agent.core.project.verifyAndRecordProjectFolderAuthorization
 import wherevercode.agent.core.project.GitRepoKind
 import wherevercode.agent.core.project.parseGitHostRepoUrl
 import wherevercode.agent.core.project.parseGitRepoUrl
@@ -3364,13 +3364,12 @@ class MainActivity : AppCompatActivity() {
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
             is HandEvent.Result -> try {
-                val ack = parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
-                handAuthorizationReceipts.record(
+                verifyAndRecordProjectFolderAuthorization(
+                    rawAck = terminal.output,
                     peerFingerprintSha256 = target.peer.fingerprintSha256,
                     agentId = target.agentId,
                     requestedFolder = folder,
-                    rawAck = terminal.output,
-                    ack = ack,
+                    receipts = handAuthorizationReceipts,
                     receivedAtEpochSeconds = System.currentTimeMillis() / 1000,
                 )
                 Result.success(Unit)
@@ -8970,6 +8969,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                     )
+                    // Remote/MCP tasks whose executor vanished mid-pause/stop
+                    // are reconciled here too, not only between local tasks.
+                    components.controlPlane?.let { plane ->
+                        pump.onControlSweep = { plane.reconcileExpiredControls() }
+                    }
                     remoteTaskPump = pump
                     pump.start()
                     // P2 自动执行（2026-11-11）：规划者自动起草 + 审查者自动
