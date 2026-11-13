@@ -115,8 +115,53 @@ public final class URLSessionCloudflareTransport: CloudflareTransport {
         request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = Data(requestBody.utf8)
         let (bytes, response) = try await session.bytes(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        return URLSessionDeepSeekConnection(statusCode: status, bytes: bytes)
+        return URLSessionCloudflareConnection(bytes: bytes, response: response)
+    }
+}
+
+private final class URLSessionCloudflareConnection: CloudflareConnection {
+    private let bytes: URLSession.AsyncBytes
+    private let httpResponse: HTTPURLResponse?
+
+    init(bytes: URLSession.AsyncBytes, response: URLResponse) {
+        self.bytes = bytes
+        self.httpResponse = response as? HTTPURLResponse
+    }
+
+    var statusCode: Int { httpResponse?.statusCode ?? -1 }
+
+    func bodyLines() -> AsyncThrowingStream<String, Error> {
+        let bytes = self.bytes
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await line in bytes.lines {
+                        continuation.yield(line)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    func readBodyText() async throws -> String {
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func readErrorBody() async -> String? {
+        do {
+            let text = try await readBodyText()
+            return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+        } catch {
+            return nil
+        }
     }
 }
 
@@ -254,7 +299,7 @@ public final class CloudflareApiClient {
         let status = connection.statusCode
         let (serverCode, serverMessage) = parseErrorBody(await connection.readErrorBody())
         var detail = ""
-        if let serverCode { detail += "（服务器错误码：\(serverCode）)" }
+        if let serverCode { detail += "（服务器错误码：\(serverCode)）" }
         if let serverMessage { detail += " \(serverMessage)" }
         let isQuotaCode = serverCode == "3036" || serverCode == "4006"
             || (serverMessage?.contains("daily free allocation") ?? false)
