@@ -17,6 +17,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run Hand server tests
+        run: |
+          python -m pip install --only-binary=:all: 'cryptography>=41,<47'
+          python -m unittest server.test_hand_server -v
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
