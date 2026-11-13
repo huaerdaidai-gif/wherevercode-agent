@@ -210,8 +210,7 @@ public final class ProjectStore {
     private func activeHomeKey(_ projectId: String) -> String { "project.activeHome.\(projectId)" }
 
     private func activeHome(of homes: [ProjectLocation], projectId: String) -> ProjectLocation? {
-        if let chosen = try? kv.get(activeHomeKey(projectId)),
-           let locationId = chosen,
+        if let locationId = try? kv.get(activeHomeKey(projectId)),
            let match = homes.first(where: { $0.locationId == locationId }) {
             return match
         }
