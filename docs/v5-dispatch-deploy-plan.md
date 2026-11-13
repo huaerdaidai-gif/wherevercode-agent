@@ -19,7 +19,7 @@
    `list_my_tasks` 返回 `{"tasks": []}`。
 2. **这三个工具只在 App 原生 MCP 里存在**：
    - 工具名定义在 `android/app/src/main/java/wherevercode/agent/core/dispatch/DispatchTools.kt:19-21`，并在 `:154` 的 `visibleTo` 里按能力过滤可见性。
-   - 实现在 `core/dispatch/McpDispatchService.kt`：`createTask` 在 `:218`，`assignTask` 在 `:249` 起，`getTaskStatus` 在 `:266`，`requireDispatchScope` 在 `:536`，`requireExecutorScope` 在 `:544`，`resolveExecutor` 在 `:548`。
+   - 实现在 `core/dispatch/McpDispatchService.kt`：`createTask` 在 `:218`，`assignTask` 在 `:242`，`getTaskStatus` 在 `:266`，`requireDispatchScope` 在 `:536`，`requireExecutorScope` 在 `:544`，`resolveExecutor` 在 `:548`。
    - 服务的运行方式在 `core/dispatch/McpDispatchRuntime.kt`：`:17` 固定端口 18744，`:138` 只绑定 `127.0.0.1`，`:45` 开关默认关闭。
    - `core/agent/CloudAgentMcpEndpoint.kt:54` 的 `publicUrl()` 固定返回 `null`，也就是没有公网入口。
    - 相关提交：`693a760`（派工核心）、`acf8837`（接入 App）、`a4c42a5`（权限收紧，以及认领和交付审计）。
