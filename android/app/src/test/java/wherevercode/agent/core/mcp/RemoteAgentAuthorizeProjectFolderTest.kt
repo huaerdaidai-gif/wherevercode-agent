@@ -21,12 +21,10 @@ import wherevercode.agent.core.transport.TransportConnection
  * 全部用假传输（不触网）：断言 App 侧发往 Hand 的信封长什么样——
  * action=authorize_project_folder，args["agent_id"] / args["folder"]
  * 是要授权的 Agent 与项目文件夹，信封 folder 就是待授权的项目
- * 文件夹（凭证绑它——Hand 的 verify 例外把信封 folder 临时并入
- * 授权表再校验；旧写法曾把信封 folder 填成 Agent 已授权的文件夹，
- * 只把项目文件夹放 args，Hand 从不读 args，结果是 already=true
- * 的“假成功”，2026-11-12 集成缺口已修）；taskId 用 authorize-
+ * 文件夹（凭证继续绑定已有授权的 Agent 工作目录；项目文件夹只放
+ * args，Hand 在通过密封、配对和凭证校验后执行明确的 grant）；taskId 用 authorize-
  * 前缀；未配对时直接 Blocked，绝不回落本地。
- * Hand 侧落盘（auth.json authorized_project_folders）由真实密封
+ * Hand 侧落盘（auth.json 中 Agent 对应的目录列表）由真实密封
  * 全流程测试 AuthorizeProjectFolderE2ETest 覆盖（本地起真 Hand）。
  */
 class RemoteAgentAuthorizeProjectFolderTest {
@@ -117,7 +115,7 @@ class RemoteAgentAuthorizeProjectFolderTest {
         assertEquals("authorize_project_folder", envelope?.action)
         assertEquals("example-agent", envelope?.args?.get("agent_id"))
         assertEquals("/workspace/wherevercode-agent", envelope?.args?.get("folder"))
-        assertEquals("/workspace/wherevercode-agent", envelope?.folder)
+        assertEquals(target.folder, envelope?.folder)
         assertTrue("taskId 应为 authorize- 前缀", envelope?.taskId?.startsWith("authorize-") == true)
         assertTrue("凭证应随信封发送", envelope?.args?.containsKey("credential") == true)
         assertEquals(listOf(HandEvent.Result(2, "authorized")), events)
