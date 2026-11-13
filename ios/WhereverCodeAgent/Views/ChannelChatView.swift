@@ -224,6 +224,15 @@ struct ChannelChatView: View {
             isLoadingHistory = false
             messages.append(contentsOf: fresh)
             messages.sort { $0.createdAtSeconds < $1.createdAtSeconds }
+            // Reply cursor (data layer): remember the newest seen
+            // message per channel, best-effort and off the UI path.
+            if let newest = messages.last {
+                let channelId = channel.id
+                Task.detached {
+                    try? LocalData.shared.cursors.setLastSeenMessageId(
+                        channelId: channelId, messageId: newest.id)
+                }
+            }
         }
         newFeed.onStateChange = { state, error in
             connectionState = state

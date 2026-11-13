@@ -244,10 +244,17 @@ struct ChatListView: View {
         // never surfaces a "missing credential" error as if the
         // platform had failed).
         guard appState.isConfigured, let transport = appState.makeChannelTransport() else { return }
+        // Local snapshot first (data layer): the last-known channel
+        // list renders immediately and survives an unreachable
+        // platform; the fetch below stays the source of truth.
+        if channels.isEmpty {
+            channels = ChannelListCache().load()
+        }
         isLoading = true
         defer { isLoading = false }
         do {
             channels = try await transport.listChannels()
+            ChannelListCache().save(channels)
             errorMessage = nil
         } catch {
             errorMessage = (error as? McpError)?.message ?? "加载频道失败。"

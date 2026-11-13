@@ -271,8 +271,7 @@ final class DataLayerTests: XCTestCase {
 
     // MARK: - Key-value stores
 
-    func testKeyValueCursorsAndChatPrefs() throws {
-        let data = try makeData()
+    func testKeyValueCursorsAndChatPrefs() throws {        let data = try makeData()
         try data.kv.set("k", "v")
         XCTAssertEqual(try data.kv.get("k"), "v")
         try data.kv.set("k", nil)
@@ -283,5 +282,22 @@ final class DataLayerTests: XCTestCase {
         XCTAssertEqual(try data.chatPrefs.sessionProjects(), ["s-1": "p-1"])
         data.chatPrefs.currentSessionId = "s-1"
         XCTAssertEqual(data.chatPrefs.currentSessionId, "s-1")
+    }
+
+    // MARK: - Channel list cache (data layer in real use)
+
+    func testChannelListCacheRoundTrip() throws {
+        let data = try makeData()
+        let cache = ChannelListCache(kv: data.kv)
+        XCTAssertEqual(cache.load().count, 0)
+        let channels = [
+            ChannelInfo(id: "chan-1", name: "团队频道", participants: ["App", "GPT"], lastMessageText: "在吗"),
+            ChannelInfo(id: "chan-2", name: "", participants: [], lastMessageText: nil),
+        ]
+        cache.save(channels)
+        let loaded = cache.load()
+        XCTAssertEqual(loaded, channels)
+        cache.clear()
+        XCTAssertEqual(cache.load().count, 0)
     }
 }
