@@ -126,9 +126,9 @@ final class ClaudeTests: XCTestCase {
                             toolCalls: [ChatToolCall(id: "t1", name: "run", argumentsJson: "{\"a\":1}")]),
                 ChatMessage(role: "tool", content: "结果", toolCallId: "t1"),
             ],
+            model: "claude-sonnet-4-5",
             tools: [ToolDef(name: "run", description: "跑命令",
-                            inputSchema: ["type": .string("object")])],
-            model: "claude-sonnet-4-5")
+                            inputSchema: ["type": .string("object")])])
         let body = ClaudeApiClient.buildRequestBody(request)
         XCTAssertEqual(body["model"] as? String, "claude-sonnet-4-5")
         XCTAssertEqual(body["max_tokens"] as? Int, 4096)
