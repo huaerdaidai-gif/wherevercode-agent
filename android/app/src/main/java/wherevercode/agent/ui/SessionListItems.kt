@@ -20,6 +20,7 @@ fun buildSessionListItems(
     sessions: List<SessionRecord>,
     titleOverrides: Map<String, String> = emptyMap(),
     summaryOverrides: Map<String, String> = emptyMap(),
+    memberLabel: (String) -> String = { it },
     timeLabel: (Long) -> String,
 ): List<SessionListController.SessionListItem> {
     // Older builds created a fresh random metadata session id for every
@@ -43,8 +44,10 @@ fun buildSessionListItems(
             SessionKind.TASK -> "任务"
         }
         val subtitle = buildString {
-            append("成员 ${record.members.size} · 更新 ${timeLabel(record.updatedAtEpochSeconds)}")
-            record.taskId?.let { append(" · 任务 $it") }
+            val members = record.members.map(memberLabel).distinct()
+            append("${members.size} 位成员：${members.joinToString("、").take(80)} · 更新 ${timeLabel(record.updatedAtEpochSeconds)}")
+            record.taskId?.let { append(" · 任务 ${it.take(12)}") }
+            record.attemptId?.let { append(" · 执行 ${it.take(8)}") }
             summaryOverrides[record.sessionId]?.takeIf { it.isNotBlank() }?.let {
                 append(" · 摘要：${it.take(64)}")
             }

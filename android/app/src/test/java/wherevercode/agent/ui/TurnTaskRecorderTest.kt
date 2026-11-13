@@ -103,6 +103,22 @@ class TurnTaskRecorderTest {
     }
 
     @Test
+    fun `DONE blocked by approval policy is failed rather than completed`() {
+        val taskId = recorder.beginTurn("加入频道", "conv-1", "model-api-zhipu")!!
+        recorder.finishTurn(
+            taskId,
+            TurnStatus.DONE,
+            "加入频道任务被审批策略拦截，尚未完成；请先完成审批。",
+            null,
+            true,
+        )
+        val task = taskStore.getTask(taskId)
+        assertEquals("failed", task?.state)
+        assertTrue((task?.error ?: "").contains("被审批策略拦截"))
+        assertNull(task?.result)
+    }
+
+    @Test
     fun `DONE with success headline mentioning no problems still completes`() {
         // 误判护栏经 finishTurn 同样生效：“没有发现问题”不判失败。
         val taskId = recorder.beginTurn("帮我检查", "conv-1", "deepseek")!!

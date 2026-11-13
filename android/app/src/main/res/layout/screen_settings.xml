@@ -53,6 +53,25 @@
             </LinearLayout>
         </LinearLayout>
 
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView android:id="@+id/settingsJumpModels" style="@style/SettingsJumpChip" android:text="模型" />
+                <TextView android:id="@+id/settingsJumpRepos" style="@style/SettingsJumpChip" android:text="仓库授权" />
+                <TextView android:id="@+id/settingsJumpDevices" style="@style/SettingsJumpChip" android:text="设备同步" />
+                <TextView android:id="@+id/settingsJumpMcp" style="@style/SettingsJumpChip" android:text="MCP" />
+                <TextView android:id="@+id/settingsJumpAbout" style="@style/SettingsJumpChip" android:text="关于" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
         <!-- 阶段 3（U6）：设置分节——大脑 / 工作区 / 关于。 -->
         <TextView
             android:layout_width="match_parent"
