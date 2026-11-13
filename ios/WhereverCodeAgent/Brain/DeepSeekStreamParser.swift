@@ -28,6 +28,12 @@ public final class DeepSeekStreamParser {
     }
 
     private let onMalformedLine: (String) -> Void
+    /// Vendor wording for user-visible failure messages ("DeepSeek"
+    /// here; the generic OpenAI parser reuses this engine with
+    /// "模型 API"), mirroring Android's two faithful clones.
+    private let vendorLabel: String
+    /// Fallback tool-call id prefix ("deepseek" / "generic").
+    private let callIdPrefix: String
     private var calls: [Int: PendingCall] = [:]
     private var callOrder: [Int] = []
     private var pendingData: String? = nil
@@ -41,8 +47,14 @@ public final class DeepSeekStreamParser {
     private var emittedToolCall = false
     private var callCounter = 0
 
-    public init(onMalformedLine: @escaping (String) -> Void = { _ in }) {
+    public init(
+        onMalformedLine: @escaping (String) -> Void = { _ in },
+        vendorLabel: String = "DeepSeek",
+        callIdPrefix: String = "deepseek"
+    ) {
         self.onMalformedLine = onMalformedLine
+        self.vendorLabel = vendorLabel
+        self.callIdPrefix = callIdPrefix
     }
 
     /// True after `data: [DONE]`.
@@ -95,12 +107,12 @@ public final class DeepSeekStreamParser {
         if sawAnyEvent {
             return flushed + [.failed(
                 code: "stream_ended_without_terminal",
-                message: "DeepSeek 流在收到 [DONE] 前结束（网络中断或代理截断），已收到的内容不作为成功回复。",
+                message: "\(vendorLabel) 流在收到 [DONE] 前结束（网络中断或代理截断），已收到的内容不作为成功回复。",
                 retryable: true)]
         }
         return flushed + [.failed(
             code: "stream_empty",
-            message: "DeepSeek 未返回任何内容（流为空）。",
+            message: "\(vendorLabel) 未返回任何内容（流为空）。",
             retryable: true)]
     }
 
@@ -124,7 +136,7 @@ public final class DeepSeekStreamParser {
             let message = Self.stringOrEmpty(error, "message")
             out.append(.failed(
                 code: code.isEmpty ? "provider_error" : code,
-                message: message.isEmpty ? "DeepSeek 返回错误" : message,
+                message: message.isEmpty ? "\(vendorLabel) 返回错误" : message,
                 retryable: false))
             finished = true
             return out
@@ -229,7 +241,7 @@ public final class DeepSeekStreamParser {
                     id = existing
                 } else {
                     callCounter += 1
-                    id = "deepseek-call-\(callCounter)"
+                    id = "\(callIdPrefix)-call-\(callCounter)"
                 }
                 let args = pending.arguments.isEmpty ? "{}" : pending.arguments
                 out.append(.toolCall(id: id, name: pending.name, argumentsJson: args))
@@ -245,12 +257,12 @@ public final class DeepSeekStreamParser {
         } else if sawReasoning {
             out.append(.failed(
                 code: "reasoning_only",
-                message: "DeepSeek 只返回了推理内容，没有返回可显示的回答。已停止本轮。",
+                message: "\(vendorLabel) 只返回了推理内容，没有返回可显示的回答。已停止本轮。",
                 retryable: true))
         } else {
             out.append(.failed(
                 code: "empty_response",
-                message: "DeepSeek 返回了空回复（没有文字或工具调用）。已停止本轮。",
+                message: "\(vendorLabel) 返回了空回复（没有文字或工具调用）。已停止本轮。",
                 retryable: true))
         }
         return out
