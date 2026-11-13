@@ -85,11 +85,8 @@ object PlatformEndpointPinning {
                 default.checkClientTrusted(chain, authType)
 
             override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                default.checkServerTrusted(chain, authType)
-                if (!matchesPinnedFingerprint(chain, pin)) {
-                    throw CertificateException("The configured platform endpoint certificate pin did not match.")
-                }
                 verifyPinnedChain(chain, pin)
+                default.checkServerTrusted(chain, authType)
             }
         }
     }
