@@ -17,6 +17,7 @@ import wherevercode.agent.core.task.EvalOutcome
 import wherevercode.agent.core.task.RoomTaskStore
 import wherevercode.agent.core.task.TaskEventKind
 import wherevercode.agent.core.task.TaskRecord
+import wherevercode.agent.core.task.TaskOrigins
 import wherevercode.agent.core.task.TaskScheduler
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStepStore
@@ -271,6 +272,7 @@ class RemoteTaskPump(
         }
         return queued.filter { task ->
             task.sessionId == null &&
+                !TaskOrigins.isMcpDispatchTask(task.taskId) &&
                 task.assignedAgentId != null &&
                 isRemoteMember(task.assignedAgentId!!) &&
                 // P2：plan 未批准的流水线任务不认领编码。

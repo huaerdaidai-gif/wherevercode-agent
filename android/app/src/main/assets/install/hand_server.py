@@ -1351,18 +1351,10 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_INVALID_CREDENTIAL,
                         "任务连接凭证无效，请重新下达任务。")
             return
-        # 凭证校验。authorize_project_folder 例外：它的作用就是把
-        # folder 写进授权表，待授权的文件夹按定义还不在表里，所以
-        # verify_credential 的“folder 已在授权表里”这一项对本动作
-        # 不适用——把待授权文件夹临时并入传入的授权表，使该项检查
-        # 按构造通过。verify_credential 本身一字不动：签名、过期、
-        # 撤销、任务绑定、目标绑定、凭证 folder 与信封 folder 一致
-        # 性，全部照常校验。凭证须由配对 App 为本次授权操作签发
-        # （task_id 由 App 为这次指派/链检出操作新 mint，
-        # folder 即待授权的项目文件夹）。
+        # 授权动作仍须以凭证绑定的现有 Agent 目录作为信封 folder。
+        # 新项目目录仅从 args.folder 读取；绝不能把信封目录临时加入
+        # 授权列表来绕过凭证的现有目录授权检查。
         authorized = self.authorized_folders(agent_id)
-        if action == "authorize_project_folder":
-            authorized = authorized + [folder]
         err = verify_credential(
             cred, signing_key,
             expected_task_id=task_id,
@@ -1390,7 +1382,7 @@ class HandServer:
                           "action": action, "client": client_id})
         if action == "authorize_project_folder":
             self._do_authorize_project_folder(
-                conn, session_key, envelope, seq, task_id, agent_id, folder)
+                conn, session_key, envelope, seq, task_id, agent_id, args)
         elif action == "list":
             self._do_list(conn, session_key, envelope, seq, folder, args)
         elif action == "read":
@@ -1421,18 +1413,23 @@ class HandServer:
     # -- 项目文件夹授权 --------------------------------------------------------
 
     def _do_authorize_project_folder(self, conn, session_key, envelope, seq,
-                                     task_id, agent_id, folder) -> None:
-        """密封动作 authorize_project_folder：把 folder 追加进
+                                     task_id, agent_id, args) -> None:
+        """密封动作 authorize_project_folder：把 args.folder 追加进
         auth.json[agent_id].authorized_project_folders。
         只允许已配对 App 的密封通道调用（_dispatch 已验签名、验凭证、
         验目标设备；_check_fence 已过）；不挂 MCP，Agent 调不到。
         授权粒度是 Agent→项目文件夹。成功回 cross_device_result，
-        output 为 JSON：{"authorized": true, "agent_id", "folder",
-        "already"}；already=true 表示重复授权，本次未写文件。"""
-        canon = canonical_folder(folder)
+        output 为 JSON：{"authorized": true, "agent_id", "requested_folder",
+        "folder", "already"}；already=true 表示重复授权，本次未写文件。"""
+        requested = args.get("folder", "") if isinstance(args, dict) else ""
+        if not isinstance(requested, str) or not os.path.isabs(requested):
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        "项目文件夹必须是已存在的绝对路径")
+            return
+        canon = canonical_folder(requested)
         if not canon or canon == "/" or not os.path.isdir(canon):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        f"文件夹不存在或不是目录：{folder}")
+                        f"文件夹不存在或不是目录：{requested}")
             return
         with self.state.lock:
             auth = self.state.load_json("auth.json", {})
@@ -1459,6 +1456,7 @@ class HandServer:
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(
                        {"authorized": True, "agent_id": agent_id,
+                        "requested_folder": requested,
                         "folder": canon, "already": already},
                        ensure_ascii=False)}, seq + 1)
 

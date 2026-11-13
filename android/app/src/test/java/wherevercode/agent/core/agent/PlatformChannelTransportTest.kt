@@ -54,7 +54,7 @@ class PlatformChannelTransportTest {
 
         assertEquals("m123", id)
         assertEquals(1, http.calls.size)
-        assertEquals("https://example.invalid/api/open/v1/mcp", http.calls[0].url)
+        assertEquals("", http.calls[0].url)
         assertEquals("test-token-not-real", http.calls[0].bearerToken)
         val body = JSONObject(http.calls[0].bodyJson)
         assertEquals("tools/call", body.optString("method"))
@@ -183,6 +183,48 @@ class PlatformChannelTransportTest {
         assertTrue(http.calls.isEmpty())
     }
 
+
+    @Test
+    fun `poll with onlyUnread and markRead sends both flags`() = runBlocking {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"ok":true,"messages":[]}""")),
+        )
+        val messages = transport(http).pollMessages("chan-1", null, 20, onlyUnread = true, markRead = true)
+
+        assertEquals(0, messages.size)
+        val args = JSONObject(http.calls[0].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(true, args?.optBoolean("only_unread"))
+        assertEquals(true, args?.optBoolean("mark_read"))
+    }
+
+    @Test
+    fun `poll without flags sends neither flag`() = runBlocking {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"ok":true,"messages":[]}""")),
+        )
+        transport(http).pollMessages("chan-1", null, 20)
+
+        val args = JSONObject(http.calls[0].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertTrue(!args!!.has("only_unread"))
+        assertTrue(!args.has("mark_read"))
+    }
+
+    @Test
+    fun `unauthorized member cannot read the channel`() = runBlocking {
+        val http = object : PlatformHttpClient {
+            override fun postJson(url: String, bearerToken: String, bodyJson: String): String {
+                throw java.io.IOException("平台返回 HTTP 403：未加入频道")
+            }
+        }
+        try {
+            transport(http).pollMessages("chan-1", null, 20, onlyUnread = true)
+            throw AssertionError("expected IOException")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("403"))
+        }
+    }
     @Test
     fun `callTool posts a generic tools call and returns the tool json`() = runBlocking {
         val http = ScriptedHttp(

@@ -156,6 +156,96 @@ class ControlPlaneTest {
     }
 
     @Test
+    fun `orphaned local task pause freezes then requeues only after lease expiry`() {
+        taskStore.createTask(
+            task("orphan", "working", leaseExpiresAt = now + 90)
+                .copy(assignedAgentId = "local"),
+        )
+        var controlCalls = 0
+        plane.configureLocalExecutionControl(
+            isExecuting = { false },
+            handler = { _, _ -> controlCalls++; true },
+        )
+
+        val result = plane.pause("orphan", "op-orphan-pause", "user pause")
+
+        assertTrue(result.ok)
+        assertFalse(result.confirmed)
+        assertEquals(ControlStatus.PAUSING, result.status)
+        assertTrue(controlStore.isDispatchFrozen("orphan"))
+        assertEquals(0, controlCalls)
+        assertEquals("working", taskStore.getTask("orphan")!!.state)
+        assertFalse(plane.resume("orphan", "op-orphan-early-resume", "too early").ok)
+        assertTrue(controlStore.isDispatchFrozen("orphan"))
+
+        now += 91
+        plane.reconcileExpiredLocalControls()
+        assertEquals("requeued", taskStore.getTask("orphan")!!.state)
+        assertEquals(ControlStatus.PAUSED, plane.getControlStatus("orphan"))
+        assertFalse(controlStore.isDispatchFrozen("orphan"))
+        assertTrue(plane.resume("orphan", "op-orphan-resume", "continue").ok)
+        assertEquals(ControlStatus.RUNNING, plane.getControlStatus("orphan"))
+    }
+
+    @Test
+    fun `orphaned local stop stays frozen then cancels after lease expiry without rerun`() {
+        taskStore.createTask(
+            task("orphan-stop", "working", leaseExpiresAt = now + 90)
+                .copy(assignedAgentId = "local"),
+        )
+        var controlCalls = 0
+        plane.configureLocalExecutionControl(
+            isExecuting = { false },
+            handler = { _, _ -> controlCalls++; true },
+        )
+
+        val result = plane.stop("orphan-stop", "op-orphan-stop", "user stop")
+        assertTrue(result.ok)
+        assertFalse(result.confirmed)
+        assertEquals(ControlStatus.STOPPING, result.status)
+        assertTrue(controlStore.isDispatchFrozen("orphan-stop"))
+        assertEquals(0, controlCalls)
+
+        now += 91
+        plane.reconcileExpiredLocalControls()
+
+        val stopped = taskStore.getTask("orphan-stop")!!
+        assertEquals("cancelled", stopped.state)
+        assertFalse(TaskStates.isClaimable(stopped.state))
+        assertEquals(ControlStatus.STOPPING, plane.getControlStatus("orphan-stop"))
+        assertFalse(controlStore.isDispatchFrozen("orphan-stop"))
+        assertEquals(0, controlCalls)
+    }
+
+    @Test
+    fun `confirmed pause releases freeze and resume makes requeued task claimable`() {
+        taskStore.createTask(
+            task("pause-resume", "working", leaseExpiresAt = now + 90)
+                .copy(assignedAgentId = "local"),
+        )
+        // Isolate ControlPlane from the live LocalTaskRunner while modeling
+        // its safe-point transition working -> requeued.
+        plane.configureLocalExecutionControl(isExecuting = { true }, handler = { _, _ -> true })
+        assertEquals(
+            ControlStatus.PAUSING,
+            plane.pause("pause-resume", "op-pause", "user pause").status,
+        )
+        taskStore.updateTask(
+            "pause-resume", mapOf("state" to "requeued"), 1, 1, 1,
+        )
+
+        val paused = plane.confirmPaused("pause-resume", "op-confirm", "safe point")
+        assertTrue(paused.confirmed)
+        assertEquals(ControlStatus.PAUSED, paused.status)
+        assertFalse(controlStore.isDispatchFrozen("pause-resume"))
+
+        val resumed = plane.resume("pause-resume", "op-resume", "continue")
+        assertTrue(resumed.ok)
+        assertEquals(ControlStatus.RUNNING, resumed.status)
+        assertEquals("requeued", taskStore.getTask("pause-resume")!!.state)
+    }
+
+    @Test
     fun `resume after pause returns RUNNING and is idempotent without bump`() {
         create("t1", "queued")
         plane.pause("t1", "op-1", "pause")

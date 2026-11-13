@@ -16,6 +16,7 @@
 import base64
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import socket
@@ -34,6 +35,20 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 
 import hand_server as hs
+
+
+def load_bundled_hand_server():
+    """Load the exact Hand implementation packaged and installed by Android."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(
+        repo_root, "android", "app", "src", "main", "assets", "install",
+        "hand_server.py",
+    )
+    spec = importlib.util.spec_from_file_location("bundled_hand_server", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def b64e(data: bytes) -> str:
@@ -137,6 +152,122 @@ class Client:
             "folder": folder, "action": action, "args": args,
         }
         return self.call(envelope, timeout=timeout)
+
+
+class BundledHandAuthorizationTest(unittest.TestCase):
+    def test_source_and_bundled_dispatch_authorization_accept_and_reject_matrix(self):
+        """Exercise the same authenticated _dispatch path shipped by both copies."""
+        modules = (hs, load_bundled_hand_server())
+        for module in modules:
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                base = os.path.join(temp, "agent-home")
+                project = os.path.join(temp, "project")
+                outside = os.path.join(temp, "outside")
+                for path in (base, project, outside):
+                    os.mkdir(path)
+                server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+                server.state.save_json("auth.json", {"agent": [base], "other": [base]})
+                events = []
+                server._send = lambda conn, key, envelope, kind, args, seq: events.append((kind, args))
+                signing_key = b"r" * 32
+
+                def dispatch(*, task, envelope_agent="agent", credential_agent="agent",
+                             envelope_folder=base, credential_folder=base, requested=project):
+                    env = {
+                        "type": "cross_device_tool_call", "version": 1, "seq": 1,
+                        "task_id": task, "agent_id": envelope_agent,
+                        "source_device_id": "client", "target_device_id": "device",
+                        "folder": envelope_folder, "action": "authorize_project_folder",
+                        "args": {
+                            "credential": make_credential(signing_key, task, "device",
+                                                           credential_folder, credential_agent),
+                            "folder": requested,
+                        },
+                    }
+                    server._dispatch(None, b"k" * 32, signing_key, "client", env)
+                    return events[-1]
+
+                kind, args = dispatch(task="ok")
+                self.assertEqual("cross_device_result", kind)
+                ack = json.loads(args["output"])
+                self.assertEqual(project, ack["requested_folder"])
+                self.assertEqual("agent", ack["agent_id"])
+                self.assertEqual(os.path.realpath(project), ack["folder"])
+
+                kind, args = dispatch(task="identity", envelope_agent="unknown-agent")
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_WRONG_FOLDER, args["code"])
+
+                kind, args = dispatch(task="folder", envelope_folder=project,
+                                      credential_folder=base, requested=outside)
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_WRONG_FOLDER, args["code"])
+
+                kind, args = dispatch(task="rejected", requested=os.path.join(temp, "missing"))
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_PATH_NOT_ALLOWED, args["code"])
+
+    def test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized(self):
+        bundled = load_bundled_hand_server()
+        with tempfile.TemporaryDirectory() as temp:
+            base = os.path.join(temp, "agent-home")
+            project = os.path.join(temp, "project")
+            os.mkdir(base)
+            os.mkdir(project)
+            server = bundled.HandServer(os.path.join(temp, "state"), "device", "test")
+            server.state.save_json("auth.json", {
+                "agent": {"folders": [base], "authorized_project_folders": []}
+            })
+            signing_key = b"s" * 32
+            task_id = "authorize-test"
+            events = []
+            server._send = lambda conn, key, envelope, kind, args, seq: events.append((kind, args))
+            envelope = {
+                "type": "cross_device_tool_call", "version": 1, "seq": 1,
+                "task_id": task_id, "agent_id": "agent",
+                "source_device_id": "client", "target_device_id": "device",
+                "folder": project, "action": "authorize_project_folder",
+                "args": {
+                    "credential": make_credential(signing_key, task_id, "device", project, "agent"),
+                    "folder": project,
+                },
+            }
+
+            server._dispatch(None, b"k" * 32, signing_key, "client", envelope)
+
+            self.assertEqual("cross_device_error", events[-1][0])
+            self.assertEqual(bundled.ERR_WRONG_FOLDER, events[-1][1]["code"])
+            auth = server.state.load_json("auth.json", {})
+            self.assertEqual([], auth["agent"]["authorized_project_folders"])
+
+    def test_authorization_uses_requested_args_folder_and_echoes_it(self):
+        bundled = load_bundled_hand_server()
+        with tempfile.TemporaryDirectory() as temp:
+            base = os.path.join(temp, "agent-home")
+            requested = os.path.join(temp, "project")
+            os.mkdir(base)
+            os.mkdir(requested)
+            server = bundled.HandServer(os.path.join(temp, "state"), "device", "test")
+            server.state.save_json("auth.json", {
+                "agent": {"folders": [base], "authorized_project_folders": []}
+            })
+            events = []
+            server._send = lambda conn, key, envelope, kind, args, seq: events.append(args)
+
+            server._do_authorize_project_folder(
+                None, b"", {"task_id": "task"}, 1, "task", "agent",
+                {"folder": requested},
+            )
+
+            result = json.loads(events[-1]["output"])
+            self.assertTrue(result["authorized"])
+            self.assertEqual(requested, result["requested_folder"])
+            self.assertEqual(os.path.realpath(requested), result["folder"])
+            auth = server.state.load_json("auth.json", {})
+            self.assertEqual([os.path.realpath(requested)],
+                             auth["agent"]["authorized_project_folders"])
+            self.assertNotIn(os.path.realpath(base),
+                             auth["agent"]["authorized_project_folders"])
 
 
 class HandServerTest(unittest.TestCase):
@@ -369,6 +500,42 @@ class HandServerTest(unittest.TestCase):
                                        {"path": ""})
         self.assertEqual(events[-1]["type"], "cross_device_error")
         self.assertEqual(events[-1]["args"]["code"], hs.ERR_WRONG_FOLDER)
+
+    def test_authorize_project_folder_requires_existing_absolute_dir_and_is_idempotent(self):
+        self.approve_client()
+        extra = os.path.join(self.tmp.name, "project")
+        os.makedirs(extra)
+        events = self.client.tool_call(
+            "t-grant", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": extra})
+        self.assertEqual(events[-1]["type"], "cross_device_result")
+        result = json.loads(events[-1]["args"]["output"])
+        self.assertTrue(result["authorized"])
+        self.assertFalse(result["already"])
+        self.assertEqual(extra, result["requested_folder"])
+        self.assertEqual("fake-agent", result["agent_id"])
+        self.assertIn(os.path.realpath(extra), self.server.authorized_folders("fake-agent"))
+
+        repeated = self.client.tool_call(
+            "t-grant-retry", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": extra})
+        self.assertTrue(json.loads(repeated[-1]["args"]["output"])["already"])
+
+        relative = self.client.tool_call(
+            "t-grant-relative", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": "relative/project"})
+        self.assertEqual(relative[-1]["type"], "cross_device_error")
+        self.assertEqual(relative[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
+
+    def test_authorize_project_folder_rejects_missing_directory(self):
+        self.approve_client()
+        missing = os.path.join(self.tmp.name, "missing")
+        events = self.client.tool_call(
+            "t-grant-missing", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": missing})
+        self.assertEqual(events[-1]["type"], "cross_device_error")
+        self.assertEqual(events[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
+        self.assertNotIn(missing, self.server.authorized_folders("fake-agent"))
 
     # -- run / 控制 ----------------------------------------------------------
 

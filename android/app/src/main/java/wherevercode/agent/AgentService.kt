@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import wherevercode.agent.core.dispatch.McpDispatchRuntime
 
 /**
  * Foreground service: keeps the agent process in the foreground class while
@@ -31,11 +32,17 @@ class AgentService : Service() {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
         startForeground(NOTIFICATION_ID, notification)
+        McpDispatchRuntime.restore(applicationContext)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Keep the service running until explicitly stopped.
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        McpDispatchRuntime.stop()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

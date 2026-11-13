@@ -117,10 +117,9 @@ interface RemoteAgentChatPort {
      *   cross_device_error，调用方按 Blocked 如实报告同步失败。
      * 不走 project_folders.json、不走 project-folder CLI——那两个
      * 方案已被新口径取代。
-     * 注意：信封 folder 绝不能填 Agent 已授权的文件夹
-     * （target.folder）——Hand 从不读 args["folder"]，那样只会把
-     * 已授权的文件夹再授权一遍、回 already=true 的“假成功”，项目
-     * 文件夹实际没进授权表（2026-11-12 集成缺口，已修）。
+     * 信封 folder 与凭证继续绑定 Agent 已授权的 target.folder；待授权
+     * 目录仅在 args.folder。Hand 必须把 args.folder 写入项目授权列表，
+     * 并回显 requested_folder 与 agent_id，客户端据此校验本次授权。
      *
      * 默认实现直接拒绝：只有真正接 Hand 的端口才实现它
      * （[HandRemoteAgentChatPort]）；测试替身不实现也不影响编译。
@@ -306,20 +305,15 @@ class HandRemoteAgentChatPort(
                 HandProtocol.Errors.NOT_AUTHORIZED,
             ),
         )
-        // D2：授权动作本身不执行命令，不带 control 栅栏快照。信封
-        // folder 必须是待授权的项目文件夹（folder 参数），凭证绑它——
-        // Hand 的 verify 例外正是为这个形状准备的：它把信封 folder
-        // 临时并入授权表再校验，凭证 folder 与信封 folder 须一致。
-        // 旧写法曾把信封 folder 填成 Agent 已授权的文件夹
-        // （target.folder），只把项目文件夹放 args["folder"]，Hand
-        // 从不读 args["folder"]，结果是把已授权的文件夹再授权一遍、
-        // 回 already=true 的“假成功”，项目文件夹实际没进授权表。
+        // 授权请求仍用 Agent 已授权目录签发任务凭证；待授权项目目录
+        // 仅放在 args 中。Hand 先按常规流程验证配对、密封信封与凭证，
+        // 再执行显式授权动作，不能用“待授权目录”绕过凭证的 grant 校验。
         return client.call(
             HandCallRequest(
                 taskId = "authorize-${UUID.randomUUID().toString().replace("-", "")}",
                 agentId = target.agentId,
                 peer = target.peer,
-                folder = folder,
+                folder = target.folder,
                 action = "authorize_project_folder",
                 args = mapOf(
                     "agent_id" to target.agentId,

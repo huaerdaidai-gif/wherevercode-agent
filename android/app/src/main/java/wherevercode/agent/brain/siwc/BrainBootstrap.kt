@@ -1,6 +1,7 @@
 package wherevercode.agent.brain.siwc
 
 import android.content.Context
+import java.util.UUID
 import kotlinx.coroutines.flow.collect
 import wherevercode.agent.AgentDiscovery
 import wherevercode.agent.AgentRunner
@@ -59,6 +60,7 @@ import wherevercode.agent.core.autonomy.AutonomyGate
 import wherevercode.agent.core.autonomy.AutonomyStore
 import wherevercode.agent.core.autonomy.DefaultAutonomyGate
 import wherevercode.agent.core.control.ControlPlane
+import wherevercode.agent.core.control.ControlAction
 import wherevercode.agent.core.control.RoomControlAuditLog
 import wherevercode.agent.core.control.RoomControlStore
 import wherevercode.agent.core.mcp.RemoteControlSender
@@ -128,6 +130,7 @@ import wherevercode.agent.core.task.SharedPreferencesEvalLogStore
 import wherevercode.agent.core.task.SharedPreferencesRoutingDecisionLog
 import wherevercode.agent.core.task.SharedPreferencesRouterSettings
 import wherevercode.agent.core.task.TaskDatabase
+import wherevercode.agent.core.task.TaskDatabaseProvider
 import wherevercode.agent.core.task.TaskEventStore
 import wherevercode.agent.core.task.TaskExecutionResult
 import wherevercode.agent.core.task.TaskExecutor
@@ -447,13 +450,10 @@ object BrainBootstrap {
         val turnController: TurnController,
         /** UI V2 任务页：真实持久任务库。阶段 1 起聊天轮次经 TurnTaskRecorder 自动写入。 */
         val taskStore: TaskStore,
-        /**
-         * 阶段 1（U3 dispatch 最小链）：任务调度器。App 内第一次实例化：
-         * 此前 TaskScheduler 全 App 零实例化，dispatch_task 只入队无人认领。
-         * freezePort 传 null（文档约定的 pre-M2 行为）：认领仍受单任务
-         * 规则约束，ControlPlane 冻结接线是阶段 3 / U4 的工作。
-         */
+        /** App task scheduler sharing the persistent control-plane freeze gate. */
         val taskScheduler: TaskScheduler,
+        /** Same control authority used by MCP dispatch, remote pumps, and UI commands. */
+        val controlPlane: ControlPlane? = null,
         /** 阶段 1：每任务执行步骤（V5 C1 起 Room 持久化，重启仍在）。 */
         val taskStepStore: TaskStepStore,
         /** a-3 交付卡：任务交付卡存储（进程内，见 InMemoryDeliveryCardStore）。 */
@@ -767,7 +767,7 @@ object BrainBootstrap {
         // 阶段 3（A1 P1）：数据库实例只建一次——任务库、授权、撤销、
         // 会话账本共用同一 TaskDatabase（会话表与任务表同一库，见
         // TaskDatabase MIGRATION_1_2 注释）。
-        val taskDb = TaskDatabase.create(appContext)
+        val taskDb = TaskDatabaseProvider.get(appContext)
         val taskStore = RoomTaskStore(taskDb)
         // V5 Phase B C1（W2）：会话历史、任务步骤、配对记录改走 Room
         // （与任务库同一 TaskDatabase，version 3）。见 roomStoresOrMemory：
@@ -783,9 +783,10 @@ object BrainBootstrap {
         // Room，同一 TaskDatabase version 8；探针失败回退内存，见
         // roomTaskEventStoreOrMemory）。
         val taskEventStore: TaskEventStore = roomTaskEventStoreOrMemory(taskDb)
-        // 阶段 1（U3）：任务步骤与调度器。调度器此前全 App
-        // 零实例化；freezePort 传 null（pre-M2 行为，见 BrainComponents）。
-        val taskScheduler = TaskScheduler(taskStore, AgentDiscovery(appContext), null)
+        // 调度与控制共用同一个持久化状态源，保证 MCP / 本机入口的
+        // PAUSING、PAUSED、STOPPING 冻结在所有认领路径一致生效。
+        val controlStore = RoomControlStore(taskDb)
+        val taskScheduler = TaskScheduler(taskStore, AgentDiscovery(appContext), controlStore)
         // P2 流水线（2026-11-11）：流水线态 + verdict 历史（Room，
         // 同一 TaskDatabase version 9；探针失败回退内存）与协调器；
         // 本地执行器经钩子查它（plan 未批准不认领、编码完成停 review）。
@@ -868,7 +869,7 @@ object BrainBootstrap {
         val autonomyGate: AutonomyGate = DefaultAutonomyGate(
             autonomyStore,
             RoomControlAuditLog(taskDb.controlAuditDao()),
-            RoomControlStore(taskDb),
+            controlStore,
         )
 
         val toolRegistry = ToolRegistry(
@@ -1301,6 +1302,7 @@ object BrainBootstrap {
             taskStore,
             authStore,
             RoomRevocationStore(taskDb),
+            controlStore = controlStore,
             remoteTargetResolver = remoteTargetResolver,
             remoteControlSender = remoteControlSender,
         )
@@ -1431,6 +1433,30 @@ object BrainBootstrap {
             // P2：plan 未批准不认领、编码完成停 review（见 LocalTaskRunner）。
             pipelineHook = pipelineHook,
         )
+        controlPlane.configureLocalExecutionControl(
+            isExecuting = { taskId -> taskRunner.isExecuting(taskId) },
+        ) { taskId, action ->
+            // TurnController is shared with foreground chat. Never let a
+            // stale/orphaned task control interrupt a different live turn.
+            if (!taskRunner.isExecuting(taskId)) return@configureLocalExecutionControl false
+            val task = taskStore.getTask(taskId) ?: return@configureLocalExecutionControl false
+            if (!task.assignedAgentId.equals(LocalTaskRunner.LOCAL_AGENT_ID, ignoreCase = true)) {
+                return@configureLocalExecutionControl false
+            }
+            when (action) {
+                ControlAction.PAUSE -> turnController.pause()
+                ControlAction.STOP -> turnController.stop()
+                else -> false
+            }
+        }
+        taskRunner.onControlCheckpoint = { taskId, outcome ->
+            val operationId = "local-control-${UUID.randomUUID()}"
+            when (outcome) {
+                "paused" -> controlPlane.confirmPaused(taskId, operationId, "本机执行器到达大脑安全检查点")
+                "stopped" -> controlPlane.confirmStop(taskId, operationId, "本机执行器到达大脑安全检查点")
+            }
+        }
+        taskRunner.onLeaseSweep = { controlPlane.reconcileExpiredLocalControls() }
 
         val components = BrainComponents(
             engine = engine,
@@ -1461,6 +1487,7 @@ object BrainBootstrap {
             turnController = turnController,
             taskStore = taskStore,
             taskScheduler = taskScheduler,
+            controlPlane = controlPlane,
             taskStepStore = taskStepStore,
             deliveryStore = deliveryStore,
             taskEventStore = taskEventStore,

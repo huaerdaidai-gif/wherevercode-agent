@@ -1,5 +1,6 @@
 package wherevercode.agent.core.team
 
+import wherevercode.agent.core.task.testTaskScheduler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -123,10 +124,10 @@ class RemoteTaskPumpTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = ScriptedPort(events, onRun)
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         // P1 eval 日志：泵配记录器；不配时行为与原来完全一致。
         val evalLogStore = InMemoryEvalLogStore()
         val pump = RemoteTaskPump(
@@ -192,6 +193,18 @@ class RemoteTaskPumpTest {
             updatedAt = now,
             version = 1,
         )
+
+    @Test
+    fun `remote pump leaves MCP tasks for their assigned dispatcher`() = runBlocking {
+        val env = setup(listOf(HandEvent.Result(2, "must not execute")))
+        env.taskStore.createTask(
+            queuedRemoteTask().copy(taskId = "mcp-agent-name-collision", assignedAgentId = "example-agent"),
+        )
+
+        assertFalse(env.pump.pumpOnce())
+        assertEquals("queued", env.taskStore.getTask("mcp-agent-name-collision")?.state)
+        assertTrue(env.port.calls.isEmpty())
+    }
 
     @Test
     fun `pump claims remote task and lands completed with result`() = runBlocking {

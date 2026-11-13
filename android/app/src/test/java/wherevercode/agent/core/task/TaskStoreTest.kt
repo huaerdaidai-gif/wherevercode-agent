@@ -285,6 +285,31 @@ class TaskStoreTest {
     }
 
     @Test
+    fun `expired lease of a PAUSING task is preserved for control reconciliation`() {
+        store.createTask(record("t1"))
+        store.updateTask(
+            "t1",
+            mapOf(
+                "state" to "assigned",
+                "assigned_agent_id" to "local",
+                "lease_owner" to "local",
+                "lease_expires_at" to (1_700_000_000L + 90),
+            ),
+            1, 1, 1,
+        )
+        store.updateTask("t1", mapOf("state" to "working"), 2, 1, 1)
+        db.controlDao().upsertState(ControlStateEntity("t1", status = "PAUSING", dispatchFrozen = true))
+
+        val expired = store.expireLeases(1_700_000_000L + 91)
+
+        assertTrue(expired.isEmpty())
+        val task = store.getTask("t1")
+        assertEquals("working", task?.state)
+        assertEquals(true, task?.needsAttention)
+        assertEquals("local", task?.leaseOwner)
+    }
+
+    @Test
     fun `expired lease of a STOPPING task only flags attention, never re-queues`() {
         store.createTask(record("t1"))
         store.updateTask(

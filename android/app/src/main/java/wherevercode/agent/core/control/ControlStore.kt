@@ -138,6 +138,7 @@ data class StoredOperation(
 )
 
 interface ControlStore : DispatchFreezePort {
+    override fun <T> runDispatchTransaction(block: () -> T): T = runTransaction(block)
     /** Current GoalVersion for [taskId]; 1 when no row exists yet (U3). */
     fun goalVersion(taskId: String): Long
 
@@ -259,29 +260,25 @@ class InMemoryControlStore(
         }
     }
 
-    override fun <T> runTransaction(block: () -> T): T {
+    override fun <T> runTransaction(block: () -> T): T = synchronized(lock) {
         // Snapshot/restore gives the in-memory store real rollback
         // semantics, so a failing audit write rolls the command back
         // exactly like the Room transaction does in production.
         val snapshotCounters: Map<String, ControlCounterEntity>
         val snapshotStates: Map<String, ControlStateEntity>
         val snapshotOperations: Map<String, StoredOperation>
-        synchronized(lock) {
-            snapshotCounters = counters.toMap()
-            snapshotStates = states.toMap()
-            snapshotOperations = operations.toMap()
-        }
+        snapshotCounters = counters.toMap()
+        snapshotStates = states.toMap()
+        snapshotOperations = operations.toMap()
         try {
-            return block()
+            block()
         } catch (e: Exception) {
-            synchronized(lock) {
-                counters.clear()
-                counters.putAll(snapshotCounters)
-                states.clear()
-                states.putAll(snapshotStates)
-                operations.clear()
-                operations.putAll(snapshotOperations)
-            }
+            counters.clear()
+            counters.putAll(snapshotCounters)
+            states.clear()
+            states.putAll(snapshotStates)
+            operations.clear()
+            operations.putAll(snapshotOperations)
             throw e
         }
     }

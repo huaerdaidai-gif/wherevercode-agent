@@ -108,7 +108,7 @@ class PlatformAgentFormTest {
         val first = (build(platformChannelId = "chan-v5-dedicated") as PlatformAgentForm.Result.Ok).record
         val second = (build(platformChannelId = "  ", existing = first) as PlatformAgentForm.Result.Ok).record
         assertEquals(null, second.platformChannelId)
-        assertTrue(PlatformAgent.isSharedChannel(second.platformChannelId))
+        assertTrue(!PlatformAgent.isSharedChannel(second.platformChannelId))
     }
 
     @Test

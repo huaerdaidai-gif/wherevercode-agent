@@ -181,9 +181,10 @@ interface TaskDao {
     fun updateCounters(taskId: String, goalVersion: Long, authEpoch: Long): Int
 
     /**
-     * Expired leases, excluding tasks whose control state is PAUSED or
-     * STOPPING (same database, anti-join on control_state, U5): a
-     * paused/stopping task is never silently returned to queued.
+     * Expired leases, excluding tasks whose control state is PAUSING,
+     * PAUSED or STOPPING (same database, anti-join on control_state, U5):
+     * a controlled task is never silently returned to queued before the
+     * control request is reconciled.
      *
      * P0: only dispatched tasks (`sessionId IS NULL`). Chat-turn mirrors
      * (TurnTaskRecorder) always carry a sessionId and take a claim lease
@@ -195,17 +196,17 @@ interface TaskDao {
             "AND leaseExpiresAt <= :now AND state IN ('assigned', 'working') " +
             "AND sessionId IS NULL " +
             "AND NOT EXISTS (SELECT 1 FROM control_state WHERE control_state.taskId = tasks.taskId " +
-            "AND control_state.status IN ('PAUSED', 'STOPPING'))",
+            "AND control_state.status IN ('PAUSING', 'PAUSED', 'STOPPING'))",
     )
     fun expiredLeases(now: Long): List<TaskEntity>
 
-    /** Expired leases of PAUSED/STOPPING tasks: flagged, never re-queued (see [expireLeases]). */
+    /** Expired leases of PAUSING/PAUSED/STOPPING tasks: flagged, never re-queued (see [expireLeases]). */
     @Query(
         "SELECT * FROM tasks WHERE leaseExpiresAt IS NOT NULL " +
             "AND leaseExpiresAt <= :now AND state IN ('assigned', 'working') " +
             "AND sessionId IS NULL " +
             "AND EXISTS (SELECT 1 FROM control_state WHERE control_state.taskId = tasks.taskId " +
-            "AND control_state.status IN ('PAUSED', 'STOPPING'))",
+            "AND control_state.status IN ('PAUSING', 'PAUSED', 'STOPPING'))",
     )
     fun expiredLeasesPaused(now: Long): List<TaskEntity>
 
@@ -852,6 +853,15 @@ abstract class TaskDatabase : RoomDatabase() {
     }
 }
 
+/** One Room instance for all app components using the primary task database. */
+object TaskDatabaseProvider {
+    @Volatile private var instance: TaskDatabase? = null
+
+    fun get(context: Context): TaskDatabase = instance ?: synchronized(this) {
+        instance ?: TaskDatabase.create(context.applicationContext).also { instance = it }
+    }
+}
+
 /**
  * ControlPlane-only port for persisting bumped counters on the task row
  * (M2). Lives in core/task so core/task never imports core/control
@@ -880,6 +890,8 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
     private val dao: TaskDao = db.taskDao()
     private val eventDao: TaskEventDao = db.taskEventDao()
     private val lock = Any()
+
+    override fun <T> withTaskLock(block: () -> T): T = synchronized(lock) { block() }
 
     override fun createTask(record: TaskRecord): TaskRecord {
         TaskStates.checkTransition(null, record.state)
@@ -1257,7 +1269,7 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
                 }
             }
         }
-        // M2: PAUSED/STOPPING tasks with an expired lease are only flagged
+        // M2: PAUSING/PAUSED/STOPPING tasks with an expired lease are only flagged
         // needs_attention (the lease and state are left untouched, the id
         // is NOT returned): the user owns the paused task, the scheduler
         // must not silently re-queue it. P0: the expiry is still written

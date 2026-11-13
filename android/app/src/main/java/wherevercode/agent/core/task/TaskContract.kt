@@ -161,6 +161,14 @@ data class TaskRecord(
         get() = KanbanStatus.columnOf(state)
 }
 
+/** Reserved task ID namespace for work created by the standalone MCP dispatcher. */
+object TaskOrigins {
+    const val MCP_DISPATCH_PREFIX: String = "mcp-"
+
+    fun isMcpDispatchTask(taskId: String): Boolean =
+        taskId.startsWith(MCP_DISPATCH_PREFIX, ignoreCase = true)
+}
+
 /**
  * Minimal store interface the scheduler and tools depend on.
  * Implementations must validate identifiers and fields and raise
@@ -183,6 +191,8 @@ interface TaskStore {
         expectedGoalVersion: Long,
         expectedAuthEpoch: Long,
     ): TaskRecord?
+    /** Serialize compound task/control transitions with this store's writes. */
+    fun <T> withTaskLock(block: () -> T): T = block()
     /** Expire claim leases older than [nowEpochSeconds]; returns the expired task ids. */
     fun expireLeases(nowEpochSeconds: Long): List<String>
 

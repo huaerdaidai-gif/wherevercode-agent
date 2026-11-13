@@ -1,5 +1,6 @@
 package wherevercode.agent.core.team
 
+import wherevercode.agent.core.task.testTaskScheduler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -70,7 +71,7 @@ class TaskAttemptFenceTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val runner = LocalTaskRunner(
             taskStore,
             scheduler,
@@ -138,7 +139,7 @@ class TaskAttemptFenceTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = FencePort(
             listOf(HandEvent.Result(3, "calculator.py 已写好，测试通过")),
@@ -150,7 +151,7 @@ class TaskAttemptFenceTest {
                 checkNotNull(reclaimed) { "回队后重认领应成功" }
             },
         )
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         val pump = RemoteTaskPump(
             taskStore = taskStore,
             scheduler = scheduler,

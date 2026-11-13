@@ -167,6 +167,14 @@ class LocalTaskRunner(
     @Volatile
     var onTasksChanged: (() -> Unit)? = null
 
+    /** Called only after a cooperative pause/stop reached the engine safe point. */
+    @Volatile
+    var onControlCheckpoint: ((String, String) -> Unit)? = null
+
+    /** Reconcile persisted local controls after expired leases are swept. */
+    @Volatile
+    var onLeaseSweep: (() -> Unit)? = null
+
     fun isExecuting(): Boolean = executingTaskId != null
 
     fun isExecuting(taskId: String): Boolean = executingTaskId == taskId
@@ -244,6 +252,11 @@ class LocalTaskRunner(
         } catch (_: Exception) {
             // Sweep failure never kills the pump; next round retries.
         }
+        try {
+            onLeaseSweep?.invoke()
+        } catch (_: Exception) {
+            // Control reconciliation is retried on the next sweep.
+        }
         val candidate = pickNext() ?: return
         if (scheduler.activeWorkCount() != 0) return
         val claimed = scheduler.claimTask(candidate.taskId, LOCAL_AGENT_ID) ?: return
@@ -270,6 +283,10 @@ class LocalTaskRunner(
         }
         return tasks
             .filter { TaskStates.isClaimable(it.state) && it.sessionId == null }
+            // The MCP namespace is reserved for the dispatcher and its
+            // assigned executor. Do not let a queued/unassigned MCP task
+            // become eligible for the local brain.
+            .filterNot { TaskOrigins.isMcpDispatchTask(it.taskId) }
             // P2：plan 未批准的流水线任务不认领编码（等用户批准 plan）；
             // 未启用流水线的任务钩子一律放行。
             .filter { pipelineHook?.canStartCoding(it.taskId) ?: true }
@@ -298,6 +315,7 @@ class LocalTaskRunner(
         }
         return tasks.filter { task ->
             TaskStates.isClaimable(task.state) && task.sessionId == null &&
+                !TaskOrigins.isMcpDispatchTask(task.taskId) &&
                 task.assignedAgentId != null &&
                 isRemoteMember(task.assignedAgentId!!)
         }
@@ -406,6 +424,23 @@ class LocalTaskRunner(
 
     private fun finishTask(taskId: String, result: TaskExecutionResult, attemptId: String?, startedAtMs: Long) {
         stepStore.closeRunningSteps(taskId)
+        val controlCode = when {
+            result.error?.startsWith("turn_paused") == true -> "paused"
+            result.error?.startsWith("turn_stopped") == true -> "stopped"
+            else -> null
+        }
+        if (controlCode != null) {
+            // Pause and stop are confirmed only after the brain reports its
+            // next safe point. A blocked/non-cooperative tool remains in its
+            // real in-flight state until it returns; no false acknowledgement.
+            if (controlCode == "paused") {
+                finishAsPaused(taskId, "任务已在安全检查点暂停，可恢复后继续。", attemptId)
+            } else {
+                finishAsCancelled(taskId, "任务已在安全检查点停止。", attemptId, startedAtMs)
+            }
+            onControlCheckpoint?.invoke(taskId, controlCode)
+            return
+        }
         // 终态写真的落盘了才记技能、才刷 UI：围栏丢弃（任务已被回队
         // 重认领）时，本次执行的结果不是这行任务的终态，不记技能。
         // 2026-11-11（22:46 本地重试复现）：生产执行器只按“轮次跑完
@@ -511,6 +546,12 @@ class LocalTaskRunner(
         // P1 eval 日志（取消也是终态结论，记一条；outcome=CANCELLED）。
         recordEval(taskId, EvalOutcome.CANCELLED, startedAtMs)
         onTasksChanged?.invoke()
+    }
+
+    /** Keep a safely paused task resumable; cancellation is terminal. */
+    private fun finishAsPaused(taskId: String, note: String, attemptId: String?) {
+        val landed = updateTask(taskId, mapOf("state" to "requeued", "result" to note), attemptId) != null
+        if (landed) onTasksChanged?.invoke()
     }
 
     /**

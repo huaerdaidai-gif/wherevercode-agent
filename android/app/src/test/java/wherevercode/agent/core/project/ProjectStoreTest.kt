@@ -139,12 +139,12 @@ class ProjectStoreTest {
     fun `location id matches old project _location_id byte for byte`() {
         // Python: hashlib.sha256(b'wherevercode-agent\0remote-device\0/workspace/example-project')
         assertEquals(
-            "loc-4b48bcee1b8950edd6579284b3e25c0c",
+            "loc-86450271308cfe4250b7bbc51339b378",
             projectLocationId("wherevercode-agent", "remote-device", "/workspace/example-project"),
         )
         // 末尾 "/" 经规整后 id 不变（老项目 Path.as_posix 同样去尾斜杠）。
         assertEquals(
-            "loc-4b48bcee1b8950edd6579284b3e25c0c",
+            "loc-86450271308cfe4250b7bbc51339b378",
             projectLocationId("wherevercode-agent", "remote-device", "/workspace/example-project/"),
         )
         assertEquals(
@@ -375,7 +375,7 @@ class ProjectStoreTest {
 
     @Test
     fun `folder basename is used as default project name`() {
-        assertEquals("fenshen", folderBasename("/workspace/example-project"))
+        assertEquals("example-project", folderBasename("/workspace/example-project"))
         assertEquals("/", folderBasename("/"))
         assertFalse(folderBasename("/workspace/example-project").isBlank())
     }

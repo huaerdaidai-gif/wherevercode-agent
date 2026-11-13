@@ -50,15 +50,15 @@ class RemoteFolderParseTest {
 
     @Test
     fun `folder basename`() {
-        assertEquals("fenshen", folderBasename("/workspace/example-project"))
-        assertEquals("fenshen", folderBasename("/workspace/example-project/"))
+        assertEquals("example-project", folderBasename("/workspace/example-project"))
+        assertEquals("example-project", folderBasename("/workspace/example-project/"))
         assertEquals("/", folderBasename("/"))
-        assertEquals("work", folderBasename("/workspace"))
+        assertEquals("workspace", folderBasename("/workspace"))
     }
 
     @Test
     fun `join folder path`() {
-        assertEquals("/workspace/example-project", joinFolderPath("/workspace", "fenshen"))
+        assertEquals("/workspace/example-project", joinFolderPath("/workspace", "example-project"))
         assertEquals("/workspace", joinFolderPath("/workspace", ""))
         assertEquals("/workspace", joinFolderPath("/workspace/", "/"))
         assertEquals("/a/b/c", joinFolderPath("/a", "b/c"))
@@ -71,6 +71,41 @@ class RemoteFolderParseTest {
         assertTrue(isAbsoluteFolderPath("  /workspace  "))
         assertFalse(isAbsoluteFolderPath("root/work"))
         assertFalse(isAbsoluteFolderPath(""))
+    }
+
+    @Test
+    fun `project folder authorization requires explicit matching acknowledgement`() {
+        val ack = parseProjectFolderAuthorizationAck(
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"remote-agent","already":false,"folder":"/work/project"}""",
+            "/work/project",
+            "remote-agent",
+        )
+        assertEquals(ProjectFolderAuthorizationAck("/work/project", false), ack)
+
+        val repeated = parseProjectFolderAuthorizationAck(
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"remote-agent","already":true,"folder":"/work/project"}""",
+            "/work/project",
+            "remote-agent",
+        )
+        assertTrue(repeated.already)
+    }
+
+    @Test
+    fun `generic success or mismatched Hand acknowledgement is rejected`() {
+        listOf(
+            "authorized",
+            """{"already":true,"folder":"/work/other"}""",
+            """{"authorized":true,"requested_folder":"/work/other","agent_id":"remote-agent","already":true,"folder":"/work/other"}""",
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"wrong-agent","already":true,"folder":"/work/project"}""",
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"remote-agent","already":"true","folder":"/work/project"}""",
+        ).forEach { output ->
+            try {
+                parseProjectFolderAuthorizationAck(output, "/work/project", "remote-agent")
+                org.junit.Assert.fail("未绑定当前请求的授权回执必须拒绝")
+            } catch (_: IllegalArgumentException) {
+                // Expected.
+            }
+        }
     }
 
     @Test

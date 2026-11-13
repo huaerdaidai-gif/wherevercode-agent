@@ -1,5 +1,6 @@
 package wherevercode.agent.core.team
 
+import wherevercode.agent.core.task.testTaskScheduler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -131,10 +132,10 @@ class RemoteTaskPumpFolderFallbackTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = ScriptedPort(listOf(HandEvent.Result(3, "改好了，测试通过")))
-        val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)
+        val dispatcher = RemoteTaskDispatcher(taskStore, scheduler, stepStore, port)
         val pump = RemoteTaskPump(
             taskStore = taskStore,
             scheduler = scheduler,

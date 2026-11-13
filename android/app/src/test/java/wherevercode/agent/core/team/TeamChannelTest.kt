@@ -136,15 +136,15 @@ class TeamChannelTest {
             record("example-agent", "Example Agent", kind = AgentKind.CLOUD, brainKind = BrainKind.PLATFORM_AGENT, adapterId = "platform-agent"),
         )
         val members = buildChannelMembers(agents)
-        assertEquals(9, members.size)
+        assertEquals(8, members.size)
         assertEquals("local-app", members.first().agentId)
         assertTrue(members.first().isLocalApp)
         assertEquals(
-            listOf("manus", "codebuddy", "opencode", "claude", "example-agent", "agy", "codex", "example-agent"),
+            listOf("manus", "codebuddy", "opencode", "claude", "example-agent", "agy", "codex"),
             members.drop(1).map { it.agentId },
         )
         // 只有平台 Agent 标出来（端点直连，中转时跳过它）。
-        assertEquals(listOf("example-agent"), members.filter { it.isPlatformAgent }.map { it.agentId })
+        assertEquals(emptyList<String>(), members.filter { it.isPlatformAgent }.map { it.agentId })
     }
 
     @Test

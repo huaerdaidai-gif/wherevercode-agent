@@ -1,5 +1,6 @@
 package wherevercode.agent.core.team
 
+import wherevercode.agent.core.task.testTaskScheduler
 import android.content.Context
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -51,7 +52,7 @@ class MemberDispatchTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val memberStore = InMemoryTeamMemberStore()
         val manager = MemberManager(memberStore, InMemoryAuditLog(), nowSeconds = { now })
         val dispatcher = MemberDispatcher(taskStore, memberStore, scheduler, nowSeconds = { now })
@@ -189,6 +190,23 @@ class MemberDispatchTest {
         // 恢复后可正常分派。
         assertTrue(control.resumeTask("t1"))
         assertTrue(dispatcher.dispatch("t1", "codex-mac") is MemberDispatchResult.Assigned)
+    }
+
+    @Test
+    fun `member dispatcher cannot route MCP task to a same named remote agent`() {
+        val (taskStore, _, manager, dispatcher, _) = setup()
+        connectedMember(manager)
+        taskStore.createTask(
+            TaskRecord(
+                taskId = "mcp-codex-cli-collision", projectId = "proj-a", title = "MCP task",
+                state = "queued", assignedAgentId = "codex-cli",
+            ),
+        )
+
+        val result = dispatcher.dispatch("mcp-codex-cli-collision", "codex-mac")
+
+        assertTrue(result is MemberDispatchResult.Refused)
+        assertEquals("queued", taskStore.getTask("mcp-codex-cli-collision")?.state)
     }
 
     @Test

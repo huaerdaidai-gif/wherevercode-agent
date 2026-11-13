@@ -86,7 +86,7 @@ class PipelineRunnerTest {
     fun setUp() {
         db = TaskDatabase.inMemory(RuntimeEnvironment.getApplication())
         taskStore = RoomTaskStore(db)
-        scheduler = TaskScheduler(taskStore, AgentDiscovery(RuntimeEnvironment.getApplication()), null)
+        scheduler = testTaskScheduler(taskStore, AgentDiscovery(RuntimeEnvironment.getApplication()))
         pipelineStore = RoomPipelineStore(db)
         orchestrator = PipelineOrchestrator(taskStore, scheduler, pipelineStore, nowSeconds = { now })
         events = RoomTaskEventStore(db)

@@ -235,7 +235,7 @@ class A2aClientTest {
             A2aClient.agentCardUrl("192.0.2.10"),
         )
         assertEquals(
-            "https://example.invalid/api/open/v1/a2a",
+            "",
             A2aClient.a2aEndpoint(null),
         )
     }

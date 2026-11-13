@@ -56,8 +56,8 @@ android {
         // Cost: no Google Play (Play requires targetSdk 35 since 2025-08-31).
         // This spike ships as a sideloaded APK, per the task.
         targetSdk = 28
-        versionCode = 2
-        versionName = "0.2.0-ui2"
+        versionCode = 5
+        versionName = "0.2.0-ui4"
 
         // V5 C1：真实版本信息（commitSha / buildTimeUtc 见文件顶部）。
         buildConfigField("String", "COMMIT_SHA", "\"$commitSha\"")
@@ -84,8 +84,16 @@ android {
     // No shared private key or signing password is stored in this repository.
     // APKs signed with a new key cannot update installations signed by the
     // historical pinned debug key; users may need to uninstall first.
-    
     buildTypes {
+        debug {
+            // CI/debug installs coexist with the established app and its data.
+            applicationIdSuffix = ".ci"
+        }
+        create("compat") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ""
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
         }

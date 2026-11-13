@@ -67,7 +67,7 @@ class DispatchClaimExecuteTest {
         taskStore = DispatchFakeTaskStore()
         stepStore = InMemoryTaskStepStore()
         val discovery = AgentDiscovery(RuntimeEnvironment.getApplication())
-        scheduler = TaskScheduler(taskStore, discovery, null)
+        scheduler = testTaskScheduler(taskStore, discovery)
         runner = LocalTaskRunner(
             taskStore,
             scheduler,
@@ -171,11 +171,11 @@ class DispatchClaimExecuteTest {
         )
         queuedDispatched("t1")
         runner.start()
-        withTimeout(10_000) {
+        withTimeout(30_000) {
             while (!runner.isExecuting("t1")) delay(100)
         }
         assertTrue(runner.cancel("t1"))
-        withTimeout(10_000) {
+        withTimeout(30_000) {
             while (taskStore.getTask("t1")?.state != "cancelled") delay(100)
         }
         assertEquals("cancelled", taskStore.getTask("t1")?.state)

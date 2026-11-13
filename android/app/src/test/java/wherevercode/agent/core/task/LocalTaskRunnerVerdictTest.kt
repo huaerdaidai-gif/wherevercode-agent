@@ -42,10 +42,9 @@ class LocalTaskRunnerVerdictTest {
     @Before
     fun setUp() {
         taskStore = DispatchFakeTaskStore()
-        scheduler = TaskScheduler(
+        scheduler = testTaskScheduler(
             taskStore,
             AgentDiscovery(RuntimeEnvironment.getApplication()),
-            null,
         )
     }
 
@@ -131,6 +130,44 @@ class LocalTaskRunnerVerdictTest {
             val task = taskStore.getTask("local-4")!!
             assertEquals("failed", task.state)
             assertTrue(task.error!!.contains("工具执行异常"))
+        } finally {
+            runner.stop()
+        }
+    }
+
+    @Test
+    fun `cooperative pause requeues task and acknowledges at safe point`() = runBlocking {
+        val id = "local-pause"
+        queued(id)
+        val runner = runnerWith(TaskExecutionResult(success = false, summary = "", error = "turn_paused：安全检查点"))
+        var acknowledged: String? = null
+        runner.onControlCheckpoint = { taskId, outcome ->
+            assertEquals(id, taskId)
+            acknowledged = outcome
+        }
+        try {
+            runner.pumpOnce()
+            assertEquals("requeued", taskStore.getTask(id)!!.state)
+            assertEquals("paused", acknowledged)
+        } finally {
+            runner.stop()
+        }
+    }
+
+    @Test
+    fun `cooperative stop cancels task and acknowledges at safe point`() = runBlocking {
+        val id = "local-stop"
+        queued(id)
+        val runner = runnerWith(TaskExecutionResult(success = false, summary = "", error = "turn_stopped：安全检查点"))
+        var acknowledged: String? = null
+        runner.onControlCheckpoint = { taskId, outcome ->
+            assertEquals(id, taskId)
+            acknowledged = outcome
+        }
+        try {
+            runner.pumpOnce()
+            assertEquals("cancelled", taskStore.getTask(id)!!.state)
+            assertEquals("stopped", acknowledged)
         } finally {
             runner.stop()
         }

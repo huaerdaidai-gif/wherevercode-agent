@@ -41,7 +41,7 @@ class LocalTaskRunnerAssignTest {
     fun setUp() {
         taskStore = DispatchFakeTaskStore()
         val discovery = AgentDiscovery(RuntimeEnvironment.getApplication())
-        scheduler = TaskScheduler(taskStore, discovery, null)
+        scheduler = testTaskScheduler(taskStore, discovery)
         runner = LocalTaskRunner(
             taskStore,
             scheduler,
@@ -102,5 +102,16 @@ class LocalTaskRunnerAssignTest {
         assertEquals("completed", taskStore.getTask("mine-1")?.state)
         assertEquals("queued", taskStore.getTask("other-1")?.state)
         assertEquals("codex", taskStore.getTask("other-1")?.assignedAgentId)
+    }
+
+    @Test
+    fun `unassigned MCP task is reserved for dispatcher and does not block local task`() = runBlocking {
+        queued("mcp-unassigned", createdAt = 1_700_000_000L)
+        queued("local-1", assignedAgentId = LocalTaskRunner.LOCAL_AGENT_ID, createdAt = 1_700_000_001L)
+
+        runner.pumpOnce()
+
+        assertEquals("queued", taskStore.getTask("mcp-unassigned")?.state)
+        assertEquals("completed", taskStore.getTask("local-1")?.state)
     }
 }
