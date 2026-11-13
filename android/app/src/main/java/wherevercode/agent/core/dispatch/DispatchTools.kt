@@ -74,14 +74,14 @@ object DispatchTools {
         ),
         DispatchToolDef(
             ASSIGN_TASK,
-            "把一个未在执行中的任务指派给已登记的执行方（agent/device）。",
+            "把一个经 MCP 创建、未在执行中的任务指派给已登记且有该项目执行权限的执行方（agent/device）；App 内任务不能经 MCP 改派。",
             DispatchCapability.DISPATCH,
             schema(listOf("task_id", "agent_id"), TASK_ID, "agent_id" to str("执行方 principal id", 64), EXPECTED_VERSION, IDEM),
             mutating = true,
         ),
         DispatchToolDef(
             GET_TASK_STATUS,
-            "查询任务状态、控制状态、最近进度与结果。派工方只能查自己建的任务，执行方只能查指派给自己的任务。",
+            "查询任务状态、控制状态、最近进度与结果。派工方只能查自己建的任务，执行方只能查指派给自己的任务且只看到自己的进度；assignee_active=false 表示执行方凭据已失效，需改派。",
             DispatchCapability.DISPATCH,
             schema(listOf("task_id"), TASK_ID),
             mutating = false,

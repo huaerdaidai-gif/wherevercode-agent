@@ -242,6 +242,13 @@ class McpDispatchService(
     private fun assignTask(principal: DispatchPrincipal, args: JSONObject): JSONObject {
         val task = requireTask(args)
         requireDispatchScope(principal, task)
+        // Only tasks created through MCP can be handed to an MCP executor: an
+        // App-native task (local runner / chat turn / remote member) assigned
+        // here could never be claimed (executors only see mcp- tasks) and
+        // would be stranded away from its own executor.
+        if (!TaskOrigins.isMcpDispatchTask(task.taskId) || task.sessionId != null) {
+            throw DispatchException(DispatchErrors.FORBIDDEN, "App 内任务不能经 MCP 改派，请在 App 内操作")
+        }
         checkExpectedVersion(args, task)
         val agentId = resolveExecutor(requireText(args, "agent_id", 64), task.projectId)
         if (TaskStates.isTerminal(task.state)) throw terminal(task)
@@ -262,7 +269,11 @@ class McpDispatchService(
         val executorOk = principal.can(DispatchCapability.EXECUTE) && isAssignedTo(principal, task)
         if (!dispatcherOk && !executorOk) throw forbiddenTask()
         val progress = JSONArray()
-        state.progress(task.taskId).forEach { n ->
+        state.progress(task.taskId)
+            // An executor sees only its own notes, not other executors' or
+            // earlier assignees' progress on the same task.
+            .filter { dispatcherOk || it.actor == principal.auditId }
+            .forEach { n ->
             progress.put(JSONObject().apply {
                 put("ts", n.ts); put("actor", n.actor); put("message", n.message)
                 put("percent", n.percent ?: JSONObject.NULL)
@@ -347,6 +358,7 @@ class McpDispatchService(
                 "认领被调度器拒绝：你手上已有执行中的任务，或有任务处于冻结（暂停/停止待确认）",
             )
         val started = startClaim(task.taskId, attemptId)
+        taskStore.recordTaskEvent(task.taskId, EVENT_MCP_CLAIMED, "${principal.id} 认领（第 ${started.attempt} 轮）", principal.auditId)
         return claimResponse(principal, started, resumed = false)
     }
 
@@ -455,6 +467,11 @@ class McpDispatchService(
                 task.version, task.goalVersion, task.authEpoch,
             ) ?: throw notFound(task.taskId)
         }
+        taskStore.recordTaskEvent(
+            task.taskId, EVENT_MCP_DELIVERED,
+            if (status == "completed") "${principal.id} 已交付（completed）" else "${principal.id} 报告失败（failed）",
+            principal.auditId,
+        )
         return JSONObject().put("ok", true).put("task", snapshot(final, principal))
     }
 
@@ -555,6 +572,9 @@ class McpDispatchService(
             put("goal", task.description ?: "")
             put("state", task.state)
             put("assigned_agent_id", task.assignedAgentId ?: JSONObject.NULL)
+            // false when the assignee no longer holds an active execute
+            // credential for this task's project (dispatcher should reassign).
+            put("assignee_active", task.assignedAgentId?.let { tokens.canonicalExecutorId(it, task.projectId) != null } ?: JSONObject.NULL)
             put("project_id", task.projectId ?: JSONObject.NULL)
             put("priority", task.priority)
             put("version", task.version)
@@ -626,6 +646,8 @@ class McpDispatchService(
         const val EVENT_MCP_CREATED = "mcp_created"
         const val EVENT_MCP_ASSIGNED = "mcp_assigned"
         const val EVENT_MCP_PROGRESS = "mcp_progress"
+        const val EVENT_MCP_CLAIMED = "mcp_claimed"
+        const val EVENT_MCP_DELIVERED = "mcp_delivered"
         private val IDEM_KEY_RE = Regex("^[A-Za-z0-9._:-]{8,128}$")
 
         /** 键排序的规范 JSON（用于幂等指纹）。 */
