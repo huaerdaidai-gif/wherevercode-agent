@@ -8885,6 +8885,7 @@ class MainActivity : AppCompatActivity() {
                         stepStore = components.taskStepStore,
                         dispatcher = RemoteTaskDispatcher(
                             taskStore = components.taskStore,
+                            scheduler = components.taskScheduler,
                             stepStore = components.taskStepStore,
                             port = remoteChatPort,
                             // P2：远端编码发 plan 批准后的包、完成停 review。
