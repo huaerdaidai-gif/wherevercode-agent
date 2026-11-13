@@ -79,6 +79,11 @@ final class WhereverCodeAgentUITests: XCTestCase {
                       "Settings must show 连接失败 with the real error after save")
         snap(app, "ui-03-settings-connection-failed")
 
+        // The keyboard is still up from the token field and covers
+        // the tab bar; dismiss it before tapping tabs, or the taps
+        // land on the keyboard and the selection never changes.
+        dismissKeyboard(app)
+
         // --- Channel list: real load error + retry, not a blank page.
         chatTab.tap()
         XCTAssertTrue(chatTab.isSelected)
@@ -110,6 +115,14 @@ final class WhereverCodeAgentUITests: XCTestCase {
         chatTab.tap()
         XCTAssertTrue(chatTab.isSelected)
         XCTAssertTrue(app.buttons["重试"].exists)
+    }
+
+    /// Dismiss the software keyboard if it is up (a swipe down on a
+    /// Form scrolls it away), so tab-bar taps actually reach the bar.
+    private func dismissKeyboard(_ app: XCUIApplication) {
+        if app.keyboards.firstMatch.exists {
+            app.swipeDown()
+        }
     }
 
     private func snap(_ app: XCUIApplication, _ name: String) {
