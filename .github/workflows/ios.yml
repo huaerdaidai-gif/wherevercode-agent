@@ -139,6 +139,16 @@ jobs:
             xcrun xcresulttool export attachments \
               --path .build/TestResults.xcresult \
               --output-path .build/screenshots || true
+            # Crash/hang diagnostics live outside the attachments:
+            # export them too, so an app death during a test leaves
+            # its stack trace in the same artifact instead of only a
+            # mysterious "Terminate" line in the log.
+            xcrun xcresulttool export diagnostics \
+              --path .build/TestResults.xcresult \
+              --output-path .build/screenshots/diagnostics || true
+            mkdir -p .build/screenshots/diagnostics
+            cp ~/Library/Logs/DiagnosticReports/WhereverCodeAgent*.ips \
+              .build/screenshots/diagnostics/ 2>/dev/null || true
             find .build/screenshots -type f | sort | head -80 || true
           else
             echo "No result bundle found; nothing to export."
