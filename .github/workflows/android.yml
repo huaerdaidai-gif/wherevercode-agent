@@ -127,7 +127,18 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle -p android :app:assembleCompat --stacktrace
+          # In-app updater (update/ package) reads the Drive file id from
+          # BuildConfig.UPDATE_DRIVE_FILE_ID. Pass-through only: set it as a
+          # repo secret or variable; this job never uploads anything to Drive.
+          WHEREVERCODE_UPDATE_DRIVE_FILE_ID: ${{ secrets.WHEREVERCODE_UPDATE_DRIVE_FILE_ID || vars.WHEREVERCODE_UPDATE_DRIVE_FILE_ID }}
+        run: |
+          if [ -n "${WHEREVERCODE_UPDATE_DRIVE_FILE_ID:-}" ]; then
+            echo "UPDATE_DRIVE_FILE_ID_STATUS=set" >> "$GITHUB_ENV"
+          else
+            echo "::warning::WHEREVERCODE_UPDATE_DRIVE_FILE_ID is not set; in-app update check will be disabled in this APK"
+            echo "UPDATE_DRIVE_FILE_ID_STATUS=not set" >> "$GITHUB_ENV"
+          fi
+          gradle -p android :app:assembleCompat --stacktrace
       - name: Verify signing certificate and version
         run: |
           set -euo pipefail
@@ -141,13 +152,25 @@ jobs:
             "$EXPECTED_CERT_SHA256_PREFIX"*) echo "certificate matches expected prefix $EXPECTED_CERT_SHA256_PREFIX" ;;
             *) echo "::error::unexpected signing certificate"; exit 1 ;;
           esac
-          "$bt/aapt" dump badging "$apk" | grep -m1 '^package:'
-          "$bt/aapt" dump badging "$apk" | grep -q "versionCode='$WHEREVERCODE_VERSION_CODE'"
+          # aapt (v1) exits non-zero on adaptive-icon references even though it
+          # prints the package line; read badging tolerantly (aapt2 first) and
+          # check the versionCode explicitly instead of relying on exit codes.
+          badging=$({ "$bt/aapt2" dump badging "$apk" || true; } 2>/dev/null)
+          if ! printf '%s\n' "$badging" | grep -q '^package:'; then
+            badging=$({ "$bt/aapt" dump badging "$apk" || true; } 2>/dev/null)
+          fi
+          pkg=$(printf '%s\n' "$badging" | grep -m1 '^package:' || true)
+          echo "$pkg"
+          case "$pkg" in
+            *"versionCode='$WHEREVERCODE_VERSION_CODE'"*) echo "versionCode $WHEREVERCODE_VERSION_CODE confirmed" ;;
+            *) echo "::error::APK versionCode does not match $WHEREVERCODE_VERSION_CODE"; exit 1 ;;
+          esac
           {
             echo "### Signed APK"
             echo "- file: $(basename "$apk")"
             echo "- versionCode: $WHEREVERCODE_VERSION_CODE"
             echo "- signer SHA-256: $sha"
+            echo "- update Drive file id: ${UPDATE_DRIVE_FILE_ID_STATUS:-unknown}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
