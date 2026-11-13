@@ -27,7 +27,8 @@ public final class ChannelListCache {
     }
 
     public func load() -> [ChannelInfo] {
-        guard let cached = try? kv.getJSON(storageKey, as: [CachedChannel].self), let cached else {
+        let decoded = try? kv.getJSON(storageKey, as: [CachedChannel].self)
+        guard let cached = decoded ?? nil else {
             return []
         }
         return cached.map {
