@@ -320,8 +320,8 @@ public final class KeyValueBrainConfigStore: BrainConfigStore {
 
     public func listConfigs() -> [BrainConfig] {
         lock.lock(); defer { lock.unlock() }
-        guard let json = try? kv.get(Self.keyConfigs), let raw = json,
-              let data = raw.data(using: .utf8),
+        guard let json = try? kv.get(Self.keyConfigs),
+              let data = json.data(using: .utf8),
               let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any]
         else { return [] }
         return array.compactMap { Self.parseConfig($0) }
@@ -356,8 +356,8 @@ public final class KeyValueBrainConfigStore: BrainConfigStore {
 
     public func deletedBrainIds() -> Set<String> {
         lock.lock(); defer { lock.unlock() }
-        guard let json = try? kv.get(Self.keyDeleted), let raw = json,
-              let data = raw.data(using: .utf8),
+        guard let json = try? kv.get(Self.keyDeleted),
+              let data = json.data(using: .utf8),
               let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any]
         else { return [] }
         return Set(array.compactMap { ($0 as? String) }
@@ -379,8 +379,8 @@ public final class KeyValueBrainConfigStore: BrainConfigStore {
     // MARK: - Unlocked internals
 
     private func unlockedList() -> [BrainConfig] {
-        guard let json = try? kv.get(Self.keyConfigs), let raw = json,
-              let data = raw.data(using: .utf8),
+        guard let json = try? kv.get(Self.keyConfigs),
+              let data = json.data(using: .utf8),
               let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any]
         else { return [] }
         return array.compactMap { Self.parseConfig($0) }
@@ -395,8 +395,8 @@ public final class KeyValueBrainConfigStore: BrainConfigStore {
     }
 
     private func unlockedDeleted() -> Set<String> {
-        guard let json = try? kv.get(Self.keyDeleted), let raw = json,
-              let data = raw.data(using: .utf8),
+        guard let json = try? kv.get(Self.keyDeleted),
+              let data = json.data(using: .utf8),
               let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any]
         else { return [] }
         return Set(array.compactMap { ($0 as? String) }
