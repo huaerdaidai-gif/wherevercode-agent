@@ -930,9 +930,18 @@ class HandServer:
                 self._error(conn, session_key, envelope, seq + 1, *fence_error)
                 return
             if attempt_id:
-                if os.path.isfile(self._artifact_path(envelope, client_id, attempt_id)):
+                path = self._artifact_path(envelope, client_id, attempt_id)
+                if os.path.isfile(path):
                     self._get_artifact(conn, session_key, envelope, seq, client_id, args)
                     return
+                os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                try:
+                    fd = os.open(path + ".started", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    self._error(conn, session_key, envelope, seq + 1, "stale_attempt",
+                                "此轮次已执行且没有成功回执，请重新认领。")
+                    return
+                os.close(fd)
                 staging = tempfile.TemporaryDirectory(prefix="hand-delivery-")
                 prompt += ("\n\n如有文件产物，把单个文件写入以下绝对路径（最多 1 MiB）："
                            + os.path.join(staging.name, "delivery.bin"))

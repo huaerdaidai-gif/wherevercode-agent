@@ -211,6 +211,39 @@ class BundledHandAuthorizationTest(unittest.TestCase):
                 self.assertEqual("cross_device_error", kind)
                 self.assertEqual(module.ERR_PATH_NOT_ALLOWED, args["code"])
 
+    def test_console_http_upgrade_requires_a_live_paired_client_ticket(self):
+        import http.client
+        bundled = load_bundled_hand_server()
+        with tempfile.TemporaryDirectory() as temp:
+            hand = bundled.HandServer(temp, "test-hand", "test")
+            hand.state.save_json("paired_clients.json", {"owner": {"status": "APPROVED"}})
+            with bundled.ThreadedHandServer(("127.0.0.1", 0), bundled.HandConnectionHandler, hand) as tcp:
+                thread = threading.Thread(target=tcp.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    ticket, _ = hand.issue_ws_token("owner")
+                    revoked, _ = hand.issue_ws_token("other")
+                    for token, status in ((revoked, 403), (ticket, 101), (ticket, 403)):
+                        conn = http.client.HTTPConnection(*tcp.server_address, timeout=5)
+                        try:
+                            conn.request("GET", "/events?token=" + token, headers={
+                                "Upgrade": "websocket", "Connection": "Upgrade",
+                                "Sec-WebSocket-Version": "13",
+                                "Sec-WebSocket-Key": b64e(os.urandom(16)),
+                            })
+                            with conn.getresponse() as response:
+                                self.assertEqual(status, response.status)
+                        finally:
+                            conn.close()
+                    owner = hand._ws_subscribe("owner")
+                    other = hand._ws_subscribe("other")
+                    hand.publish_event("owner", "agent.run.progress", {"message": "private"})
+                    self.assertIn(b"private", owner.queue.get_nowait())
+                    self.assertTrue(other.queue.empty())
+                finally:
+                    tcp.shutdown()
+                    thread.join(timeout=5)
+
     def test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized(self):
         bundled = load_bundled_hand_server()
         with tempfile.TemporaryDirectory() as temp:

@@ -346,7 +346,8 @@ class _WsSubscriber:
     """一个 WS 订阅者：有界队列，上限 WS_QUEUE_MAX 条；满了丢最旧的，
     慢订阅者绝不能堵住 Agent 执行（offer 永不阻塞）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, client_id: str) -> None:
+        self.client_id = client_id
         self.queue: queue.Queue = queue.Queue(maxsize=WS_QUEUE_MAX)
 
     def offer(self, payload: bytes) -> None:
@@ -1047,7 +1048,7 @@ class HandServer:
     # 这张票，不另搞一套加密、不记 token 日志。事件只发真实事件，
     # 绝不造假；没有事件就不发（liveness 靠 WS ping 帧，不靠心跳事件）。
 
-    def publish_event(self, event: str, data: dict) -> None:
+    def publish_event(self, client_id: str, event: str, data: dict) -> None:
         """往所有 WS 订阅者发一条事件（定死的事件信封格式）。"""
         payload = json.dumps({
             "v": 1, "type": "event", "event": event,
@@ -1057,10 +1058,11 @@ class HandServer:
         with self.ws_subscribers_lock:
             subscribers = list(self.ws_subscribers)
         for sub in subscribers:
-            sub.offer(payload)
+            if sub.client_id == client_id:
+                sub.offer(payload)
 
-    def _ws_subscribe(self) -> _WsSubscriber:
-        sub = _WsSubscriber()
+    def _ws_subscribe(self, client_id: str) -> _WsSubscriber:
+        sub = _WsSubscriber(client_id)
         with self.ws_subscribers_lock:
             self.ws_subscribers.add(sub)
         return sub
@@ -1096,7 +1098,8 @@ class HandServer:
             rec = self.ws_tokens.pop(token, None)
         if rec is None or rec["expires_at"] <= time.time():
             return None
-        return rec["client_id"]
+        client_id = rec["client_id"]
+        return client_id if self.client_status(client_id) == "APPROVED" else None
 
     def _peek_first_bytes(self, conn: socket.socket, timeout: float = 30.0) -> bytes:
         """偷看连接前 4 字节（MSG_PEEK，不消费），区分 WebSocket/HTTP
@@ -1203,7 +1206,7 @@ class HandServer:
             return
         self.state.audit({"event": "ws_connected", "client": client_id,
                           "from": str(addr)})
-        sub = self._ws_subscribe()
+        sub = self._ws_subscribe(client_id)
         try:
             # 连上先发一次 device.info，再补发当前正在跑的任务。
             agents = [{"agent_id": a.get("agent_id", ""),
@@ -1222,6 +1225,8 @@ class HandServer:
                            if proc.poll() is None]
             for task_id, _proc in running:
                 meta = self.task_meta.get(task_id, {})
+                if meta.get("owner", (None,))[0] != client_id:
+                    continue
                 self._ws_send_json(conn, {
                     "v": 1, "type": "event", "event": "agent.run.started",
                     "ts": int(time.time()), "device_id": self.device_id,
@@ -1241,7 +1246,7 @@ class HandServer:
         import select as _select
 
         last_send = time.time()
-        while True:
+        while self.client_status(sub.client_id) == "APPROVED":
             try:
                 while True:
                     payload = sub.queue.get_nowait()
@@ -1934,9 +1939,18 @@ class HandServer:
                 self._error(conn, session_key, envelope, seq + 1, *fence_error)
                 return
             if attempt_id:
-                if os.path.isfile(self._artifact_path(envelope, client_id, attempt_id)):
+                path = self._artifact_path(envelope, client_id, attempt_id)
+                if os.path.isfile(path):
                     self._get_artifact(conn, session_key, envelope, seq, client_id, args)
                     return
+                os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                try:
+                    fd = os.open(path + ".started", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    self._error(conn, session_key, envelope, seq + 1, "stale_attempt",
+                                "此轮次已执行且没有成功回执，请重新认领。")
+                    return
+                os.close(fd)
                 staging = tempfile.TemporaryDirectory(prefix="hand-delivery-")
                 prompt += ("\n\n如有文件产物，把单个文件写入以下绝对路径（最多 1 MiB）："
                            + os.path.join(staging.name, "delivery.bin"))
@@ -1944,11 +1958,12 @@ class HandServer:
             meta = self.task_meta.setdefault(task_id, {})
             snap = json.loads(args.get("control") or "{}")
             meta.update(goal_version=int(snap.get("goal_version", 1)),
-                        epoch=int(snap.get("epoch", 1)), control_stopped=False)
+                        epoch=int(snap.get("epoch", 1)), control_stopped=False,
+                        agent_id=run_agent_id, folder=folder)
         next_seq = seq + 1
         # 2026-11-11 控制台 WebSocket：run 真正开始（只发真实事件）。
         # finished 用守卫保证所有出口只发一次。
-        self.publish_event("agent.run.started",
+        self.publish_event(client_id, "agent.run.started",
                            {"task_id": task_id, "agent_id": run_agent_id,
                             "folder": folder})
         finished_sent = False
@@ -1958,7 +1973,7 @@ class HandServer:
             if finished_sent:
                 return
             finished_sent = True
-            self.publish_event("agent.run.finished",
+            self.publish_event(client_id, "agent.run.finished",
                                {"task_id": task_id, "agent_id": run_agent_id,
                                 "status": status, "detail": detail})
 
@@ -1966,7 +1981,7 @@ class HandServer:
             nonlocal next_seq
             message = line.rstrip("\n")[-1000:]
             # 先发 WS 事件再回密封 progress：密封连接断了 WS 侧也不丢行。
-            self.publish_event("agent.run.progress",
+            self.publish_event(client_id, "agent.run.progress",
                                {"task_id": task_id, "agent_id": run_agent_id,
                                 "message": message})
             self._send(conn, session_key, envelope, "cross_device_progress",
