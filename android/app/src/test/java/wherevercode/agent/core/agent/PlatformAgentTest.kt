@@ -47,6 +47,8 @@ class PlatformAgentTest {
     @Test
     fun `configuration notes identify public defaults as empty`() {
         assertTrue(PlatformAgent.ENDPOINT_NOTE.contains("不会预置平台地址"))
+        assertTrue(PlatformAgent.ENDPOINT_NOTE.contains("受信任 HTTPS 证书"))
+        assertTrue(PlatformAgent.ENDPOINT_NOTE.contains("自签名证书会被拒绝"))
         assertTrue(PlatformAgent.CHANNEL_NOTE.contains("不预置频道 ID"))
         assertFalse(PlatformAgent.ENDPOINT_NOTE.contains("192.0.2.10"))
         assertFalse(PlatformAgent.CHANNEL_NOTE.contains("dedicated-channel-test"))

@@ -99,7 +99,7 @@ object PlatformAgent {
     val V5_CHANNEL_ID: String = BuildConfig.PLATFORM_V5_CHANNEL.trim()
 
     const val ENDPOINT_NOTE: String =
-        "公开版不会预置平台地址。请填写你的平台主机名；端点为 https://<平台地址>/api/open/v1/mcp。"
+        "公开版不会预置平台地址。请填受信任 HTTPS 证书对应的域名（可带端口），不要填协议或路径；自签名证书会被拒绝。端点为 https://<平台地址>/api/open/v1/mcp。"
 
     /**
      * 专用频道栏说明：空着时仅使用本地构建配置的默认频道；公开构建不

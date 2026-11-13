@@ -74,7 +74,7 @@ object PlatformEndpointPinning {
         return factory.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
 
-    /** Pin match is an additional trust path; every other certificate uses system trust. */
+    /** System CA trust is mandatory; a configured pin only narrows the accepted certificate. */
     fun pinnedTrustManager(pin: Pin): X509TrustManager {
         require(pin.isValid()) { "A valid configured host and SHA-256 pin are required." }
         val default = defaultTrustManager()
@@ -85,11 +85,11 @@ object PlatformEndpointPinning {
                 default.checkClientTrusted(chain, authType)
 
             override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                if (matchesPinnedFingerprint(chain, pin)) {
-                    verifyPinnedChain(chain, pin)
-                } else {
-                    default.checkServerTrusted(chain, authType)
+                default.checkServerTrusted(chain, authType)
+                if (!matchesPinnedFingerprint(chain, pin)) {
+                    throw CertificateException("The configured platform endpoint certificate pin did not match.")
                 }
+                verifyPinnedChain(chain, pin)
             }
         }
     }
