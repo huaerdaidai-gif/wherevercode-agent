@@ -188,36 +188,6 @@
 		892AEB362C95AAE0B8B13531 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelParsingTests.swift; sourceTree = "<group>"; };
 		8AE3EE43D06F281BFB338F66 = {isa = PBXBuildFile; fileRef = 61F1002C04C602A200A9C2E1; };
 		8C1969BC5989E871C77EB3CC = {isa = PBXGroup; children = (
-		DA0000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteDatabase.swift; sourceTree = "<group>"; };
-		DA0000000000000000000003 = {isa = PBXBuildFile; fileRef = DA0000000000000000000002; };
-		DA0000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
-		DA0000000000000000000005 = {isa = PBXBuildFile; fileRef = DA0000000000000000000004; };
-		DA0000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStates.swift; sourceTree = "<group>"; };
-		DA0000000000000000000007 = {isa = PBXBuildFile; fileRef = DA0000000000000000000006; };
-		DA0000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskStore.swift; sourceTree = "<group>"; };
-		DA0000000000000000000009 = {isa = PBXBuildFile; fileRef = DA0000000000000000000008; };
-		DA000000000000000000000A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyValueStore.swift; sourceTree = "<group>"; };
-		DA000000000000000000000B = {isa = PBXBuildFile; fileRef = DA000000000000000000000A; };
-		DA000000000000000000000C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryStore.swift; sourceTree = "<group>"; };
-		DA000000000000000000000D = {isa = PBXBuildFile; fileRef = DA000000000000000000000C; };
-		DA000000000000000000000E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStore.swift; sourceTree = "<group>"; };
-		DA000000000000000000000F = {isa = PBXBuildFile; fileRef = DA000000000000000000000E; };
-		DA0000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalData.swift; sourceTree = "<group>"; };
-		DA0000000000000000000011 = {isa = PBXBuildFile; fileRef = DA0000000000000000000010; };
-		DA0000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataLayerTests.swift; sourceTree = "<group>"; };
-		DA0000000000000000000013 = {isa = PBXBuildFile; fileRef = DA0000000000000000000012; };
-		DA0000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
-		DA0000000000000000000015 = {isa = PBXBuildFile; fileRef = DA0000000000000000000014; };
-		DA0000000000000000000001 = {isa = PBXGroup; children = (
-			DA0000000000000000000002,
-			DA0000000000000000000004,
-			DA0000000000000000000006,
-			DA0000000000000000000008,
-			DA000000000000000000000A,
-			DA000000000000000000000C,
-			DA000000000000000000000E,
-			DA0000000000000000000010,
-		); name = Data; path = Data; sourceTree = "<group>"; };
 			71E728FFB566FEED3128BAEF,
 			E14659535277E988EECDDE93,
 			A1B2C3D4E5F6000000000013,
@@ -352,6 +322,36 @@
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = WhereverCodeAgent;
 			}; name = Release; };
+		DA0000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteDatabase.swift; sourceTree = "<group>"; };
+		DA0000000000000000000003 = {isa = PBXBuildFile; fileRef = DA0000000000000000000002; };
+		DA0000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
+		DA0000000000000000000005 = {isa = PBXBuildFile; fileRef = DA0000000000000000000004; };
+		DA0000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStates.swift; sourceTree = "<group>"; };
+		DA0000000000000000000007 = {isa = PBXBuildFile; fileRef = DA0000000000000000000006; };
+		DA0000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskStore.swift; sourceTree = "<group>"; };
+		DA0000000000000000000009 = {isa = PBXBuildFile; fileRef = DA0000000000000000000008; };
+		DA000000000000000000000A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyValueStore.swift; sourceTree = "<group>"; };
+		DA000000000000000000000B = {isa = PBXBuildFile; fileRef = DA000000000000000000000A; };
+		DA000000000000000000000C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryStore.swift; sourceTree = "<group>"; };
+		DA000000000000000000000D = {isa = PBXBuildFile; fileRef = DA000000000000000000000C; };
+		DA000000000000000000000E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStore.swift; sourceTree = "<group>"; };
+		DA000000000000000000000F = {isa = PBXBuildFile; fileRef = DA000000000000000000000E; };
+		DA0000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalData.swift; sourceTree = "<group>"; };
+		DA0000000000000000000011 = {isa = PBXBuildFile; fileRef = DA0000000000000000000010; };
+		DA0000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataLayerTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000013 = {isa = PBXBuildFile; fileRef = DA0000000000000000000012; };
+		DA0000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+		DA0000000000000000000015 = {isa = PBXBuildFile; fileRef = DA0000000000000000000014; };
+		DA0000000000000000000001 = {isa = PBXGroup; children = (
+			DA0000000000000000000002,
+			DA0000000000000000000004,
+			DA0000000000000000000006,
+			DA0000000000000000000008,
+			DA000000000000000000000A,
+			DA000000000000000000000C,
+			DA000000000000000000000E,
+			DA0000000000000000000010,
+		); name = Data; path = Data; sourceTree = "<group>"; };
 	};
 	rootObject = 5CD759D4193846E4910FD9BB;
 }
