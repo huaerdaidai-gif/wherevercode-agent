@@ -80,6 +80,31 @@ struct TaskRow: View {
     }
 }
 
+/// Pure tasks content for the platform-not-connected state: the
+/// page still renders as a page — the shared 平台连接 card, an
+/// honest hint in the task section, and the standing explanation.
+/// Mirrors Android, where an unconfigured platform only ever
+/// affects the platform-backed page itself (the team channel's
+/// setup hint) and never turns the page into a dead end.
+struct TasksNotConnectedContentView: View {
+    let onGoSettings: () -> Void
+
+    var body: some View {
+        List {
+            PlatformConnectionCardSection(onGoSettings: onGoSettings)
+            Section("我的任务") {
+                Text("还没有连上平台：任务来自平台分配。连接平台后，这里会列出分配给你的任务。")
+                    .foregroundStyle(.secondary)
+            }
+            Section("说明") {
+                Text("一次只领一个任务；领取后租约 2 小时，汇报进度或心跳可续租。平台没有创建 / 指派任务的接口，本页只做已分配任务的领取与交付。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 struct TasksView: View {
     @EnvironmentObject private var appState: AppState
     @State private var tasks: [AgentTask] = []
@@ -90,8 +115,7 @@ struct TasksView: View {
         NavigationStack {
             Group {
                 if !appState.isConfigured {
-                    NotConfiguredView(
-                        message: "任务列表来自平台分配。请先在「设置」里生成或粘贴 Token（平台地址已预填）。",
+                    TasksNotConnectedContentView(
                         onGoSettings: { appState.goToSettings() }
                     )
                 } else if isLoading && tasks.isEmpty && errorMessage == nil {
@@ -127,7 +151,10 @@ struct TasksView: View {
     }
 
     private func loadTasks() async {
-        guard let service = appState.makeTaskService() else { return }
+        // Not connected is a page state, not an error (see
+        // TasksNotConnectedContentView): never attempt a load and
+        // never surface a missing-credential error here.
+        guard appState.isConfigured, let service = appState.makeTaskService() else { return }
         isLoading = true
         defer { isLoading = false }
         do {

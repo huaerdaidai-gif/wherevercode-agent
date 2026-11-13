@@ -12,11 +12,17 @@
 //    must honestly report 未连接平台 (issuance is authorized by an
 //    existing owner credential, exactly as on Android).
 // 3. Real error surfacing: the app is then reconfigured (through
-//    its own Settings UI, token pasted in the collapsed advanced
-//    entry) with an unresolvable https address and a dummy token
-//    typed by the test — not a real credential. Every page must
-//    show the REAL network error and a retry path, and Settings
-//    must show 连接失败 with the real error text.
+//    its own Settings UI — the platform credential field inside
+//    the 平台连接 section, where Android's platform-agent form
+//    keeps the same field) with an unresolvable https address and
+//    a dummy token typed by the test — not a real credential.
+//    Every page must show the REAL network error and a retry
+//    path, and Settings must show 连接失败 with the real error
+//    text.
+// 4. The platform-not-connected home is a page, not a gate: on
+//    first launch the chat tab shows the conversation home with
+//    its 平台连接 card and the channel setup hint, and every tab
+//    still shows its own page.
 // Screenshots are attached at each stage and exported by CI as the
 // "ios-screenshots-simulator" artifact.
 
@@ -84,23 +90,13 @@ final class WhereverCodeAgentUITests: XCTestCase {
                        "Address field must contain exactly the fake address after replacement")
         app.buttons["settings.saveAddressChannel"].tap()
 
-        // --- Paste the dummy token through the advanced fallback.
-        // The disclosure header is found by label: an identifier on
-        // the DisclosureGroup container itself would propagate to
-        // (and shadow) every control inside it.
-        let advancedToggle = app.buttons["手工粘贴 Token（兜底）"]
-        reveal(advancedToggle, in: app)
-        XCTAssertTrue(advancedToggle.waitForExistence(timeout: 10))
-        advancedToggle.tap()
-        // Query the token field by its placeholder (the phase-2 way).
-        // An earlier failure had a subtle cause, proven by that run's
-        // element dump: the DisclosureGroup's own identifier had
-        // propagated to every child inside it, shadowing
-        // settings.tokenField — the group no longer carries an
-        // identifier, and the placeholder query is kept as the
-        // proven route regardless.
+        // --- Paste the dummy token into the credential field of
+        // the 平台连接 section (the platform-agent form's field —
+        // in the form itself since the Android-parity restructure,
+        // not behind a collapsed "advanced" disclosure). The field
+        // is queried by placeholder text.
         let tokenField = app.secureTextFields.matching(
-            NSPredicate(format: "placeholderValue BEGINSWITH %@", "粘贴 Agent Token")
+            NSPredicate(format: "placeholderValue BEGINSWITH %@", "粘贴平台凭证")
         ).firstMatch
         reveal(tokenField, in: app)
         XCTAssertTrue(tokenField.waitForExistence(timeout: 15))

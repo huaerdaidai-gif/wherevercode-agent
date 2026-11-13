@@ -125,6 +125,38 @@ final class ScreenshotRenderTests: XCTestCase {
         attach(image, name: "page-07-channel-picker")
     }
 
+    func testScreenshotHomeNotConnected() async {
+        // The restructured home in its platform-not-connected
+        // state: still the app's home page — a 平台连接 card, the
+        // team-channel setup hint (Android's wording for the same
+        // state) and the reserved conversation rows. Not a gate.
+        let image = await snapshot(
+            NavigationStack {
+                ConversationHomeContentView(
+                    platformConnected: false,
+                    channels: [],
+                    loadError: nil,
+                    isLoading: false,
+                    onRetry: {},
+                    onRefresh: {},
+                    onGoSettings: {}
+                )
+                .navigationTitle("对话")
+            }
+        )
+        attach(image, name: "page-08-home-not-connected")
+    }
+
+    func testScreenshotTasksNotConnected() async {
+        let image = await snapshot(
+            NavigationStack {
+                TasksNotConnectedContentView(onGoSettings: {})
+                    .navigationTitle("任务")
+            }
+        )
+        attach(image, name: "page-09-tasks-not-connected")
+    }
+
     func testScreenshotDevices() async {
         let image = await snapshot(DevicesView())
         attach(image, name: "page-06-devices")

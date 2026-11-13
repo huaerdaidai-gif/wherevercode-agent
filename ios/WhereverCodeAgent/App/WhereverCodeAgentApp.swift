@@ -250,7 +250,7 @@ final class AppState: ObservableObject {
             return
         }
         guard hasToken else {
-            connectionStatus = .notConfigured("还没有平台凭证：在「平台令牌」里生成一个，或在高级里粘贴已有 Token。")
+            connectionStatus = .notConfigured("还没有平台凭证：在设置的「平台连接」里填入平台凭证，或在「平台令牌」里生成一个。")
             return
         }
         guard let client = makeMcpClient() else {

@@ -1,22 +1,40 @@
 // WhereverCode Agent — iOS
 //
-// Settings, aligned with the Android app's platform configuration:
+// Settings, restructured to the Android app's form (see the
+// delivery notes' Android-form checklist):
+// - The platform connection is ONE connection item of the app —
+//   the 「平台连接」 section below is the iOS counterpart of
+//   Android's platform-agent form (`PlatformAgentForm` / the
+//   platform-agent form in Android's MainActivity): platform
+//   address, the app's platform credential field, and the channel
+//   selection, all in one place. It is never the app's front door
+//   and never a first-run gate.
 // - The platform address is PREFILLED with the platform's public
-//   endpoint (editable; a user-saved address is never overwritten
-//   by the prefill). Only https; ATS stays on, self-signed
-//   certificates are never trusted.
+//   endpoint (the maintainer build's default, like Android's
+//   BuildConfig-provided host; editable, and a user-saved address
+//   is never overwritten by the prefill). Only https; ATS stays
+//   on, self-signed certificates are never trusted.
+// - The app's platform credential lives in the SAME form, exactly
+//   where Android puts it: a password field labelled with where
+//   the credential comes from ("在平台服务器终端签发后填入" —
+//   Android's field label, MainActivity's platform-agent form).
+//   It is stored only in the Keychain. It is not a first step for
+//   the app: every page works without it, it only connects the
+//   platform-backed channel and task lists.
 // - The channel is picked by TAPPING a row in the channel list
 //   (loaded live from `agent_channel_list`); a single visible
-//   channel is selected automatically. Typing a channel id by hand
-//   survives only as a collapsed advanced fallback.
-// - The main token path is "生成并保存 Token": the app issues a
-//   token through the platform's `issue_agent_token` tool (the
-//   same call Android's PlatformTokenIssuer makes) and stores it
-//   straight into the Keychain as this app's own credential — the
-//   user never sees, copies or pastes the token string. Pasting an
-//   existing token is the collapsed advanced fallback (it is also
-//   the bootstrap path: issuance is authorized by an existing
-//   owner credential, exactly as on Android).
+//   channel is selected automatically. Typing a channel id by
+//   hand survives only as a collapsed advanced fallback, like
+//   Android's optional dedicated-channel field.
+// - 「平台令牌」 is Android's settings section of the same name
+//   (`PlatformTokenIssuer`): with an existing owner credential
+//   the app issues a token through the platform's
+//   `issue_agent_token` tool. Difference from Android, recorded
+//   in the alignment table: Android shows the issued token once
+//   for OTHER agents (its own credential is provisioned by the
+//   maintainer beforehand); here the issued token is stored
+//   straight into the Keychain as this app's own credential, so
+//   the user never has to copy or paste the string anywhere.
 // - After every save the app runs a REAL connection check and
 //   shows the outcome here; entering Settings (and launching the
 //   app) re-checks automatically. Failures always show the
@@ -100,6 +118,31 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
+                    // The app's platform credential field — the
+                    // same field, in the same form, as Android's
+                    // platform-agent form ("App 的平台凭证值（在
+                    // 平台服务器终端签发后填入…）"). One field of
+                    // this connection item, not an app gate.
+                    SecureField("粘贴平台凭证（v5_ 开头）", text: $tokenText)
+                        .accessibilityIdentifier("settings.tokenField")
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("App 的平台凭证：在平台服务器终端签发后填入（与安卓平台 Agent 表单同一栏）。只存本机 Keychain（仅本设备可读，不同步 iCloud），不会显示在界面其他地方，也不会写进日志。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("保存凭证") {
+                            saveToken()
+                        }
+                        .accessibilityIdentifier("settings.saveToken")
+                        .disabled(tokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Spacer()
+                        Button("清除凭证", role: .destructive) {
+                            clearToken()
+                        }
+                        .disabled(!appState.hasToken)
+                    }
+                    LabeledContent("凭证状态", value: appState.hasToken ? "已保存" : "未保存")
                     channelPickerRows
                     DisclosureGroup("高级：手动填写频道 ID") {
                         TextField("频道 ID", text: $channelIDText)
@@ -149,35 +192,6 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
                     }
-                }
-                Section("高级") {
-                    DisclosureGroup("手工粘贴 Token（兜底）") {
-                        SecureField("粘贴 Agent Token", text: $tokenText)
-                            .accessibilityIdentifier("settings.tokenField")
-                        Text("已有一个平台签发的 Token 时用这里（例如管理员在平台终端签发的第一个凭证）。只存本机 Keychain（仅本设备可读，不同步 iCloud），不会显示在界面其他地方，也不会写进日志。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack {
-                            Button("保存 Token") {
-                                saveToken()
-                            }
-                            .accessibilityIdentifier("settings.saveToken")
-                            .disabled(tokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            Spacer()
-                            Button("清除 Token", role: .destructive) {
-                                clearToken()
-                            }
-                            .disabled(!appState.hasToken)
-                        }
-                        LabeledContent("Token 状态", value: appState.hasToken ? "已保存" : "未保存")
-                    }
-                    // NOTE: no accessibilityIdentifier on the
-                    // DisclosureGroup itself — SwiftUI propagates a
-                    // container's identifier to every child, which
-                    // shadowed settings.tokenField / settings.saveToken
-                    // in the accessibility tree (found via CI screen
-                    // recording + element dump). The UI test finds this
-                    // header by its label instead.
                 }
                 Section("连接状态") {
                     connectionStatusContent
@@ -275,7 +289,7 @@ struct SettingsView: View {
         if appState.hasToken, let endpoint = appState.settings.mcpEndpoint {
             return "平台：已连接（\(endpoint.absoluteString)）"
         }
-        return "平台：未连接（先在下方生成 Token，或在高级区粘贴已有凭证）"
+        return "平台：未连接（先在上方「平台连接」里填入平台凭证，之后即可在这里生成新令牌）"
     }
 
     // MARK: - Connection status
@@ -284,7 +298,7 @@ struct SettingsView: View {
     private var connectionStatusContent: some View {
         switch appState.connectionStatus {
         case .unknown:
-            Text("尚未检查。保存地址与 Token 后会自动检查，也可以点下面的「重新检查连接」。")
+            Text("尚未检查。保存地址与凭证后会自动检查，也可以点下面的「重新检查连接」。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         case .notConfigured(let reason):
@@ -315,7 +329,7 @@ struct SettingsView: View {
         }
     }
 
-    /// "1.2 (3)" — read from the bundle, never hardcoded, so this row
+    /// "1.3 (4)" — read from the bundle, never hardcoded, so this row
     /// can never drift from the shipped build.
     static var versionString: String {
         let info = Bundle.main.infoDictionary
@@ -361,22 +375,22 @@ struct SettingsView: View {
         do {
             try appState.saveToken(token)
             tokenText = ""
-            saveMessage = "Token 已存入 Keychain，正在检查连接…"
+            saveMessage = "平台凭证已存入 Keychain，正在检查连接…"
             errorMessage = nil
             Task { await appState.refreshConnectionStatus() }
         } catch {
-            errorMessage = (error as? KeychainError)?.message ?? "保存 Token 失败。"
+            errorMessage = (error as? KeychainError)?.message ?? "保存凭证失败。"
         }
     }
 
     private func clearToken() {
         do {
             try appState.deleteToken()
-            saveMessage = "Token 已清除。"
+            saveMessage = "平台凭证已清除。"
             errorMessage = nil
             Task { await appState.refreshConnectionStatus() }
         } catch {
-            errorMessage = (error as? KeychainError)?.message ?? "清除 Token 失败。"
+            errorMessage = (error as? KeychainError)?.message ?? "清除凭证失败。"
         }
     }
 }

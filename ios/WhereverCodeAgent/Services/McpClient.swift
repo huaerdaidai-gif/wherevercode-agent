@@ -281,16 +281,18 @@ public struct PlatformTokenIssuer {
 
     /// Translate a transport/platform error into user-readable text,
     /// mirroring Android's `PlatformTokenIssuer.mapError`. The
-    /// not-configured wording names the iOS fallback (the advanced
-    /// paste entry in Settings) because iOS has no separate
-    /// platform-agent form; every other message is Android's.
-    /// Failure text never contains a token value.
+    /// not-configured wording names the credential field of the
+    /// Settings 「平台连接」 section — the iOS counterpart of
+    /// Android's platform-agent form, whose credential field is
+    /// where a platform-issued credential is entered; every other
+    /// message is Android's. Failure text never contains a token
+    /// value.
     public static func mapError(_ error: Error) -> String {
         let raw = ((error as? McpError)?.message ?? (error as NSError).localizedDescription)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let message = raw.isEmpty ? "签发失败" : raw
         if message.contains("未配置平台 Agent 凭证") || message.contains("未配置平台凭证") {
-            return "未连接平台：本 App 还没有平台凭证。请先在下方「高级：手工粘贴 Token」里保存一个已有凭证，之后即可在这里生成新令牌。"
+            return "未连接平台：本 App 还没有平台凭证。请先在设置的「平台连接」里填入 App 的平台凭证（由平台管理员签发），之后即可在这里生成新令牌。"
         }
         if message.contains("未知工具") {
             return "签发失败：平台端点不支持签发令牌，或当前平台凭证没有 owner 权限。" +
