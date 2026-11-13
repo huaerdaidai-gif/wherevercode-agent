@@ -13,6 +13,37 @@ import org.json.JSONArray
  */
 data class RemoteFolderEntry(val name: String, val isDir: Boolean)
 
+data class ProjectFolderAuthorizationAck(val folder: String, val already: Boolean)
+
+/**
+ * Accept only the structured Hand grant acknowledgement bound to this exact
+ * request. A generic successful frame is not evidence that access was added.
+ */
+fun parseProjectFolderAuthorizationAck(
+    output: String,
+    requestedFolder: String,
+): ProjectFolderAuthorizationAck {
+    val response = try {
+        org.json.JSONObject(output)
+    } catch (_: Exception) {
+        throw IllegalArgumentException("Hand 未返回有效的项目目录授权回执")
+    }
+    if (response.opt("authorized") != true) {
+        throw IllegalArgumentException("Hand 未确认项目目录已授权")
+    }
+    if (response.opt("requested_folder") != requestedFolder) {
+        throw IllegalArgumentException("Hand 授权回执与请求目录不匹配")
+    }
+    val canonicalFolder = response.opt("folder") as? String
+        ?: throw IllegalArgumentException("Hand 授权回执缺少规范目录")
+    if (!isAbsoluteFolderPath(canonicalFolder)) {
+        throw IllegalArgumentException("Hand 授权回执中的目录不是绝对路径")
+    }
+    val already = response.opt("already") as? Boolean
+        ?: throw IllegalArgumentException("Hand 授权回执缺少授权状态")
+    return ProjectFolderAuthorizationAck(canonicalFolder, already)
+}
+
 /**
  * 解析 Hand list 回包 output。空串 = 空文件夹；非法 JSON 抛
  * [IllegalArgumentException]（中文原因），调用方不得把半截结果

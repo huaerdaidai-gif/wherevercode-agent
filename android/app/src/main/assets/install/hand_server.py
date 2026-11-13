@@ -1390,7 +1390,7 @@ class HandServer:
                           "action": action, "client": client_id})
         if action == "authorize_project_folder":
             self._do_authorize_project_folder(
-                conn, session_key, envelope, seq, task_id, agent_id, folder)
+                conn, session_key, envelope, seq, task_id, agent_id, args)
         elif action == "list":
             self._do_list(conn, session_key, envelope, seq, folder, args)
         elif action == "read":
@@ -1421,18 +1421,23 @@ class HandServer:
     # -- 项目文件夹授权 --------------------------------------------------------
 
     def _do_authorize_project_folder(self, conn, session_key, envelope, seq,
-                                     task_id, agent_id, folder) -> None:
-        """密封动作 authorize_project_folder：把 folder 追加进
+                                     task_id, agent_id, args) -> None:
+        """密封动作 authorize_project_folder：把 args.folder 追加进
         auth.json[agent_id].authorized_project_folders。
         只允许已配对 App 的密封通道调用（_dispatch 已验签名、验凭证、
         验目标设备；_check_fence 已过）；不挂 MCP，Agent 调不到。
         授权粒度是 Agent→项目文件夹。成功回 cross_device_result，
-        output 为 JSON：{"authorized": true, "agent_id", "folder",
-        "already"}；already=true 表示重复授权，本次未写文件。"""
-        canon = canonical_folder(folder)
+        output 为 JSON：{"authorized": true, "agent_id", "requested_folder",
+        "folder", "already"}；already=true 表示重复授权，本次未写文件。"""
+        requested = args.get("folder", "") if isinstance(args, dict) else ""
+        if not isinstance(requested, str) or not os.path.isabs(requested):
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        "项目文件夹必须是已存在的绝对路径")
+            return
+        canon = canonical_folder(requested)
         if not canon or canon == "/" or not os.path.isdir(canon):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        f"文件夹不存在或不是目录：{folder}")
+                        f"文件夹不存在或不是目录：{requested}")
             return
         with self.state.lock:
             auth = self.state.load_json("auth.json", {})
@@ -1459,6 +1464,7 @@ class HandServer:
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(
                        {"authorized": True, "agent_id": agent_id,
+                        "requested_folder": requested,
                         "folder": canon, "already": already},
                        ensure_ascii=False)}, seq + 1)
 

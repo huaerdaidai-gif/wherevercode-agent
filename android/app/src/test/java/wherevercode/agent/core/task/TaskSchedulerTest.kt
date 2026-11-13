@@ -111,6 +111,24 @@ class TaskSchedulerTest {
     }
 
     @Test
+    fun `local claim rejects reserved MCP task namespace`() {
+        val taskId = "mcp-unassigned-task"
+        queued(taskId)
+
+        assertNull(scheduler.claimTask(taskId, "local"))
+        assertEquals("queued", taskStore.getTask(taskId)?.state)
+    }
+
+    @Test
+    fun `paused control status blocks queued claims`() {
+        queued("paused-task")
+        controlStore.setControlStatus("paused-task", wherevercode.agent.core.control.ControlStatus.PAUSED)
+
+        assertNull(scheduler.claimTask("paused-task", "agent-1"))
+        assertEquals("queued", taskStore.getTask("paused-task")?.state)
+    }
+
+    @Test
     fun `unfreezing restores normal claiming`() {
         queued("t1")
         controlStore.setDispatchFrozen("t1", true)

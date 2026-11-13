@@ -16,6 +16,7 @@
 import base64
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import socket
@@ -34,6 +35,20 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 
 import hand_server as hs
+
+
+def load_bundled_hand_server():
+    """Load the exact Hand implementation packaged and installed by Android."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(
+        repo_root, "android", "app", "src", "main", "assets", "install",
+        "hand_server.py",
+    )
+    spec = importlib.util.spec_from_file_location("bundled_hand_server", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def b64e(data: bytes) -> str:
@@ -137,6 +152,37 @@ class Client:
             "folder": folder, "action": action, "args": args,
         }
         return self.call(envelope, timeout=timeout)
+
+
+class BundledHandAuthorizationTest(unittest.TestCase):
+    def test_authorization_uses_requested_args_folder_and_echoes_it(self):
+        bundled = load_bundled_hand_server()
+        with tempfile.TemporaryDirectory() as temp:
+            base = os.path.join(temp, "agent-home")
+            requested = os.path.join(temp, "project")
+            os.mkdir(base)
+            os.mkdir(requested)
+            server = bundled.HandServer(os.path.join(temp, "state"), "device", "test")
+            server.state.save_json("auth.json", {
+                "agent": {"folders": [base], "authorized_project_folders": []}
+            })
+            events = []
+            server._send = lambda conn, key, envelope, kind, args, seq: events.append(args)
+
+            server._do_authorize_project_folder(
+                None, b"", {"task_id": "task"}, 1, "task", "agent",
+                {"folder": requested},
+            )
+
+            result = json.loads(events[-1]["output"])
+            self.assertTrue(result["authorized"])
+            self.assertEqual(requested, result["requested_folder"])
+            self.assertEqual(os.path.realpath(requested), result["folder"])
+            auth = server.state.load_json("auth.json", {})
+            self.assertEqual([os.path.realpath(requested)],
+                             auth["agent"]["authorized_project_folders"])
+            self.assertNotIn(os.path.realpath(base),
+                             auth["agent"]["authorized_project_folders"])
 
 
 class HandServerTest(unittest.TestCase):
@@ -381,6 +427,7 @@ class HandServerTest(unittest.TestCase):
         result = json.loads(events[-1]["args"]["output"])
         self.assertTrue(result["authorized"])
         self.assertFalse(result["already"])
+        self.assertEqual(extra, result["requested_folder"])
         self.assertIn(os.path.realpath(extra), self.server.authorized_folders("fake-agent"))
 
         repeated = self.client.tool_call(

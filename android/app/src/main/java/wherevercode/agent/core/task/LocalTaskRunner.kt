@@ -270,6 +270,10 @@ class LocalTaskRunner(
         }
         return tasks
             .filter { TaskStates.isClaimable(it.state) && it.sessionId == null }
+            // The MCP namespace is reserved for the dispatcher and its
+            // assigned executor. Do not let a queued/unassigned MCP task
+            // become eligible for the local brain.
+            .filterNot { TaskOrigins.isMcpDispatchTask(it.taskId) }
             // P2：plan 未批准的流水线任务不认领编码（等用户批准 plan）；
             // 未启用流水线的任务钩子一律放行。
             .filter { pipelineHook?.canStartCoding(it.taskId) ?: true }

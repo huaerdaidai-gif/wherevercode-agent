@@ -50,8 +50,8 @@ interface DispatchFreezePort {
 class TaskScheduler(
     private val taskStore: TaskStore,
     private val discovery: AgentDiscovery,
-    /** M2: null = no control plane wired (pre-M2 behaviour). */
-    private val freezePort: DispatchFreezePort? = null,
+    /** Required: every claim path must observe the shared control-plane freeze state. */
+    private val freezePort: DispatchFreezePort,
 ) {
     private val lock = Any()
 
@@ -86,8 +86,7 @@ class TaskScheduler(
      */
     fun canClaim(): Boolean = synchronized(lock) {
         if (activeWorkCount() != 0) return false
-        val port = freezePort ?: return true
-        taskStore.listTasks().none { port.isDispatchFrozen(it.taskId) }
+        taskStore.listTasks().none { freezePort.isDispatchFrozen(it.taskId) }
     }
 
     /**
@@ -98,8 +97,7 @@ class TaskScheduler(
      */
     fun canClaimForMember(memberId: String): Boolean = synchronized(lock) {
         if (activeWorkCountForMember(memberId) != 0) return false
-        val port = freezePort ?: return true
-        taskStore.listTasks().none { port.isDispatchFrozen(it.taskId) }
+        taskStore.listTasks().none { freezePort.isDispatchFrozen(it.taskId) }
     }
 
     /**
@@ -119,16 +117,17 @@ class TaskScheduler(
      * new attempt.
      */
     fun claimTask(taskId: String, agentId: String): TaskRecord? = synchronized(lock) {
+        // MCP tasks belong to their MCP-assigned executor; the local brain
+        // must never claim them, even when the dispatcher has not assigned
+        // an executor yet.
+        if (TaskOrigins.isMcpDispatchTask(taskId)) return null
         if (!canClaim()) return null
         val task = taskStore.getTask(taskId) ?: return null
         if (!TaskStates.isClaimable(task.state)) return null
         // M2: frozen tasks and non-RUNNING control states are not claimable.
-        val port = freezePort
-        if (port != null) {
-            if (port.isDispatchFrozen(taskId)) return null
-            val status = port.controlStatus(taskId)
-            if (status != null && status != "RUNNING") return null
-        }
+        if (freezePort.isDispatchFrozen(taskId)) return null
+        val status = freezePort.controlStatus(taskId)
+        if (status != null && status != "RUNNING") return null
         val now = System.currentTimeMillis() / 1000
         val attemptId = java.util.UUID.randomUUID().toString().replace("-", "")
         return try {
@@ -202,12 +201,9 @@ class TaskScheduler(
         if (!canClaimForMember(memberId)) return null
         val task = taskStore.getTask(taskId) ?: return null
         if (!TaskStates.isClaimable(task.state)) return null
-        val port = freezePort
-        if (port != null) {
-            if (port.isDispatchFrozen(taskId)) return null
-            val status = port.controlStatus(taskId)
-            if (status != null && status != "RUNNING") return null
-        }
+        if (freezePort.isDispatchFrozen(taskId)) return null
+        val status = freezePort.controlStatus(taskId)
+        if (status != null && status != "RUNNING") return null
         return try {
             taskStore.updateTask(
                 taskId,

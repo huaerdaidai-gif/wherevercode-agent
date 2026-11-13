@@ -37,7 +37,7 @@ class DecompositionOrchestratorTest {
     fun setUp() {
         db = TaskDatabase.inMemory(RuntimeEnvironment.getApplication())
         taskStore = RoomTaskStore(db)
-        scheduler = TaskScheduler(taskStore, AgentDiscovery(RuntimeEnvironment.getApplication()), null)
+        scheduler = testTaskScheduler(taskStore, AgentDiscovery(RuntimeEnvironment.getApplication()))
         decompositionStore = RoomDecompositionStore(db)
         orchestrator = DecompositionOrchestrator(taskStore, decompositionStore, nowSeconds = { now })
         events = RoomTaskEventStore(db)

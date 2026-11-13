@@ -1,5 +1,6 @@
 package wherevercode.agent.core.team
 
+import wherevercode.agent.core.task.testTaskScheduler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -89,7 +90,7 @@ class RemoteTaskDispatcherVerdictTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val stepStore = InMemoryTaskStepStore()
         val port = ScriptedPort(events)
         val dispatcher = RemoteTaskDispatcher(taskStore, stepStore, port)

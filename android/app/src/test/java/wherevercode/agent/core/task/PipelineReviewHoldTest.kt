@@ -52,7 +52,7 @@ class PipelineReviewHoldTest {
     @Before
     fun setUp() {
         taskStore = DispatchFakeTaskStore()
-        scheduler = TaskScheduler(taskStore, AgentDiscovery(RuntimeEnvironment.getApplication()), null)
+        scheduler = testTaskScheduler(taskStore, AgentDiscovery(RuntimeEnvironment.getApplication()))
         pipelineStore = InMemoryPipelineStore()
         orchestrator = PipelineOrchestrator(taskStore, scheduler, pipelineStore, nowSeconds = { now })
         runner = LocalTaskRunner(
@@ -131,7 +131,7 @@ class PipelineReviewHoldTest {
         )
         manager.grantProject("codex-mac", "proj-a", "user")
         manager.setConnectionState("codex-mac", MemberConnectionState.CONNECTED)
-        val memberOrchestrator = PipelineOrchestrator(tasks, TaskScheduler(tasks, AgentDiscovery(RuntimeEnvironment.getApplication()), null), InMemoryPipelineStore(), nowSeconds = { now })
+        val memberOrchestrator = PipelineOrchestrator(tasks, testTaskScheduler(tasks, AgentDiscovery(RuntimeEnvironment.getApplication())), InMemoryPipelineStore(), nowSeconds = { now })
         val receiver = MemberReturnReceiver(tasks, members, nowSeconds = { now }, pipelineHook = PipelineRunnerHookImpl(memberOrchestrator))
         tasks.createTask(TaskRecord(taskId = "m1", projectId = "proj-a", title = "任务 m1"))
         memberOrchestrator.enablePipeline("m1")

@@ -164,6 +164,7 @@ import wherevercode.agent.core.project.remoteFolderPickerListing
 import wherevercode.agent.core.project.isValidLocalWorkspacePath
 import wherevercode.agent.core.project.openFolderEntryOptions
 import wherevercode.agent.core.project.parseFolderListJson
+import wherevercode.agent.core.project.parseProjectFolderAuthorizationAck
 import wherevercode.agent.core.project.GitRepoKind
 import wherevercode.agent.core.project.parseGitHostRepoUrl
 import wherevercode.agent.core.project.parseGitRepoUrl
@@ -3356,7 +3357,12 @@ class MainActivity : AppCompatActivity() {
             return Result.failure(e)
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
-            is HandEvent.Result -> Result.success(Unit)
+            is HandEvent.Result -> try {
+                parseProjectFolderAuthorizationAck(terminal.output, folder)
+                Result.success(Unit)
+            } catch (_: Exception) {
+                Result.failure(IllegalStateException("Hand 未返回与请求目录匹配的有效授权回执"))
+            }
             is HandEvent.Blocked -> Result.failure(IllegalStateException(terminal.reason))
             else -> Result.failure(IllegalStateException("未知回包"))
         }

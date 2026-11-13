@@ -19,6 +19,7 @@ import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskScheduler
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStore
+import wherevercode.agent.core.task.TaskOrigins
 
 /**
  * 认领口：生产用 [SchedulerClaimPort]（复用 App 的 [TaskScheduler]
@@ -176,7 +177,7 @@ class McpDispatchService(
         val projectId = optText(args, "project_id", 128)
         val priority = if (args.has("priority")) args.optInt("priority", 0).coerceIn(-100, 100) else 0
         val assignee = optText(args, "assignee", 64)?.let { resolveExecutor(it) }
-        val taskId = "mcp-" + newId().take(24)
+        val taskId = TaskOrigins.MCP_DISPATCH_PREFIX + newId().take(24)
         val created = taskStore.createTask(
             TaskRecord(
                 taskId = taskId,

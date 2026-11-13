@@ -1,5 +1,6 @@
 package wherevercode.agent.ui
 
+import wherevercode.agent.core.task.testTaskScheduler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -36,7 +37,7 @@ class TurnTaskRecorderTest {
         taskStore = DispatchFakeTaskStore()
         stepStore = InMemoryTaskStepStore()
         val discovery = AgentDiscovery(RuntimeEnvironment.getApplication())
-        scheduler = TaskScheduler(taskStore, discovery, null)
+        scheduler = testTaskScheduler(taskStore, discovery)
         recorder = TurnTaskRecorder(taskStore, scheduler, stepStore)
     }
 

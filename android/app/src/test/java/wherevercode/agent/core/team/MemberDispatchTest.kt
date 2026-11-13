@@ -1,5 +1,6 @@
 package wherevercode.agent.core.team
 
+import wherevercode.agent.core.task.testTaskScheduler
 import android.content.Context
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -51,7 +52,7 @@ class MemberDispatchTest {
         val database = TaskDatabase.inMemory(context)
         db = database
         val taskStore = RoomTaskStore(database)
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val memberStore = InMemoryTeamMemberStore()
         val manager = MemberManager(memberStore, InMemoryAuditLog(), nowSeconds = { now })
         val dispatcher = MemberDispatcher(taskStore, memberStore, scheduler, nowSeconds = { now })

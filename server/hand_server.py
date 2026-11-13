@@ -684,7 +684,9 @@ class HandServer:
                           "folder": canonical, "already": already,
                           "task": envelope.get("task_id", "")})
         self._send(conn, session_key, envelope, "cross_device_result",
-                   {"output": json.dumps({"authorized": True, "already": already,
+                   {"output": json.dumps({"authorized": True,
+                                          "requested_folder": requested,
+                                          "already": already,
                                           "folder": canonical}, ensure_ascii=False)},
                    seq + 1)
 

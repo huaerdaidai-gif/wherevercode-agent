@@ -67,7 +67,7 @@ class DispatchClaimExecuteTest {
         taskStore = DispatchFakeTaskStore()
         stepStore = InMemoryTaskStepStore()
         val discovery = AgentDiscovery(RuntimeEnvironment.getApplication())
-        scheduler = TaskScheduler(taskStore, discovery, null)
+        scheduler = testTaskScheduler(taskStore, discovery)
         runner = LocalTaskRunner(
             taskStore,
             scheduler,

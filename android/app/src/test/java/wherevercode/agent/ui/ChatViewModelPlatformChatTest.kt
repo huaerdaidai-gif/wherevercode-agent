@@ -1,5 +1,6 @@
 package wherevercode.agent.ui
 
+import wherevercode.agent.core.task.testTaskScheduler
 import android.content.Context
 import java.io.File
 import java.nio.file.Files
@@ -277,7 +278,7 @@ class ChatViewModelPlatformChatTest {
             sessionLedger = NoOpSessionLedger,
         )
         val taskStepStore = InMemoryTaskStepStore()
-        val scheduler = TaskScheduler(taskStore, AgentDiscovery(context))
+        val scheduler = testTaskScheduler(taskStore, AgentDiscovery(context))
         val taskRunner = LocalTaskRunner(taskStore, scheduler, taskStepStore, NoopExecutor())
         val cloudflareStore = KeystoreCloudflareCredentialStore(secrets)
         val deepSeekStore = KeystoreDeepSeekCredentialStore(secrets)

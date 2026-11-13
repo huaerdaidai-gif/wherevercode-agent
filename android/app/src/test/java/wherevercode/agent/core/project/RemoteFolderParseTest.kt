@@ -74,6 +74,38 @@ class RemoteFolderParseTest {
     }
 
     @Test
+    fun `project folder authorization requires explicit matching acknowledgement`() {
+        val ack = parseProjectFolderAuthorizationAck(
+            """{"authorized":true,"requested_folder":"/work/project","already":false,"folder":"/work/project"}""",
+            "/work/project",
+        )
+        assertEquals(ProjectFolderAuthorizationAck("/work/project", false), ack)
+
+        val repeated = parseProjectFolderAuthorizationAck(
+            """{"authorized":true,"requested_folder":"/work/project","already":true,"folder":"/work/project"}""",
+            "/work/project",
+        )
+        assertTrue(repeated.already)
+    }
+
+    @Test
+    fun `generic success or mismatched Hand acknowledgement is rejected`() {
+        listOf(
+            "authorized",
+            """{"already":true,"folder":"/work/other"}""",
+            """{"authorized":true,"requested_folder":"/work/other","already":true,"folder":"/work/other"}""",
+            """{"authorized":true,"requested_folder":"/work/project","already":"true","folder":"/work/project"}""",
+        ).forEach { output ->
+            try {
+                parseProjectFolderAuthorizationAck(output, "/work/project")
+                org.junit.Assert.fail("未绑定当前请求的授权回执必须拒绝")
+            } catch (_: IllegalArgumentException) {
+                // Expected.
+            }
+        }
+    }
+
+    @Test
     fun `resolve project relative path`() {
         assertEquals("", resolveProjectRelativePath("/workspace/example-project", "/workspace/example-project"))
         assertEquals(

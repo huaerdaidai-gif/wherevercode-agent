@@ -447,12 +447,7 @@ object BrainBootstrap {
         val turnController: TurnController,
         /** UI V2 任务页：真实持久任务库。阶段 1 起聊天轮次经 TurnTaskRecorder 自动写入。 */
         val taskStore: TaskStore,
-        /**
-         * 阶段 1（U3 dispatch 最小链）：任务调度器。App 内第一次实例化：
-         * 此前 TaskScheduler 全 App 零实例化，dispatch_task 只入队无人认领。
-         * freezePort 传 null（文档约定的 pre-M2 行为）：认领仍受单任务
-         * 规则约束，ControlPlane 冻结接线是阶段 3 / U4 的工作。
-         */
+        /** App task scheduler sharing the persistent control-plane freeze gate. */
         val taskScheduler: TaskScheduler,
         /** 阶段 1：每任务执行步骤（V5 C1 起 Room 持久化，重启仍在）。 */
         val taskStepStore: TaskStepStore,
@@ -783,9 +778,10 @@ object BrainBootstrap {
         // Room，同一 TaskDatabase version 8；探针失败回退内存，见
         // roomTaskEventStoreOrMemory）。
         val taskEventStore: TaskEventStore = roomTaskEventStoreOrMemory(taskDb)
-        // 阶段 1（U3）：任务步骤与调度器。调度器此前全 App
-        // 零实例化；freezePort 传 null（pre-M2 行为，见 BrainComponents）。
-        val taskScheduler = TaskScheduler(taskStore, AgentDiscovery(appContext), null)
+        // 调度与控制共用同一个持久化状态源，保证 MCP / 本机入口的
+        // PAUSING、PAUSED、STOPPING 冻结在所有认领路径一致生效。
+        val controlStore = RoomControlStore(taskDb)
+        val taskScheduler = TaskScheduler(taskStore, AgentDiscovery(appContext), controlStore)
         // P2 流水线（2026-11-11）：流水线态 + verdict 历史（Room，
         // 同一 TaskDatabase version 9；探针失败回退内存）与协调器；
         // 本地执行器经钩子查它（plan 未批准不认领、编码完成停 review）。
@@ -868,7 +864,7 @@ object BrainBootstrap {
         val autonomyGate: AutonomyGate = DefaultAutonomyGate(
             autonomyStore,
             RoomControlAuditLog(taskDb.controlAuditDao()),
-            RoomControlStore(taskDb),
+            controlStore,
         )
 
         val toolRegistry = ToolRegistry(
@@ -1301,6 +1297,7 @@ object BrainBootstrap {
             taskStore,
             authStore,
             RoomRevocationStore(taskDb),
+            controlStore = controlStore,
             remoteTargetResolver = remoteTargetResolver,
             remoteControlSender = remoteControlSender,
         )

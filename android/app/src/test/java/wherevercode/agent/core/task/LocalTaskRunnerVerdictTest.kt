@@ -42,10 +42,9 @@ class LocalTaskRunnerVerdictTest {
     @Before
     fun setUp() {
         taskStore = DispatchFakeTaskStore()
-        scheduler = TaskScheduler(
+        scheduler = testTaskScheduler(
             taskStore,
             AgentDiscovery(RuntimeEnvironment.getApplication()),
-            null,
         )
     }
 
