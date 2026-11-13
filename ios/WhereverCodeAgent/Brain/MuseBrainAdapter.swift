@@ -115,7 +115,8 @@ public final class MuseBrainAdapter: BrainAdapter {
             return .failure(BrainErrorInfo(
                 code: "not_configured", message: "未配置 Muse 服务地址。", retryable: false))
         }
-        return await apiClient.listModels(apiKey: apiKey, baseUrl: baseUrl)
+        let result = await apiClient.listModels(apiKey: apiKey, baseUrl: baseUrl)
+        return result.mapError { $0 as Error }
     }
 
     public func chatStream(request: ChatRequest) -> AsyncThrowingStream<BrainEvent, Error> {
