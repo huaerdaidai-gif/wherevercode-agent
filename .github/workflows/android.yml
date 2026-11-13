@@ -97,7 +97,20 @@ jobs:
             if [ -z "${!name}" ]; then echo "::error::missing secret $name"; exit 1; fi
           done
           umask 077
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/maintainer.keystore"
+          # Tolerate line-wrapped / CRLF / URL-safe base64 as stored in the secret.
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n\t' | tr -- '-_' '+/' > "$RUNNER_TEMP/keystore.b64"
+          pad=$(( (4 - $(wc -c < "$RUNNER_TEMP/keystore.b64") % 4) % 4 ))
+          if [ "$pad" -gt 0 ]; then printf '%*s' "$pad" '' | tr ' ' '=' >> "$RUNNER_TEMP/keystore.b64"; fi
+          if ! base64 -d "$RUNNER_TEMP/keystore.b64" > "$RUNNER_TEMP/maintainer.keystore"; then
+            # Diagnostics without revealing the value: only sizes / character classes.
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not valid base64 (normalized length $(wc -c < "$RUNNER_TEMP/keystore.b64"), non-alphabet chars $(tr -d 'A-Za-z0-9+/=' < "$RUNNER_TEMP/keystore.b64" | wc -c))"
+            rm -f "$RUNNER_TEMP/keystore.b64" "$RUNNER_TEMP/maintainer.keystore"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/keystore.b64"
+          echo "decoded keystore: $(wc -c < "$RUNNER_TEMP/maintainer.keystore") bytes"
+          keytool -list -keystore "$RUNNER_TEMP/maintainer.keystore" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > /dev/null \
+            || { echo "::error::keystore does not open with ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS"; exit 1; }
           echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/maintainer.keystore" >> "$GITHUB_ENV"
       - name: Build signed compat APK
         env:
