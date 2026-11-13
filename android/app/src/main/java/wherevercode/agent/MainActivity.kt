@@ -253,6 +253,7 @@ import wherevercode.agent.ui.SessionListController
 import wherevercode.agent.ui.PipelineAction
 import wherevercode.agent.ui.TaskDetailArtifacts
 import wherevercode.agent.ui.TaskDetailController
+import wherevercode.agent.ui.TurnTaskRecorder
 import wherevercode.agent.ui.taskStateLabel
 import wherevercode.agent.ui.approvalOutcomeLabel
 import wherevercode.agent.ui.buildSessionListItems

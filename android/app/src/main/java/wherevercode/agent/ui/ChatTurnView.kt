@@ -343,6 +343,12 @@ class ChatTurnView(
         }
         addView(errorCard)
 
+        errorDetails = UiKit.text(context, "", 10f, R.color.text_tertiary).apply {
+            visibility = GONE
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setBackgroundResource(R.drawable.bg_system_note)
+        }
+        addView(errorDetails)
         errorDetailsToggle = UiKit.text(context, "查看原始诊断", 11f, R.color.accent).apply {
             visibility = GONE
             setPadding(dp(4), dp(2), dp(4), dp(4))
@@ -352,12 +358,6 @@ class ChatTurnView(
             }
         }
         addView(errorDetailsToggle)
-        errorDetails = UiKit.text(context, "", 10f, R.color.text_tertiary).apply {
-            visibility = GONE
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            setBackgroundResource(R.drawable.bg_system_note)
-        }
-        addView(errorDetails)
         errorRetry = UiKit.text(context, "重试本轮", 11f, R.color.accent, bold = true).apply {
             visibility = GONE
             setPadding(dp(10), dp(6), dp(10), dp(6))

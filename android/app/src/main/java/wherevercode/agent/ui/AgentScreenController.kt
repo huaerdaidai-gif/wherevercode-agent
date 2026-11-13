@@ -3,6 +3,7 @@ package wherevercode.agent.ui
 import wherevercode.agent.R
 
 import android.content.Context
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
