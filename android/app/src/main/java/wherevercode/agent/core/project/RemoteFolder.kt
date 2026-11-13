@@ -22,6 +22,7 @@ data class ProjectFolderAuthorizationAck(val folder: String, val already: Boolea
 fun parseProjectFolderAuthorizationAck(
     output: String,
     requestedFolder: String,
+    expectedAgentId: String,
 ): ProjectFolderAuthorizationAck {
     val response = try {
         org.json.JSONObject(output)
@@ -33,6 +34,9 @@ fun parseProjectFolderAuthorizationAck(
     }
     if (response.opt("requested_folder") != requestedFolder) {
         throw IllegalArgumentException("Hand 授权回执与请求目录不匹配")
+    }
+    if (response.opt("agent_id") != expectedAgentId) {
+        throw IllegalArgumentException("Hand 授权回执与目标 Agent 不匹配")
     }
     val canonicalFolder = response.opt("folder") as? String
         ?: throw IllegalArgumentException("Hand 授权回执缺少规范目录")

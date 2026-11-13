@@ -76,14 +76,16 @@ class RemoteFolderParseTest {
     @Test
     fun `project folder authorization requires explicit matching acknowledgement`() {
         val ack = parseProjectFolderAuthorizationAck(
-            """{"authorized":true,"requested_folder":"/work/project","already":false,"folder":"/work/project"}""",
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"remote-agent","already":false,"folder":"/work/project"}""",
             "/work/project",
+            "remote-agent",
         )
         assertEquals(ProjectFolderAuthorizationAck("/work/project", false), ack)
 
         val repeated = parseProjectFolderAuthorizationAck(
-            """{"authorized":true,"requested_folder":"/work/project","already":true,"folder":"/work/project"}""",
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"remote-agent","already":true,"folder":"/work/project"}""",
             "/work/project",
+            "remote-agent",
         )
         assertTrue(repeated.already)
     }
@@ -93,11 +95,12 @@ class RemoteFolderParseTest {
         listOf(
             "authorized",
             """{"already":true,"folder":"/work/other"}""",
-            """{"authorized":true,"requested_folder":"/work/other","already":true,"folder":"/work/other"}""",
-            """{"authorized":true,"requested_folder":"/work/project","already":"true","folder":"/work/project"}""",
+            """{"authorized":true,"requested_folder":"/work/other","agent_id":"remote-agent","already":true,"folder":"/work/other"}""",
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"wrong-agent","already":true,"folder":"/work/project"}""",
+            """{"authorized":true,"requested_folder":"/work/project","agent_id":"remote-agent","already":"true","folder":"/work/project"}""",
         ).forEach { output ->
             try {
-                parseProjectFolderAuthorizationAck(output, "/work/project")
+                parseProjectFolderAuthorizationAck(output, "/work/project", "remote-agent")
                 org.junit.Assert.fail("未绑定当前请求的授权回执必须拒绝")
             } catch (_: IllegalArgumentException) {
                 // Expected.

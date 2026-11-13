@@ -521,6 +521,22 @@ class HandClient(
                         connection.close()
                         return@collect
                     }
+                    if (response.agentId != request.agentId ||
+                        response.sourceDeviceId != request.peer.deviceId ||
+                        response.targetDeviceId != ownDeviceId ||
+                        response.folder != request.folder ||
+                        response.action != request.action
+                    ) {
+                        emit(
+                            HandEvent.Blocked(
+                                "Hand 回包身份或操作范围与本次请求不匹配，请重试",
+                                HandProtocol.Errors.INVALID_CREDENTIAL,
+                            ),
+                        )
+                        done = true
+                        connection.close()
+                        return@collect
+                    }
                     if (!replayGuard.checkAndRecord(response.seq, nowEpochSeconds())) {
                         // 重放 / 过期 / 超前太多的 seq：只丢弃该帧，不阻塞整个任务。
                         return@collect

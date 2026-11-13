@@ -117,10 +117,9 @@ interface RemoteAgentChatPort {
      *   cross_device_error，调用方按 Blocked 如实报告同步失败。
      * 不走 project_folders.json、不走 project-folder CLI——那两个
      * 方案已被新口径取代。
-     * 注意：信封 folder 绝不能填 Agent 已授权的文件夹
-     * （target.folder）——Hand 从不读 args["folder"]，那样只会把
-     * 已授权的文件夹再授权一遍、回 already=true 的“假成功”，项目
-     * 文件夹实际没进授权表（2026-11-12 集成缺口，已修）。
+     * 信封 folder 与凭证继续绑定 Agent 已授权的 target.folder；待授权
+     * 目录仅在 args.folder。Hand 必须把 args.folder 写入项目授权列表，
+     * 并回显 requested_folder 与 agent_id，客户端据此校验本次授权。
      *
      * 默认实现直接拒绝：只有真正接 Hand 的端口才实现它
      * （[HandRemoteAgentChatPort]）；测试替身不实现也不影响编译。

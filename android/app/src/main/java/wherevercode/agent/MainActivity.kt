@@ -3358,7 +3358,7 @@ class MainActivity : AppCompatActivity() {
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
             is HandEvent.Result -> try {
-                parseProjectFolderAuthorizationAck(terminal.output, folder)
+                parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
                 Result.success(Unit)
             } catch (_: Exception) {
                 Result.failure(IllegalStateException("Hand 未返回与请求目录匹配的有效授权回执"))
