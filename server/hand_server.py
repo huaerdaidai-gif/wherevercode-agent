@@ -625,7 +625,7 @@ class HandServer:
             expected_agent_id=agent_id,
             authorized_folders=self.authorized_folders(agent_id),
             revoked_jtis=self.revoked_jtis,
-            revoked_tasks=self.revoked_tasks,
+            revoked_tasks=set() if self._is_stop_call(action, args) else self.revoked_tasks,
             now=int(time.time()),
         )
         if err is not None:
@@ -693,6 +693,16 @@ class HandServer:
                                           "already": already,
                                           "folder": canonical}, ensure_ascii=False)},
                    seq + 1)
+
+    @staticmethod
+    def _is_stop_call(action: str, args: dict) -> bool:
+        if action != "run":
+            return False
+        try:
+            argv = json.loads(args.get("argv", "[]"))
+        except (TypeError, ValueError):
+            return False
+        return isinstance(argv, list) and argv[:2] == ["__control__", "stop"]
 
     def _check_fence(self, task_id: str, args: dict) -> tuple[str, str] | None:
         """goal_version/epoch 快照：旧于服务端记录即拒绝（改目标后旧执行不复活）。"""
@@ -895,7 +905,10 @@ class HandServer:
                 if time.time() > deadline:
                     timed_out = True
                     break
-                ready, _, _ = _select.select([out_fd, conn], [], [], 0.2)
+                exited = proc.poll() is not None
+                ready, _, _ = _select.select([out_fd, conn], [], [], 0 if exited else 0.2)
+                if exited and out_fd not in ready:
+                    break
                 if conn in ready:
                     raise ConnectionError("Hand run connection closed")
                 if out_fd in ready:
@@ -988,6 +1001,9 @@ class HandServer:
             return
         with self.process_lock:
             proc = self.processes.get(task_id)
+            if action == "stop":
+                self.revoked_tasks.add(task_id)
+                self.state.save_json("stopped_tasks.json", sorted(self.revoked_tasks))
             if task_id in self.starting_tasks and proc is None:
                 self._send(conn, session_key, envelope, "cross_device_result",
                            {"output": json.dumps({"control": action, "confirmed": False,
@@ -1019,21 +1035,26 @@ class HandServer:
                 else:
                     message = "任务未在运行，无需继续。"
             elif action == "stop":
-                self.revoked_tasks.add(task_id)
-                self.state.save_json("stopped_tasks.json", sorted(self.revoked_tasks))
                 if running:
                     assert proc is not None
                     self.task_meta.setdefault(task_id, {})["control_stopped"] = True
                     self._kill_process(task_id)
-                    proc.wait(timeout=5)
-                    message = "远端执行已停止。"
+                    try:
+                        proc.wait(timeout=5)
+                        message = "远端执行已停止。"
+                    except subprocess.TimeoutExpired:
+                        confirmed = False
+                        message = "执行进程尚未退出，请重试。"
                 else:
                     message = "任务未在运行，无需停止。"
             else:  # change_goal
                 if running:
                     self.task_meta.setdefault(task_id, {})["control_stopped"] = True
                     self._kill_process(task_id)
-                    proc.wait(timeout=5)
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        confirmed = False
                 meta = self.task_meta.setdefault(task_id, {})
                 meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
                 if new_goal:

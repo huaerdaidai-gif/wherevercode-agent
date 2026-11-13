@@ -95,7 +95,7 @@ class DispatchTokenRegistry(
         state.tokens().firstOrNull {
             it.principalId.equals(principalId, ignoreCase = true) && !it.revoked &&
                 DispatchCapability.EXECUTE in it.capabilities &&
-                (it.role == DispatchRole.OWNER || projectId == null || projectId in it.projectIds)
+                (it.role == DispatchRole.OWNER || if (projectId == null) it.projectIds.isEmpty() else projectId in it.projectIds)
         }?.principalId
 
     companion object {

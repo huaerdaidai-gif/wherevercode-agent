@@ -387,6 +387,8 @@ class McpDispatchServiceTest {
         val request = args("title" to "Scoped", "goal" to "Verify scope",
             "project_id" to "project-a", "idempotency_key" to "scoped-create")
         assertEquals(DispatchErrors.FORBIDDEN, f.fail(a.chatgpt, "create_task", request).code)
+        val unscoped = JSONObject(request.toString()).apply { remove("project_id") }
+        assertEquals(DispatchErrors.FORBIDDEN, f.fail(dispatcher, "create_task", unscoped).code)
         val id = f.call(dispatcher, "create_task", request).getJSONObject("task").getString("task_id")
         assertEquals(DispatchErrors.UNKNOWN_AGENT, f.fail(dispatcher, "assign_task",
             args("task_id" to id, "agent_id" to a.grok.id)).code)

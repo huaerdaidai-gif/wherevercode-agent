@@ -644,7 +644,7 @@ class ControlPlane(
             (isLocalDispatchedTask(task) || TaskOrigins.isMcpDispatchTask(task.taskId))
 
     private fun releasePausedAttempt(task: TaskRecord) {
-        taskStore.updateTask(
+        checkNotNull(taskStore.updateTask(
             task.taskId,
             mapOf(
                 "state" to "requeued",
@@ -656,7 +656,7 @@ class ControlPlane(
                 "needs_attention" to true,
             ),
             task.version, task.goalVersion, task.authEpoch,
-        )
+        )) { "Expired task disappeared before its attempt could be released" }
     }
 
     private fun isLocalDispatchedTask(task: TaskRecord): Boolean =

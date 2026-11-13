@@ -35,7 +35,7 @@ data class DispatchPrincipal(
         role == DispatchRole.OWNER || capability in capabilities
 
     fun canAccessProject(projectId: String?): Boolean =
-        role == DispatchRole.OWNER || projectId == null || projectId in projectIds
+        role == DispatchRole.OWNER || if (projectId == null) projectIds.isEmpty() else projectId in projectIds
 
     /** 审计里的主体标识：`role:id`，不含任何令牌信息。 */
     val auditId: String get() = "${role.name.lowercase()}:$id"

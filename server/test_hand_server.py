@@ -619,6 +619,10 @@ class HandServerTest(unittest.TestCase):
                          hs.ERR_REMOTE_CONTROLLED_STOP)
 
         self.assertIsNotNone(proc.poll())
+        retried_stop = self.client.tool_call(
+            "tslow", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "stop", "op-3"])})
+        self.assertTrue(json.loads(retried_stop[-1]["args"]["output"])["confirmed"])
         restarted = hs.HandServer(self.server.state.dir, self.server.device_id, "restarted")
         self.assertIn("tslow", restarted.revoked_tasks)
         replay = self.client.tool_call(
