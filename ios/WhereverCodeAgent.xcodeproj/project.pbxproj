@@ -81,6 +81,7 @@
 		47214D5C5C54BFCD442E61C8 = {isa = XCBuildConfiguration; buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "WhereverCodeAgent/WhereverCodeAgent.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
@@ -148,6 +149,7 @@
 		732524DA06571CF0EB4D85BA = {isa = XCBuildConfiguration; buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "WhereverCodeAgent/WhereverCodeAgent.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
@@ -184,6 +186,7 @@
 		); buildRules = (); dependencies = (
 			DE7EDA7845E668E233D95004,
 		); name = WhereverCodeAgentTests; productName = WhereverCodeAgentTests; productReference = E14659535277E988EECDDE93; productType = "com.apple.product-type.bundle.unit-test"; };
+		98E3434F859B0C281501C824 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhereverCodeAgent.entitlements; sourceTree = "<group>"; };
 		9CCD70432011961B094C8FCE = {isa = PBXBuildFile; fileRef = 91067B38E1192DA78C1A0C00; };
 		A8FBCDEA5E707EC35BAF1DE6 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
 		ABD4D6AD9705B560B2E73A9F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
@@ -208,6 +211,7 @@
 			B6346D3B3FFCEA4422AAA296,
 			C3E649AE6FBC41A1C5956252,
 			58DA840CC0A312D88F6FA6BF,
+			98E3434F859B0C281501C824,
 		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			A8FBCDEA5E707EC35BAF1DE6,

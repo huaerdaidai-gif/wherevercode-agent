@@ -104,6 +104,12 @@ jobs:
           if-no-files-found: error
 
       - name: Test on iOS Simulator
+        # Ad-hoc signed ("Sign to Run Locally", identity "-"): the
+        # simulator Keychain refuses unsigned apps with -34018
+        # (errSecMissingEntitlement), which would fail the Keychain
+        # tests for an environment reason, not a code reason. No real
+        # identity or certificate is involved; the shipped IPA above
+        # stays fully unsigned.
         run: |
           set -euo pipefail
           xcodebuild test \
@@ -112,4 +118,5 @@ jobs:
             -configuration Debug \
             -destination 'platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}' \
             -derivedDataPath .build/derived \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY="-"
