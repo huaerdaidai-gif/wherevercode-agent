@@ -89,6 +89,7 @@ class DrawerViewTest {
     @Test
     fun `extensions group keeps console mcp plugins and three resource placeholders in order`() {
         val drawerView = view()
+        drawerView.setGroupCollapsed("extensions", false)
         assertEquals(
             listOf("nav_console", "nav_team_channel", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
             drawerView.renderedGroupIds("extensions"),
@@ -106,15 +107,17 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `default drawer renders ten primary rows and secondary groups`() {
+    fun `default drawer keeps secondary resources folded below primary navigation`() {
         val drawerView = view()
-        // 一级 10 + 工作空间 2 + 扩展与资源 6（P3 加了团队频道）+ 底部用户行 1。
-        assertEquals(19, drawerView.renderedIds().size)
+        assertTrue(drawerView.isGroupCollapsed("extensions"))
+        // 一级 10 + 工作空间 2 + 底部用户行 1；次级入口由可见分组头展开。
+        assertEquals(13, drawerView.renderedIds().size)
     }
 
     @Test
     fun `all ten V5-UI section-three entries are reachable from the drawer or top bar`() {
         val drawerView = view()
+        drawerView.setGroupCollapsed("extensions", false)
         val targets = drawerView.renderedIds().mapNotNull { EntryRegistry.find(it) }
             .filter { it.targetKind == EntryRegistry.TargetKind.DRAWER }
             .map { it.target }

@@ -36,6 +36,7 @@ class ProjectScreenController(
     private val context: Context,
     private val rootLabel: TextView,
     private val treePane: View,
+    private val breadcrumb: LinearLayout,
     private val treeList: LinearLayout,
     private val treeScroll: ScrollView,
     private val emptyView: TextView,
@@ -120,6 +121,7 @@ class ProjectScreenController(
         WorkspaceEditSession(FileWorkspaceAdapter(workspaceDir, taskRootDir), browser)
     }
     private val expanded = LinkedHashSet<String>()
+    private var currentDirectory: String = ""
     private var currentFile: String? = null
     private var currentRead: WorkspaceRead? = null
     private var readLimit: Int = READ_TIER_SMALL
@@ -205,6 +207,7 @@ class ProjectScreenController(
     /** 本机工作区文件树（原来的项目页视图；从项目列表点“本机工作区”进来）。 */
     fun showWorkspace() {
         expanded.clear()
+        currentDirectory = ""
         projectListPane.visibility = View.GONE
         searchInput.visibility = View.VISIBLE
         rootLabel.text = "本机工作区 · ${browser.rootPath}"
@@ -219,6 +222,7 @@ class ProjectScreenController(
      */
     fun openLocalFolder(relativePath: String) {
         expanded.clear()
+        currentDirectory = relativePath.trim('/')
         projectListPane.visibility = View.GONE
         searchInput.visibility = View.VISIBLE
         rootLabel.text = "本机 · $relativePath"
@@ -541,6 +545,7 @@ class ProjectScreenController(
 
     private fun render() {
         treeList.removeAllViews()
+        renderBreadcrumb()
         if (searchQuery.isNotBlank()) {
             renderSearch()
             return
@@ -572,6 +577,36 @@ class ProjectScreenController(
             treeMoreButton.visibility = View.GONE
         }
         treeScroll.post { treeScroll.fullScroll(View.FOCUS_UP) }
+    }
+
+    private fun renderBreadcrumb() {
+        breadcrumb.removeAllViews()
+        val parts = currentDirectory.split('/').filter { it.isNotBlank() }
+        val segments = listOf("工作区" to "") + parts.mapIndexed { index, name ->
+            name to parts.take(index + 1).joinToString("/")
+        }
+        segments.forEachIndexed { index, (label, path) ->
+            if (index > 0) {
+                breadcrumb.addView(UiKit.text(context, "›", 12f, R.color.text_tertiary).apply {
+                    setPadding(UiKit.dp(context, 5), UiKit.dp(context, 4), UiKit.dp(context, 5), UiKit.dp(context, 4))
+                })
+            }
+            breadcrumb.addView(UiKit.text(context, label, 11f, R.color.accent).apply {
+                isClickable = true
+                isFocusable = true
+                setPadding(UiKit.dp(context, 4), UiKit.dp(context, 4), UiKit.dp(context, 4), UiKit.dp(context, 4))
+                setOnClickListener {
+                    currentDirectory = path
+                    expanded.clear()
+                    var prefix = ""
+                    path.split('/').filter { it.isNotBlank() }.forEach { part ->
+                        prefix = if (prefix.isEmpty()) part else "$prefix/$part"
+                        expanded.add(prefix)
+                    }
+                    render()
+                }
+            })
+        }
     }
 
     private fun renderSearch() {
@@ -662,6 +697,7 @@ class ProjectScreenController(
         row.setOnClickListener {
             if (entry.isDirectory) {
                 if (!expanded.add(entry.relativePath)) expanded.remove(entry.relativePath)
+                currentDirectory = entry.relativePath
                 render()
             } else {
                 openFile(entry.relativePath)

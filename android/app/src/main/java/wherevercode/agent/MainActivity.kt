@@ -1165,9 +1165,9 @@ class MainActivity : AppCompatActivity() {
         // 造通知数。大脑 pill 与“新建”已删：大脑状态在设置页大脑分节
         // （refreshBrainStatus 写 brainStatus），新对话走抽屉“对话”
         // 入口（onDrawerEntrySelected 的 nav_chat 分支调 newConversationAndShow）。
-        findViewById<View>(R.id.buttonBell).setOnClickListener {
-            toast("通知中心待开发")
-        }
+        // Notifications have no persisted inbox or delivery source yet. Hide
+        // the decorative bell until it can open a real notification screen.
+        findViewById<View>(R.id.buttonBell).visibility = View.GONE
     }
 
     // ------------------------------------------------------------------
@@ -1542,6 +1542,11 @@ class MainActivity : AppCompatActivity() {
             },
             onStartFanout = { question -> startTeamFanout(question) },
             onRefresh = { refreshTeamChannel() },
+            onReconnect = {
+                stopTeamChannelFeed()
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -1951,6 +1956,10 @@ class MainActivity : AppCompatActivity() {
                 sessions,
                 titleOverrides = titles,
                 summaryOverrides = summaries,
+                memberLabel = { id ->
+                    if (id == TurnTaskRecorder.LOCAL_AGENT_ID) "本机 App"
+                    else runCatching { agentStore.getAgent(id)?.displayName }.getOrNull() ?: id
+                },
                 timeLabel = { epochSeconds -> UiKit.shortTime(epochSeconds) },
             )
             val defaultSubtitle = "当前：${chatViewModel.currentSessionLabel()}"
@@ -4681,6 +4690,7 @@ class MainActivity : AppCompatActivity() {
             context = this,
             rootLabel = screenProjects.findViewById(R.id.projectRoot),
             treePane = screenProjects.findViewById(R.id.projectTreePane),
+            breadcrumb = screenProjects.findViewById(R.id.projectBreadcrumb),
             treeList = screenProjects.findViewById(R.id.projectTreeList),
             treeScroll = screenProjects.findViewById(R.id.projectTreeScroll),
             emptyView = screenProjects.findViewById(R.id.projectEmpty),
@@ -7456,22 +7466,34 @@ class MainActivity : AppCompatActivity() {
         cloudSection.addView(canDispatchBox)
         cloudSection.addView(setupSheetButton)
         form.addView(cloudSection)
-        form.addView(label("服务地址"))
+        val baseUrlLabel = label("服务地址")
+        val modelLabel = label("模型")
+        val adapterLabel = label("适配器 id")
+        val binaryLabel = label("CLI 二进制名")
+        val authRefLabel = label("密钥引用名")
+        val secretLabel = label("密钥值")
+        val capabilitiesLabel = label("能力")
+        val limitsLabel = label("已知限制")
+        val dispatchableLabel = label("任务权限")
+        form.addView(label("当前类型配置"))
+        form.addView(baseUrlLabel)
         form.addView(baseUrlField)
-        form.addView(label("模型"))
+        form.addView(modelLabel)
         form.addView(modelField)
-        form.addView(label("适配器 id"))
+        form.addView(adapterLabel)
         form.addView(adapterField)
-        form.addView(label("CLI 二进制名"))
+        form.addView(binaryLabel)
         form.addView(binaryField)
-        form.addView(label("密钥引用名"))
+        form.addView(authRefLabel)
         form.addView(authRefField)
-        form.addView(label("密钥值"))
+        form.addView(secretLabel)
         form.addView(secretField)
-        form.addView(label("能力"))
+        form.addView(label("通用能力与限制"))
+        form.addView(capabilitiesLabel)
         form.addView(capsField)
+        form.addView(dispatchableLabel)
         form.addView(dispatchableBox)
-        form.addView(label("已知限制"))
+        form.addView(limitsLabel)
         form.addView(limitsField)
 
         fun currentKind(): BrainKind = when {
@@ -7490,21 +7512,36 @@ class MainActivity : AppCompatActivity() {
             val kind = currentKind()
             val isManus = kind == BrainKind.MODEL_API && manusBox.isChecked
             manusBox.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            baseUrlLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             baseUrlField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            modelLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             modelField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             modelField.hint = if (isManus) {
                 "档位：standard / lite / max（默认 standard；“Manus 2.0 Lite”填 lite）"
             } else {
                 "模型，如 deepseek-flash"
             }
+            binaryLabel.visibility = if (kind == BrainKind.AGENT_RUNTIME) View.VISIBLE else View.GONE
             binaryField.visibility = if (kind == BrainKind.AGENT_RUNTIME) View.VISIBLE else View.GONE
             binaryField.hint = if (isDeviceAgent()) "设备上的 CLI 二进制名，如 codex" else "CLI 二进制名，如 codebuddy"
+            val adapterVisible = kind in setOf(BrainKind.MODEL_API, BrainKind.SUBSCRIPTION, BrainKind.AGENT_RUNTIME)
+            adapterLabel.visibility = if (adapterVisible) View.VISIBLE else View.GONE
+            adapterField.visibility = adapterLabel.visibility
             deviceSection.visibility = if (isDeviceAgent()) View.VISIBLE else View.GONE
             platformSection.visibility = if (isPlatformAgent()) View.VISIBLE else View.GONE
             cloudSection.visibility = if (isCloudAgent()) View.VISIBLE else View.GONE
             cloudHomeSpinner.visibility = if (isCloudAgent() && cloudHomeDevice.isChecked) View.VISIBLE else View.GONE
+            authRefLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             authRefField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            secretLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             secretField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            val commonVisibility = if (kind == BrainKind.CLOUD_AGENT) View.GONE else View.VISIBLE
+            capabilitiesLabel.visibility = commonVisibility
+            capsField.visibility = commonVisibility
+            limitsLabel.visibility = commonVisibility
+            limitsField.visibility = commonVisibility
+            dispatchableLabel.visibility = commonVisibility
+            dispatchableBox.visibility = commonVisibility
         }
         typeGroup.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
         cloudHomeGroup.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
@@ -8420,6 +8457,30 @@ class MainActivity : AppCompatActivity() {
         bindAutonomySettings()
         // Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接设备的 Hand）。
         bindHandSyncSettings()
+        bindSettingsNavigation()
+    }
+
+    private fun bindSettingsNavigation() {
+        val scroll = screenSettings as? ScrollView ?: return
+        val destinations = mapOf(
+            R.id.settingsJumpModels to { screenSettings.findViewById<View>(R.id.brainListContainer) },
+            R.id.settingsJumpRepos to { screenSettings.findViewById<View>(R.id.githubAuthStatus) },
+            R.id.settingsJumpDevices to { screenSettings.findViewById<View>(R.id.handAutoSyncRow) },
+            R.id.settingsJumpMcp to {
+                screenSettings.findViewWithTag<View>("settings_mcp_dispatch")
+                    ?: screenSettings.findViewById(R.id.buttonBrainAdvanced)
+            },
+            R.id.settingsJumpAbout to { screenSettings.findViewById<View>(R.id.appUpdateStatus) },
+        )
+        destinations.forEach { (buttonId, resolveTarget) ->
+            screenSettings.findViewById<View>(buttonId).setOnClickListener {
+                val target = resolveTarget() ?: return@setOnClickListener
+                val rect = android.graphics.Rect()
+                target.getDrawingRect(rect)
+                scroll.offsetDescendantRectToMyCoords(target, rect)
+                scroll.smoothScrollTo(0, rect.top.coerceAtLeast(0))
+            }
+        }
     }
 
     /**
@@ -8436,6 +8497,7 @@ class MainActivity : AppCompatActivity() {
         val section = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(20), 0, dp(8))
+            tag = "settings_mcp_dispatch"
         }
         val title = TextView(this).apply {
             text = "本机 MCP 派工"

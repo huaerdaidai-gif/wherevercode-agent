@@ -100,6 +100,9 @@ class ChatTurnView(
     private val attachmentContainer: LinearLayout
     private val notesContainer: LinearLayout
     private val errorCard: TextView
+    private val errorDetailsToggle: TextView
+    private val errorDetails: TextView
+    private val errorRetry: TextView
     private val statusFooter: TextView
 
     private val toolCards = LinkedHashMap<String, ToolCallCardView>()
@@ -340,6 +343,29 @@ class ChatTurnView(
         }
         addView(errorCard)
 
+        errorDetailsToggle = UiKit.text(context, "查看原始诊断", 11f, R.color.accent).apply {
+            visibility = GONE
+            setPadding(dp(4), dp(2), dp(4), dp(4))
+            setOnClickListener {
+                errorDetails.visibility = if (errorDetails.visibility == VISIBLE) GONE else VISIBLE
+                text = if (errorDetails.visibility == VISIBLE) "收起原始诊断" else "查看原始诊断"
+            }
+        }
+        addView(errorDetailsToggle)
+        errorDetails = UiKit.text(context, "", 10f, R.color.text_tertiary).apply {
+            visibility = GONE
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setBackgroundResource(R.drawable.bg_system_note)
+        }
+        addView(errorDetails)
+        errorRetry = UiKit.text(context, "重试本轮", 11f, R.color.accent, bold = true).apply {
+            visibility = GONE
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setBackgroundResource(R.drawable.bg_chip_accent)
+            setOnClickListener { boundTurn?.let { onRegenerate?.invoke(it.userText) } }
+        }
+        addView(errorRetry)
+
         statusFooter = UiKit.text(context, "", 11f, R.color.home_text_secondary).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
                 topMargin = dp(4)
@@ -483,9 +509,17 @@ class ChatTurnView(
 
         if (turn.status == TurnStatus.ERROR && !turn.error.isNullOrBlank()) {
             errorCard.visibility = VISIBLE
-            errorCard.text = turn.error
+            errorCard.text = friendlyError(turn.error)
+            errorDetailsToggle.visibility = VISIBLE
+            errorDetailsToggle.text = "查看原始诊断"
+            errorDetails.visibility = GONE
+            errorDetails.text = turn.error
+            errorRetry.visibility = if (turn.userText.isNotBlank()) VISIBLE else GONE
         } else {
             errorCard.visibility = GONE
+            errorDetailsToggle.visibility = GONE
+            errorDetails.visibility = GONE
+            errorRetry.visibility = GONE
         }
 
         // V5 聊天清理 20261111：进行中的状态只占一行 subtle 状态行——
@@ -685,6 +719,27 @@ class ChatTurnView(
         TurnStatus.PAUSED -> "已暂停"
         TurnStatus.STOPPED -> "已停止"
         TurnStatus.GOAL_CHANGED -> "已改目标"
+    }
+
+    private fun friendlyError(raw: String): String {
+        val json = runCatching { org.json.JSONObject(raw) }.getOrNull()
+            ?: runCatching { org.json.JSONObject(raw.substringAfter(": ")) }.getOrNull()
+        val code = json?.optJSONObject("error")?.optString("code")
+            ?: json?.optString("code")
+            ?: ""
+        val message = json?.optJSONObject("error")?.optString("message")
+            ?: json?.optString("message")
+            ?: ""
+        return when (code.lowercase()) {
+            "unsupported_country_region_territory" ->
+                "模型服务当前不支持此账号所在的地区。可以检查服务区域，或切换到当前可用的模型后重试。"
+            "insufficient_quota", "billing_hard_limit_reached" ->
+                "模型服务额度不足。请检查账号用量或更换已配置的模型后重试。"
+            "invalid_api_key", "authentication_error" ->
+                "模型服务认证失败。请检查该 Agent 的凭证设置后重试。"
+            else -> message.takeIf { it.isNotBlank() }?.let { "本轮没有完成：${it.take(180)}。可检查配置后重试。" }
+                ?: "本轮没有完成。可检查网络和模型配置后重试；详细原因已收在诊断信息中。"
+        }
     }
 
     @ColorRes

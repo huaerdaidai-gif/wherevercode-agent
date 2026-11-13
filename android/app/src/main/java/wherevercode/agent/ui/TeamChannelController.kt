@@ -74,6 +74,7 @@ class TeamChannelController(
     private val onNewRound: () -> Unit,
     private val onStartFanout: (question: String) -> Unit,
     private val onRefresh: () -> Unit,
+    private val onReconnect: () -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -98,6 +99,14 @@ class TeamChannelController(
     private val connectionLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val noticeLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
+    private val diagnosticToggle: TextView = UiKit.text(context, "查看连接诊断", 10f, R.color.accent).apply {
+        visibility = View.GONE
+        setPadding(dp(16), 0, dp(16), dp(3))
+    }
+    private val diagnosticLine: TextView = UiKit.text(context, "", 10f, R.color.text_tertiary).apply {
+        visibility = View.GONE
+        setPadding(dp(16), 0, dp(16), dp(4))
+    }
 
     private val messageInput: EditText = EditText(context).apply {
         hint = "给频道发一条短消息（≤500 字），@名字 叫一位 Agent…"
@@ -136,6 +145,30 @@ class TeamChannelController(
         )
         connectionLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(connectionLine)
+        val connectionActions = UiKit.horizontal(context).apply {
+            setPadding(dp(16), 0, dp(16), dp(2))
+        }
+        connectionActions.addView(
+            UiKit.text(context, "重新连接", 11f, R.color.accent, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip_accent)
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                setOnClickListener { onReconnect() }
+            },
+        )
+        connectionActions.addView(
+            UiKit.text(context, "刷新消息", 11f, R.color.text_secondary).apply {
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                setOnClickListener { onRefresh() }
+            },
+        )
+        root.addView(connectionActions)
+        root.addView(diagnosticToggle)
+        root.addView(diagnosticLine)
+        diagnosticToggle.setOnClickListener {
+            val expanded = diagnosticLine.visibility != View.VISIBLE
+            diagnosticLine.visibility = if (expanded) View.VISIBLE else View.GONE
+            diagnosticToggle.text = if (expanded) "收起连接诊断" else "查看连接诊断"
+        }
         roundLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(roundLine)
         noticeLine.setPadding(dp(16), 0, dp(16), dp(6))
@@ -163,7 +196,10 @@ class TeamChannelController(
                 setOnClickListener { sendMessage() }
             },
         )
-        bar.addView(sendRow)
+        val sendColumn = UiKit.vertical(context)
+        sendColumn.addView(UiKit.text(context, "频道消息 · 所有成员可见，可用 @名字 邀请回复", 10f, R.color.text_tertiary))
+        sendColumn.addView(sendRow)
+        bar.addView(sendColumn)
         val fanoutRow = UiKit.horizontal(context).apply { setPadding(0, dp(8), 0, 0) }
         fanoutRow.addView(
             fanoutInput.apply {
@@ -177,7 +213,10 @@ class TeamChannelController(
                 setOnClickListener { startFanout() }
             },
         )
-        bar.addView(fanoutRow)
+        val fanoutColumn = UiKit.vertical(context)
+        fanoutColumn.addView(UiKit.text(context, "只读问大家 · 仅生成建议，不会派活或写文件", 10f, R.color.text_tertiary))
+        fanoutColumn.addView(fanoutRow)
+        bar.addView(fanoutColumn)
         return bar
     }
 
@@ -207,14 +246,20 @@ class TeamChannelController(
 
     fun render(snapshot: TeamChannelSnapshot) {
         this.snapshot = snapshot
+        val diagnostic = snapshot.connectionError?.takeIf { it.isNotBlank() }
+        val certificateFailure = diagnostic?.let(::isCertificateFailure) == true
         connectionLine.text = when (snapshot.connectionState) {
             ChannelConnectionState.LIVE -> "● 直播推送（WS 已连）"
             ChannelConnectionState.CONNECTING -> "○ 正在连接频道…"
             ChannelConnectionState.POLLING ->
-                "○ 轮询兜底（推送已断）" +
-                    (snapshot.connectionError?.let { "：$it" } ?: "")
+                "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）" +
+                    if (certificateFailure) " · 证书验证失败，安全连接未建立" else ""
             ChannelConnectionState.STOPPED -> "○ 频道未连接"
         }
+        diagnosticToggle.visibility = if (diagnostic == null) View.GONE else View.VISIBLE
+        diagnosticLine.visibility = View.GONE
+        diagnosticLine.text = diagnostic.orEmpty()
+        diagnosticToggle.text = "查看连接诊断"
         roundLine.text = if (snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS) {
             "已到 ${TeamChatLimits.MAX_ROUNDS} 轮上限，点“开始新一轮”继续"
         } else {
@@ -384,19 +429,45 @@ class TeamChannelController(
                 FanoutBranchStatus.DONE -> "已回"
                 FanoutBranchStatus.RUNNING -> "问着呢…"
                 FanoutBranchStatus.PENDING -> "等着问"
-                FanoutBranchStatus.FAILED -> "没回：${branch.error.orEmpty().take(100)}"
+                FanoutBranchStatus.FAILED -> "连接失败"
                 FanoutBranchStatus.TIMEOUT -> "超时没回"
             }
-            col.addView(
-                UiKit.text(context, "${branch.displayName}：$statusText", 12f, R.color.text_primary)
-                    .apply { setPadding(0, dp(2), 0, 0) },
-            )
-            branch.summary?.takeIf { it.isNotBlank() }?.let { summary ->
-                col.addView(
-                    UiKit.text(context, summary, 12f, R.color.text_tertiary)
-                        .apply { setPadding(dp(8), 0, 0, dp(4)) },
-                )
+            val branchCard = UiKit.vertical(context).apply {
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(5) }
             }
+            branchCard.addView(UiKit.text(context, "${branch.displayName} · $statusText", 12f, R.color.text_primary, bold = true))
+            branch.summary?.takeIf { it.isNotBlank() }?.let { summary ->
+                val summaryView = UiKit.text(context, summary, 12f, R.color.text_tertiary).apply {
+                    maxLines = 4
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(4), 0, 0)
+                }
+                summaryView.setOnClickListener {
+                    summaryView.maxLines = if (summaryView.maxLines == 4) 24 else 4
+                }
+                branchCard.addView(summaryView)
+            }
+            branch.error?.takeIf { it.isNotBlank() }?.let { error ->
+                val detail = UiKit.text(context, error, 10f, R.color.text_tertiary).apply {
+                    visibility = View.GONE
+                    setPadding(0, dp(4), 0, 0)
+                }
+                val toggle = UiKit.text(context, "查看失败诊断", 10f, R.color.accent).apply {
+                    setPadding(0, dp(4), 0, 0)
+                    setOnClickListener {
+                        detail.visibility = if (detail.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                        text = if (detail.visibility == View.VISIBLE) "收起失败诊断" else "查看失败诊断"
+                    }
+                }
+                branchCard.addView(toggle)
+                branchCard.addView(detail)
+            }
+            col.addView(branchCard)
         }
         return col
     }
@@ -414,6 +485,12 @@ class TeamChannelController(
         } catch (_: Exception) {
             ""
         }
+    }
+
+    private fun isCertificateFailure(error: String): Boolean {
+        val normalized = error.lowercase(Locale.ROOT)
+        return listOf("certificate", "certpath", "trust anchor", "sslhandshake", "证书", "证书链")
+            .any(normalized::contains)
     }
 
     private fun dp(value: Int): Int = UiKit.dp(context, value)
