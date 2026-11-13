@@ -103,6 +103,17 @@ struct ChannelChatView: View {
                 .id(message.id)
             }
             .listStyle(.plain)
+            // iOS 17 deprecates the one-parameter onChange; Xcode 26
+            // uses the two-parameter form, older toolchains the old one.
+            #if swift(>=6.0)
+            .onChange(of: messages.count) { _, _ in
+                if let last = messages.last {
+                    withAnimation {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+            #else
             .onChange(of: messages.count) { _ in
                 if let last = messages.last {
                     withAnimation {
@@ -110,6 +121,7 @@ struct ChannelChatView: View {
                     }
                 }
             }
+            #endif
         }
     }
 

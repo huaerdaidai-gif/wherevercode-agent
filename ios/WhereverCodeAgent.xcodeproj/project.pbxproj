@@ -92,6 +92,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			}; name = Debug; };
 		47FFE0ECCF7C83A806454DF9 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpClientTests.swift; sourceTree = "<group>"; };
@@ -175,7 +176,7 @@
 		91067B38E1192DA78C1A0C00 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhereverCodeAgentApp.swift; sourceTree = "<group>"; };
 		918CC59A2183C5FAA462994B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
 		92543349B33279DD5291FA11 = {isa = XCBuildConfiguration; buildSettings = {
-
+				ALWAYS_SEARCH_USER_PATHS = NO;
 			}; name = Debug; };
 		96D98ED529C3FE45773F4B2D = {isa = PBXNativeTarget; buildConfigurationList = 3AB2292BD206EE84BF0DEB19; buildPhases = (
 			ABD4D6AD9705B560B2E73A9F,
@@ -227,7 +228,7 @@
 		C938E01FDB5D371FF097BED0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalGate.swift; sourceTree = "<group>"; };
 		CADD1518C40C924157152CE5 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		CE35DE7B00E4C3789C5A5852 = {isa = XCBuildConfiguration; buildSettings = {
-
+				ALWAYS_SEARCH_USER_PATHS = NO;
 			}; name = Release; };
 		D2F8A62EC32897E7406C54CD = {isa = PBXBuildFile; fileRef = 09B55E412B3CD3EA22477AB8; };
 		DAA35294198AB5749AF56D9F = {isa = PBXNativeTarget; buildConfigurationList = C6036759D6AA8FB498EF9EC9; buildPhases = (
