@@ -51,16 +51,19 @@ final class WhereverCodeAgentUITests: XCTestCase {
         snap(app, "ui-02-settings")
 
         // --- Configure an unresolvable https address + dummy token.
-        // The channel id is filled explicitly too, so the flow does
-        // not depend on whatever defaults earlier tests left behind.
+        // The channel id is only typed when the field is empty (a
+        // default value may already be there; typing would append),
+        // so the flow does not depend on inherited defaults.
         urlField.tap()
         urlField.typeText("https://uitest.invalid")
         let channelField = app.textFields.matching(
             NSPredicate(format: "placeholderValue BEGINSWITH %@", "频道")
         ).firstMatch
         XCTAssertTrue(channelField.waitForExistence(timeout: 10))
-        channelField.tap()
-        channelField.typeText("uitest-channel")
+        if (channelField.value as? String) == "频道 ID" {
+            channelField.tap()
+            channelField.typeText("uitest-channel")
+        }
         app.buttons["保存地址与频道"].tap()
 
         let tokenField = app.secureTextFields.matching(
@@ -117,11 +120,25 @@ final class WhereverCodeAgentUITests: XCTestCase {
         XCTAssertTrue(app.buttons["重试"].exists)
     }
 
-    /// Dismiss the software keyboard if it is up (a swipe down on a
-    /// Form scrolls it away), so tab-bar taps actually reach the bar.
+    /// Get rid of the software keyboard before tapping the tab bar:
+    /// while it is up it COVERS the tab bar, so tab taps land on the
+    /// keyboard (a plain swipe only scrolls the form — verified from
+    /// a failing run's screen recording). First try the interactive
+    /// drag-down dismissal; if the keyboard is still up, relaunch —
+    /// settings and token persist, and the app reopens on the chat
+    /// tab, which is where the test goes next anyway.
     private func dismissKeyboard(_ app: XCUIApplication) {
+        guard app.keyboards.firstMatch.exists else { return }
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.80))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        let deadline = Date().addingTimeInterval(3)
+        while app.keyboards.firstMatch.exists && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
         if app.keyboards.firstMatch.exists {
-            app.swipeDown()
+            app.terminate()
+            app.launch()
         }
     }
 
