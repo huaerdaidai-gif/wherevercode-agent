@@ -534,8 +534,10 @@ def verify_credential(
         return ERR_WRONG_TARGET
     if canonical_folder(cred["folder"]) != canonical_folder(expected_folder):
         return ERR_WRONG_FOLDER
-    if canonical_folder(expected_folder) not in [canonical_folder(f) for f in authorized_folders]:
+    if os.path.realpath(expected_folder) not in [os.path.realpath(f) for f in authorized_folders]:
         return ERR_WRONG_FOLDER
+    if cred["agent_id"] and cred["agent_id"] != expected_agent_id:
+        return ERR_WRONG_TASK
     return None
 
 
@@ -591,10 +593,11 @@ class HandServer:
         self.port = port
         self.private_key, self.public_key = self._load_or_create_key()
         self.processes: dict[str, subprocess.Popen] = {}  # task_id → 进程
-        self.process_lock = threading.Lock()
+        self.process_lock = threading.RLock()
+        self.starting_tasks: set[str] = set()
         self.task_meta: dict[str, dict] = {}  # task_id → {goal_version, epoch}
         self.revoked_jtis: set[str] = set()
-        self.revoked_tasks: set[str] = set()
+        self.revoked_tasks: set[str] = set(self.state.load_json("stopped_tasks.json", []))
         # 2026-11-11 控制台 WebSocket：事件订阅者集合与票据表。
         # 票据只放内存（token → {client_id, expires_at}），绝不落盘、
         # 绝不记日志；订阅者队列有界，慢订阅者不堵 Agent 执行。
@@ -1426,7 +1429,7 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         "项目文件夹必须是已存在的绝对路径")
             return
-        canon = canonical_folder(requested)
+        canon = os.path.realpath(canonical_folder(requested))
         if not canon or canon == "/" or not os.path.isdir(canon):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         f"文件夹不存在或不是目录：{requested}")
@@ -1447,7 +1450,7 @@ class HandServer:
             if not isinstance(project, list):
                 project = []
             entry["authorized_project_folders"] = project
-            already = canon in [canonical_folder(f) for f in project]
+            already = canon in [os.path.realpath(canonical_folder(f)) for f in project]
             if not already:
                 project.append(canon)
                 self.state.save_json("auth.json", auth)
@@ -1863,12 +1866,22 @@ class HandServer:
         # 保留，stdin 恒为 /dev/null）。日志副本只对 grok 写一份（见
         # 注册表的 log_template），不是 shell 重定向。
         log_path = adapter_log_path(reg, self.device_id, task_id) if reg else None
-        self.task_meta[task_id] = {
-            "goal_version": self.task_meta.get(task_id, {}).get("goal_version", 1),
-            "epoch": self.task_meta.get(task_id, {}).get("epoch", 1),
-            "agent_id": run_agent_id,
-            "folder": folder,
-        }
+        with self.process_lock:
+            if task_id in self.revoked_tasks:
+                self._error(conn, session_key, envelope, seq + 1, ERR_REVOKED_CREDENTIAL,
+                            "任务已停止。")
+                return
+            if task_id in self.starting_tasks or task_id in self.processes:
+                self._error(conn, session_key, envelope, seq + 1, "task_in_flight",
+                            "该任务已有执行正在进行。")
+                return
+            self.starting_tasks.add(task_id)
+            self.task_meta[task_id] = {
+                "goal_version": self.task_meta.get(task_id, {}).get("goal_version", 1),
+                "epoch": self.task_meta.get(task_id, {}).get("epoch", 1),
+                "agent_id": run_agent_id,
+                "folder": folder,
+            }
         next_seq = seq + 1
         # 2026-11-11 控制台 WebSocket：run 真正开始（只发真实事件）。
         # finished 用守卫保证所有出口只发一次。
@@ -1900,6 +1913,9 @@ class HandServer:
         def _register_proc(proc) -> None:
             with self.process_lock:
                 self.processes[task_id] = proc
+                if task_id in self.revoked_tasks:
+                    self.task_meta[task_id]["control_stopped"] = True
+                    self._kill_process(task_id)
 
         try:
             entry = dict(reg)
@@ -1931,6 +1947,7 @@ class HandServer:
         finally:
             with self.process_lock:
                 self.processes.pop(task_id, None)
+                self.starting_tasks.discard(task_id)
         if timed_out:
             _finish_run("timeout", f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
             self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT,
@@ -1967,12 +1984,11 @@ class HandServer:
             proc = self.processes.get(task_id)
         if proc is not None and proc.poll() is None:
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                try:
-                    proc.terminate()
-                except OSError:
-                    pass
+                # SIGTERM remains pending while a process is SIGSTOP'ed.
+                # Kill the group without resuming paused user code.
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     # -- 控制 -------------------------------------------------------------------
 
@@ -1992,59 +2008,66 @@ class HandServer:
             return
         with self.process_lock:
             proc = self.processes.get(task_id)
-        running = proc is not None and proc.poll() is None
-        confirmed = True
-        message = ""
-        if action == "pause":
-            if running:
-                assert proc is not None
-                try:
-                    os.killpg(proc.pid, signal.SIGSTOP)
-                    message = "远端执行已暂停。"
-                except (OSError, ProcessLookupError):
-                    confirmed = False
-                    message = "暂停失败：进程已不存在。"
-            else:
-                message = "任务未在运行，无需暂停。"
-        elif action == "resume":
-            if running:
-                assert proc is not None
-                try:
-                    os.killpg(proc.pid, signal.SIGCONT)
-                    message = "远端执行已继续。"
-                except (OSError, ProcessLookupError):
-                    confirmed = False
-                    message = "继续失败：进程已不存在。"
-            else:
-                message = "任务未在运行，无需继续。"
-        elif action == "stop":
-            if running:
-                assert proc is not None
-                self._kill_process(task_id)
-                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
-                message = "远端执行已停止。"
-            else:
-                message = "任务未在运行，无需停止。"
-        else:  # change_goal
-            if running:
-                self._kill_process(task_id)
-                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
-            meta = self.task_meta.setdefault(task_id, {})
-            meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
-            if new_goal:
-                meta["new_goal"] = new_goal
-            message = f"目标已更新（goal_version={meta['goal_version']}），旧执行已停止，请按新目标重新派发。"
-            self.state.audit({"event": "change_goal", "task": task_id,
-                              "operation": operation_id,
-                              "goal_version": meta["goal_version"]})
-        if action in ("stop", "change_goal"):
-            # 只撤销当次运行的凭证（jti），不撤销整个任务：改目标后
-            # 任务要能凭新凭证、新 goal_version 快照重新派发；整任务
-            # 撤销会让重派永远失败。
-            jti = self.task_meta.get(task_id, {}).get("credential_jti")
-            if jti:
-                self.revoked_jtis.add(jti)
-        result = {"control": action, "confirmed": confirmed, "message": message}
+            if task_id in self.starting_tasks and proc is None:
+                self._send(conn, session_key, envelope, "cross_device_result",
+                           {"output": json.dumps({"control": action, "confirmed": False,
+                                                  "message": "任务正在启动，请重试。"})}, seq + 1)
+                return
+            running = proc is not None and proc.poll() is None
+            confirmed = True
+            message = ""
+            if action == "pause":
+                if running:
+                    assert proc is not None
+                    try:
+                        os.killpg(proc.pid, signal.SIGSTOP)
+                        message = "远端执行已暂停。"
+                    except (OSError, ProcessLookupError):
+                        confirmed = False
+                        message = "暂停失败：进程已不存在。"
+                else:
+                    message = "任务未在运行，无需暂停。"
+            elif action == "resume":
+                if running:
+                    assert proc is not None
+                    try:
+                        os.killpg(proc.pid, signal.SIGCONT)
+                        message = "远端执行已继续。"
+                    except (OSError, ProcessLookupError):
+                        confirmed = False
+                        message = "继续失败：进程已不存在。"
+                else:
+                    message = "任务未在运行，无需继续。"
+            elif action == "stop":
+                self.revoked_tasks.add(task_id)
+                self.state.save_json("stopped_tasks.json", sorted(self.revoked_tasks))
+                if running:
+                    assert proc is not None
+                    self.task_meta.setdefault(task_id, {})["control_stopped"] = True
+                    self._kill_process(task_id)
+                    proc.wait(timeout=5)
+                    message = "远端执行已停止。"
+                else:
+                    message = "任务未在运行，无需停止。"
+            else:  # change_goal
+                if running:
+                    self.task_meta.setdefault(task_id, {})["control_stopped"] = True
+                    self._kill_process(task_id)
+                    proc.wait(timeout=5)
+                meta = self.task_meta.setdefault(task_id, {})
+                meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
+                if new_goal:
+                    meta["new_goal"] = new_goal
+                message = f"目标已更新（goal_version={meta['goal_version']}），旧执行已停止，请按新目标重新派发。"
+                self.state.audit({"event": "change_goal", "task": task_id,
+                                  "operation": operation_id,
+                                  "goal_version": meta["goal_version"]})
+            if action == "change_goal":
+                # Retargeting allows a new execution at the new goal version.
+                jti = self.task_meta.get(task_id, {}).get("credential_jti")
+                if jti:
+                    self.revoked_jtis.add(jti)
+            result = {"control": action, "confirmed": confirmed, "message": message}
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(result, ensure_ascii=False)}, seq + 1)
 

@@ -8479,10 +8479,10 @@ class MainActivity : AppCompatActivity() {
         toggle.setOnCheckedChangeListener { _, enabled ->
             toggleMcpDispatchService(enabled, toggle, tokenButton, status, endpoint)
         }
-        tokenButton.setOnClickListener {
+        fun issueToken(create: () -> wherevercode.agent.core.dispatch.IssuedDispatchToken) {
             tokenButton.isEnabled = false
             Thread {
-                val issued = runCatching { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                val issued = runCatching(create)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     tokenButton.isEnabled = toggle.isChecked
@@ -8509,6 +8509,38 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.start()
+        }
+        tokenButton.setOnClickListener {
+            val capabilities = wherevercode.agent.core.dispatch.DispatchCapability.values()
+            val roles = arrayOf("派工", "执行", "本机所有者")
+            android.app.AlertDialog.Builder(this)
+                .setTitle("令牌权限")
+                .setItems(roles) { _, index ->
+                    if (index == capabilities.size) {
+                        issueToken { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                    } else {
+                        val principal = EditText(this).apply { hint = "Agent ID" }
+                        val project = EditText(this).apply { hint = "项目 ID（可留空）" }
+                        val fields = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(principal)
+                            addView(project)
+                        }
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle(roles[index])
+                            .setView(fields)
+                            .setPositiveButton("生成令牌") { _, _ ->
+                                val id = principal.text.toString().trim()
+                                val projectId = project.text.toString().trim().ifEmpty { null }
+                                issueToken {
+                                    McpDispatchRuntime.issueAgentToken(applicationContext, id, capabilities[index], projectId)
+                                }
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+                .show()
         }
         section.addView(title)
         section.addView(note)

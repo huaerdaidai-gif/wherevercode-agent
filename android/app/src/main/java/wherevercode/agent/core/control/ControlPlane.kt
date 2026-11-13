@@ -8,6 +8,7 @@ import wherevercode.agent.core.security.AuthorizationStore
 import wherevercode.agent.core.security.RevocationStore
 import wherevercode.agent.core.task.TaskControlCounterStore
 import wherevercode.agent.core.task.LocalTaskRunner
+import wherevercode.agent.core.task.TaskOrigins
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStore
@@ -189,6 +190,7 @@ class ControlPlane(
                     errorCode = "control_pausing", reason = "暂停尚未确认，不能恢复",
                 )
                 else -> {
+                    if (canRecoverExpiredAttempt(task)) releasePausedAttempt(task)
                     token.confirm(taskId)
                     controlStore.setDispatchFrozen(taskId, false)
                     controlStore.setControlStatus(taskId, ControlStatus.RUNNING)
@@ -486,21 +488,7 @@ class ControlPlane(
                 )
                 ControlStatus.PAUSING -> {
                     if (TaskStates.isTerminal(task.state) || !isTaskInFlight(task.state) || leaseExpired(task)) {
-                        if (isTaskInFlight(task.state) && leaseExpired(task)) {
-                            taskStore.updateTask(
-                                taskId,
-                                mapOf(
-                                    "state" to "requeued",
-                                    "assigned_agent_id" to null,
-                                    "lease_owner" to null,
-                                    "lease_expires_at" to null,
-                                    "member_id" to null,
-                                    "attempt_id" to null,
-                                    "needs_attention" to true,
-                                ),
-                                task.version, task.goalVersion, task.authEpoch,
-                            )
-                        }
+                        if (isTaskInFlight(task.state) && leaseExpired(task)) releasePausedAttempt(task)
                         controlStore.setControlStatus(taskId, ControlStatus.PAUSED)
                         controlStore.setDispatchFrozen(taskId, false)
                         ControlResult(
@@ -556,7 +544,7 @@ class ControlPlane(
             if (!isTaskInFlight(task.state) || leaseExpired(task)) {
                 taskStore.updateTask(
                     taskId,
-                    mapOf("state" to "cancelled"),
+                    mapOf("state" to "cancelled", "lease_owner" to null, "lease_expires_at" to null),
                     task.version, task.goalVersion, task.authEpoch,
                 )
                 token.confirm(taskId)
@@ -575,14 +563,14 @@ class ControlPlane(
         }
 
     /**
-     * Finalize local pause/stop requests once a crashed executor's lease
+     * Finalize local and MCP pause/stop requests once an executor's lease
      * expires. Called after each lease sweep; the sweep preserves pending
      * control states so they cannot be silently requeued first.
      */
-    fun reconcileExpiredLocalControls() {
+    fun reconcileExpiredControls() {
         val expired = try {
             taskStore.listTasks().filter { task ->
-                isLocalDispatchedTask(task) && isTaskInFlight(task.state) && leaseExpired(task)
+                canRecoverExpiredAttempt(task)
             }
         } catch (_: Exception) {
             return
@@ -591,11 +579,11 @@ class ControlPlane(
             when (getControlStatus(task.taskId)) {
                 ControlStatus.PAUSING -> confirmPaused(
                     task.taskId, "lease-pause-${java.util.UUID.randomUUID()}",
-                    "本机执行器租约过期，已安全回队等待恢复",
+                    "执行器租约过期，已安全回队等待恢复",
                 )
                 ControlStatus.STOPPING -> confirmStop(
                     task.taskId, "lease-stop-${java.util.UUID.randomUUID()}",
-                    "本机执行器租约过期，已确认停止",
+                    "执行器租约过期，已确认停止",
                 )
                 else -> Unit
             }
@@ -637,6 +625,27 @@ class ControlPlane(
     private fun leaseExpired(task: TaskRecord): Boolean {
         val lease = task.leaseExpiresAt ?: return true
         return lease <= nowEpochSeconds()
+    }
+
+    private fun canRecoverExpiredAttempt(task: TaskRecord): Boolean =
+        task.sessionId == null && isTaskInFlight(task.state) &&
+            task.leaseExpiresAt != null && leaseExpired(task) &&
+            (isLocalDispatchedTask(task) || TaskOrigins.isMcpDispatchTask(task.taskId))
+
+    private fun releasePausedAttempt(task: TaskRecord) {
+        taskStore.updateTask(
+            task.taskId,
+            mapOf(
+                "state" to "requeued",
+                "assigned_agent_id" to task.assignedAgentId.takeIf { TaskOrigins.isMcpDispatchTask(task.taskId) },
+                "lease_owner" to null,
+                "lease_expires_at" to null,
+                "member_id" to null,
+                "attempt_id" to null,
+                "needs_attention" to true,
+            ),
+            task.version, task.goalVersion, task.authEpoch,
+        )
     }
 
     private fun isLocalDispatchedTask(task: TaskRecord): Boolean =

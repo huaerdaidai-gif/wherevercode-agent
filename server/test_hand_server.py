@@ -594,6 +594,11 @@ class HandServerTest(unittest.TestCase):
              "control": json.dumps({"goal_version": 1, "epoch": 1})},
             timeout=10)
         self.assertTrue(json.loads(ev[-1]["args"]["output"])["confirmed"])
+        # Stop must also work when the process is still suspended.
+        ev = self.client.tool_call(
+            "tslow", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "pause", "op-2b"])})
+        self.assertTrue(json.loads(ev[-1]["args"]["output"])["confirmed"])
         # stop → run 调用以 remote_controlled_stop 终态。
         ev = self.client.tool_call(
             "tslow", "slow-agent", self.work, "run",
@@ -608,6 +613,12 @@ class HandServerTest(unittest.TestCase):
         self.assertEqual(results[0][-1]["type"], "cross_device_error")
         self.assertEqual(results[0][-1]["args"]["code"],
                          hs.ERR_REMOTE_CONTROLLED_STOP)
+
+        self.assertIsNotNone(proc.poll())
+        replay = self.client.tool_call(
+            "tslow", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["agent", "slow-agent", "retry"])})
+        self.assertEqual(hs.ERR_REVOKED_CREDENTIAL, replay[-1]["args"]["code"])
 
     def test_change_goal_bumps_version_and_stale_snapshot_rejected(self):
         self.approve_client()

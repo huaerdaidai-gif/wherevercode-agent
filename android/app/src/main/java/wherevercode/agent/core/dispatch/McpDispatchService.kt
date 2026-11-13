@@ -104,7 +104,15 @@ class McpDispatchService(
             try {
                 val visible = DispatchTools.visibleTo(principal).any { it.name == tool }
                 if (!visible) throw DispatchException(DispatchErrors.FORBIDDEN, "当前身份无权调用 $tool")
-                val result = withIdempotency(principal, def, args) { dispatch(principal, tool, args) }
+                val result = withIdempotency(principal, def, args) {
+                    // Claim acquires the scheduler lock before the task lock.
+                    // Worker writes only need the task lock, shared with ControlPlane.
+                    when (tool) {
+                        DispatchTools.REPORT_PROGRESS, DispatchTools.SUBMIT_RESULT ->
+                            taskStore.withTaskLock { dispatch(principal, tool, args) }
+                        else -> dispatch(principal, tool, args)
+                    }
+                }
                 result.optJSONObject("task")?.optString("task_id")?.takeIf { it.isNotEmpty() }?.let { taskId = it }
                 writeAudit(principal.auditId, "mcp_dispatch.$tool", taskId, ok = true, errorCode = null,
                     replayed = result.optBoolean("replayed", false))
@@ -154,7 +162,16 @@ class McpDispatchService(
             if (existing.fingerprint != fingerprint) {
                 throw DispatchException(DispatchErrors.IDEMPOTENCY_CONFLICT, "同一 idempotency_key 已用于不同参数的请求")
             }
-            return JSONObject(existing.responseJson).put("replayed", true)
+            val response = JSONObject(existing.responseJson)
+            val savedProject = response.optJSONObject("task")?.let { optText(it, "project_id", 128) }
+            if (!principal.canAccessProject(savedProject)) throw forbiddenTask()
+            if (def.name == DispatchTools.CLAIM_TASK) {
+                val task = requireTask(args)
+                requireExecutorScope(principal, task)
+                executorFence(task)
+                requireAttempt(response, task)
+            }
+            return response.put("replayed", true)
         }
         val result = work()
         state.putIdempotency(IdempotencyRecord(scope, fingerprint, result.toString(), nowEpochSeconds()))
@@ -184,8 +201,9 @@ class McpDispatchService(
         val title = requireText(args, "title", 200)
         val goal = requireText(args, "goal", 8000)
         val projectId = optText(args, "project_id", 128)
+        if (!principal.canAccessProject(projectId)) throw forbiddenTask()
         val priority = if (args.has("priority")) args.optInt("priority", 0).coerceIn(-100, 100) else 0
-        val assignee = optText(args, "assignee", 64)?.let { resolveExecutor(it) }
+        val assignee = optText(args, "assignee", 64)?.let { resolveExecutor(it, projectId) }
         val taskId = TaskOrigins.MCP_DISPATCH_PREFIX + newId().take(24)
         val created = taskStore.createTask(
             TaskRecord(
@@ -207,7 +225,7 @@ class McpDispatchService(
         val task = requireTask(args)
         requireDispatchScope(principal, task)
         checkExpectedVersion(args, task)
-        val agentId = resolveExecutor(requireText(args, "agent_id", 64))
+        val agentId = resolveExecutor(requireText(args, "agent_id", 64), task.projectId)
         if (TaskStates.isTerminal(task.state)) throw terminal(task)
         if (!TaskStates.isClaimable(task.state)) {
             throw DispatchException(DispatchErrors.TASK_IN_FLIGHT, "任务正在执行（${task.state}），请先停止再改派")
@@ -288,17 +306,18 @@ class McpDispatchService(
         requireExecutorScope(principal, task)
         if (revocationStore.isTaskRevoked(task.taskId)) throw revoked()
         if (TaskStates.isTerminal(task.state)) throw terminal(task)
-        // 断线恢复：同一执行方已认领（租约仍归我）时，返回当前 attempt，不再开新 attempt。
-        if ((task.state == "assigned" || task.state == "working") &&
-            task.leaseOwner.equals(principal.id, ignoreCase = true) && task.attemptId != null
-        ) {
-            val current = if (task.state == "assigned") claimPort.start(task.taskId) ?: task else task
-            return claimResponse(principal, current, resumed = true)
-        }
         when (controlPlane.getControlStatus(task.taskId)) {
             ControlStatus.STOPPING -> throw stopped()
             ControlStatus.PAUSING, ControlStatus.PAUSED -> throw paused()
             ControlStatus.RUNNING -> Unit
+        }
+        // 断线恢复：同一执行方已认领（租约仍归我）时，返回当前 attempt，不再开新 attempt。
+        if ((task.state == "assigned" || task.state == "working") &&
+            task.leaseOwner.equals(principal.id, ignoreCase = true) && task.attemptId != null &&
+            hasLiveLease(task)
+        ) {
+            val current = if (task.state == "assigned") claimPort.start(task.taskId) ?: task else task
+            return claimResponse(principal, current, resumed = true)
         }
         if (!TaskStates.isClaimable(task.state)) {
             throw DispatchException(DispatchErrors.CLAIM_REJECTED, "任务当前不可认领（${task.state}）")
@@ -428,9 +447,12 @@ class McpDispatchService(
         }
     }
 
+    private fun hasLiveLease(task: TaskRecord): Boolean =
+        task.leaseExpiresAt?.let { it > nowEpochSeconds() } == true
+
     private fun requireAttempt(args: JSONObject, task: TaskRecord) {
         val attemptId = requireText(args, "attempt_id", 64)
-        if (task.attemptId == null || task.attemptId != attemptId) {
+        if (task.attemptId != attemptId || !hasLiveLease(task)) {
             throw DispatchException(DispatchErrors.STALE_ATTEMPT, "attempt_id 不是该任务当前的认领，写入被拒绝")
         }
     }
@@ -462,6 +484,7 @@ class McpDispatchService(
     }
 
     private fun hasDispatchScope(principal: DispatchPrincipal, task: TaskRecord): Boolean {
+        if (!principal.canAccessProject(task.projectId)) return false
         if (principal.role == DispatchRole.OWNER) return true
         val meta = state.taskMeta(task.taskId) ?: return false
         return meta.createdBy == principal.id && meta.createdByRole == principal.role
@@ -472,18 +495,17 @@ class McpDispatchService(
     }
 
     private fun isAssignedTo(principal: DispatchPrincipal, task: TaskRecord): Boolean =
-        task.assignedAgentId?.equals(principal.id, ignoreCase = true) == true
+        TaskOrigins.isMcpDispatchTask(task.taskId) && principal.canAccessProject(task.projectId) &&
+            task.assignedAgentId?.equals(principal.id, ignoreCase = true) == true
 
     private fun requireExecutorScope(principal: DispatchPrincipal, task: TaskRecord) {
         if (!isAssignedTo(principal, task)) throw forbiddenTask()
     }
 
-    private fun resolveExecutor(agentId: String): String {
+    private fun resolveExecutor(agentId: String, projectId: String?): String {
         if (!DispatchPrincipal.isValidId(agentId)) throw DispatchException(DispatchErrors.INVALID_ARGUMENT, "agent_id 格式不对")
-        if (!tokens.isActiveExecutor(agentId)) {
-            throw DispatchException(DispatchErrors.UNKNOWN_AGENT, "执行方 $agentId 未登记或没有 execute 能力")
-        }
-        return tokens.canonicalExecutorId(agentId) ?: agentId
+        return tokens.canonicalExecutorId(agentId, projectId)
+            ?: throw DispatchException(DispatchErrors.UNKNOWN_AGENT, "执行方未登记或无权执行该项目任务")
     }
 
     private fun requireTask(args: JSONObject): TaskRecord {

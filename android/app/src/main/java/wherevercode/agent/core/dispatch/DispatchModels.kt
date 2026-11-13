@@ -29,9 +29,13 @@ data class DispatchPrincipal(
     val id: String,
     val role: DispatchRole,
     val capabilities: Set<DispatchCapability>,
+    val projectIds: Set<String> = emptySet(),
 ) {
     fun can(capability: DispatchCapability): Boolean =
         role == DispatchRole.OWNER || capability in capabilities
+
+    fun canAccessProject(projectId: String?): Boolean =
+        role == DispatchRole.OWNER || projectId == null || projectId in projectIds
 
     /** 审计里的主体标识：`role:id`，不含任何令牌信息。 */
     val auditId: String get() = "${role.name.lowercase()}:$id"

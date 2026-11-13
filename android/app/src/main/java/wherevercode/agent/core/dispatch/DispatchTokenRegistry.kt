@@ -27,6 +27,7 @@ class DispatchTokenRegistry(
         role: DispatchRole,
         capabilities: Set<DispatchCapability>,
         label: String = "",
+        projectIds: Set<String> = emptySet(),
     ): IssuedDispatchToken {
         require(DispatchPrincipal.isValidId(principalId)) { "principal id 只能用字母、数字、点、横杠和下划线（1–64 位）" }
         val allowed = DispatchPrincipal.allowedCapabilities(role)
@@ -45,9 +46,10 @@ class DispatchTokenRegistry(
                 hashHex = sha256Hex(token),
                 label = label.take(100),
                 createdAt = nowEpochSeconds(),
+                projectIds = projectIds.toSet(),
             ),
         )
-        return IssuedDispatchToken(token, tokenId, DispatchPrincipal(principalId, role, effective))
+        return IssuedDispatchToken(token, tokenId, DispatchPrincipal(principalId, role, effective, projectIds.toSet()))
     }
 
     /** 验令牌；不合格式、不存在、已吊销一律返回 null（不区分原因，不回显令牌）。 */
@@ -64,7 +66,7 @@ class DispatchTokenRegistry(
             }
         }
         val rec = match ?: return null
-        return DispatchPrincipal(rec.principalId, rec.role, rec.capabilities)
+        return DispatchPrincipal(rec.principalId, rec.role, rec.capabilities, rec.projectIds)
     }
 
     fun revoke(tokenId: String): Boolean {
@@ -88,17 +90,12 @@ class DispatchTokenRegistry(
         return active.size
     }
 
-    /** [principalId] 是否是一个有效（未吊销）且具备 execute 能力的执行方。 */
-    fun isActiveExecutor(principalId: String): Boolean =
-        state.tokens().any {
-            it.principalId.equals(principalId, ignoreCase = true) && !it.revoked &&
-                (it.role == DispatchRole.OWNER || DispatchCapability.EXECUTE in it.capabilities)
-        }
-
-    /** 规范化的执行方 id（按登记时的大小写）。 */
-    fun canonicalExecutorId(principalId: String): String? =
+    /** An assignment requires an active execution credential scoped to the task's project. */
+    fun canonicalExecutorId(principalId: String, projectId: String?): String? =
         state.tokens().firstOrNull {
-            it.principalId.equals(principalId, ignoreCase = true) && !it.revoked
+            it.principalId.equals(principalId, ignoreCase = true) && !it.revoked &&
+                DispatchCapability.EXECUTE in it.capabilities &&
+                (it.role == DispatchRole.OWNER || projectId == null || projectId in it.projectIds)
         }?.principalId
 
     companion object {
