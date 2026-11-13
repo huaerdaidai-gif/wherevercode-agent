@@ -50,15 +50,15 @@ class RemoteFolderParseTest {
 
     @Test
     fun `folder basename`() {
-        assertEquals("fenshen", folderBasename("/workspace/example-project"))
-        assertEquals("fenshen", folderBasename("/workspace/example-project/"))
+        assertEquals("example-project", folderBasename("/workspace/example-project"))
+        assertEquals("example-project", folderBasename("/workspace/example-project/"))
         assertEquals("/", folderBasename("/"))
         assertEquals("work", folderBasename("/workspace"))
     }
 
     @Test
     fun `join folder path`() {
-        assertEquals("/workspace/example-project", joinFolderPath("/workspace", "fenshen"))
+        assertEquals("/workspace/example-project", joinFolderPath("/workspace", "example-project"))
         assertEquals("/workspace", joinFolderPath("/workspace", ""))
         assertEquals("/workspace", joinFolderPath("/workspace/", "/"))
         assertEquals("/a/b/c", joinFolderPath("/a", "b/c"))

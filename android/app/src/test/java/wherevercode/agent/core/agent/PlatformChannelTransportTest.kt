@@ -54,7 +54,7 @@ class PlatformChannelTransportTest {
 
         assertEquals("m123", id)
         assertEquals(1, http.calls.size)
-        assertEquals("https://example.invalid/api/open/v1/mcp", http.calls[0].url)
+        assertEquals("", http.calls[0].url)
         assertEquals("test-token-not-real", http.calls[0].bearerToken)
         val body = JSONObject(http.calls[0].bodyJson)
         assertEquals("tools/call", body.optString("method"))

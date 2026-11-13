@@ -437,7 +437,7 @@ class SessionLedgerTest {
     fun `audit never leaks secrets`() {
         val h = LedgerHarness()
         val session = h.privateSession()
-        val secret = "test-ledger-secret"
+        val secret = "Bearer test-ledger-secret-token"
         val result = h.ledger.record(
             IncomingMessage(
                 conversationId = session.sessionId,

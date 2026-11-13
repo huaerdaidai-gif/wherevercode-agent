@@ -168,14 +168,14 @@ class PlatformAgentChatBridgeTest {
     }
 
     @Test
-    fun `endpoint defaults to cococolo xyz when the agent host is blank`() = runBlocking {
+    fun `endpoint remains unset when no agent host is configured`() = runBlocking {
         val transport = ScriptedTransport()
         var seenEndpoint: String? = null
         val agent = grokBotAgent().copy(platformHost = null)
         bridge(transport, onFactory = { seenEndpoint = it })
             .runChat("conv-1", agent, "在吗").toList()
 
-        assertEquals("https://example.invalid/api/open/v1/mcp", seenEndpoint)
+        assertEquals("", seenEndpoint)
     }
 
     @Test
