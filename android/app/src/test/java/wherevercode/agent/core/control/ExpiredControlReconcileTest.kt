@@ -261,6 +261,37 @@ class ExpiredControlReconcileTest {
         assertEquals(1, port.runs.get())
     }
 
+    @Test
+    fun `remote controls name the live attempt so the Hand never wakes a released attempt`() {
+        val id = "remote-attempt-scoped"
+        queue(id, REMOTE)
+        startRemote(id, attempt = "att-live")
+        plane.pause(id, "op-pause", "pause")
+        val pause = sentControls.last()
+        assertEquals(wherevercode.agent.core.control.ControlAction.PAUSE, pause.action)
+        assertTrue(pause.attemptScoped)
+        assertEquals("att-live", pause.attemptId)
+
+        expireLease(id)
+        plane.reconcileExpiredControls()
+        plane.resume(id, "op-resume", "resume")
+        val resume = sentControls.last()
+        assertEquals(wherevercode.agent.core.control.ControlAction.RESUME, resume.action)
+        assertTrue(resume.attemptScoped)
+        assertEquals("released attempt: no live attempt on the wire", "", resume.attemptId)
+    }
+
+    @Test
+    fun `control fence snapshot carries attempt only for attempt-scoped controls`() {
+        val legacy = org.json.JSONObject(wherevercode.agent.core.mcp.controlFenceSnapshot(3, 2))
+        assertFalse(legacy.has("attempt"))
+        assertEquals(3, legacy.getLong("goal_version"))
+        val none = org.json.JSONObject(wherevercode.agent.core.mcp.controlFenceSnapshot(3, 2, ""))
+        assertEquals("", none.getString("attempt"))
+        val live = org.json.JSONObject(wherevercode.agent.core.mcp.controlFenceSnapshot(3, 2, "att-1"))
+        assertEquals("att-1", live.getString("attempt"))
+    }
+
     // -- remote member: STOPPING -------------------------------------------
 
     @Test

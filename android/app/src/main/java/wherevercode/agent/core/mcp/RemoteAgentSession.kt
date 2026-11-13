@@ -62,6 +62,13 @@ data class RemoteControlCommand(
     val newGoal: String? = null,
     val goalVersion: Long = 0,
     val epoch: Long = 0,
+    /**
+     * Attempt-scoped controls: when true the snapshot names the task's live
+     * attempt ([attemptId], "" = none). The Hand then kills a running process
+     * of any other (dead) attempt instead of pausing or waking it.
+     */
+    val attemptScoped: Boolean = false,
+    val attemptId: String? = null,
 )
 
 /** 远端 Agent 的聊天/任务/控制口：调用方只认接口，不认 HandClient。 */
@@ -273,7 +280,10 @@ class HandRemoteAgentChatPort(
                 args = mapOf(
                     "argv" to argv.toString(),
                     "timeout" to "30",
-                    "control" to fenceSnapshot(command.goalVersion, command.epoch),
+                    "control" to fenceSnapshot(
+                        command.goalVersion, command.epoch,
+                        attempt = if (command.attemptScoped) command.attemptId.orEmpty() else null,
+                    ),
                 ),
             ),
         )
@@ -380,10 +390,18 @@ class HandRemoteAgentChatPort(
         )
     }
 
-    private fun fenceSnapshot(goalVersion: Long, epoch: Long): String {
-        val obj = JSONObject()
-        obj.put("goal_version", goalVersion)
-        obj.put("epoch", epoch)
-        return obj.toString()
-    }
+    private fun fenceSnapshot(goalVersion: Long, epoch: Long, attempt: String? = null): String =
+        controlFenceSnapshot(goalVersion, epoch, attempt)
+}
+
+/**
+ * Control/run fence snapshot sent as args["control"]. [attempt] is included
+ * only for attempt-scoped controls ("" means the task has no live attempt).
+ */
+internal fun controlFenceSnapshot(goalVersion: Long, epoch: Long, attempt: String? = null): String {
+    val obj = JSONObject()
+    obj.put("goal_version", goalVersion)
+    obj.put("epoch", epoch)
+    if (attempt != null) obj.put("attempt", attempt)
+    return obj.toString()
 }

@@ -423,6 +423,30 @@ os.execv(sys.argv[2], sys.argv[2:])
 """
 
 
+
+# Dead-peer detection without waiting for a write: a phone that loses power
+# or network never sends FIN, so a paused (SIGSTOP) run would otherwise sit
+# until its timeout. Keepalive probes make the socket readable with an error
+# within ~35s, and the run loops treat a readable connection as closed.
+KEEPALIVE_IDLE_SECONDS = 20
+KEEPALIVE_INTERVAL_SECONDS = 5
+KEEPALIVE_PROBES = 3
+
+
+def enable_keepalive(conn) -> None:
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        idle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+        if idle is not None:
+            conn.setsockopt(socket.IPPROTO_TCP, idle, KEEPALIVE_IDLE_SECONDS)
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, KEEPALIVE_INTERVAL_SECONDS)
+        if hasattr(socket, "TCP_KEEPCNT"):
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, KEEPALIVE_PROBES)
+    except (OSError, AttributeError, ValueError):
+        pass  # Best effort: unsupported platforms keep the old behavior.
+
+
 def spawn_agent(argv, **kwargs):
     read_fd, lease_fd = os.pipe()
     try:
@@ -451,6 +475,10 @@ class HandServer:
         self.task_meta: dict[str, dict] = {}  # task_id → {goal_version, epoch}
         self.revoked_jtis: set[str] = set()
         self.revoked_tasks: set[str] = set(self.state.load_json("stopped_tasks.json", []))
+        # task_id -> attempt id of the process currently registered for it.
+        self.process_attempts: dict[str, str] = {}
+        # pids killed because their attempt was superseded (not a user stop).
+        self.superseded_pids: set[int] = set()
 
     # -- 密钥与状态 -------------------------------------------------------
 
@@ -553,6 +581,7 @@ class HandServer:
     # -- 连接处理 ------------------------------------------------------------
 
     def handle_connection(self, conn: socket.socket, addr) -> None:
+        enable_keepalive(conn)
         try:
             self._handle_connection(conn, addr)
         except (ConnectionError, ValueError, OSError) as e:
@@ -883,7 +912,7 @@ class HandServer:
             timeout_s = DEFAULT_TIMEOUT_SECONDS
         timeout_s = max(1.0, min(timeout_s, 3600.0))
         if argv[0] == "__control__":
-            self._do_control(conn, session_key, envelope, seq, task_id, argv)
+            self._do_control(conn, session_key, envelope, seq, task_id, argv, args)
             return
         if argv[0] != "agent" or len(argv) < 3:
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
@@ -917,11 +946,23 @@ class HandServer:
                 self._error(conn, session_key, envelope, seq + 1, ERR_REVOKED_CREDENTIAL,
                             "任务已停止。")
                 return
+            # A new attempt id means the App released the old attempt (its
+            # ledger only re-claims after the old lease is gone): the old
+            # process, possibly SIGSTOPped, must not survive next to it.
+            if (attempt_id and task_id in self.processes
+                    and self.process_attempts.get(task_id, "") != attempt_id
+                    and self._check_fence(task_id, args) is None):
+                self._supersede_stale_process(task_id, "new_attempt")
             if task_id in self.starting_tasks or task_id in self.processes:
                 self._error(conn, session_key, envelope, seq + 1, "task_in_flight",
                             "该任务已有执行正在进行。")
                 return
             meta = self.task_meta.get(task_id, {})
+            if meta.get("paused") and attempt_id and meta.get("paused_attempt", "") != attempt_id:
+                # The pause belonged to an earlier attempt; the App only
+                # claims a new attempt after resuming the task.
+                meta["paused"] = False
+                meta.pop("paused_attempt", None)
             if meta.get("paused"):
                 self._error(conn, session_key, envelope, seq + 1, "task_paused", "任务已暂停。")
                 return
@@ -974,6 +1015,7 @@ class HandServer:
             return
         with self.process_lock:
             self.processes[task_id] = proc
+            self.process_attempts[task_id] = attempt_id
             if task_id in self.revoked_tasks:
                 self.task_meta[task_id]["control_stopped"] = True
                 self._kill_process(task_id)
@@ -1017,7 +1059,7 @@ class HandServer:
                            {"message": buf[-1000:]}, next_seq)
                 next_seq += 1
             if timed_out:
-                self._kill_process(task_id)
+                self._kill_proc(proc)
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
@@ -1028,7 +1070,7 @@ class HandServer:
             try:
                 proc.wait(timeout=max(0.0, deadline - time.time()))
             except subprocess.TimeoutExpired:
-                self._kill_process(task_id)
+                self._kill_proc(proc)
                 proc.wait(timeout=5)
                 self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT, "Agent 执行超时。")
                 return
@@ -1042,8 +1084,8 @@ class HandServer:
             self._error(conn, session_key, envelope, next_seq, "artifact_invalid", "产物类型或大小不受支持。")
             return
         except (BrokenPipeError, ConnectionError, OSError):
-            # 客户端已断开：杀掉子进程，不再回包。
-            self._kill_process(task_id)
+            # 客户端已断开：杀掉子进程，不再回包。只杀本次执行自己的进程。
+            self._kill_proc(proc)
             proc.wait(timeout=5)
             return
         finally:
@@ -1053,8 +1095,13 @@ class HandServer:
             if proc.stdout is not None:
                 proc.stdout.close()
             with self.process_lock:
-                self.processes.pop(task_id, None)
-                self.starting_tasks.discard(task_id)
+                self._release_if_owned(task_id, proc)
+                superseded = proc.pid in self.superseded_pids
+                self.superseded_pids.discard(proc.pid)
+        if superseded:
+            self._error(conn, session_key, envelope, next_seq, "stale_attempt",
+                        "此执行轮次已被新的轮次取代，已终止。")
+            return
         if proc.returncode is not None and proc.returncode < 0:
             # 负退出码 = 被信号杀死。SIGTERM/SIGKILL 且是控制停掉的，
             # 走 remote_controlled_stop；否则按失败。
@@ -1157,7 +1204,46 @@ class HandServer:
 
     # -- 控制 -------------------------------------------------------------------
 
-    def _do_control(self, conn, session_key, envelope, seq, task_id, argv) -> None:
+
+    # -- Dead-attempt process cleanup ------------------------------------------
+
+    def _kill_proc(self, proc) -> None:
+        """Kill exactly this process group (never whatever now runs the task)."""
+        if proc is not None and proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    def _supersede_stale_process(self, task_id: str, reason: str) -> bool:
+        """Kill the process of a dead attempt so it can never be resumed or
+        keep running next to a newer attempt. Caller holds process_lock."""
+        proc = self.processes.get(task_id)
+        if proc is None:
+            return False
+        self.superseded_pids.add(proc.pid)
+        self._kill_proc(proc)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        self.processes.pop(task_id, None)
+        self.process_attempts.pop(task_id, None)
+        self.starting_tasks.discard(task_id)
+        meta = self.task_meta.setdefault(task_id, {})
+        meta["paused"] = False
+        meta.pop("paused_attempt", None)
+        self.state.audit({"event": "stale_attempt_killed", "task": task_id, "reason": reason})
+        return True
+
+    def _release_if_owned(self, task_id: str, proc) -> None:
+        """Run-thread cleanup: only release bookkeeping this run still owns."""
+        if self.processes.get(task_id) is proc:
+            self.processes.pop(task_id, None)
+            self.process_attempts.pop(task_id, None)
+            self.starting_tasks.discard(task_id)
+
+    def _do_control(self, conn, session_key, envelope, seq, task_id, argv, args=None) -> None:
         """argv = ["__control__", pause|resume|stop|change_goal, operationId, newGoal?]
         回执是 result 帧，output 为 JSON {"control":…,"confirmed":bool,"message":…}。"""
         if len(argv) < 3:
@@ -1183,6 +1269,23 @@ class HandServer:
                                                   "message": "任务正在启动，请重试。"})}, seq + 1)
                 return
             running = proc is not None and proc.poll() is None
+            try:
+                snap = json.loads((args or {}).get("control") or "{}")
+            except (AttributeError, TypeError, ValueError):
+                snap = {}
+            # Newer Apps name the live attempt in the control snapshot. A
+            # running process of any other attempt is a leftover of a dead
+            # attempt: kill it instead of pausing or waking it (SIGCONT would
+            # let it run next to the re-dispatched attempt).
+            if (running and action in ("pause", "resume") and isinstance(snap, dict)
+                    and "attempt" in snap
+                    and self.process_attempts.get(task_id, "") != str(snap.get("attempt") or "")):
+                self._supersede_stale_process(task_id, f"control_{action}")
+                self._send(conn, session_key, envelope, "cross_device_result",
+                           {"output": json.dumps({"control": action, "confirmed": True,
+                                                  "message": "旧执行轮次已作废并终止，不会被继续。"},
+                                                 ensure_ascii=False)}, seq + 1)
+                return
             confirmed = True
             message = ""
             if action == "pause":
@@ -1237,7 +1340,12 @@ class HandServer:
                                   "operation": operation_id,
                                   "goal_version": meta["goal_version"]})
             if confirmed and action in ("pause", "resume"):
-                self.task_meta.setdefault(task_id, {})["paused"] = action == "pause"
+                meta = self.task_meta.setdefault(task_id, {})
+                meta["paused"] = action == "pause"
+                if action == "pause":
+                    meta["paused_attempt"] = self.process_attempts.get(task_id, "")
+                else:
+                    meta.pop("paused_attempt", None)
             result = {"control": action, "confirmed": confirmed, "message": message}
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(result, ensure_ascii=False)}, seq + 1)

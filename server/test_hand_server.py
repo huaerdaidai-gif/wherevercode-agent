@@ -154,6 +154,232 @@ class Client:
         return self.call(envelope, timeout=timeout)
 
 
+class HandDeadAttemptCleanupTest(unittest.TestCase):
+    """Leftover processes of a dead attempt are killed, never paused/woken,
+    in both Hand copies (source and bundled), through the real _dispatch."""
+
+    AGENT = (
+        "#!/bin/sh\n"
+        "name=$(printf '%s' \"$1\" | head -n1)\n"
+        "echo $$ > \"$PIDDIR/$name.pid\"\n"
+        "while true; do echo tick >> \"$PIDDIR/$name.ticks\"; sleep 0.1; done\n"
+    )
+
+    def _setup(self, module, temp):
+        base = os.path.join(temp, "agent-home")
+        os.mkdir(base)
+        self.piddir = os.path.join(temp, "pids")
+        os.mkdir(self.piddir)
+        script = os.path.join(temp, "agent.sh")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(self.AGENT)
+        os.chmod(script, 0o755)
+        server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+        server.state.save_json("agents.json", {"agent": {
+            "display_name": "Agent", "kind": "agent", "capabilities": ["dev"],
+            "folder": base, "command": [script, "{prompt}"], "env": {"PIDDIR": self.piddir}}})
+        server.state.save_json("auth.json", {"agent": [base]})
+        self.events = []
+        lock = threading.Lock()
+
+        def record(conn, key, envelope, kind, args, seq):
+            with lock:
+                self.events.append((kind, args))
+        server._send = record
+        self.server, self.base, self.key = server, base, b"r" * 32
+        self.threads, self.socks = [], []
+        return server
+
+    def _env(self, args):
+        task = "task-1"
+        args = dict(args)
+        args["credential"] = make_credential(self.key, task, "device", self.base, "agent")
+        return {"type": "cross_device_tool_call", "version": 1, "seq": 1, "task_id": task,
+                "agent_id": "agent", "source_device_id": "client", "target_device_id": "device",
+                "folder": self.base, "action": "run", "args": args}
+
+    def _start_run(self, name, attempt):
+        server_side, client_side = socket.socketpair()
+        self.socks += [server_side, client_side]
+        args = {"argv": json.dumps(["agent", "agent", name]), "timeout": "60",
+                "control": json.dumps({"goal_version": 1, "epoch": 1})}
+        if attempt is not None:
+            args["attempt"] = attempt
+        env = self._env(args)
+
+        def run():
+            try:
+                self.server._dispatch(server_side, b"k" * 32, self.key, "client", env)
+            except OSError:
+                pass
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        self.threads.append(t)
+        return t, client_side, self._wait_pid(name)
+
+    def _control(self, action, op, attempt=None):
+        snap = {"goal_version": 1, "epoch": 1}
+        if attempt is not None:
+            snap["attempt"] = attempt
+        before = len(self.events)
+        self.server._dispatch(None, b"k" * 32, self.key, "client", self._env({
+            "argv": json.dumps(["__control__", action, op]), "control": json.dumps(snap)}))
+        kind, args = self.events[before]
+        self.assertEqual("cross_device_result", kind)
+        return json.loads(args["output"])
+
+    def _wait_pid(self, name):
+        path = os.path.join(self.piddir, name + ".pid")
+        for _ in range(100):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return int(f.read())
+            except (FileNotFoundError, ValueError):
+                time.sleep(0.05)
+        self.fail(f"agent {name} did not start")
+
+    @staticmethod
+    def _state(pid):
+        import subprocess
+        r = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+        out = r.stdout.strip()
+        return "gone" if r.returncode != 0 or out.startswith("Z") else out
+
+    def _wait_gone(self, pid, seconds=5.0):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if self._state(pid) == "gone":
+                return True
+            time.sleep(0.05)
+        return False
+
+    def _ticks(self, name):
+        try:
+            with open(os.path.join(self.piddir, name + ".ticks"), encoding="utf-8") as f:
+                return len(f.read().splitlines())
+        except FileNotFoundError:
+            return 0
+
+    def _cleanup(self):
+        import signal
+        for path in os.listdir(self.piddir):
+            if path.endswith(".pid"):
+                with open(os.path.join(self.piddir, path), encoding="utf-8") as f:
+                    pid = int(f.read())
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        for t in self.threads:
+            t.join(timeout=10)
+        for sock in self.socks:
+            sock.close()
+
+    def _modules(self):
+        return (hs, load_bundled_hand_server())
+
+    def test_keepalive_is_enabled_on_accepted_connections(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__):
+                a, b = socket.socket(socket.AF_INET, socket.SOCK_STREAM), None
+                try:
+                    module.enable_keepalive(a)
+                    self.assertEqual(1, a.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE))
+                    if hasattr(socket, "TCP_KEEPIDLE"):
+                        self.assertEqual(module.KEEPALIVE_IDLE_SECONDS,
+                                         a.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE))
+                finally:
+                    a.close()
+
+    def test_new_attempt_kills_paused_process_of_dead_attempt(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    old_thread, _, old_pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p", attempt="att-1")["confirmed"])
+                    self.assertTrue(self._state(old_pid).startswith("T"), self._state(old_pid))
+                    # The App released att-1 and claims att-2: the old process
+                    # must die, the new attempt must start (not task_in_flight
+                    # / task_paused).
+                    _, _, new_pid = self._start_run("two", "att-2")
+                    self.assertTrue(self._wait_gone(old_pid), "dead attempt survived a new attempt")
+                    self.assertNotEqual("gone", self._state(new_pid))
+                    old_thread.join(timeout=10)
+                    self.assertFalse(old_thread.is_alive())
+                    codes = [a.get("code") for k, a in self.events if k == "cross_device_error"]
+                    self.assertIn("stale_attempt", codes)
+                    self.assertNotIn("task_in_flight", codes)
+                    self.assertNotIn("task_paused", codes)
+                    # Controls naming the live attempt keep working normally.
+                    self.assertTrue(self._control("pause", "op-p2", attempt="att-2")["confirmed"])
+                    self.assertTrue(self._state(new_pid).startswith("T"))
+                    self.assertTrue(self._control("resume", "op-r2", attempt="att-2")["confirmed"])
+                    self.assertNotEqual("gone", self._state(new_pid))
+                    self.assertFalse(self._state(new_pid).startswith("T"))
+                finally:
+                    self._cleanup()
+
+    def test_resume_without_live_attempt_kills_instead_of_waking(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    thread, _, pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p", attempt="att-1")["confirmed"])
+                    time.sleep(0.3)
+                    ticks = self._ticks("one")
+                    # App released att-1 after lease expiry and resumes: there
+                    # is no live attempt, so the paused leftover is killed.
+                    result = self._control("resume", "op-r", attempt="")
+                    self.assertTrue(result["confirmed"])
+                    self.assertTrue(self._wait_gone(pid))
+                    time.sleep(0.3)
+                    self.assertEqual(ticks, self._ticks("one"), "stale process was woken")
+                    thread.join(timeout=10)
+                    self.assertFalse(thread.is_alive())
+                    self.assertFalse(self.server.task_meta["task-1"].get("paused"))
+                    # The re-dispatched attempt is accepted.
+                    _, _, new_pid = self._start_run("two", "att-2")
+                    self.assertNotEqual("gone", self._state(new_pid))
+                finally:
+                    self._cleanup()
+
+    def test_legacy_controls_without_attempt_keep_pause_resume_semantics(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    _, _, pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p")["confirmed"])
+                    self.assertTrue(self._state(pid).startswith("T"))
+                    self.assertTrue(self._control("resume", "op-r")["confirmed"])
+                    time.sleep(0.4)
+                    before = self._ticks("one")
+                    time.sleep(0.4)
+                    self.assertGreater(self._ticks("one"), before, "legacy resume must continue")
+                    self.assertTrue(self._control("stop", "op-s")["confirmed"])
+                    self.assertTrue(self._wait_gone(pid))
+                finally:
+                    self._cleanup()
+
+    def test_dropped_connection_kills_a_paused_run_without_any_write(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    thread, client_side, pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p", attempt="att-1")["confirmed"])
+                    self.assertTrue(self._state(pid).startswith("T"))
+                    client_side.close()  # App gone; the paused agent writes nothing.
+                    self.assertTrue(self._wait_gone(pid, seconds=5), "paused orphan survived disconnect")
+                    thread.join(timeout=10)
+                    self.assertFalse(thread.is_alive())
+                    self.assertNotIn("task-1", self.server.processes)
+                finally:
+                    self._cleanup()
+
+
 class BundledHandAuthorizationTest(unittest.TestCase):
     def test_source_and_bundled_dispatch_authorization_accept_and_reject_matrix(self):
         """Exercise the same authenticated _dispatch path shipped by both copies."""

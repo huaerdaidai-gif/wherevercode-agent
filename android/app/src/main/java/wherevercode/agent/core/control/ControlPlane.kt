@@ -409,6 +409,10 @@ class ControlPlane(
             newGoal = newGoal,
             goalVersion = task.goalVersion,
             epoch = task.authEpoch,
+            // Name the live attempt so the Hand never pauses/wakes a leftover
+            // process of a released attempt (e.g. resume after lease expiry).
+            attemptScoped = true,
+            attemptId = task.attemptId.orEmpty(),
         )
         try {
             sender.send(target, taskId, command) { remoteResult ->
