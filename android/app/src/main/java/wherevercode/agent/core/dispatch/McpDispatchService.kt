@@ -166,11 +166,28 @@ class McpDispatchService(
             val savedProject = response.optJSONObject("task")?.let { optText(it, "project_id", 128) }
             if (!principal.canAccessProject(savedProject)) throw forbiddenTask()
             if (def.name in CONTROL_TOOLS) return work().put("replayed", true)
-            if (def.name == DispatchTools.CLAIM_TASK) {
+            if (def.name == DispatchTools.CLAIM_TASK || def.name == DispatchTools.REPORT_PROGRESS ||
+                def.name == DispatchTools.SUBMIT_RESULT
+            ) {
                 val task = requireTask(args)
                 requireExecutorScope(principal, task)
-                executorFence(task)
-                requireAttempt(response, task)
+                if (def.name == DispatchTools.CLAIM_TASK) {
+                    executorFence(task)
+                    requireAttempt(response, task)
+                    return claimResponse(principal, task, resumed = true).put("replayed", true)
+                }
+                val recorded = response.getJSONObject("task")
+                if (recorded.optInt("attempt") != task.attempt) {
+                    throw DispatchException(DispatchErrors.STALE_ATTEMPT, "执行轮次已变化")
+                }
+                if (def.name == DispatchTools.REPORT_PROGRESS && !response.has("acknowledged")) {
+                    executorFence(task)
+                    requireAttempt(args, task)
+                    checkGoalVersion(args, task, required = false)
+                    return response.put("task", snapshot(task, principal))
+                        .put("lease_expires_at", task.leaseExpiresAt ?: JSONObject.NULL)
+                        .put("replayed", true)
+                }
             }
             return response.put("replayed", true)
         }
@@ -582,9 +599,9 @@ class McpDispatchService(
             audit.record(
                 AuditEntry(
                     ts = Instant.ofEpochSecond(nowEpochSeconds()).toString(),
-                    taskId = taskId.take(128),
+                    taskId = SecretRedactor.redact(taskId, 128),
                     agentId = actor,
-                    action = action.take(64),
+                    action = SecretRedactor.redact(action, 64),
                     ok = ok,
                     errorCode = errorCode,
                     result = if (replayed) mapOf("changed" to false) else null,

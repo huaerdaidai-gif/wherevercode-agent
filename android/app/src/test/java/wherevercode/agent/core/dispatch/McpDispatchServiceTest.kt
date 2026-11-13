@@ -268,6 +268,18 @@ class McpDispatchServiceTest {
     }
 
     @Test
+    fun `replayed progress cannot return continue while task is paused`() {
+        val taskId = create()
+        assign(taskId)
+        val attempt = claim(taskId).getString("attempt_id")
+        val progress = args("task_id" to taskId, "attempt_id" to attempt,
+            "message" to "step", "idempotency_key" to "pause-replay")
+        f.call(a.grok, "report_progress", progress)
+        f.call(a.chatgpt, "pause_task", args("task_id" to taskId))
+        assertEquals(DispatchErrors.TASK_PAUSED, f.fail(a.grok, "report_progress", progress).code)
+    }
+
+    @Test
     fun `expected_version mismatch is rejected without writing`() {
         val taskId = create()
         val v = f.taskStore.getTask(taskId)!!.version

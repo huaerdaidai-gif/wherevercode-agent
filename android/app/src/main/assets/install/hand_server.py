@@ -133,6 +133,8 @@ import socketserver
 import struct
 import subprocess
 import sys
+import stat
+import tempfile
 import threading
 import time
 import urllib.error
@@ -174,6 +176,7 @@ def hand_code_version() -> str:
     except OSError:
         return ""
 MAX_OUTPUT_CHARS = 20_000
+MAX_ARTIFACT_BYTES = 1024 * 1024
 DEFAULT_PORT = 18743
 DEFAULT_TIMEOUT_SECONDS = 600
 CREDENTIAL_TTL_SECONDS = 900
@@ -581,6 +584,46 @@ class StateStore:
 # 服务端
 # --------------------------------------------------------------------------
 
+# A detached watchdog owns the read end of a pipe held by Hand. EOF
+# means the server exited (including SIGKILL) or finished the run.
+_PROCESS_WATCHDOG = """
+import os, signal, sys
+read_fd = int(sys.argv[1])
+group = os.getpgrp()
+if os.fork() == 0:
+    os.setsid()
+    for fd in (0, 1, 2):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    try:
+        os.read(read_fd, 1)
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    finally:
+        os._exit(0)
+os.close(read_fd)
+os.execv(sys.argv[2], sys.argv[2:])
+"""
+
+
+def spawn_agent(argv, **kwargs):
+    read_fd, lease_fd = os.pipe()
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _PROCESS_WATCHDOG, str(read_fd), *argv],
+            pass_fds=(read_fd,), start_new_session=True, **kwargs,
+        )
+    except BaseException:
+        os.close(lease_fd)
+        raise
+    finally:
+        os.close(read_fd)
+    return proc, lease_fd
+
+
 class HandServer:
     def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT):
         self.state = StateStore(state_dir)
@@ -778,17 +821,8 @@ class HandServer:
                     "note": "agents.json command ignored; registry argv wins"})
         return cfg or None
 
-    def authorized_folders(self, agent_id: str) -> list[str]:
-        """auth.json 授权 + 注册表声明的文件夹（表里声明即授权，
-        解决自动发现的 Agent“hello 报出来也跑不了”的问题）+
-        agents.json 的 folder + auth.json[agent_id] 下的
-        authorized_project_folders（第四路：任务/项目定工作目录，
-        项目文件夹逐项授权，精确相等才放行——子目录也不放行，
-        见 verify_credential）。auth.json[agent_id] 可以是列表
-        （旧形，只含授权文件夹）或字典 {"folders": […],
-        "authorized_project_folders": […]}（新形，由密封动作
-        authorize_project_folder 写入）。注册表编辑与 auth.json
-        编辑同属设备管理员权限（须 SSH 到设备），信任级别相同。"""
+    def authorized_folders(self, agent_id: str, client_id: str | None = None) -> list[str]:
+        """Host-configured folders are shared; project grants belong to a paired client."""
         auth = self.state.load_json("auth.json", {})
         entry = auth.get(agent_id, []) if isinstance(auth, dict) else []
         raw_folders = entry if isinstance(entry, list) else (
@@ -800,13 +834,14 @@ class HandServer:
         cfg_folder = (self.agent_config(agent_id) or {}).get("folder", "")
         if cfg_folder:
             folders.append(cfg_folder)
-        raw_project = entry.get("authorized_project_folders", []) \
-            if isinstance(entry, dict) else []
-        if isinstance(raw_project, list):
-            folders.extend(raw_project)
+        if client_id:
+            grants = self.state.load_json("project_grants.json", {})
+            folders.extend(grants.get(client_id, {}).get(agent_id, []))
         seen: set[str] = set()
         out: list[str] = []
         for folder in folders:
+            if not isinstance(folder, str) or not folder:
+                continue
             canon = canonical_folder(folder)
             if canon not in seen:
                 seen.add(canon)
@@ -829,6 +864,8 @@ class HandServer:
                 }
                 clients[device_id] = entry
                 self.state.save_json("paired_clients.json", clients)
+            elif not hmac.compare_digest(entry.get("public_key_b64", ""), public_key_b64):
+                return "KEY_MISMATCH"
             return entry.get("status", "PENDING")
 
     def client_status(self, device_id: str) -> str | None:
@@ -1245,7 +1282,7 @@ class HandServer:
         pair-approve 解除撤销。只等 15 秒：App 的配对确认紧跟 hello
         发出，超时即关，不占线程。
         """
-        if status == "REVOKED":
+        if status in ("REVOKED", "KEY_MISMATCH"):
             return
         try:
             sealed = read_frame(conn, timeout=15)
@@ -1331,7 +1368,7 @@ class HandServer:
             args = {}
         if envelope.get("type") != "cross_device_tool_call" or envelope.get("version") != VERSION:
             return
-        if action not in ("list", "read", "write", "run", "authorize_project_folder"):
+        if action not in ("list", "read", "write", "run", "authorize_project_folder", "get_artifact"):
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
                         "不支持的操作：跨设备只允许 list/read/write/run/authorize_project_folder")
             return
@@ -1353,8 +1390,10 @@ class HandServer:
         # 授权动作仍须以凭证绑定的现有 Agent 目录作为信封 folder。
         # 新项目目录仅从 args.folder 读取；绝不能把信封目录临时加入
         # 授权列表来绕过凭证的现有目录授权检查。
-        authorized = self.authorized_folders(agent_id)
-        if cred["source_device_id"] and cred["source_device_id"] != client_id:
+        authorized = self.authorized_folders(agent_id, client_id)
+        if (cred["source_device_id"] != client_id
+                or envelope.get("source_device_id") != client_id
+                or cred["agent_id"] != agent_id):
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TASK,
                         "连接凭证不属于此设备。")
             return
@@ -1373,19 +1412,35 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, err,
                         _credential_error_message(err))
             return
-        # 执行栅栏：args["control"] 快照必须不旧于服务端记录。
-        # 先记下本次调用的凭证 jti：stop/change_goal 只撤销当次凭证。
-        self.task_meta.setdefault(task_id, {})["credential_jti"] = cred["jti"]
-        control_err = self._check_fence(task_id, args)
-        if control_err is not None:
-            code, message = control_err
-            self._error(conn, session_key, envelope, seq + 1, code, message)
+        if not os.path.isabs(folder) or os.path.realpath(folder) != os.path.realpath(cred["folder"]):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
+                        _credential_error_message(ERR_WRONG_FOLDER))
             return
+        if not any(os.path.realpath(folder) == os.path.realpath(grant) for grant in
+                   self.authorized_folders(agent_id, client_id)):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
+                        _credential_error_message(ERR_WRONG_FOLDER))
+            return
+        if action == "run":
+            # Reserve the task identity before a run or control can touch its process.
+            owner = (client_id, agent_id, os.path.realpath(folder))
+            with self.process_lock:
+                meta = self.task_meta.setdefault(task_id, {})
+                if meta.setdefault("owner", owner) != owner:
+                    control_err = (ERR_WRONG_TASK, _credential_error_message(ERR_WRONG_TASK))
+                else:
+                    control_err = self._check_fence(task_id, args)
+            if control_err is not None:
+                code, message = control_err
+                self._error(conn, session_key, envelope, seq + 1, code, message)
+                return
         self.state.audit({"event": "call", "task": task_id, "agent": agent_id,
                           "action": action, "client": client_id})
         if action == "authorize_project_folder":
             self._do_authorize_project_folder(
-                conn, session_key, envelope, seq, task_id, agent_id, args)
+                conn, session_key, envelope, seq, task_id, agent_id, args, client_id)
+        elif action == "get_artifact":
+            self._get_artifact(conn, session_key, envelope, seq, client_id, args)
         elif action == "list":
             self._do_list(conn, session_key, envelope, seq, folder, args)
         elif action == "read":
@@ -1393,7 +1448,7 @@ class HandServer:
         elif action == "write":
             self._do_write(conn, session_key, envelope, seq, folder, args)
         else:
-            self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args)
+            self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args, client_id)
 
     @staticmethod
     def _is_stop_call(action: str, args: dict) -> bool:
@@ -1407,33 +1462,24 @@ class HandServer:
 
     def _check_fence(self, task_id: str, args: dict) -> tuple[str, str] | None:
         """goal_version/epoch 快照：旧于服务端记录即拒绝（改目标后旧执行不复活）。"""
-        raw = args.get("control", "")
-        if not raw:
-            return None
         try:
-            snap = json.loads(raw)
-        except Exception:
+            snap = json.loads(args.get("control") or "{}")
+            epoch = int(snap.get("epoch", 1))
+            goal_version = int(snap.get("goal_version", 1))
+        except (AttributeError, TypeError, ValueError, OverflowError):
             return (ERR_STALE_GOAL_VERSION, "控制快照格式不对，请重新下达任务。")
-        meta = self.task_meta.get(task_id)
-        if meta is None:
-            return None
-        if int(snap.get("epoch", 1)) < int(meta.get("epoch", 1)):
+        meta = self.task_meta.get(task_id, {})
+        if epoch < meta.get("epoch", 1):
             return (ERR_STALE_EPOCH, "凭证已过期（授权已变更）：授权版本已更新，请重新发起任务")
-        if int(snap.get("goal_version", 1)) < int(meta.get("goal_version", 1)):
+        if goal_version < meta.get("goal_version", 1):
             return (ERR_STALE_GOAL_VERSION, "凭证已过期（目标已变更）：任务目标已更新，请重新发起任务")
         return None
 
     # -- 项目文件夹授权 --------------------------------------------------------
 
     def _do_authorize_project_folder(self, conn, session_key, envelope, seq,
-                                     task_id, agent_id, args) -> None:
-        """密封动作 authorize_project_folder：把 args.folder 追加进
-        auth.json[agent_id].authorized_project_folders。
-        只允许已配对 App 的密封通道调用（_dispatch 已验签名、验凭证、
-        验目标设备；_check_fence 已过）；不挂 MCP，Agent 调不到。
-        授权粒度是 Agent→项目文件夹。成功回 cross_device_result，
-        output 为 JSON：{"authorized": true, "agent_id", "requested_folder",
-        "folder", "already"}；already=true 表示重复授权，本次未写文件。"""
+                                     task_id, agent_id, args, client_id) -> None:
+        """Save a project grant for the authenticated device and Agent."""
         requested = args.get("folder", "") if isinstance(args, dict) else ""
         if not isinstance(requested, str) or not os.path.isabs(requested):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
@@ -1445,25 +1491,12 @@ class HandServer:
                         f"文件夹不存在或不是目录：{requested}")
             return
         with self.state.lock:
-            auth = self.state.load_json("auth.json", {})
-            if not isinstance(auth, dict):
-                auth = {}
-            entry = auth.get(agent_id)
-            if isinstance(entry, list):
-                # 旧形转新形：原列表原样保留为 folders。
-                entry = {"folders": entry, "authorized_project_folders": []}
-                auth[agent_id] = entry
-            elif not isinstance(entry, dict):
-                entry = {"authorized_project_folders": []}
-                auth[agent_id] = entry
-            project = entry.get("authorized_project_folders", [])
-            if not isinstance(project, list):
-                project = []
-            entry["authorized_project_folders"] = project
-            already = canon in [os.path.realpath(canonical_folder(f)) for f in project]
+            grants = self.state.load_json("project_grants.json", {})
+            folders = grants.setdefault(client_id, {}).setdefault(agent_id, [])
+            already = canon in folders
             if not already:
-                project.append(canon)
-                self.state.save_json("auth.json", auth)
+                folders.append(canon)
+                self.state.save_json("project_grants.json", grants)
         self.state.audit({"event": "authorize_project_folder", "agent": agent_id,
                           "folder": canon, "task": task_id, "already": already})
         self._send(conn, session_key, envelope, "cross_device_result",
@@ -1740,6 +1773,8 @@ class HandServer:
 
     def _resolve_path(self, folder: str, rel: str) -> str | None:
         """把相对路径解析到 folder 内；越界（.. 逃出）返回 None。"""
+        if not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.split(os.sep):
+            return None
         base = os.path.realpath(folder)
         target = os.path.realpath(os.path.join(base, rel or ""))
         if target != base and not target.startswith(base + os.sep):
@@ -1820,7 +1855,7 @@ class HandServer:
 
     # -- run -------------------------------------------------------------------
 
-    def _do_run(self, conn, session_key, envelope, seq, task_id, agent_id, folder, args) -> None:
+    def _do_run(self, conn, session_key, envelope, seq, task_id, agent_id, folder, args, client_id) -> None:
         try:
             argv = json.loads(args.get("argv", "[]"))
         except Exception:
@@ -1876,6 +1911,11 @@ class HandServer:
         # 保留，stdin 恒为 /dev/null）。日志副本只对 grok 写一份（见
         # 注册表的 log_template），不是 shell 重定向。
         log_path = adapter_log_path(reg, self.device_id, task_id) if reg else None
+        attempt_id = args.get("attempt", "")
+        if not isinstance(attempt_id, str) or len(attempt_id) > 64:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "执行轮次格式错误。")
+            return
+        staging = None
         with self.process_lock:
             if task_id in self.revoked_tasks:
                 self._error(conn, session_key, envelope, seq + 1, ERR_REVOKED_CREDENTIAL,
@@ -1885,13 +1925,26 @@ class HandServer:
                 self._error(conn, session_key, envelope, seq + 1, "task_in_flight",
                             "该任务已有执行正在进行。")
                 return
+            meta = self.task_meta.get(task_id, {})
+            if meta.get("paused"):
+                self._error(conn, session_key, envelope, seq + 1, "task_paused", "任务已暂停。")
+                return
+            fence_error = self._check_fence(task_id, args)
+            if fence_error is not None:
+                self._error(conn, session_key, envelope, seq + 1, *fence_error)
+                return
+            if attempt_id:
+                if os.path.isfile(self._artifact_path(envelope, client_id, attempt_id)):
+                    self._get_artifact(conn, session_key, envelope, seq, client_id, args)
+                    return
+                staging = tempfile.TemporaryDirectory(prefix="hand-delivery-")
+                prompt += ("\n\n如有文件产物，把单个文件写入以下绝对路径（最多 1 MiB）："
+                           + os.path.join(staging.name, "delivery.bin"))
             self.starting_tasks.add(task_id)
-            self.task_meta[task_id] = {
-                "goal_version": self.task_meta.get(task_id, {}).get("goal_version", 1),
-                "epoch": self.task_meta.get(task_id, {}).get("epoch", 1),
-                "agent_id": run_agent_id,
-                "folder": folder,
-            }
+            meta = self.task_meta.setdefault(task_id, {})
+            snap = json.loads(args.get("control") or "{}")
+            meta.update(goal_version=int(snap.get("goal_version", 1)),
+                        epoch=int(snap.get("epoch", 1)), control_stopped=False)
         next_seq = seq + 1
         # 2026-11-11 控制台 WebSocket：run 真正开始（只发真实事件）。
         # finished 用守卫保证所有出口只发一次。
@@ -1935,6 +1988,15 @@ class HandServer:
                 env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
                 on_line=_on_line, log_path=log_path,
                 register_proc=_register_proc, connection=conn)
+            result = {"output": output[-MAX_OUTPUT_CHARS:]}
+            if returncode == 0 and not timed_out and staging is not None:
+                with self.process_lock:
+                    if not self._was_control_stopped(task_id):
+                        result = self._save_artifact(envelope, client_id, attempt_id, staging.name, result["output"])
+        except ValueError:
+            _finish_run("error", "产物类型或大小不受支持。")
+            self._error(conn, session_key, envelope, next_seq, "artifact_invalid", "产物类型或大小不受支持。")
+            return
         except InternalAgentExecution as e:
             _finish_run("error", str(e)[:200])
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
@@ -1955,6 +2017,8 @@ class HandServer:
                         f"无法启动 Agent：{e}")
             return
         finally:
+            if staging is not None:
+                staging.cleanup()
             with self.process_lock:
                 self.processes.pop(task_id, None)
                 self.starting_tasks.discard(task_id)
@@ -1982,8 +2046,74 @@ class HandServer:
                         + output[-2000:])
             return
         _finish_run("ok", "执行完成。")
-        self._send(conn, session_key, envelope, "cross_device_result",
-                   {"output": output[-MAX_OUTPUT_CHARS:]}, next_seq)
+        if self._was_control_stopped(task_id):
+            self._error(conn, session_key, envelope, next_seq, ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
+            return
+        self._send(conn, session_key, envelope, "cross_device_result", result, next_seq)
+
+    def _artifact_path(self, envelope, client_id, attempt_id):
+        identity = [client_id, envelope["agent_id"], envelope["task_id"],
+                    os.path.realpath(envelope["folder"]), attempt_id]
+        key = hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
+        return os.path.join(self.state.dir, "artifacts", key + ".json")
+
+    def _get_artifact(self, conn, session_key, envelope, seq, client_id, args):
+        attempt = args.get("attempt", "")
+        if not isinstance(attempt, str) or not 1 <= len(attempt) <= 64:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "产物请求缺少执行轮次。")
+            return
+        try:
+            with open(self._artifact_path(envelope, client_id, attempt), encoding="utf-8") as f:
+                record = json.load(f)
+        except FileNotFoundError:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_missing", "此轮次没有已交付产物。")
+            return
+        except (OSError, ValueError):
+            self._error(conn, session_key, envelope, seq + 1, "artifact_unavailable", "暂时无法读取已交付产物。")
+            return
+        self._send(conn, session_key, envelope, "cross_device_result", record, seq + 1)
+
+    def _save_artifact(self, envelope, client_id, attempt_id, staging, output):
+        # Open the fixed name relative to a directory descriptor. A symlink,
+        # directory or FIFO supplied by the runner is never a delivery.
+        directory = os.open(staging, os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            try:
+                fd = os.open("delivery.bin", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
+            except FileNotFoundError:
+                fd = None
+            except OSError as e:
+                raise ValueError("cannot open artifact") from e
+            content = None
+            if fd is not None:
+                with os.fdopen(fd, "rb") as artifact:
+                    info = os.fstat(artifact.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError("invalid artifact type")
+                    content = artifact.read(MAX_ARTIFACT_BYTES + 1)
+                if len(content) > MAX_ARTIFACT_BYTES:
+                    raise ValueError("artifact too large")
+        finally:
+            os.close(directory)
+        record = {"output": output, "artifact_present": "false"}
+        if content is not None:
+            record.update(artifact_present="true", artifact_b64=b64e(content),
+                          artifact_sha256=hashlib.sha256(content).hexdigest())
+        path = self._artifact_path(envelope, client_id, attempt_id)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         dir=os.path.dirname(path), delete=False) as f:
+            tmp = f.name
+            try:
+                json.dump(record, f)
+                f.flush()
+                os.fsync(f.fileno())
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        return record
 
     def _was_control_stopped(self, task_id: str) -> bool:
         meta = self.task_meta.get(task_id, {})
@@ -2019,6 +2149,7 @@ class HandServer:
         with self.process_lock:
             proc = self.processes.get(task_id)
             if action == "stop":
+                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
                 self.revoked_tasks.add(task_id)
                 self.state.save_json("stopped_tasks.json", sorted(self.revoked_tasks))
             if task_id in self.starting_tasks and proc is None:
@@ -2080,11 +2211,8 @@ class HandServer:
                 self.state.audit({"event": "change_goal", "task": task_id,
                                   "operation": operation_id,
                                   "goal_version": meta["goal_version"]})
-            if action == "change_goal":
-                # Retargeting allows a new execution at the new goal version.
-                jti = self.task_meta.get(task_id, {}).get("credential_jti")
-                if jti:
-                    self.revoked_jtis.add(jti)
+            if confirmed and action in ("pause", "resume"):
+                self.task_meta.setdefault(task_id, {})["paused"] = action == "pause"
             result = {"control": action, "confirmed": confirmed, "message": message}
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(result, ensure_ascii=False)}, seq + 1)
@@ -3067,7 +3195,8 @@ def adapter_log_path(entry: dict, device_id: str, task_id: str) -> str | None:
     dev = canonical_device_id(device_id)
     tmpl = entry.get("log_template", {}) or {}
     raw = tmpl.get(dev) or tmpl.get(device_id)
-    return raw.replace("{task_id}", task_id) if raw else None
+    safe_id = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
+    return raw.replace("{task_id}", safe_id) if raw else None
 
 
 def resolve_adapters(state_dir: str, device_id: str) -> dict[str, dict]:
@@ -3153,147 +3282,89 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
         argv[0] = binary
     env = dict(os.environ)
     env.update(env_extra or {})
-    proc = subprocess.Popen(
+    proc, lease_fd = spawn_agent(
         argv,
         cwd=cwd or None,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
-        # 2026-11-11 回复杂音修复：stderr 必须单独抓，绝不能合进
-        # stdout。实测各 CLI 的启动横幅/日志/对话 transcript/
-        # token 统计全走 stderr（agy 的 glog 行、codex 的横幅+
-        # 配置+transcript+token 数、claude 的模型告警都在 stderr；
-        # 正文只在 stdout）。旧版 stderr=STDOUT 把两者合并，
-        # 杂音原样进了回复正文。codex 不用改走 --json：plain
-        # stdout 本来就是干净的最后一条消息（实测）。
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         bufsize=0,  # 二进制无缓冲：下文用 os.read + select 直接读 fd
         env=env,
-        start_new_session=True,
     )
-    if register_proc is not None:
-        register_proc(proc)
-    # stderr 后台线程持续排空：不读会堵满 64KB 管道导致子进程挂起。
-    # 内容只记服务端日志（保留 session id / token 数等诊断信息），
-    # 不进 on_line/output。stdout 为空时也不用 stderr 兜底——那会
-    # 把杂音重新带回正文。
-    stderr_lines: list[str] = []
-    stderr_lock = threading.Lock()
-    stderr_done = threading.Event()
-
-    def _drain_stderr() -> None:
+    try:
+        if register_proc is not None:
+            register_proc(proc)
+        output_lines: list[str] = []
+        timed_out = False
         try:
-            assert proc.stderr is not None
-            err_fd = proc.stderr.fileno()
+            deadline = time.time() + timeout_s
+            assert proc.stdout is not None
+            out_fd = proc.stdout.fileno()
+            buf = ""
             while True:
-                chunk = os.read(err_fd, 65536)
-                if not chunk:
+                if proc.poll() is not None and not buf:
+                    # 2026-11-11 控制台 WebSocket 顺带修：进程已退出时先看
+                    # 管道里还有没有残留输出。旧版这里直接 break，快退出的
+                    # 进程（输出已进管道、父进程还没读）会整段丢输出：
+                    # progress 全丢、result 为空（实测 fake-agent 3/5 次
+                    # 空输出）。残留数据读完后，下面的 os.read 读到 EOF
+                    #（b""）再退出；管道已空才直接 break。
+                    ready_now, _, _ = _select.select([out_fd], [], [], 0)
+                    if not ready_now:
+                        break
+                if time.time() > deadline:
+                    timed_out = True
                     break
-                text = chunk.decode("utf-8", errors="replace")
-                with stderr_lock:
-                    stderr_lines.append(text)
-                    # 只留最后 ~64KB 诊断用，不让长日志无限涨内存。
-                    total = sum(len(t) for t in stderr_lines)
-                    while total > 65536 and len(stderr_lines) > 1:
-                        total -= len(stderr_lines.pop(0))
-        except (OSError, ValueError):
-            pass
-        finally:
-            stderr_done.set()
-
-    err_thread = threading.Thread(target=_drain_stderr, daemon=True)
-    err_thread.start()
-    output_lines: list[str] = []
-    timed_out = False
-    try:
-        deadline = time.time() + timeout_s
-        assert proc.stdout is not None
-        out_fd = proc.stdout.fileno()
-        buf = ""
-        while True:
-            if proc.poll() is not None and not buf:
-                # 2026-11-11 控制台 WebSocket 顺带修：进程已退出时先看
-                # 管道里还有没有残留输出。旧版这里直接 break，快退出的
-                # 进程（输出已进管道、父进程还没读）会整段丢输出：
-                # progress 全丢、result 为空（实测 fake-agent 3/5 次
-                # 空输出）。残留数据读完后，下面的 os.read 读到 EOF
-                #（b""）再退出；管道已空才直接 break。
-                ready_now, _, _ = _select.select([out_fd], [], [], 0)
-                if not ready_now:
+                sources = [out_fd] if connection is None else [out_fd, connection]
+                ready, _, _ = _select.select(sources, [], [], 0.2)
+                if connection in ready:
+                    raise ConnectionError("Hand run connection closed")
+                if out_fd in ready:
+                    chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        line += "\n"
+                        output_lines.append(line)
+                        if on_line is not None:
+                            on_line(line)
+                elif proc.poll() is not None:
                     break
-            if time.time() > deadline:
-                timed_out = True
-                break
-            sources = [out_fd] if connection is None else [out_fd, connection]
-            ready, _, _ = _select.select(sources, [], [], 0.2)
-            if connection in ready:
-                raise ConnectionError("Hand run connection closed")
-            if out_fd in ready:
-                chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
-                if not chunk:
-                    break
-                buf += chunk
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
-                    line += "\n"
-                    output_lines.append(line)
-                    if on_line is not None:
-                        on_line(line)
-            elif proc.poll() is not None:
-                break
-        if buf:
-            output_lines.append(buf)
-            if on_line is not None:
-                on_line(buf)
-    except OSError:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.wait(timeout=5)
-        proc.stdout.close()
-        proc.stderr.close()
-        raise
-    if not timed_out:
-        try:
-            proc.wait(timeout=max(0.0, deadline - time.time()))
-        except subprocess.TimeoutExpired:
-            timed_out = True
-    if timed_out:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.wait(timeout=5)
-    output = "".join(output_lines)
-    try:
-        if proc.stdout is not None:
-            proc.stdout.close()
-    except OSError:
-        pass
-    try:
-        if proc.stderr is not None:
-            proc.stderr.close()
-    except OSError:
-        pass
-    # 等 stderr 排空线程收尾（最多 2 秒，不阻塞服务主循环）。
-    stderr_done.wait(timeout=2.0)
-    with stderr_lock:
-        stderr_text = "".join(stderr_lines)
-    if stderr_text.strip():
-        print(f"[hand] run_cli_agent task {task_id} stderr "
-              f"({len(stderr_text)} bytes, tail):\n"
-              f"{stderr_text[-4000:]}", file=sys.stderr, flush=True)
-    elif not output_lines:
-        print(f"[hand] run_cli_agent task {task_id}：stdout 为空且 stderr 也为空",
-              file=sys.stderr, flush=True)
-    if log_path:
-        try:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "w", encoding="utf-8") as f:
-                f.write(output)
+            if buf:
+                output_lines.append(buf)
+                if on_line is not None:
+                    on_line(buf)
         except OSError:
-            pass  # 日志副本写失败不影响主结果
-    return proc.returncode, output, timed_out
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=5)
+            proc.stdout.close()
+            raise
+        if not timed_out:
+            try:
+                proc.wait(timeout=max(0.0, deadline - time.time()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+        if timed_out:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=5)
+        output = "".join(output_lines)
+        try:
+            if proc.stdout is not None:
+                proc.stdout.close()
+        except OSError:
+            pass
+        return proc.returncode, output, timed_out
+
+    finally:
+        os.close(lease_fd)
 
 
 class InternalAgentExecution(Exception):
@@ -3544,11 +3615,9 @@ def _servable_folders(hand: "HandServer") -> list[str]:
             if isinstance(items, list):
                 folders.extend(items)
             elif isinstance(items, dict):
-                # 字典形：folders 与 authorized_project_folders 都算。
-                for key in ("folders", "authorized_project_folders"):
-                    vals = items.get(key, [])
-                    if isinstance(vals, list):
-                        folders.extend(vals)
+                vals = items.get("folders", [])
+                if isinstance(vals, list):
+                    folders.extend(vals)
     for agent_id in resolve_adapters(hand.state.dir, hand.device_id):
         folders.extend(hand.authorized_folders(agent_id))
     seen: set[str] = set()

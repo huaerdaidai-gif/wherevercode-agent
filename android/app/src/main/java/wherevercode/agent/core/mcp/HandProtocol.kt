@@ -55,7 +55,7 @@ object HandProtocol {
     // 管理动作（把项目文件夹记入 Agent 的 auth.json），不执行命令；
     // 与 list/read/write/run 同走密封通道——parseJson 按本表校验
     // action，缺了它连请求信封都解析不出来（Hand 侧同理）。
-    val HAND_ACTIONS: List<String> = listOf("list", "read", "write", "run", "authorize_project_folder")
+    val HAND_ACTIONS: List<String> = listOf("list", "read", "write", "run", "authorize_project_folder", "get_artifact")
 
     /**
      * M2 M11: session-sync envelope type (WACF §5.1). Constants and

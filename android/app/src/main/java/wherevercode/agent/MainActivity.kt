@@ -8923,6 +8923,7 @@ class MainActivity : AppCompatActivity() {
                             scheduler = components.taskScheduler,
                             stepStore = components.taskStepStore,
                             port = remoteChatPort,
+                            artifactDirectory = java.io.File(filesDir, "task-artifacts"),
                             // P2：远端编码发 plan 批准后的包、完成停 review。
                             pipelineHook = components.pipelineOrchestrator?.let { PipelineRunnerHookImpl(it) },
                         ),

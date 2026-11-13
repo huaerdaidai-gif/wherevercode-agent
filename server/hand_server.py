@@ -84,6 +84,8 @@ import socket
 import socketserver
 import subprocess
 import sys
+import stat
+import tempfile
 import threading
 import time
 import uuid
@@ -102,6 +104,7 @@ CREDENTIAL_SIGNING_INFO = b"wherevercode-credential-signing/v1"
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_CHARS = 20_000
+MAX_ARTIFACT_BYTES = 1024 * 1024
 DEFAULT_PORT = 18743
 DEFAULT_TIMEOUT_SECONDS = 600
 CREDENTIAL_TTL_SECONDS = 900
@@ -395,6 +398,46 @@ def git_repos_for_folder(folder: str) -> list[dict]:
         return []
 
 
+# A detached watchdog owns the read end of a pipe held by Hand. EOF
+# means the server exited (including SIGKILL) or finished the run.
+_PROCESS_WATCHDOG = """
+import os, signal, sys
+read_fd = int(sys.argv[1])
+group = os.getpgrp()
+if os.fork() == 0:
+    os.setsid()
+    for fd in (0, 1, 2):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    try:
+        os.read(read_fd, 1)
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    finally:
+        os._exit(0)
+os.close(read_fd)
+os.execv(sys.argv[2], sys.argv[2:])
+"""
+
+
+def spawn_agent(argv, **kwargs):
+    read_fd, lease_fd = os.pipe()
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _PROCESS_WATCHDOG, str(read_fd), *argv],
+            pass_fds=(read_fd,), start_new_session=True, **kwargs,
+        )
+    except BaseException:
+        os.close(lease_fd)
+        raise
+    finally:
+        os.close(read_fd)
+    return proc, lease_fd
+
+
 class HandServer:
     def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT):
         self.state = StateStore(state_dir)
@@ -462,10 +505,15 @@ class HandServer:
         cfg = raw.get(agent_id)
         return cfg if isinstance(cfg, dict) else None
 
-    def authorized_folders(self, agent_id: str) -> list[str]:
+    def authorized_folders(self, agent_id: str, client_id: str | None = None) -> list[str]:
+        """Host-configured folders are shared; project grants belong to a paired client."""
         auth = self.state.load_json("auth.json", {})
-        folders = auth.get(agent_id, [])
-        return folders if isinstance(folders, list) else []
+        entry = auth.get(agent_id, []) if isinstance(auth, dict) else []
+        folders = list(entry) if isinstance(entry, list) else []
+        if client_id:
+            grants = self.state.load_json("project_grants.json", {})
+            folders.extend(grants.get(client_id, {}).get(agent_id, []))
+        return folders
 
     # -- 配对 --------------------------------------------------------------
 
@@ -483,6 +531,8 @@ class HandServer:
                 }
                 clients[device_id] = entry
                 self.state.save_json("paired_clients.json", clients)
+            elif not hmac.compare_digest(entry.get("public_key_b64", ""), public_key_b64):
+                return "KEY_MISMATCH"
             return entry.get("status", "PENDING")
 
     def client_status(self, device_id: str) -> str | None:
@@ -594,7 +644,7 @@ class HandServer:
             args = {}
         if envelope.get("type") != "cross_device_tool_call" or envelope.get("version") != VERSION:
             return
-        if action not in ("list", "read", "write", "run", "authorize_project_folder"):
+        if action not in ("list", "read", "write", "run", "authorize_project_folder", "get_artifact"):
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
                         "不支持的操作：跨设备只允许 list/read/write/run/authorize_project_folder")
             return
@@ -613,7 +663,9 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_INVALID_CREDENTIAL,
                         "任务连接凭证无效，请重新下达任务。")
             return
-        if cred["source_device_id"] and cred["source_device_id"] != client_id:
+        if (cred["source_device_id"] != client_id
+                or envelope.get("source_device_id") != client_id
+                or cred["agent_id"] != agent_id):
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TASK,
                         "连接凭证不属于此设备。")
             return
@@ -623,7 +675,7 @@ class HandServer:
             expected_target_device_id=self.device_id,
             expected_folder=folder,
             expected_agent_id=agent_id,
-            authorized_folders=self.authorized_folders(agent_id),
+            authorized_folders=self.authorized_folders(agent_id, client_id),
             revoked_jtis=self.revoked_jtis,
             revoked_tasks=set() if self._is_stop_call(action, args) else self.revoked_tasks,
             now=int(time.time()),
@@ -632,19 +684,35 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, err,
                         _credential_error_message(err))
             return
-        # 执行栅栏：args["control"] 快照必须不旧于服务端记录。
-        # 先记下本次调用的凭证 jti：stop/change_goal 只撤销当次凭证。
-        self.task_meta.setdefault(task_id, {})["credential_jti"] = cred["jti"]
-        control_err = self._check_fence(task_id, args)
-        if control_err is not None:
-            code, message = control_err
-            self._error(conn, session_key, envelope, seq + 1, code, message)
+        if not os.path.isabs(folder) or os.path.realpath(folder) != os.path.realpath(cred["folder"]):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
+                        _credential_error_message(ERR_WRONG_FOLDER))
             return
+        if not any(os.path.realpath(folder) == os.path.realpath(grant) for grant in
+                   self.authorized_folders(agent_id, client_id)):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
+                        _credential_error_message(ERR_WRONG_FOLDER))
+            return
+        if action == "run":
+            # Reserve the task identity before a run or control can touch its process.
+            owner = (client_id, agent_id, os.path.realpath(folder))
+            with self.process_lock:
+                meta = self.task_meta.setdefault(task_id, {})
+                if meta.setdefault("owner", owner) != owner:
+                    control_err = (ERR_WRONG_TASK, _credential_error_message(ERR_WRONG_TASK))
+                else:
+                    control_err = self._check_fence(task_id, args)
+            if control_err is not None:
+                code, message = control_err
+                self._error(conn, session_key, envelope, seq + 1, code, message)
+                return
         self.state.audit({"event": "call", "task": task_id, "agent": agent_id,
                           "action": action, "client": client_id})
         if action == "authorize_project_folder":
             self._do_authorize_project_folder(
-                conn, session_key, envelope, seq, agent_id, args)
+                conn, session_key, envelope, seq, agent_id, args, client_id)
+        elif action == "get_artifact":
+            self._get_artifact(conn, session_key, envelope, seq, client_id, args)
         elif action == "list":
             self._do_list(conn, session_key, envelope, seq, folder, args)
         elif action == "read":
@@ -652,37 +720,29 @@ class HandServer:
         elif action == "write":
             self._do_write(conn, session_key, envelope, seq, folder, args)
         else:
-            self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args)
+            self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args, client_id)
 
     def _do_authorize_project_folder(
-        self, conn, session_key, envelope, seq, agent_id, args,
+        self, conn, session_key, envelope, seq, agent_id, args, client_id,
     ) -> None:
-        """Grant one existing canonical directory after the normal sealed,
-        paired-client and task-credential checks in _dispatch have passed.
-        The credential remains bound to an already-authorized folder; only
-        this explicit operation can add the user-approved target folder.
-        """
+        """Save a project grant for the authenticated device and Agent."""
         requested = args.get("folder", "")
         if not isinstance(requested, str) or not requested or not os.path.isabs(requested):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         "授权目录必须是已存在的绝对路径。")
             return
         canonical = os.path.realpath(requested)
-        if not os.path.isdir(canonical):
+        if canonical == os.path.abspath(os.sep) or not os.path.isdir(canonical):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         "授权目录不存在或不是文件夹。")
             return
         with self.state.lock:
-            auth = self.state.load_json("auth.json", {})
-            folders = auth.setdefault(agent_id, [])
-            if not isinstance(folders, list):
-                folders = []
-                auth[agent_id] = folders
-            already = canonical in [os.path.realpath(item) for item in folders
-                                    if isinstance(item, str)]
+            grants = self.state.load_json("project_grants.json", {})
+            folders = grants.setdefault(client_id, {}).setdefault(agent_id, [])
+            already = canonical in folders
             if not already:
                 folders.append(canonical)
-                self.state.save_json("auth.json", auth)
+                self.state.save_json("project_grants.json", grants)
         self.state.audit({"event": "folder_authorized", "agent": agent_id,
                           "folder": canonical, "already": already,
                           "task": envelope.get("task_id", "")})
@@ -706,19 +766,16 @@ class HandServer:
 
     def _check_fence(self, task_id: str, args: dict) -> tuple[str, str] | None:
         """goal_version/epoch 快照：旧于服务端记录即拒绝（改目标后旧执行不复活）。"""
-        raw = args.get("control", "")
-        if not raw:
-            return None
         try:
-            snap = json.loads(raw)
-        except Exception:
+            snap = json.loads(args.get("control") or "{}")
+            epoch = int(snap.get("epoch", 1))
+            goal_version = int(snap.get("goal_version", 1))
+        except (AttributeError, TypeError, ValueError, OverflowError):
             return (ERR_STALE_GOAL_VERSION, "控制快照格式不对，请重新下达任务。")
-        meta = self.task_meta.get(task_id)
-        if meta is None:
-            return None
-        if int(snap.get("epoch", 1)) < int(meta.get("epoch", 1)):
+        meta = self.task_meta.get(task_id, {})
+        if epoch < meta.get("epoch", 1):
             return (ERR_STALE_EPOCH, "凭证已过期（授权已变更）：授权版本已更新，请重新发起任务")
-        if int(snap.get("goal_version", 1)) < int(meta.get("goal_version", 1)):
+        if goal_version < meta.get("goal_version", 1):
             return (ERR_STALE_GOAL_VERSION, "凭证已过期（目标已变更）：任务目标已更新，请重新发起任务")
         return None
 
@@ -726,6 +783,8 @@ class HandServer:
 
     def _resolve_path(self, folder: str, rel: str) -> str | None:
         """把相对路径解析到 folder 内；越界（.. 逃出）返回 None。"""
+        if not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.split(os.sep):
+            return None
         base = os.path.realpath(folder)
         target = os.path.realpath(os.path.join(base, rel or ""))
         if target != base and not target.startswith(base + os.sep):
@@ -806,7 +865,7 @@ class HandServer:
 
     # -- run -------------------------------------------------------------------
 
-    def _do_run(self, conn, session_key, envelope, seq, task_id, agent_id, folder, args) -> None:
+    def _do_run(self, conn, session_key, envelope, seq, task_id, agent_id, folder, args, client_id) -> None:
         try:
             argv = json.loads(args.get("argv", "[]"))
         except Exception:
@@ -846,12 +905,13 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"Agent 入口不存在（{run_agent_id}）：请先在设备上确认 Agent 已安装。")
             return
-        full_argv = [
-            part.replace("{prompt}", prompt).replace("{task_id}", task_id)
-            for part in command
-        ]
         env = dict(os.environ)
         env.update(cfg.get("env", {}) or {})
+        attempt_id = args.get("attempt", "")
+        if not isinstance(attempt_id, str) or len(attempt_id) > 64:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "执行轮次格式错误。")
+            return
+        staging = None
         with self.process_lock:
             if task_id in self.revoked_tasks:
                 self._error(conn, session_key, envelope, seq + 1, ERR_REVOKED_CREDENTIAL,
@@ -861,26 +921,45 @@ class HandServer:
                 self._error(conn, session_key, envelope, seq + 1, "task_in_flight",
                             "该任务已有执行正在进行。")
                 return
+            meta = self.task_meta.get(task_id, {})
+            if meta.get("paused"):
+                self._error(conn, session_key, envelope, seq + 1, "task_paused", "任务已暂停。")
+                return
+            fence_error = self._check_fence(task_id, args)
+            if fence_error is not None:
+                self._error(conn, session_key, envelope, seq + 1, *fence_error)
+                return
+            if attempt_id:
+                if os.path.isfile(self._artifact_path(envelope, client_id, attempt_id)):
+                    self._get_artifact(conn, session_key, envelope, seq, client_id, args)
+                    return
+                staging = tempfile.TemporaryDirectory(prefix="hand-delivery-")
+                prompt += ("\n\n如有文件产物，把单个文件写入以下绝对路径（最多 1 MiB）："
+                           + os.path.join(staging.name, "delivery.bin"))
             self.starting_tasks.add(task_id)
-            self.task_meta[task_id] = {
-                "goal_version": self.task_meta.get(task_id, {}).get("goal_version", 1),
-                "epoch": self.task_meta.get(task_id, {}).get("epoch", 1),
-                "agent_id": run_agent_id,
-                "folder": folder,
-            }
+            meta = self.task_meta.setdefault(task_id, {})
+            snap = json.loads(args.get("control") or "{}")
+            meta.update(goal_version=int(snap.get("goal_version", 1)),
+                        epoch=int(snap.get("epoch", 1)), control_stopped=False)
+        full_argv = [
+            part.replace("{prompt}", prompt).replace("{task_id}", task_id)
+            for part in command
+        ]
         try:
-            proc = subprocess.Popen(
+            proc, lease_fd = spawn_agent(
                 full_argv,
                 cwd=folder,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 bufsize=0,  # 二进制无缓冲：下文用 os.read + select 直接读 fd
                 env=env,
-                start_new_session=True,
             )
         except OSError as e:
             with self.process_lock:
                 self.starting_tasks.discard(task_id)
+            if staging is not None:
+                staging.cleanup()
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"无法启动 Agent：{e}")
             return
@@ -937,13 +1016,31 @@ class HandServer:
                 self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT,
                             f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
                 return
-            proc.wait(timeout=max(0.0, deadline - time.time()))
+            try:
+                proc.wait(timeout=max(0.0, deadline - time.time()))
+            except subprocess.TimeoutExpired:
+                self._kill_process(task_id)
+                proc.wait(timeout=5)
+                self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT, "Agent 执行超时。")
+                return
+            result = {"output": "".join(output_lines)[-MAX_OUTPUT_CHARS:]}
+            if proc.returncode == 0 and staging is not None:
+                with self.process_lock:
+                    if not self._was_control_stopped(task_id):
+                        result = self._save_artifact(envelope, client_id, attempt_id, staging.name, result["output"])
+
+        except ValueError:
+            self._error(conn, session_key, envelope, next_seq, "artifact_invalid", "产物类型或大小不受支持。")
+            return
         except (BrokenPipeError, ConnectionError, OSError):
             # 客户端已断开：杀掉子进程，不再回包。
             self._kill_process(task_id)
             proc.wait(timeout=5)
             return
         finally:
+            os.close(lease_fd)
+            if staging is not None:
+                staging.cleanup()
             if proc.stdout is not None:
                 proc.stdout.close()
             with self.process_lock:
@@ -965,8 +1062,74 @@ class HandServer:
                         f"Agent 执行失败（退出码 {proc.returncode}）："
                         + output[-2000:])
             return
-        self._send(conn, session_key, envelope, "cross_device_result",
-                   {"output": output[-MAX_OUTPUT_CHARS:]}, next_seq)
+        if self._was_control_stopped(task_id):
+            self._error(conn, session_key, envelope, next_seq, ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
+            return
+        self._send(conn, session_key, envelope, "cross_device_result", result, next_seq)
+
+    def _artifact_path(self, envelope, client_id, attempt_id):
+        identity = [client_id, envelope["agent_id"], envelope["task_id"],
+                    os.path.realpath(envelope["folder"]), attempt_id]
+        key = hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
+        return os.path.join(self.state.dir, "artifacts", key + ".json")
+
+    def _get_artifact(self, conn, session_key, envelope, seq, client_id, args):
+        attempt = args.get("attempt", "")
+        if not isinstance(attempt, str) or not 1 <= len(attempt) <= 64:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "产物请求缺少执行轮次。")
+            return
+        try:
+            with open(self._artifact_path(envelope, client_id, attempt), encoding="utf-8") as f:
+                record = json.load(f)
+        except FileNotFoundError:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_missing", "此轮次没有已交付产物。")
+            return
+        except (OSError, ValueError):
+            self._error(conn, session_key, envelope, seq + 1, "artifact_unavailable", "暂时无法读取已交付产物。")
+            return
+        self._send(conn, session_key, envelope, "cross_device_result", record, seq + 1)
+
+    def _save_artifact(self, envelope, client_id, attempt_id, staging, output):
+        # Open the fixed name relative to a directory descriptor. A symlink,
+        # directory or FIFO supplied by the runner is never a delivery.
+        directory = os.open(staging, os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            try:
+                fd = os.open("delivery.bin", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
+            except FileNotFoundError:
+                fd = None
+            except OSError as e:
+                raise ValueError("cannot open artifact") from e
+            content = None
+            if fd is not None:
+                with os.fdopen(fd, "rb") as artifact:
+                    info = os.fstat(artifact.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError("invalid artifact type")
+                    content = artifact.read(MAX_ARTIFACT_BYTES + 1)
+                if len(content) > MAX_ARTIFACT_BYTES:
+                    raise ValueError("artifact too large")
+        finally:
+            os.close(directory)
+        record = {"output": output, "artifact_present": "false"}
+        if content is not None:
+            record.update(artifact_present="true", artifact_b64=b64e(content),
+                          artifact_sha256=hashlib.sha256(content).hexdigest())
+        path = self._artifact_path(envelope, client_id, attempt_id)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         dir=os.path.dirname(path), delete=False) as f:
+            tmp = f.name
+            try:
+                json.dump(record, f)
+                f.flush()
+                os.fsync(f.fileno())
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        return record
 
     def _was_control_stopped(self, task_id: str) -> bool:
         meta = self.task_meta.get(task_id, {})
@@ -1002,6 +1165,7 @@ class HandServer:
         with self.process_lock:
             proc = self.processes.get(task_id)
             if action == "stop":
+                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
                 self.revoked_tasks.add(task_id)
                 self.state.save_json("stopped_tasks.json", sorted(self.revoked_tasks))
             if task_id in self.starting_tasks and proc is None:
@@ -1063,11 +1227,8 @@ class HandServer:
                 self.state.audit({"event": "change_goal", "task": task_id,
                                   "operation": operation_id,
                                   "goal_version": meta["goal_version"]})
-            if action == "change_goal":
-                # Retargeting allows a new execution at the new goal version.
-                jti = self.task_meta.get(task_id, {}).get("credential_jti")
-                if jti:
-                    self.revoked_jtis.add(jti)
+            if confirmed and action in ("pause", "resume"):
+                self.task_meta.setdefault(task_id, {})["paused"] = action == "pause"
             result = {"control": action, "confirmed": confirmed, "message": message}
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(result, ensure_ascii=False)}, seq + 1)
