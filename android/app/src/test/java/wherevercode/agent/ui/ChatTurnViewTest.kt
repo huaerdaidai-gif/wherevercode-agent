@@ -516,7 +516,7 @@ class ChatTurnViewTest {
                 error = "调用 ChatGPT 失败：{\"error\":{\"code\":\"unsupported_country_region_territory\",\"message\":\"unsupported\"}}",
             ),
         )
-        val shown = visibleTexts(view).map { it.text.toString() }
+        val shown = visibleTexts(view)
         assertTrue(shown.any { it.contains("当前不支持此账号所在的地区") })
         assertTrue(shown.contains("查看原始诊断"))
         assertTrue(shown.contains("重试本轮"))
