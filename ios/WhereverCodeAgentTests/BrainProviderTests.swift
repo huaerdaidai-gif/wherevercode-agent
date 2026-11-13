@@ -55,9 +55,9 @@ final class BrainProviderTests: XCTestCase {
                 ChatMessage(role: "assistant", content: "答复"),
                 ChatMessage(role: "tool", content: "结果文本", name: "run"),
             ],
-            tools: [ToolSpec(name: "run", description: "跑命令",
-                             inputSchema: ["type": .string("object")])],
-            model: " ")
+            model: " ",
+            tools: [ToolDef(name: "run", description: "跑命令",
+                            inputSchema: ["type": .string("object")])])
         let mapped = SiwcM2BrainAdapter.mapRequest(request)
         XCTAssertEqual(mapped.instructions, "规则一\n规则二")
         XCTAssertNil(mapped.model)
