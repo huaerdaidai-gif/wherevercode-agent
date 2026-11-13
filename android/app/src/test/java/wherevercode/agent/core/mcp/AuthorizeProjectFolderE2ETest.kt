@@ -192,8 +192,7 @@ class AuthorizeProjectFolderE2ETest {
 
     private fun authProjectFolders(): List<String> {
         val auth = JSONObject(File(stateDir, "auth.json").readText())
-        val entry = auth.optJSONObject("e2e-agent") ?: return emptyList()
-        val arr = entry.optJSONArray("authorized_project_folders") ?: return emptyList()
+        val arr = auth.optJSONArray("e2e-agent") ?: return emptyList()
         return (0 until arr.length()).map { arr.getString(it) }
     }
 

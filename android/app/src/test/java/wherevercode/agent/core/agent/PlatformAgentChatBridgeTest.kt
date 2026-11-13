@@ -175,7 +175,7 @@ class PlatformAgentChatBridgeTest {
         bridge(transport, onFactory = { seenEndpoint = it })
             .runChat("conv-1", agent, "在吗").toList()
 
-        assertEquals("", seenEndpoint)
+        assertEquals(null, seenEndpoint)
     }
 
     @Test

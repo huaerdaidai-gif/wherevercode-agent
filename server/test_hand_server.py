@@ -370,6 +370,40 @@ class HandServerTest(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "cross_device_error")
         self.assertEqual(events[-1]["args"]["code"], hs.ERR_WRONG_FOLDER)
 
+    def test_authorize_project_folder_requires_existing_absolute_dir_and_is_idempotent(self):
+        self.approve_client()
+        extra = os.path.join(self.tmp.name, "project")
+        os.makedirs(extra)
+        events = self.client.tool_call(
+            "t-grant", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": extra})
+        self.assertEqual(events[-1]["type"], "cross_device_result")
+        result = json.loads(events[-1]["args"]["output"])
+        self.assertTrue(result["authorized"])
+        self.assertFalse(result["already"])
+        self.assertIn(os.path.realpath(extra), self.server.authorized_folders("fake-agent"))
+
+        repeated = self.client.tool_call(
+            "t-grant-retry", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": extra})
+        self.assertTrue(json.loads(repeated[-1]["args"]["output"])["already"])
+
+        relative = self.client.tool_call(
+            "t-grant-relative", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": "relative/project"})
+        self.assertEqual(relative[-1]["type"], "cross_device_error")
+        self.assertEqual(relative[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
+
+    def test_authorize_project_folder_rejects_missing_directory(self):
+        self.approve_client()
+        missing = os.path.join(self.tmp.name, "missing")
+        events = self.client.tool_call(
+            "t-grant-missing", "fake-agent", self.work, "authorize_project_folder",
+            {"folder": missing})
+        self.assertEqual(events[-1]["type"], "cross_device_error")
+        self.assertEqual(events[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
+        self.assertNotIn(missing, self.server.authorized_folders("fake-agent"))
+
     # -- run / 控制 ----------------------------------------------------------
 
     def test_fake_agent_run_streams_progress_and_result(self):

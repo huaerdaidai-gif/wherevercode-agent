@@ -595,9 +595,9 @@ class HandServer:
             args = {}
         if envelope.get("type") != "cross_device_tool_call" or envelope.get("version") != VERSION:
             return
-        if action not in ("list", "read", "write", "run"):
+        if action not in ("list", "read", "write", "run", "authorize_project_folder"):
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
-                        "不支持的操作：跨设备只允许 list/read/write/run")
+                        "不支持的操作：跨设备只允许 list/read/write/run/authorize_project_folder")
             return
         if not task_id or not agent_id or not folder:
             self._error(conn, session_key, envelope, seq + 1, ERR_INVALID_CREDENTIAL,
@@ -639,7 +639,10 @@ class HandServer:
             return
         self.state.audit({"event": "call", "task": task_id, "agent": agent_id,
                           "action": action, "client": client_id})
-        if action == "list":
+        if action == "authorize_project_folder":
+            self._do_authorize_project_folder(
+                conn, session_key, envelope, seq, agent_id, args)
+        elif action == "list":
             self._do_list(conn, session_key, envelope, seq, folder, args)
         elif action == "read":
             self._do_read(conn, session_key, envelope, seq, folder, args)
@@ -647,6 +650,43 @@ class HandServer:
             self._do_write(conn, session_key, envelope, seq, folder, args)
         else:
             self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args)
+
+    def _do_authorize_project_folder(
+        self, conn, session_key, envelope, seq, agent_id, args,
+    ) -> None:
+        """Grant one existing canonical directory after the normal sealed,
+        paired-client and task-credential checks in _dispatch have passed.
+        The credential remains bound to an already-authorized folder; only
+        this explicit operation can add the user-approved target folder.
+        """
+        requested = args.get("folder", "")
+        if not isinstance(requested, str) or not requested or not os.path.isabs(requested):
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        "授权目录必须是已存在的绝对路径。")
+            return
+        canonical = os.path.realpath(requested)
+        if not os.path.isdir(canonical):
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        "授权目录不存在或不是文件夹。")
+            return
+        with self.state.lock:
+            auth = self.state.load_json("auth.json", {})
+            folders = auth.setdefault(agent_id, [])
+            if not isinstance(folders, list):
+                folders = []
+                auth[agent_id] = folders
+            already = canonical in [os.path.realpath(item) for item in folders
+                                    if isinstance(item, str)]
+            if not already:
+                folders.append(canonical)
+                self.state.save_json("auth.json", auth)
+        self.state.audit({"event": "folder_authorized", "agent": agent_id,
+                          "folder": canonical, "already": already,
+                          "task": envelope.get("task_id", "")})
+        self._send(conn, session_key, envelope, "cross_device_result",
+                   {"output": json.dumps({"authorized": True, "already": already,
+                                          "folder": canonical}, ensure_ascii=False)},
+                   seq + 1)
 
     def _check_fence(self, task_id: str, args: dict) -> tuple[str, str] | None:
         """goal_version/epoch 快照：旧于服务端记录即拒绝（改目标后旧执行不复活）。"""
