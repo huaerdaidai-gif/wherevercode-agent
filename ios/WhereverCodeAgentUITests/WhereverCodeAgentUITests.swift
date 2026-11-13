@@ -51,8 +51,16 @@ final class WhereverCodeAgentUITests: XCTestCase {
         snap(app, "ui-02-settings")
 
         // --- Configure an unresolvable https address + dummy token.
+        // The channel id is filled explicitly too, so the flow does
+        // not depend on whatever defaults earlier tests left behind.
         urlField.tap()
         urlField.typeText("https://uitest.invalid")
+        let channelField = app.textFields.matching(
+            NSPredicate(format: "placeholderValue BEGINSWITH %@", "频道")
+        ).firstMatch
+        XCTAssertTrue(channelField.waitForExistence(timeout: 10))
+        channelField.tap()
+        channelField.typeText("uitest-channel")
         app.buttons["保存地址与频道"].tap()
 
         let tokenField = app.secureTextFields.matching(

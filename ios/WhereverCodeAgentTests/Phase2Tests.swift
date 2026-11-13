@@ -47,9 +47,11 @@ final class TabNavigationTests: XCTestCase {
 final class ConnectionStatusTests: XCTestCase {
 
     func testUnconfiguredStatusNamesTheMissingAddress() async {
-        // Deterministic starting point: empty settings in the
-        // standard defaults the AppState loads from.
-        SettingsStore.save(AppSettings(platformBaseURLString: "", channelID: ""))
+        // Deterministic starting point: empty address in the standard
+        // defaults the AppState loads from. Keep the DEFAULT channel
+        // id — saving an empty one here would poison the shared
+        // defaults for the UI test that runs later in the same app.
+        SettingsStore.save(AppSettings(platformBaseURLString: "", channelID: AppSettings.defaultChannelID))
         let state = AppState()
         await state.refreshConnectionStatus()
         XCTAssertEqual(state.connectionStatus, .notConfigured("还没有填写平台地址。"))
@@ -63,7 +65,8 @@ final class ConnectionStatusTests: XCTestCase {
         try? state.deleteToken()
         await state.refreshConnectionStatus()
         XCTAssertEqual(state.connectionStatus, .notConfigured("还没有保存 Agent Token。"))
-        SettingsStore.save(AppSettings(platformBaseURLString: "", channelID: ""))
+        // Restore pristine defaults (empty address, default channel).
+        SettingsStore.save(AppSettings())
     }
 }
 

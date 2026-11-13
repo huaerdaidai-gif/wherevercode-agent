@@ -104,10 +104,18 @@ final class ScreenshotRenderTests: XCTestCase {
     // MARK: - Snapshot helper
 
     /// Host the view in a real window on the simulator and draw it,
-    /// so List/Form content renders exactly as on screen.
+    /// so List/Form content renders exactly as on screen. The window
+    /// MUST join the app's foreground scene — a scene-less window
+    /// draws pure black (that is how the first CI run's renders came
+    /// out blank), so `assertNotBlank` guards the evidence as well.
     private func snapshot<V: View>(_ view: V, size: CGSize = CGSize(width: 393, height: 852)) async -> UIImage {
         let host = UIHostingController(rootView: view)
         let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) {
+            window.windowScene = scene
+        }
         window.rootViewController = host
         window.makeKeyAndVisible()
         host.view.frame = window.bounds
@@ -120,7 +128,29 @@ final class ScreenshotRenderTests: XCTestCase {
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
         window.isHidden = true
+        assertNotBlank(image)
         return image
+    }
+
+    /// A rendered page is never a single flat colour. Downscale to a
+    /// tiny bitmap and require several distinct pixel values, so a
+    /// broken (blank/black) render fails the test loudly instead of
+    /// silently producing useless screenshot evidence.
+    private func assertNotBlank(_ image: UIImage) {
+        let side = 16
+        var pixels = [UInt8](repeating: 0, count: side * side)
+        let context = CGContext(
+            data: &pixels, width: side, height: side,
+            bitsPerComponent: 8, bytesPerRow: side,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        )
+        guard let context, let cgImage = image.cgImage else {
+            XCTFail("screenshot could not be sampled")
+            return
+        }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
+        XCTAssertGreaterThan(Set(pixels).count, 4, "screenshot looks blank — the render produced a flat image")
     }
 
     private func attach(_ image: UIImage, name: String) {
