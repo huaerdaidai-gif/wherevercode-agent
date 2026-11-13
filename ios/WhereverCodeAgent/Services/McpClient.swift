@@ -43,7 +43,7 @@ public enum McpError: Error, Equatable {
 /// Builds and executes MCP `tools/call` requests. The token is supplied
 /// per call by `tokenProvider` and is never retained or logged.
 public struct McpClient {
-    public static let userAgent = "WhereverCode-iOS/1.1 (WhereverCodeAgent)"
+    public static let userAgent = "WhereverCode-iOS/1.2 (WhereverCodeAgent)"
 
     private let endpoint: URL
     private let tokenProvider: () -> String?
@@ -197,5 +197,108 @@ public struct McpClient {
     private func shortError(_ error: Error) -> String {
         let description = (error as NSError).localizedDescription
         return String(description.prefix(200))
+    }
+}
+
+// MARK: - Platform token issuance (`issue_agent_token`)
+
+/// Outcome of one issuance attempt, mirroring Android's
+/// `IssueTokenResult`. On success the token value exists ONLY in
+/// this value, in memory: the caller (AppState) writes it straight
+/// to the Keychain as the app's own platform credential and drops
+/// it. It is never shown in the UI, never logged, never stored
+/// anywhere else.
+public enum IssueTokenResult: Equatable {
+    case issued(token: String, tokenId: String, agentId: String, name: String)
+    case failed(String)
+}
+
+/// Issues a platform token through the platform's owner tool
+/// `issue_agent_token` — the same tool name, parameters and error
+/// semantics as the Android app's `PlatformTokenIssuer`:
+///
+/// - The call is authorized by the app's EXISTING platform
+///   credential (fetched fresh from the Keychain per call by
+///   `McpClient`). The tool is owner-only: the server answers a
+///   non-owner call with "未知工具", exactly like a missing tool,
+///   so the error mapping below never claims which of the two it
+///   was.
+/// - The target agent must already exist and be enabled on the
+///   platform; the issued token inherits that agent's scope.
+/// - The server stores only a hash; the plaintext exists once, in
+///   this call's response.
+public struct PlatformTokenIssuer {
+    /// Server-side owner tool name.
+    public static let toolName = "issue_agent_token"
+    /// Default issuance target (same default as Android).
+    public static let defaultAgentID = "chatgpt"
+    /// Default token label (same default as Android).
+    public static let defaultName = "App 生成"
+    /// Server-side name limit for `create_agent_token`.
+    public static let maxNameChars = 100
+
+    private let callTool: (String, [String: Any]) async throws -> [String: Any]
+
+    public init(callTool: @escaping (String, [String: Any]) async throws -> [String: Any]) {
+        self.callTool = callTool
+    }
+
+    /// Issue a token for `agentId` labelled `name`. Input problems
+    /// are rejected locally with Android's exact messages and never
+    /// reach the network.
+    public func issueToken(agentId: String, name: String) async -> IssueTokenResult {
+        let target = agentId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if target.isEmpty {
+            return .failed("Agent ID 不能为空（如 chatgpt）。")
+        }
+        if target.range(of: "^[A-Za-z0-9_-]{1,120}$", options: .regularExpression) == nil {
+            return .failed("Agent ID 只能用字母、数字、横杠和下划线。")
+        }
+        if label.isEmpty {
+            return .failed("令牌名称不能为空。")
+        }
+        if label.count > Self.maxNameChars {
+            return .failed("令牌名称不能超过 \(Self.maxNameChars) 字。")
+        }
+        let result: [String: Any]
+        do {
+            result = try await callTool(Self.toolName, ["agent_id": target, "name": label])
+        } catch {
+            return .failed(Self.mapError(error))
+        }
+        let token = stringField(result, keys: ["token"]) ?? ""
+        if token.isEmpty {
+            return .failed("平台没有返回令牌（签发失败）。")
+        }
+        return .issued(
+            token: token,
+            tokenId: stringField(result, keys: ["token_id"]) ?? "",
+            agentId: stringField(result, keys: ["agent_id"]) ?? target,
+            name: stringField(result, keys: ["name"]) ?? label
+        )
+    }
+
+    /// Translate a transport/platform error into user-readable text,
+    /// mirroring Android's `PlatformTokenIssuer.mapError`. The
+    /// not-configured wording names the iOS fallback (the advanced
+    /// paste entry in Settings) because iOS has no separate
+    /// platform-agent form; every other message is Android's.
+    /// Failure text never contains a token value.
+    public static func mapError(_ error: Error) -> String {
+        let raw = ((error as? McpError)?.message ?? (error as NSError).localizedDescription)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = raw.isEmpty ? "签发失败" : raw
+        if message.contains("未配置平台 Agent 凭证") || message.contains("未配置平台凭证") {
+            return "未连接平台：本 App 还没有平台凭证。请先在下方「高级：手工粘贴 Token」里保存一个已有凭证，之后即可在这里生成新令牌。"
+        }
+        if message.contains("未知工具") {
+            return "签发失败：平台端点不支持签发令牌，或当前平台凭证没有 owner 权限。" +
+                "请确认服务端已更新（issue_agent_token 工具）且 App 的平台凭证是 owner 权限。"
+        }
+        if message.contains("不存在") {
+            return "签发失败：\(message)"
+        }
+        return "签发失败：\(String(message.prefix(200)))"
     }
 }

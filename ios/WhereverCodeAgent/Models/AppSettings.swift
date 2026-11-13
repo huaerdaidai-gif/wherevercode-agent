@@ -1,27 +1,53 @@
-// WhereverCode Agent — iOS MVP
+// WhereverCode Agent — iOS
 //
-// App settings: the platform address and channel id the user types in.
-// The platform address defaults to EMPTY on purpose — the app never
-// hardcodes a server address or IP. The token is NOT stored here; it
-// lives in the Keychain (see KeychainStore). Settings are plain,
-// non-secret configuration and may live in UserDefaults.
+// App settings: the platform address and the selected channel id.
+// The platform address is PREFILLED with the platform's public MCP
+// endpoint (`defaultPlatformBaseURLString`) so a fresh install does
+// not make the user type a long URL on a phone keyboard; the value
+// is a public address, not a credential, and the user can edit it at
+// any time. Once the user has saved their own non-empty address it
+// is kept verbatim — the prefill never overwrites it (see
+// `SettingsStore.load`). The channel is chosen by TAPPING a channel
+// in the Settings picker or the conversation list; the id is stored
+// here, but the main path never asks the user to type it. The token
+// is NOT stored here; it lives in the Keychain (see KeychainStore).
+// Settings are plain, non-secret configuration and may live in
+// UserDefaults.
 
 import Foundation
 
 /// User-editable connection settings (no secrets).
 public struct AppSettings: Equatable {
-    /// Platform base URL typed by the user, for example
-    /// `https://example.invalid`. Empty until the user fills it in.
+    /// Platform address. Accepts either the full MCP endpoint URL
+    /// (`https://host/api/open/v1/mcp`) or the bare base
+    /// (`https://host`): validation strips any path and the client
+    /// appends the API paths itself, so the two forms are identical
+    /// in effect. Prefilled with `defaultPlatformBaseURLString`
+    /// until the user saves their own.
     public var platformBaseURLString: String
-    /// Channel to open by default. Editable in Settings.
+    /// The selected channel. Stored as an id, chosen by tapping —
+    /// see `ChannelSelection`.
     public var channelID: String
 
-    /// The team channel this app is built to join. This is a channel
-    /// identifier, not a server address and not a credential; the user
-    /// can change it in Settings at any time.
+    /// The platform's public MCP endpoint, prefilled as the default
+    /// platform address. This is the same endpoint every client of
+    /// this platform uses (Android composes it as
+    /// `https://<host>/api/open/v1/mcp` from its host field); it is a
+    /// well-known public address, not a private address and not a
+    /// credential.
+    public static let defaultPlatformBaseURLString = "https://v5.cococolo.xyz/api/open/v1/mcp"
+
+    /// The team channel this app opens by default. This is a channel
+    /// identifier, not a server address and not a credential; after
+    /// connecting, the user picks the channel by tapping in
+    /// Settings, and a single visible channel is selected
+    /// automatically (see `ChannelSelection`).
     public static let defaultChannelID = "ab6379bfa1574c70bc8989cdd70dfcce"
 
-    public init(platformBaseURLString: String = "", channelID: String = defaultChannelID) {
+    public init(
+        platformBaseURLString: String = AppSettings.defaultPlatformBaseURLString,
+        channelID: String = defaultChannelID
+    ) {
         self.platformBaseURLString = platformBaseURLString
         self.channelID = channelID
     }
@@ -54,6 +80,8 @@ public struct AppSettings: Equatable {
     ///   never hide inside the address.
     /// - Trailing slashes and paths are stripped: only scheme + host
     ///   (+ port) are kept, the API paths are appended by the client.
+    ///   This is why the prefilled full endpoint URL and a bare host
+    ///   behave identically.
     public var validatedBaseURL: URL? {
         let trimmed = platformBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed) else { return nil }
@@ -91,8 +119,18 @@ public enum SettingsStore {
     private static let channelIDKey = "wherevercode.channelID"
 
     public static func load(defaults: UserDefaults = .standard) -> AppSettings {
-        AppSettings(
-            platformBaseURLString: defaults.string(forKey: baseURLKey) ?? "",
+        // Prefill policy: a saved non-empty address is the user's own
+        // choice and is kept verbatim. "Never saved" and "saved
+        // empty" both fall back to the prefilled public endpoint —
+        // a saved empty value can only be the untouched pre-prefill
+        // form persisted by a stray save tap, and an empty address
+        // cannot connect to anything anyway.
+        let savedAddress = defaults.string(forKey: baseURLKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return AppSettings(
+            platformBaseURLString: savedAddress.isEmpty
+                ? AppSettings.defaultPlatformBaseURLString
+                : savedAddress,
             channelID: defaults.string(forKey: channelIDKey) ?? AppSettings.defaultChannelID
         )
     }
@@ -100,5 +138,21 @@ public enum SettingsStore {
     public static func save(_ settings: AppSettings, defaults: UserDefaults = .standard) {
         defaults.set(settings.platformBaseURLString, forKey: baseURLKey)
         defaults.set(settings.channelID, forKey: channelIDKey)
+    }
+}
+
+/// Which channel is selected after a channel-list refresh. Pure and
+/// side-effect free so the rule is unit-testable:
+/// - If the current selection is still in the list, it stays.
+/// - If the list has exactly ONE channel, that channel is selected
+///   automatically (there is nothing to choose between).
+/// - Otherwise the current selection is left untouched — the user
+///   picks by tapping in Settings or in the conversation list. The
+///   app never invents a selection the user did not make.
+public enum ChannelSelection {
+    public static func resolvedChannelID(channels: [ChannelInfo], current: String) -> String {
+        if channels.contains(where: { $0.id == current }) { return current }
+        if channels.count == 1, let only = channels.first { return only.id }
+        return current
     }
 }

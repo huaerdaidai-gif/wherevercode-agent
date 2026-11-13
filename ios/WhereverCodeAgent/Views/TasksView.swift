@@ -91,7 +91,7 @@ struct TasksView: View {
             Group {
                 if !appState.isConfigured {
                     NotConfiguredView(
-                        message: "任务列表来自平台分配。请先在「设置」里填写平台地址并保存 Token。",
+                        message: "任务列表来自平台分配。请先在「设置」里生成或粘贴 Token（平台地址已预填）。",
                         onGoSettings: { appState.goToSettings() }
                     )
                 } else if isLoading && tasks.isEmpty && errorMessage == nil {

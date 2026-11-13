@@ -1,4 +1,4 @@
-// WhereverCode Agent — iOS phase-2 UI tests (simulator)
+// WhereverCode Agent — iOS UI tests (simulator)
 //
 // Drives the REAL app binary in the simulator:
 // 1. Navigation regression: the phase-1 bug showed the Settings page
@@ -6,11 +6,17 @@
 //    been pushed onto the chat tab's stack). The "去设置" action must
 //    now SELECT the Settings tab, and every tab must show its own
 //    page with the matching selection.
-// 2. Real error surfacing: the app is configured (through its own
-//    Settings UI) with an unresolvable https address and a dummy
-//    token typed by the test — not a real credential. Every page
-//    must then show the REAL network error and a retry path, and
-//    Settings must show 连接失败 with the real error text.
+// 2. Config experience: the platform address is PREFILLED (the test
+//    asserts the platform host is already in the field — nobody
+//    types it), and "生成并保存 Token" with no credential saved
+//    must honestly report 未连接平台 (issuance is authorized by an
+//    existing owner credential, exactly as on Android).
+// 3. Real error surfacing: the app is then reconfigured (through
+//    its own Settings UI, token pasted in the collapsed advanced
+//    entry) with an unresolvable https address and a dummy token
+//    typed by the test — not a real credential. Every page must
+//    show the REAL network error and a retry path, and Settings
+//    must show 连接失败 with the real error text.
 // Screenshots are attached at each stage and exported by CI as the
 // "ios-screenshots-simulator" artifact.
 
@@ -44,35 +50,50 @@ final class WhereverCodeAgentUITests: XCTestCase {
             settingsTab.tap()
         }
         XCTAssertTrue(settingsTab.isSelected, "Settings TAB must be selected after 去设置")
-        let urlField = app.textFields.matching(
-            NSPredicate(format: "placeholderValue BEGINSWITH %@", "平台地址")
-        ).firstMatch
+        let urlField = app.textFields["settings.address"]
         XCTAssertTrue(urlField.waitForExistence(timeout: 10))
         snap(app, "ui-02-settings")
 
-        // --- Configure an unresolvable https address + dummy token.
-        // The channel id is only typed when the field is empty (a
-        // default value may already be there; typing would append),
-        // so the flow does not depend on inherited defaults.
-        urlField.tap()
-        urlField.typeText("https://uitest.invalid")
-        let channelField = app.textFields.matching(
-            NSPredicate(format: "placeholderValue BEGINSWITH %@", "频道")
-        ).firstMatch
-        XCTAssertTrue(channelField.waitForExistence(timeout: 10))
-        if (channelField.value as? String) == "频道 ID" {
-            channelField.tap()
-            channelField.typeText("uitest-channel")
-        }
-        app.buttons["保存地址与频道"].tap()
+        // --- The platform address is prefilled, not typed by anyone.
+        let prefilled = urlField.value as? String ?? ""
+        XCTAssertTrue(
+            prefilled.contains("v5.cococolo.xyz"),
+            "Address must be prefilled with the platform endpoint, got: \(prefilled)"
+        )
 
-        let tokenField = app.secureTextFields.matching(
-            NSPredicate(format: "placeholderValue BEGINSWITH %@", "粘贴 Agent Token")
+        // --- Generate with no credential: honest 未连接平台 report.
+        // Deterministic: with no token in the Keychain the MCP layer
+        // refuses before any networking, and the issuer maps that to
+        // the not-connected message (Android's semantics).
+        let generateButton = app.buttons["settings.generateToken"]
+        reveal(generateButton, in: app)
+        XCTAssertTrue(generateButton.waitForExistence(timeout: 10))
+        generateButton.tap()
+        let notConnected = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "未连接平台")
         ).firstMatch
+        XCTAssertTrue(notConnected.waitForExistence(timeout: 20),
+                      "Generate without a credential must report 未连接平台")
+        snap(app, "ui-02b-generate-no-credential")
+
+        // --- Reconfigure with an unresolvable https address.
+        scrollToTop(app)
+        XCTAssertTrue(urlField.waitForExistence(timeout: 10))
+        replaceText(in: urlField, with: "https://uitest.invalid")
+        XCTAssertEqual(urlField.value as? String, "https://uitest.invalid",
+                       "Address field must contain exactly the fake address after replacement")
+        app.buttons["settings.saveAddressChannel"].tap()
+
+        // --- Paste the dummy token through the advanced fallback.
+        let advancedToggle = app.buttons["settings.advancedToken"]
+        reveal(advancedToggle, in: app)
+        XCTAssertTrue(advancedToggle.waitForExistence(timeout: 10))
+        advancedToggle.tap()
+        let tokenField = app.secureTextFields["settings.tokenField"]
         XCTAssertTrue(tokenField.waitForExistence(timeout: 10))
         tokenField.tap()
         tokenField.typeText("uitest-dummy-token")
-        app.buttons["保存 Token"].tap()
+        app.buttons["settings.saveToken"].tap()
 
         // Settings must report the connection failure with real text.
         let failedLabel = app.staticTexts.matching(
@@ -118,6 +139,29 @@ final class WhereverCodeAgentUITests: XCTestCase {
         chatTab.tap()
         XCTAssertTrue(chatTab.isSelected)
         XCTAssertTrue(app.buttons["重试"].exists)
+    }
+
+    /// Scroll the settings form until `element` is in the hierarchy
+    /// (Form rows below the fold do not exist for XCTest until
+    /// scrolled near).
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 6) {
+        var swipes = 0
+        while !element.exists && swipes < maxSwipes {
+            app.swipeUp()
+            swipes += 1
+        }
+    }
+
+    private func scrollToTop(_ app: XCUIApplication) {
+        for _ in 0..<4 { app.swipeDown() }
+    }
+
+    /// Replace a text field's whole content: triple-tap selects all
+    /// (the field is prefilled now, so appending is not an option),
+    /// then typing replaces the selection.
+    private func replaceText(in field: XCUIElement, with text: String) {
+        field.tap(withNumberOfTaps: 3, numberOfTouches: 1)
+        field.typeText(text)
     }
 
     /// Get rid of the software keyboard before tapping the tab bar:

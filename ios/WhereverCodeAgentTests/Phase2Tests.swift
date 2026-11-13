@@ -46,26 +46,28 @@ final class TabNavigationTests: XCTestCase {
 @MainActor
 final class ConnectionStatusTests: XCTestCase {
 
-    func testUnconfiguredStatusNamesTheMissingAddress() async {
-        // Deterministic starting point: empty address in the standard
-        // defaults the AppState loads from. Keep the DEFAULT channel
-        // id — saving an empty one here would poison the shared
-        // defaults for the UI test that runs later in the same app.
-        SettingsStore.save(AppSettings(platformBaseURLString: "", channelID: AppSettings.defaultChannelID))
+    func testClearedAddressStatusNamesTheMissingAddress() async {
+        // The prefill means a loaded state always has an address;
+        // the missing-address status now belongs to an address the
+        // user deliberately cleared in the form. Set it directly on
+        // the state (the refresh reads the in-memory settings).
         let state = AppState()
+        state.settings = AppSettings(platformBaseURLString: "", channelID: AppSettings.defaultChannelID)
         await state.refreshConnectionStatus()
         XCTAssertEqual(state.connectionStatus, .notConfigured("还没有填写平台地址。"))
+        // Restore pristine defaults for later tests in this process.
+        SettingsStore.save(AppSettings())
     }
 
-    func testValidAddressWithoutTokenNamesTheMissingToken() async {
+    func testValidAddressWithoutTokenNamesTheMissingCredential() async {
         SettingsStore.save(AppSettings(platformBaseURLString: "https://example.invalid", channelID: "ch-1"))
         let state = AppState()
         // The test host must not have a token for this to be the
         // missing piece; remove any leftover from other tests.
         try? state.deleteToken()
         await state.refreshConnectionStatus()
-        XCTAssertEqual(state.connectionStatus, .notConfigured("还没有保存 Agent Token。"))
-        // Restore pristine defaults (empty address, default channel).
+        XCTAssertEqual(state.connectionStatus, .notConfigured("还没有平台凭证：在「平台令牌」里生成一个，或在高级里粘贴已有 Token。"))
+        // Restore pristine defaults (prefilled address, default channel).
         SettingsStore.save(AppSettings())
     }
 }
@@ -172,6 +174,141 @@ final class ChannelFeedInitialPollTests: XCTestCase {
         feed.start()
         await fulfillment(of: [messagesArrived, initialPollDone], timeout: 20)
         feed.stop()
+    }
+}
+
+// MARK: - Platform token issuance
+
+/// The issuer is a port of Android's PlatformTokenIssuer: same tool
+/// name, same arguments, same validation and error wording. The
+/// network is a stub closure; nothing here touches a real platform.
+final class PlatformTokenIssuerTests: XCTestCase {
+
+    func testBlankAgentIdRejectedLocally() async {
+        var called = false
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in
+            called = true
+            return [:]
+        })
+        let result = await issuer.issueToken(agentId: "  ", name: "App 生成")
+        XCTAssertEqual(result, .failed("Agent ID 不能为空（如 chatgpt）。"))
+        XCTAssertFalse(called, "invalid input must never reach the network")
+    }
+
+    func testAgentIdWithIllegalCharactersRejectedLocally() async {
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in [:] })
+        let result = await issuer.issueToken(agentId: "bad id!", name: "App 生成")
+        XCTAssertEqual(result, .failed("Agent ID 只能用字母、数字、横杠和下划线。"))
+    }
+
+    func testBlankNameRejectedLocally() async {
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in [:] })
+        let result = await issuer.issueToken(agentId: "chatgpt", name: " ")
+        XCTAssertEqual(result, .failed("令牌名称不能为空。"))
+    }
+
+    func testOverlongNameRejectedLocally() async {
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in [:] })
+        let result = await issuer.issueToken(
+            agentId: "chatgpt", name: String(repeating: "x", count: 101)
+        )
+        XCTAssertEqual(result, .failed("令牌名称不能超过 100 字。"))
+    }
+
+    func testSuccessParsesTokenAndSendsAndroidArguments() async {
+        var seenTool: String?
+        var seenArgs: [String: Any]?
+        let issuer = PlatformTokenIssuer(callTool: { tool, args in
+            seenTool = tool
+            seenArgs = args
+            return ["token": "v5_fixture-token", "token_id": "t-1",
+                    "agent_id": "chatgpt", "name": "App 生成"]
+        })
+        // Surrounding whitespace is trimmed before the call, exactly
+        // like Android's `trim()`.
+        let result = await issuer.issueToken(agentId: " chatgpt ", name: " App 生成 ")
+        XCTAssertEqual(
+            result,
+            .issued(token: "v5_fixture-token", tokenId: "t-1", agentId: "chatgpt", name: "App 生成")
+        )
+        XCTAssertEqual(seenTool, "issue_agent_token")
+        XCTAssertEqual(seenArgs?["agent_id"] as? String, "chatgpt")
+        XCTAssertEqual(seenArgs?["name"] as? String, "App 生成")
+    }
+
+    func testBlankTokenInResponseIsFailure() async {
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in ["token_id": "t-1"] })
+        let result = await issuer.issueToken(agentId: "chatgpt", name: "App 生成")
+        XCTAssertEqual(result, .failed("平台没有返回令牌（签发失败）。"))
+    }
+
+    func testNoCredentialMapsToNotConnected() async {
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in
+            throw McpError.notConfigured("未配置平台 Agent 凭证：请先在设置里保存 Token。")
+        })
+        let result = await issuer.issueToken(agentId: "chatgpt", name: "App 生成")
+        guard case .failed(let message) = result else {
+            XCTFail("expected failure, got \(result)")
+            return
+        }
+        XCTAssertTrue(message.hasPrefix("未连接平台"), message)
+        XCTAssertTrue(message.contains("高级"), message)
+    }
+
+    func testUnknownToolMapsToOwnerHint() async {
+        // The server answers non-owner calls and missing tools the
+        // same way; the message must name both possibilities.
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in
+            throw McpError.serverError("请求失败：未知工具")
+        })
+        let result = await issuer.issueToken(agentId: "chatgpt", name: "App 生成")
+        guard case .failed(let message) = result else {
+            XCTFail("expected failure, got \(result)")
+            return
+        }
+        XCTAssertTrue(message.contains("issue_agent_token"), message)
+        XCTAssertTrue(message.contains("owner"), message)
+    }
+
+    func testMissingAgentErrorPassesThrough() async {
+        let issuer = PlatformTokenIssuer(callTool: { _, _ in
+            throw McpError.serverError("Agent 不存在或已停用")
+        })
+        let result = await issuer.issueToken(agentId: "ghost", name: "App 生成")
+        XCTAssertEqual(result, .failed("签发失败：Agent 不存在或已停用"))
+    }
+}
+
+// MARK: - Channel selection
+
+final class ChannelSelectionTests: XCTestCase {
+
+    private func channel(_ id: String) -> ChannelInfo { ChannelInfo(id: id, name: id) }
+
+    func testCurrentSelectionSurvivesWhenStillListed() {
+        let resolved = ChannelSelection.resolvedChannelID(
+            channels: [channel("a"), channel("b")], current: "b"
+        )
+        XCTAssertEqual(resolved, "b")
+    }
+
+    func testSingleChannelIsAutoSelected() {
+        let resolved = ChannelSelection.resolvedChannelID(
+            channels: [channel("only")], current: "something-else"
+        )
+        XCTAssertEqual(resolved, "only")
+    }
+
+    func testMultipleChannelsLeaveSelectionUntouched() {
+        let resolved = ChannelSelection.resolvedChannelID(
+            channels: [channel("a"), channel("b")], current: "something-else"
+        )
+        XCTAssertEqual(resolved, "something-else")
+    }
+
+    func testEmptyListLeavesSelectionUntouched() {
+        let resolved = ChannelSelection.resolvedChannelID(channels: [], current: "keep-me")
+        XCTAssertEqual(resolved, "keep-me")
     }
 }
 

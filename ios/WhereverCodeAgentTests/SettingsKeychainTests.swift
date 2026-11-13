@@ -10,12 +10,64 @@ import XCTest
 
 final class SettingsKeychainTests: XCTestCase {
 
-    func testDefaultSettingsLeaveAddressEmpty() {
+    func testDefaultSettingsPrefillPlatformAddress() {
+        // Fresh-install behaviour: the platform's public endpoint is
+        // prefilled so nobody has to type it on a phone keyboard.
         let settings = AppSettings()
-        XCTAssertEqual(settings.platformBaseURLString, "")
+        XCTAssertEqual(settings.platformBaseURLString, AppSettings.defaultPlatformBaseURLString)
+        XCTAssertEqual(settings.mcpEndpoint?.absoluteString, "https://v5.cococolo.xyz/api/open/v1/mcp")
+        XCTAssertEqual(settings.validation, .ok)
+    }
+
+    func testExplicitlyEmptyAddressIsMissing() {
+        // An address the user deliberately cleared is still reported
+        // as missing — the prefill only applies at load time, never
+        // overrides an in-memory value.
+        let settings = AppSettings(platformBaseURLString: "", channelID: "ch-1")
         XCTAssertNil(settings.validatedBaseURL)
         XCTAssertNil(settings.mcpEndpoint)
         XCTAssertEqual(settings.validation, .missingBaseURL)
+    }
+
+    func testFullEndpointAddressBehavesLikeBareHost() {
+        // Pasting the whole MCP endpoint (what every other client
+        // shows as "the platform address") must work exactly like
+        // the bare host form: the path is stripped, then re-derived.
+        let settings = AppSettings(
+            platformBaseURLString: "https://example.invalid/api/open/v1/mcp",
+            channelID: "ch-1"
+        )
+        XCTAssertEqual(settings.validation, .ok)
+        XCTAssertEqual(settings.mcpEndpoint?.absoluteString, "https://example.invalid/api/open/v1/mcp")
+    }
+
+    func testLoadPrefillsWhenNothingWasSaved() {
+        let suiteName = "wherevercode.agent.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        XCTAssertEqual(SettingsStore.load(defaults: defaults), AppSettings())
+    }
+
+    func testLoadPrefillsWhenSavedAddressIsEmpty() {
+        // A pre-prefill install could have persisted the old empty
+        // default via a stray save; it must upgrade to the prefill,
+        // while the user's saved channel survives.
+        let suiteName = "wherevercode.agent.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        SettingsStore.save(AppSettings(platformBaseURLString: "", channelID: "ch-9"), defaults: defaults)
+        let loaded = SettingsStore.load(defaults: defaults)
+        XCTAssertEqual(loaded.platformBaseURLString, AppSettings.defaultPlatformBaseURLString)
+        XCTAssertEqual(loaded.channelID, "ch-9")
+    }
+
+    func testLoadKeepsUserSavedAddress() {
+        let suiteName = "wherevercode.agent.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let original = AppSettings(platformBaseURLString: "https://example.invalid", channelID: "ch-9")
+        SettingsStore.save(original, defaults: defaults)
+        XCTAssertEqual(SettingsStore.load(defaults: defaults), original)
     }
 
     func testHttpsAddressValidatesAndDerivesEndpoints() {

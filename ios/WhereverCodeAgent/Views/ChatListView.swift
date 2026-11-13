@@ -133,7 +133,7 @@ struct ChatListView: View {
             Group {
                 if !appState.isConfigured {
                     NotConfiguredView(
-                        message: "请先在「设置」里填写平台地址，并保存 Agent Token。地址默认为空，不会替你猜；Token 只存本机 Keychain。",
+                        message: "请先在「设置」里生成 Token：填 Agent ID，点「生成并保存 Token」，令牌会自动存入 Keychain，不用粘贴。平台地址已预填；Token 只存本机 Keychain。",
                         onGoSettings: { appState.goToSettings() }
                     )
                 } else if isLoading && channels.isEmpty && errorMessage == nil {

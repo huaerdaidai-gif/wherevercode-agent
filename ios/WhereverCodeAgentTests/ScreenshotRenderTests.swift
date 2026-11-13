@@ -96,6 +96,35 @@ final class ScreenshotRenderTests: XCTestCase {
         attach(image, name: "page-05-settings")
     }
 
+    func testScreenshotChannelPicker() async {
+        // The Settings channel picker: channels are chosen by
+        // tapping; the checkmark marks the current selection. Two
+        // sample rows, the first one selected.
+        let pickerChannels = sampleChannels + [
+            ChannelInfo(
+                id: "demo-2",
+                name: "示例频道二",
+                participants: ["示例 Agent"],
+                lastMessageText: nil
+            ),
+        ]
+        let image = await snapshot(
+            NavigationStack {
+                List {
+                    Section("团队频道") {
+                        ChannelPickerContentView(
+                            channels: pickerChannels,
+                            selectedChannelID: "demo-1",
+                            onSelect: {}
+                        )
+                    }
+                }
+                .navigationTitle("设置 · 选频道")
+            }
+        )
+        attach(image, name: "page-07-channel-picker")
+    }
+
     func testScreenshotDevices() async {
         let image = await snapshot(DevicesView())
         attach(image, name: "page-06-devices")

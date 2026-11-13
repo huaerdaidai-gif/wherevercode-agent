@@ -58,6 +58,29 @@ struct WhereverCodeAgentApp: App {
                     .tag(AppTab.settings)
             }
             .environmentObject(appState)
+            .task {
+                // Launch check: the connection status must be
+                // truthful from the first second — with a complete
+                // setup it verifies for real, with an incomplete one
+                // it names what is missing. It never sits on
+                // "尚未检查" just because nobody tapped anything.
+                await appState.refreshConnectionStatus()
+            }
+            #if compiler(>=6.0)
+            .onChange(of: appState.selectedTab) { _, tab in
+                // Entering Settings re-checks automatically when
+                // there is anything to check with.
+                if tab == .settings {
+                    Task { await appState.refreshConnectionStatus() }
+                }
+            }
+            #else
+            .onChange(of: appState.selectedTab) { tab in
+                if tab == .settings {
+                    Task { await appState.refreshConnectionStatus() }
+                }
+            }
+            #endif
         }
     }
 }
@@ -79,6 +102,15 @@ final class AppState: ObservableObject {
     /// Outcome of the most recent connection check (see
     /// `refreshConnectionStatus()`).
     @Published private(set) var connectionStatus: PlatformConnectionStatus = .unknown
+
+    /// Channels the platform returned for the current credential
+    /// (from `agent_channel_list`). Drives the Settings channel
+    /// picker: channels are chosen by tapping, and a single visible
+    /// channel is selected automatically (see `ChannelSelection`).
+    @Published private(set) var availableChannels: [ChannelInfo] = []
+    /// Real error text from the last channel-list load, if it failed.
+    @Published private(set) var channelListError: String?
+    @Published private(set) var isLoadingChannels = false
 
     private nonisolated let keychain = KeychainStore()
 
@@ -124,6 +156,68 @@ final class AppState: ObservableObject {
         return McpClient(endpoint: endpoint, tokenProvider: tokenProvider)
     }
 
+    // MARK: - Channels
+
+    /// Load the visible channel list from the platform and apply
+    /// the selection rule (`ChannelSelection`): the current
+    /// selection survives while it is still listed; a single
+    /// visible channel is selected automatically. Failures land in
+    /// `channelListError` with the real error text.
+    func loadChannels() async {
+        guard let transport = makeChannelTransport() else {
+            channelListError = "平台地址无效，读不到频道列表。"
+            return
+        }
+        isLoadingChannels = true
+        defer { isLoadingChannels = false }
+        do {
+            let channels = try await transport.listChannels()
+            availableChannels = channels
+            channelListError = nil
+            let resolved = ChannelSelection.resolvedChannelID(
+                channels: channels, current: settings.channelID
+            )
+            if resolved != settings.channelID {
+                settings.channelID = resolved
+            }
+        } catch {
+            channelListError = (error as? McpError)?.message ?? "加载频道失败。"
+        }
+    }
+
+    /// Select a channel by tapping it (Settings picker or the
+    /// conversation list). The id is persisted via `settings`.
+    func selectChannel(_ channelID: String) {
+        settings.channelID = channelID
+    }
+
+    // MARK: - Token generation
+
+    /// "生成并保存 Token": issue a token through the platform's
+    /// `issue_agent_token` tool (the same call Android makes) and
+    /// store it in the Keychain as this app's platform credential.
+    /// The token value never reaches the view layer — it exists
+    /// only inside the returned result, and only the metadata is
+    /// meant to be shown. On success the connection is re-checked
+    /// (and the channel list reloaded) immediately.
+    func generateAndSaveToken(agentId: String, name: String) async -> IssueTokenResult {
+        guard let client = makeMcpClient() else {
+            return .failed("平台地址无效：请先在上方填写并保存一个 https 平台地址。")
+        }
+        let issuer = PlatformTokenIssuer(callTool: { toolName, arguments in
+            try await client.callTool(name: toolName, arguments: arguments)
+        })
+        let result = await issuer.issueToken(agentId: agentId, name: name)
+        guard case .issued(let token, _, _, _) = result else { return result }
+        do {
+            try saveToken(token)
+        } catch {
+            return .failed("Token 已签发，但存入 Keychain 失败：请再点一次「生成并保存 Token」重新签发。")
+        }
+        await refreshConnectionStatus()
+        return result
+    }
+
     func makeChannelTransport() -> ChannelTransport? {
         guard let client = makeMcpClient() else { return nil }
         return ChannelTransport(client: client)
@@ -149,14 +243,14 @@ final class AppState: ObservableObject {
             case .invalidBaseURL(let detail):
                 connectionStatus = .notConfigured(detail)
             case .missingChannelID:
-                connectionStatus = .notConfigured("还没有填写频道 ID。")
+                connectionStatus = .notConfigured("还没有选择频道。")
             case .ok:
                 break // unreachable: guarded above
             }
             return
         }
         guard hasToken else {
-            connectionStatus = .notConfigured("还没有保存 Agent Token。")
+            connectionStatus = .notConfigured("还没有平台凭证：在「平台令牌」里生成一个，或在高级里粘贴已有 Token。")
             return
         }
         guard let client = makeMcpClient() else {
@@ -167,9 +261,9 @@ final class AppState: ObservableObject {
         do {
             let tools = try await client.listToolNames()
             var summary = "已连接：平台返回 \(tools.count) 个工具"
-            if let transport = makeChannelTransport(),
-               let channels = try? await transport.listChannels() {
-                summary += "，可见频道 \(channels.count) 个"
+            await loadChannels()
+            if channelListError == nil {
+                summary += "，可见频道 \(availableChannels.count) 个"
             }
             summary += "。"
             connectionStatus = .connected(summary)
