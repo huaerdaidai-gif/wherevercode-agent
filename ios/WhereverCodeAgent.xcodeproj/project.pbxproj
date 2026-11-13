@@ -62,6 +62,7 @@
 			DA0000000000000000000043,
 			DA000000000000000000004D,
 			DA0000000000000000000053,
+			DA000000000000000000005D,
 			A1B2C3D4E5F6000000000003,
 			892AEB362C95AAE0B8B13531,
 			47FFE0ECCF7C83A806454DF9,
@@ -183,6 +184,10 @@
 			DA000000000000000000004C,
 			DA0000000000000000000050,
 			DA0000000000000000000052,
+			DA0000000000000000000056,
+			DA0000000000000000000058,
+			DA000000000000000000005A,
+			DA000000000000000000005C,
 			DA0000000000000000000038,
 			DA000000000000000000003A,
 		); runOnlyForDeploymentPostprocessing = 0; };
@@ -242,6 +247,7 @@
 			DA0000000000000000000044,
 			DA000000000000000000004E,
 			DA0000000000000000000054,
+			DA000000000000000000005E,
 			A1B2C3D4E5F6000000000004,
 			2A3B9E2C913ADDDB16F1CD99,
 			7F749415C58C7FDDBBA14398,
@@ -438,6 +444,10 @@
 			DA000000000000000000004B,
 			DA000000000000000000004F,
 			DA0000000000000000000051,
+			DA0000000000000000000055,
+			DA0000000000000000000057,
+			DA0000000000000000000059,
+			DA000000000000000000005B,
 		); name = Brain; path = Brain; sourceTree = "<group>"; };
 		DA000000000000000000003D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekStreamParser.swift; sourceTree = "<group>"; };
 		DA000000000000000000003E = {isa = PBXBuildFile; fileRef = DA000000000000000000003D; };
@@ -463,6 +473,16 @@
 		DA0000000000000000000052 = {isa = PBXBuildFile; fileRef = DA0000000000000000000051; };
 		DA0000000000000000000053 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainProviderTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000054 = {isa = PBXBuildFile; fileRef = DA0000000000000000000053; };
+		DA0000000000000000000055 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareStreamParser.swift; sourceTree = "<group>"; };
+		DA0000000000000000000056 = {isa = PBXBuildFile; fileRef = DA0000000000000000000055; };
+		DA0000000000000000000057 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareApiClient.swift; sourceTree = "<group>"; };
+		DA0000000000000000000058 = {isa = PBXBuildFile; fileRef = DA0000000000000000000057; };
+		DA0000000000000000000059 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareBrainAdapter.swift; sourceTree = "<group>"; };
+		DA000000000000000000005A = {isa = PBXBuildFile; fileRef = DA0000000000000000000059; };
+		DA000000000000000000005B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareM2BrainAdapter.swift; sourceTree = "<group>"; };
+		DA000000000000000000005C = {isa = PBXBuildFile; fileRef = DA000000000000000000005B; };
+		DA000000000000000000005D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareTests.swift; sourceTree = "<group>"; };
+		DA000000000000000000005E = {isa = PBXBuildFile; fileRef = DA000000000000000000005D; };
 	};
 	rootObject = 5CD759D4193846E4910FD9BB;
 }
