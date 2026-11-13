@@ -9,7 +9,10 @@
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_ID)</string>
+	<!-- Literal, not $(PRODUCT_BUNDLE_ID): with CODE_SIGNING_ALLOWED=NO
+	     (unsigned CI builds) Xcode expands $(PRODUCT_BUNDLE_ID) to empty
+	     and drops the key, so the simulator cannot install the app. -->
+	<string>wherevercode.agent</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
