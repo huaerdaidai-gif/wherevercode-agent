@@ -1,0 +1,115 @@
+# iOS — WhereverCode Agent (unsigned IPA)
+#
+# Builds the native Swift/SwiftUI app on a GitHub-hosted macOS runner,
+# runs the XCTest suite on an iPhone simulator, then packages an
+# UNSIGNED .app into an .ipa for self-signed sideloading (Sideloadly /
+# AltStore). No user signing identity is ever stored in CI.
+#
+# The repository is public, so Actions runs here do not consume the
+# private-repo $12/month compute allowance.
+
+name: iOS
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    runs-on: macos-15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode on the runner
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app || true
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1 || true)"
+          if [ -n "$XCODE" ]; then
+            echo "Using $XCODE"
+            sudo xcode-select -s "$XCODE"
+          else
+            echo "No Xcode_*.app found; using the runner default."
+          fi
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          UDID="$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          phones = [d for runtimes in data['devices'].values() for d in runtimes
+                    if d.get('isAvailable') and 'iPhone' in d.get('name', '')]
+          print(phones[0]['udid'] if phones else '')
+          ")"
+          if [ -z "$UDID" ]; then
+            echo "No available iPhone simulator on this runner."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $UDID"
+
+      - name: Build (unsigned, generic iOS device)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build/derived \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="$(find .build/derived/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "No .app found under Release-iphoneos:"
+            find .build/derived/Build/Products -maxdepth 2 -print
+            exit 1
+          fi
+          echo "Packaging $APP"
+          rm -rf Payload WhereverCodeAgent-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          /usr/bin/zip -r -y WhereverCodeAgent-unsigned.ipa Payload
+          /usr/bin/zip -T WhereverCodeAgent-unsigned.ipa
+          ls -lh WhereverCodeAgent-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhereverCodeAgent-unsigned-ipa
+          path: WhereverCodeAgent-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Test on iOS Simulator
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}' \
+            -derivedDataPath .build/derived \
+            CODE_SIGNING_ALLOWED=NO

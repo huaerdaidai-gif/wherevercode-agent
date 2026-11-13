@@ -1,0 +1,246 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+		00600EE2EA71EC2F6623B155 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsKeychainTests.swift; sourceTree = "<group>"; };
+		0762E029FB342CB47C96D83A = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		09B55E412B3CD3EA22477AB8 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		0CA4DA9504A66A2AACFD3AA9 = {isa = XCBuildConfiguration; buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+				"$(inherited)",
+				"@executable_path/Frameworks",
+				"@loader_path/Frameworks",
+			);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhereverCodeAgent.app/WhereverCodeAgent";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			}; name = Release; };
+		0EC43C27AE6A9F51433ABA31 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicesView.swift; sourceTree = "<group>"; };
+		1979B6204A28ED3B41351A82 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelTransport.swift; sourceTree = "<group>"; };
+		1A43B4FB7BCFBC9D8720311E = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
+			623D5A4E16C91488EB97E424,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		1D1884016C4723C9F758A1A1 = {isa = XCBuildConfiguration; buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+				"$(inherited)",
+				"@executable_path/Frameworks",
+				"@loader_path/Frameworks",
+			);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhereverCodeAgent.app/WhereverCodeAgent";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			}; name = Debug; };
+		1D41BC56CCB553459BA17CCB = {isa = PBXGroup; children = (
+			892AEB362C95AAE0B8B13531,
+			47FFE0ECCF7C83A806454DF9,
+			00600EE2EA71EC2F6623B155,
+			AF29026DEB46CEBD6478E0B0,
+		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
+		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
+		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
+		212B3758D9A02E43B3111A45 = {isa = PBXGroup; children = (
+			91067B38E1192DA78C1A0C00,
+		); name = App; path = App; sourceTree = "<group>"; };
+		29351C8E854D96368B36E5CB = {isa = PBXBuildFile; fileRef = A8FBCDEA5E707EC35BAF1DE6; };
+		2A3B9E2C913ADDDB16F1CD99 = {isa = PBXBuildFile; fileRef = 892AEB362C95AAE0B8B13531; };
+		2FAFA8646A910CE4490E1BBD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
+		3AB2292BD206EE84BF0DEB19 = {isa = XCConfigurationList; buildConfigurations = (
+			1D1884016C4723C9F758A1A1,
+			0CA4DA9504A66A2AACFD3AA9,
+		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		3D59A5380EBD5A1E1BB4A452 = {isa = XCConfigurationList; buildConfigurations = (
+			92543349B33279DD5291FA11,
+			CE35DE7B00E4C3789C5A5852,
+		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		41158D5AB6FD801A75FC1903 = {isa = PBXBuildFile; fileRef = 90A876B7A773B795F59F07C2; };
+		47214D5C5C54BFCD442E61C8 = {isa = XCBuildConfiguration; buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			}; name = Debug; };
+		47FFE0ECCF7C83A806454DF9 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpClientTests.swift; sourceTree = "<group>"; };
+		49C827D627120C9B5B9F3A01 = {isa = PBXBuildFile; fileRef = 5B13EA927360ADAE195EE80B; };
+		537589441B76EA165F23EABC = {isa = PBXGroup; children = (
+			61F1002C04C602A200A9C2E1,
+			09B55E412B3CD3EA22477AB8,
+		); name = Models; path = Models; sourceTree = "<group>"; };
+		58DA840CC0A312D88F6FA6BF = {isa = PBXGroup; children = (
+			FAE5B2E37F68D6FF5711A9D2,
+			E11324A5BC4F0A7FA438F642,
+		); name = Resources; path = Resources; sourceTree = "<group>"; };
+		5B13EA927360ADAE195EE80B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpClient.swift; sourceTree = "<group>"; };
+		5CD759D4193846E4910FD9BB = {isa = PBXProject; attributes = {
+			LastUpgradeCheck = 1600;
+			TargetAttributes = {
+				DAA35294198AB5749AF56D9F = {
+					CreatedOnToolsVersion = 16.0;
+				};
+				96D98ED529C3FE45773F4B2D = {
+					CreatedOnToolsVersion = 16.0;
+				};
+			};
+		}; buildConfigurationList = 3D59A5380EBD5A1E1BB4A452; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (
+			en,
+			Base,
+		); mainGroup = C83C56C58470393E35E1B586; projectDirPath = ""; projectRoot = ""; targets = (
+			DAA35294198AB5749AF56D9F,
+			96D98ED529C3FE45773F4B2D,
+		); };
+		5D93AC07A45BF27D2FEF38A9 = {isa = PBXBuildFile; fileRef = C938E01FDB5D371FF097BED0; };
+		61F1002C04C602A200A9C2E1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		623D5A4E16C91488EB97E424 = {isa = PBXBuildFile; fileRef = FAE5B2E37F68D6FF5711A9D2; };
+		624CBBBAADC0F2E4F66F1DBB = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			9CCD70432011961B094C8FCE,
+			8AE3EE43D06F281BFB338F66,
+			D2F8A62EC32897E7406C54CD,
+			E8F9160690D9CF2B9C55B44F,
+			49C827D627120C9B5B9F3A01,
+			1E69D22CB70873DDBFF041B3,
+			BB35B5B26176D7E09841F13F,
+			41158D5AB6FD801A75FC1903,
+			5D93AC07A45BF27D2FEF38A9,
+			29351C8E854D96368B36E5CB,
+			1D42142C90798881BB34AD0B,
+			828B51501A8E088E7BC25411,
+			DD5FF8DD89D9D8B920AF7867,
+			FABAA829E2C95B619B4A5E94,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		6D2652F5D197BA7CCF479CE7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatView.swift; sourceTree = "<group>"; };
+		6E49E94E4D6DA0B155C63BBD = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		71E728FFB566FEED3128BAEF = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhereverCodeAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		732524DA06571CF0EB4D85BA = {isa = XCBuildConfiguration; buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			}; name = Release; };
+		7667F7CA498D0ED82757FFC2 = {isa = PBXBuildFile; fileRef = AF29026DEB46CEBD6478E0B0; };
+		7F749415C58C7FDDBBA14398 = {isa = PBXBuildFile; fileRef = 47FFE0ECCF7C83A806454DF9; };
+		828B51501A8E088E7BC25411 = {isa = PBXBuildFile; fileRef = 918CC59A2183C5FAA462994B; };
+		844C8F533FE271C19FE543DF = {isa = PBXBuildFile; fileRef = 00600EE2EA71EC2F6623B155; };
+		892AEB362C95AAE0B8B13531 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelParsingTests.swift; sourceTree = "<group>"; };
+		8AE3EE43D06F281BFB338F66 = {isa = PBXBuildFile; fileRef = 61F1002C04C602A200A9C2E1; };
+		8C1969BC5989E871C77EB3CC = {isa = PBXGroup; children = (
+			71E728FFB566FEED3128BAEF,
+			E14659535277E988EECDDE93,
+		); name = Products; sourceTree = "<group>"; };
+		8C26D4EE798CD10F2C32C5F2 = {isa = PBXContainerItemProxy; containerPortal = 5CD759D4193846E4910FD9BB; proxyType = 1; remoteGlobalIDString = DAA35294198AB5749AF56D9F; remoteInfo = WhereverCodeAgent; };
+		90A876B7A773B795F59F07C2 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskService.swift; sourceTree = "<group>"; };
+		91067B38E1192DA78C1A0C00 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhereverCodeAgentApp.swift; sourceTree = "<group>"; };
+		918CC59A2183C5FAA462994B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		92543349B33279DD5291FA11 = {isa = XCBuildConfiguration; buildSettings = {
+
+			}; name = Debug; };
+		96D98ED529C3FE45773F4B2D = {isa = PBXNativeTarget; buildConfigurationList = 3AB2292BD206EE84BF0DEB19; buildPhases = (
+			ABD4D6AD9705B560B2E73A9F,
+			0762E029FB342CB47C96D83A,
+		); buildRules = (); dependencies = (
+			DE7EDA7845E668E233D95004,
+		); name = WhereverCodeAgentTests; productName = WhereverCodeAgentTests; productReference = E14659535277E988EECDDE93; productType = "com.apple.product-type.bundle.unit-test"; };
+		9CCD70432011961B094C8FCE = {isa = PBXBuildFile; fileRef = 91067B38E1192DA78C1A0C00; };
+		A8FBCDEA5E707EC35BAF1DE6 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		ABD4D6AD9705B560B2E73A9F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			2A3B9E2C913ADDDB16F1CD99,
+			7F749415C58C7FDDBBA14398,
+			844C8F533FE271C19FE543DF,
+			7667F7CA498D0ED82757FFC2,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
+		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
+			CADD1518C40C924157152CE5,
+			5B13EA927360ADAE195EE80B,
+			1979B6204A28ED3B41351A82,
+			2FAFA8646A910CE4490E1BBD,
+			90A876B7A773B795F59F07C2,
+			C938E01FDB5D371FF097BED0,
+		); name = Services; path = Services; sourceTree = "<group>"; };
+		BB35B5B26176D7E09841F13F = {isa = PBXBuildFile; fileRef = 2FAFA8646A910CE4490E1BBD; };
+		BEB0DA9A7B8738232918BE47 = {isa = PBXGroup; children = (
+			212B3758D9A02E43B3111A45,
+			537589441B76EA165F23EABC,
+			B6346D3B3FFCEA4422AAA296,
+			C3E649AE6FBC41A1C5956252,
+			58DA840CC0A312D88F6FA6BF,
+		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
+		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
+			A8FBCDEA5E707EC35BAF1DE6,
+			6D2652F5D197BA7CCF479CE7,
+			918CC59A2183C5FAA462994B,
+			0EC43C27AE6A9F51433ABA31,
+			F61BE8AE8EDB3888F3137986,
+		); name = Views; path = Views; sourceTree = "<group>"; };
+		C6036759D6AA8FB498EF9EC9 = {isa = XCConfigurationList; buildConfigurations = (
+			47214D5C5C54BFCD442E61C8,
+			732524DA06571CF0EB4D85BA,
+		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		C83C56C58470393E35E1B586 = {isa = PBXGroup; children = (
+			BEB0DA9A7B8738232918BE47,
+			1D41BC56CCB553459BA17CCB,
+			8C1969BC5989E871C77EB3CC,
+		); sourceTree = "<group>"; };
+		C938E01FDB5D371FF097BED0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalGate.swift; sourceTree = "<group>"; };
+		CADD1518C40C924157152CE5 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		CE35DE7B00E4C3789C5A5852 = {isa = XCBuildConfiguration; buildSettings = {
+
+			}; name = Release; };
+		D2F8A62EC32897E7406C54CD = {isa = PBXBuildFile; fileRef = 09B55E412B3CD3EA22477AB8; };
+		DAA35294198AB5749AF56D9F = {isa = PBXNativeTarget; buildConfigurationList = C6036759D6AA8FB498EF9EC9; buildPhases = (
+			624CBBBAADC0F2E4F66F1DBB, 6E49E94E4D6DA0B155C63BBD, 1A43B4FB7BCFBC9D8720311E,
+		); buildRules = (); dependencies = (); name = WhereverCodeAgent; productName = WhereverCodeAgent; productReference = 71E728FFB566FEED3128BAEF; productType = "com.apple.product-type.application"; };
+		DD5FF8DD89D9D8B920AF7867 = {isa = PBXBuildFile; fileRef = 0EC43C27AE6A9F51433ABA31; };
+		DE7EDA7845E668E233D95004 = {isa = PBXTargetDependency; target = DAA35294198AB5749AF56D9F; targetProxy = 8C26D4EE798CD10F2C32C5F2; };
+		E11324A5BC4F0A7FA438F642 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E14659535277E988EECDDE93 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhereverCodeAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E8F9160690D9CF2B9C55B44F = {isa = PBXBuildFile; fileRef = CADD1518C40C924157152CE5; };
+		F61BE8AE8EDB3888F3137986 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		FABAA829E2C95B619B4A5E94 = {isa = PBXBuildFile; fileRef = F61BE8AE8EDB3888F3137986; };
+		FAE5B2E37F68D6FF5711A9D2 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+	};
+	rootObject = 5CD759D4193846E4910FD9BB;
+}
