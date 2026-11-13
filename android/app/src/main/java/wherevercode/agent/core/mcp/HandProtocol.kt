@@ -254,7 +254,7 @@ object HandProtocol {
                 val keys = argsObj.keys()
                 while (keys.hasNext()) {
                     val key = keys.next()
-                    args[key] = argsObj.optString(key, "")
+                    if (!argsObj.isNull(key)) args[key] = argsObj.optString(key, "")
                 }
             }
             HandEnvelope(

@@ -895,8 +895,10 @@ class HandServer:
                 if time.time() > deadline:
                     timed_out = True
                     break
-                ready, _, _ = _select.select([out_fd], [], [], 0.2)
-                if ready:
+                ready, _, _ = _select.select([out_fd, conn], [], [], 0.2)
+                if conn in ready:
+                    raise ConnectionError("Hand run connection closed")
+                if out_fd in ready:
                     chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
                     if not chunk:
                         break
@@ -926,6 +928,7 @@ class HandServer:
         except (BrokenPipeError, ConnectionError, OSError):
             # 客户端已断开：杀掉子进程，不再回包。
             self._kill_process(task_id)
+            proc.wait(timeout=5)
             return
         finally:
             if proc.stdout is not None:

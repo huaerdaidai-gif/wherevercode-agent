@@ -1924,7 +1924,7 @@ class HandServer:
                 entry, prompt, task_id, folder,
                 env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
                 on_line=_on_line, log_path=log_path,
-                register_proc=_register_proc)
+                register_proc=_register_proc, connection=conn)
         except InternalAgentExecution as e:
             _finish_run("error", str(e)[:200])
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
@@ -3118,7 +3118,7 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                   task_id: str, cwd: str, env_extra: dict | None = None,
                   timeout_s: float = 600.0,
                   on_line=None, log_path: str | None = None,
-                  register_proc=None,
+                  register_proc=None, connection=None,
                   ) -> tuple[int | None, str, bool]:
     """通用 runner：输入（二进制、argv 模板含 {prompt}/{task_id}、
     工作目录、env），跑任意 CLI Agent，stdout 直接抓回。
@@ -3205,8 +3205,11 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
             if time.time() > deadline:
                 timed_out = True
                 break
-            ready, _, _ = _select.select([out_fd], [], [], 0.2)
-            if ready:
+            sources = [out_fd] if connection is None else [out_fd, connection]
+            ready, _, _ = _select.select(sources, [], [], 0.2)
+            if connection in ready:
+                raise ConnectionError("Hand run connection closed")
+            if out_fd in ready:
                 chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
                 if not chunk:
                     break
@@ -3223,38 +3226,26 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
             output_lines.append(buf)
             if on_line is not None:
                 on_line(buf)
-    except (BrokenPipeError, ConnectionError, OSError):
+    except OSError:
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except (OSError, ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
             pass
+        proc.wait(timeout=5)
+        proc.stdout.close()
+        proc.stderr.close()
         raise
-    if timed_out:
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except (OSError, ProcessLookupError):
-            try:
-                proc.terminate()
-            except OSError:
-                pass
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-            except OSError:
-                pass
-            proc.wait(timeout=5)
-    else:
+    if not timed_out:
         try:
             proc.wait(timeout=max(0.0, deadline - time.time()))
         except subprocess.TimeoutExpired:
             timed_out = True
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                pass
-            proc.wait(timeout=5)
+    if timed_out:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=5)
     output = "".join(output_lines)
     try:
         if proc.stdout is not None:
@@ -3295,7 +3286,7 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
                     env_extra: dict | None = None,
                     timeout_s: float = 600.0,
                     on_line=None, log_path: str | None = None,
-                    register_proc=None,
+                    register_proc=None, connection=None,
                     ) -> tuple[int | None, str, bool]:
     """统一分派：按注册行的 execution 分派执行方式，两条都是一等路径。
     - cli：子进程跑 CLI（run_cli_agent）。
@@ -3313,7 +3304,7 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
     return run_cli_agent(command[0], command, prompt, task_id, cwd,
                          env_extra=env_extra, timeout_s=timeout_s,
                          on_line=on_line, log_path=log_path,
-                         register_proc=register_proc)
+                         register_proc=register_proc, connection=connection)
 
 
 # --------------------------------------------------------------------------
