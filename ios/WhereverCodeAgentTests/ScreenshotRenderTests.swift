@@ -115,7 +115,7 @@ final class ScreenshotRenderTests: XCTestCase {
                         ChannelPickerContentView(
                             channels: pickerChannels,
                             selectedChannelID: "demo-1",
-                            onSelect: {}
+                            onSelect: { _ in }
                         )
                     }
                 }
