@@ -852,6 +852,15 @@ abstract class TaskDatabase : RoomDatabase() {
     }
 }
 
+/** One Room instance for all app components using the primary task database. */
+object TaskDatabaseProvider {
+    @Volatile private var instance: TaskDatabase? = null
+
+    fun get(context: Context): TaskDatabase = instance ?: synchronized(this) {
+        instance ?: TaskDatabase.create(context.applicationContext).also { instance = it }
+    }
+}
+
 /**
  * ControlPlane-only port for persisting bumped counters on the task row
  * (M2). Lives in core/task so core/task never imports core/control
@@ -880,6 +889,8 @@ class RoomTaskStore(private val db: TaskDatabase) : TaskStore, TaskControlCounte
     private val dao: TaskDao = db.taskDao()
     private val eventDao: TaskEventDao = db.taskEventDao()
     private val lock = Any()
+
+    override fun <T> withTaskLock(block: () -> T): T = synchronized(lock) { block() }
 
     override fun createTask(record: TaskRecord): TaskRecord {
         TaskStates.checkTransition(null, record.state)

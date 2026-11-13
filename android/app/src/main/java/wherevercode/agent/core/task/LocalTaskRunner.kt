@@ -302,6 +302,7 @@ class LocalTaskRunner(
         }
         return tasks.filter { task ->
             TaskStates.isClaimable(task.state) && task.sessionId == null &&
+                !TaskOrigins.isMcpDispatchTask(task.taskId) &&
                 task.assignedAgentId != null &&
                 isRemoteMember(task.assignedAgentId!!)
         }

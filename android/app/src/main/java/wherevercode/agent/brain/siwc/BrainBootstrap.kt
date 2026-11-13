@@ -128,6 +128,7 @@ import wherevercode.agent.core.task.SharedPreferencesEvalLogStore
 import wherevercode.agent.core.task.SharedPreferencesRoutingDecisionLog
 import wherevercode.agent.core.task.SharedPreferencesRouterSettings
 import wherevercode.agent.core.task.TaskDatabase
+import wherevercode.agent.core.task.TaskDatabaseProvider
 import wherevercode.agent.core.task.TaskEventStore
 import wherevercode.agent.core.task.TaskExecutionResult
 import wherevercode.agent.core.task.TaskExecutor
@@ -449,6 +450,8 @@ object BrainBootstrap {
         val taskStore: TaskStore,
         /** App task scheduler sharing the persistent control-plane freeze gate. */
         val taskScheduler: TaskScheduler,
+        /** Same control authority used by MCP dispatch, remote pumps, and UI commands. */
+        val controlPlane: ControlPlane? = null,
         /** 阶段 1：每任务执行步骤（V5 C1 起 Room 持久化，重启仍在）。 */
         val taskStepStore: TaskStepStore,
         /** a-3 交付卡：任务交付卡存储（进程内，见 InMemoryDeliveryCardStore）。 */
@@ -762,7 +765,7 @@ object BrainBootstrap {
         // 阶段 3（A1 P1）：数据库实例只建一次——任务库、授权、撤销、
         // 会话账本共用同一 TaskDatabase（会话表与任务表同一库，见
         // TaskDatabase MIGRATION_1_2 注释）。
-        val taskDb = TaskDatabase.create(appContext)
+        val taskDb = TaskDatabaseProvider.get(appContext)
         val taskStore = RoomTaskStore(taskDb)
         // V5 Phase B C1（W2）：会话历史、任务步骤、配对记录改走 Room
         // （与任务库同一 TaskDatabase，version 3）。见 roomStoresOrMemory：
@@ -1458,6 +1461,7 @@ object BrainBootstrap {
             turnController = turnController,
             taskStore = taskStore,
             taskScheduler = taskScheduler,
+            controlPlane = controlPlane,
             taskStepStore = taskStepStore,
             deliveryStore = deliveryStore,
             taskEventStore = taskEventStore,

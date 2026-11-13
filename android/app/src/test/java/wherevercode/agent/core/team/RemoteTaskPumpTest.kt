@@ -195,6 +195,18 @@ class RemoteTaskPumpTest {
         )
 
     @Test
+    fun `remote pump leaves MCP tasks for their assigned dispatcher`() = runBlocking {
+        val env = setup(listOf(HandEvent.Result(2, "must not execute")))
+        env.taskStore.createTask(
+            queuedRemoteTask().copy(taskId = "mcp-agent-name-collision", assignedAgentId = "example-agent"),
+        )
+
+        assertFalse(env.pump.pumpOnce())
+        assertEquals("queued", env.taskStore.getTask("mcp-agent-name-collision")?.state)
+        assertTrue(env.port.calls.isEmpty())
+    }
+
+    @Test
     fun `pump claims remote task and lands completed with result`() = runBlocking {
         val env = setup(
             listOf(

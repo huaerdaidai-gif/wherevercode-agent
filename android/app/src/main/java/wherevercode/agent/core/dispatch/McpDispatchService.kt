@@ -33,7 +33,7 @@ interface DispatchClaimPort {
 
 class SchedulerClaimPort(private val scheduler: TaskScheduler) : DispatchClaimPort {
     override fun claim(taskId: String, agentId: String, attemptId: String, nowEpochSeconds: Long): TaskRecord? =
-        scheduler.claimTaskForMember(taskId, agentId, attemptId, nowEpochSeconds)
+        scheduler.claimMcpTaskForMember(taskId, agentId, attemptId, nowEpochSeconds)
 
     override fun start(taskId: String): TaskRecord? = scheduler.startTask(taskId)
 }
@@ -59,7 +59,7 @@ class SchedulerClaimPort(private val scheduler: TaskScheduler) : DispatchClaimPo
  */
 class McpDispatchService(
     private val taskStore: TaskStore,
-    private val controlPlane: ControlPlane,
+    @Volatile private var controlPlane: ControlPlane,
     private val controlStore: ControlStore,
     private val revocationStore: RevocationStore,
     private val claimPort: DispatchClaimPort,
@@ -70,6 +70,15 @@ class McpDispatchService(
     private val newId: () -> String = { UUID.randomUUID().toString().replace("-", "") },
 ) {
     private val lock = Any()
+
+    fun configureRemoteControl(
+        targetResolver: ((String?) -> wherevercode.agent.core.mcp.RemoteTarget?)?,
+        controlSender: wherevercode.agent.core.mcp.RemoteControlSender?,
+    ) = controlPlane.configureRemoteControl(targetResolver, controlSender)
+
+    fun useControlPlane(sharedControlPlane: ControlPlane) {
+        synchronized(lock) { controlPlane = sharedControlPlane }
+    }
 
     fun toolsFor(principal: DispatchPrincipal): List<DispatchToolDef> = DispatchTools.visibleTo(principal)
 

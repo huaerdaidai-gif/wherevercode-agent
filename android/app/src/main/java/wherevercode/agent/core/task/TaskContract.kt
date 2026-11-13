@@ -191,6 +191,8 @@ interface TaskStore {
         expectedGoalVersion: Long,
         expectedAuthEpoch: Long,
     ): TaskRecord?
+    /** Serialize compound task/control transitions with this store's writes. */
+    fun <T> withTaskLock(block: () -> T): T = block()
     /** Expire claim leases older than [nowEpochSeconds]; returns the expired task ids. */
     fun expireLeases(nowEpochSeconds: Long): List<String>
 

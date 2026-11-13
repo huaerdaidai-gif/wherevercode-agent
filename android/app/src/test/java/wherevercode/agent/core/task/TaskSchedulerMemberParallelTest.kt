@@ -150,13 +150,15 @@ class TaskSchedulerMemberParallelTest {
     }
 
     @Test
-    fun `frozen task still blocks member claims globally`() {
+    fun `frozen task does not block other members claims`() {
         queued("t1")
         queued("t2")
         controlStore.setDispatchFrozen("t2", true)
-        assertFalse(scheduler.canClaimForMember("member-a"))
-        assertNull(scheduler.claimTaskForMember("t1", "member-a", attemptId()))
-        controlStore.setDispatchFrozen("t2", false)
+        assertTrue(scheduler.canClaimForMember("member-a"))
         assertNotNull(scheduler.claimTaskForMember("t1", "member-a", attemptId()))
+        assertNull(scheduler.claimTaskForMember("t2", "member-b", attemptId()))
+        assertEquals("queued", taskStore.getTask("t2")?.state)
+        controlStore.setDispatchFrozen("t2", false)
+        assertNotNull(scheduler.claimTaskForMember("t2", "member-b", attemptId()))
     }
 }

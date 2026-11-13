@@ -1351,18 +1351,10 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_INVALID_CREDENTIAL,
                         "任务连接凭证无效，请重新下达任务。")
             return
-        # 凭证校验。authorize_project_folder 例外：它的作用就是把
-        # folder 写进授权表，待授权的文件夹按定义还不在表里，所以
-        # verify_credential 的“folder 已在授权表里”这一项对本动作
-        # 不适用——把待授权文件夹临时并入传入的授权表，使该项检查
-        # 按构造通过。verify_credential 本身一字不动：签名、过期、
-        # 撤销、任务绑定、目标绑定、凭证 folder 与信封 folder 一致
-        # 性，全部照常校验。凭证须由配对 App 为本次授权操作签发
-        # （task_id 由 App 为这次指派/链检出操作新 mint，
-        # folder 即待授权的项目文件夹）。
+        # 授权动作仍须以凭证绑定的现有 Agent 目录作为信封 folder。
+        # 新项目目录仅从 args.folder 读取；绝不能把信封目录临时加入
+        # 授权列表来绕过凭证的现有目录授权检查。
         authorized = self.authorized_folders(agent_id)
-        if action == "authorize_project_folder":
-            authorized = authorized + [folder]
         err = verify_credential(
             cred, signing_key,
             expected_task_id=task_id,

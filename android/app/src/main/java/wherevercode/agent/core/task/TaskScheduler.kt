@@ -16,8 +16,7 @@ import wherevercode.agent.AgentDiscovery
  *   must not block member B's claim (task decomposition needs this:
  *   subtasks for different members run in parallel). The per-member
  *   busy check is the same predicate [MemberDispatcher] enforces
- *   (gate 5); the freeze scan stays global (any frozen task still
- *   blocks member claims, as before).
+ *   (gate 5); only the requested task's freeze state blocks a claim.
  * - A task in `review` does NOT count as work in hand.
  * - Match by capability / device / authorization (three dimensions);
  *   stage 2 matches on AgentDiscovery's installed agents + an explicit
@@ -45,6 +44,8 @@ data class TaskRequirement(
 interface DispatchFreezePort {
     fun isDispatchFrozen(taskId: String): Boolean
     fun controlStatus(taskId: String): String?
+    /** Serialize claim/start checks with ControlPlane state changes. */
+    fun <T> runDispatchTransaction(block: () -> T): T = block()
 }
 
 class TaskScheduler(
@@ -78,27 +79,19 @@ class TaskScheduler(
         }
 
     /**
-     * M2: frozen dispatch blocks new claims. The freeze check runs
-     * inside the same [lock] as [claimTask] so a freeze cannot race a
-     * claim that already passed the check (a claim that still slips
-     * through is caught again by ExecutionFence, which refuses writes
-     * for frozen tasks).
+     * Local single-worker capacity only. Task-specific freeze checks run
+     * atomically with each claim and start transition.
      */
-    fun canClaim(): Boolean = synchronized(lock) {
-        if (activeWorkCount() != 0) return false
-        taskStore.listTasks().none { freezePort.isDispatchFrozen(it.taskId) }
-    }
+    fun canClaim(): Boolean = synchronized(lock) { activeWorkCount() == 0 }
 
     /**
      * Member-path claim gate: only THIS member must be idle (one task
      * at a time per member); other members' work does not block it.
-     * The freeze scan stays global, exactly as in [canClaim]: any
-     * frozen task still blocks member claims.
+     * Freeze state is checked only for the requested task inside its
+     * atomic claim transition.
      */
-    fun canClaimForMember(memberId: String): Boolean = synchronized(lock) {
-        if (activeWorkCountForMember(memberId) != 0) return false
-        taskStore.listTasks().none { freezePort.isDispatchFrozen(it.taskId) }
-    }
+    fun canClaimForMember(memberId: String): Boolean =
+        synchronized(lock) { activeWorkCountForMember(memberId) == 0 }
 
     /**
      * Claim a queued task for [agentId]. Returns null when another task
@@ -121,44 +114,51 @@ class TaskScheduler(
         // must never claim them, even when the dispatcher has not assigned
         // an executor yet.
         if (TaskOrigins.isMcpDispatchTask(taskId)) return null
-        if (!canClaim()) return null
-        val task = taskStore.getTask(taskId) ?: return null
-        if (!TaskStates.isClaimable(task.state)) return null
-        // M2: frozen tasks and non-RUNNING control states are not claimable.
-        if (freezePort.isDispatchFrozen(taskId)) return null
-        val status = freezePort.controlStatus(taskId)
-        if (status != null && status != "RUNNING") return null
-        val now = System.currentTimeMillis() / 1000
-        val attemptId = java.util.UUID.randomUUID().toString().replace("-", "")
-        return try {
-            taskStore.updateTask(
-                taskId,
-                mapOf(
-                    "state" to "assigned",
-                    "assigned_agent_id" to agentId,
-                    "attempt" to (task.attempt + 1),
-                    "attempt_id" to attemptId,
-                    "lease_owner" to agentId,
-                    "lease_expires_at" to (now + RoomTaskStore.LEASE_SECONDS),
-                ),
-                task.version,
-                task.goalVersion,
-                task.authEpoch,
-            )
-        } catch (_: Exception) {
-            null
+        taskStore.withTaskLock {
+            freezePort.runDispatchTransaction {
+                if (activeWorkCount() != 0 || !isTaskRunnable(taskId)) return@runDispatchTransaction null
+                val task = taskStore.getTask(taskId) ?: return@runDispatchTransaction null
+                if (!TaskStates.isClaimable(task.state)) return@runDispatchTransaction null
+                val now = System.currentTimeMillis() / 1000
+                val attemptId = java.util.UUID.randomUUID().toString().replace("-", "")
+                try {
+                    taskStore.updateTask(
+                        taskId,
+                        mapOf(
+                            "state" to "assigned",
+                            "assigned_agent_id" to agentId,
+                            "attempt" to (task.attempt + 1),
+                            "attempt_id" to attemptId,
+                            "lease_owner" to agentId,
+                            "lease_expires_at" to (now + RoomTaskStore.LEASE_SECONDS),
+                        ),
+                        task.version,
+                        task.goalVersion,
+                        task.authEpoch,
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
         }
     }
 
-    fun startTask(taskId: String): TaskRecord? {
-        val task = taskStore.getTask(taskId) ?: return null
-        if (task.state != "assigned") return null
-        return try {
-            taskStore.updateTask(taskId, mapOf("state" to "working"), task.version, task.goalVersion, task.authEpoch)
-        } catch (_: Exception) {
-            null
+    fun startTask(taskId: String): TaskRecord? = taskStore.withTaskLock {
+        freezePort.runDispatchTransaction {
+            if (!isTaskRunnable(taskId)) return@runDispatchTransaction null
+            val task = taskStore.getTask(taskId) ?: return@runDispatchTransaction null
+            if (task.state != "assigned") return@runDispatchTransaction null
+            try {
+                taskStore.updateTask(taskId, mapOf("state" to "working"), task.version, task.goalVersion, task.authEpoch)
+            } catch (_: Exception) {
+                null
+            }
         }
     }
+
+    private fun isTaskRunnable(taskId: String): Boolean =
+        !freezePort.isDispatchFrozen(taskId) &&
+            (freezePort.controlStatus(taskId) == null || freezePort.controlStatus(taskId) == "RUNNING")
 
     /**
      * P0：审查打回返工。review → rework（reason 写入 error 栏，可见），
@@ -197,31 +197,53 @@ class TaskScheduler(
         memberId: String,
         attemptId: String,
         nowEpochSeconds: Long = System.currentTimeMillis() / 1000,
+    ): TaskRecord? = claimTaskForMemberInternal(taskId, memberId, attemptId, nowEpochSeconds, allowMcp = false)
+
+    /** Claim path reserved for the authenticated MCP dispatcher executor. */
+    fun claimMcpTaskForMember(
+        taskId: String,
+        memberId: String,
+        attemptId: String,
+        nowEpochSeconds: Long,
+    ): TaskRecord? = claimTaskForMemberInternal(taskId, memberId, attemptId, nowEpochSeconds, allowMcp = true)
+
+    private fun claimTaskForMemberInternal(
+        taskId: String,
+        memberId: String,
+        attemptId: String,
+        nowEpochSeconds: Long,
+        allowMcp: Boolean,
     ): TaskRecord? = synchronized(lock) {
-        if (!canClaimForMember(memberId)) return null
-        val task = taskStore.getTask(taskId) ?: return null
-        if (!TaskStates.isClaimable(task.state)) return null
-        if (freezePort.isDispatchFrozen(taskId)) return null
-        val status = freezePort.controlStatus(taskId)
-        if (status != null && status != "RUNNING") return null
-        return try {
-            taskStore.updateTask(
-                taskId,
-                mapOf(
-                    "state" to "assigned",
-                    "assigned_agent_id" to memberId,
-                    "member_id" to memberId,
-                    "attempt" to (task.attempt + 1),
-                    "attempt_id" to attemptId,
-                    "lease_owner" to memberId,
-                    "lease_expires_at" to (nowEpochSeconds + RoomTaskStore.LEASE_SECONDS),
-                ),
-                task.version,
-                task.goalVersion,
-                task.authEpoch,
-            )
-        } catch (_: Exception) {
-            null
+        taskStore.withTaskLock {
+            freezePort.runDispatchTransaction {
+                val task = taskStore.getTask(taskId) ?: return@runDispatchTransaction null
+                val isMcpTask = TaskOrigins.isMcpDispatchTask(taskId)
+                if (isMcpTask != allowMcp) return@runDispatchTransaction null
+                if (isMcpTask && task.assignedAgentId?.equals(memberId, ignoreCase = true) != true) {
+                    return@runDispatchTransaction null
+                }
+                if (!TaskStates.isClaimable(task.state) || !isTaskRunnable(taskId)) return@runDispatchTransaction null
+                if (activeWorkCountForMember(memberId) != 0) return@runDispatchTransaction null
+                try {
+                    taskStore.updateTask(
+                        taskId,
+                        mapOf(
+                            "state" to "assigned",
+                            "assigned_agent_id" to memberId,
+                            "member_id" to memberId,
+                            "attempt" to (task.attempt + 1),
+                            "attempt_id" to attemptId,
+                            "lease_owner" to memberId,
+                            "lease_expires_at" to (nowEpochSeconds + RoomTaskStore.LEASE_SECONDS),
+                        ),
+                        task.version,
+                        task.goalVersion,
+                        task.authEpoch,
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
         }
     }
 

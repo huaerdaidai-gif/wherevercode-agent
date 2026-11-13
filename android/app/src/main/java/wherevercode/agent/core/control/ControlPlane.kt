@@ -92,14 +92,22 @@ class ControlPlane(
      * 发往该目标。本地控制语义不变：远端回执到之前，本地态保持
      * 待确认（PAUSING/STOPPING），绝不先写已确认。
      */
-    private val remoteTargetResolver: ((String?) -> RemoteTarget?)? = null,
-    private val remoteControlSender: RemoteControlSender? = null,
+    @Volatile private var remoteTargetResolver: ((String?) -> RemoteTarget?)? = null,
+    @Volatile private var remoteControlSender: RemoteControlSender? = null,
 ) : ControlCommandPort {
     private val counters: TaskControlCounterStore? =
         counterSync ?: (taskStore as? TaskControlCounterStore)
     private val goalVersion = GoalVersion(controlStore)
     private val authEpoch = AuthorizationEpoch(controlStore)
     private val token = CancellationToken(controlStore, taskStore, nowEpochSeconds)
+
+    fun configureRemoteControl(
+        targetResolver: ((String?) -> RemoteTarget?)?,
+        controlSender: RemoteControlSender?,
+    ) {
+        remoteTargetResolver = targetResolver
+        remoteControlSender = controlSender
+    }
 
     // -- ControlCommandPort -------------------------------------------------
 
@@ -579,7 +587,8 @@ class ControlPlane(
         work: (TaskRecord) -> ControlResult,
     ): ControlResult {
         val result: ControlResult = try {
-            controlStore.runTransaction {
+            taskStore.withTaskLock {
+                controlStore.runTransaction {
                 val replay = controlStore.getOperation(operationId)
                 if (replay != null) return@runTransaction replay.result
                 val task = taskStore.getTask(taskId)
@@ -596,6 +605,7 @@ class ControlPlane(
                 recordAudit(action, taskId, operationId, outcome, reason)
                 recordOperation(operationId, taskId, action, outcome)
                 outcome
+                }
             }
         } catch (e: Exception) {
             ControlResult(

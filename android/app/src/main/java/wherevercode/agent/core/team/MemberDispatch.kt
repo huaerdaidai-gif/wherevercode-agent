@@ -6,6 +6,7 @@ import wherevercode.agent.core.autonomy.AutonomyGate
 import wherevercode.agent.core.mcp.RemoteTarget
 import wherevercode.agent.core.task.RoomTaskStore
 import wherevercode.agent.core.task.TaskScheduler
+import wherevercode.agent.core.task.TaskOrigins
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStore
 
@@ -81,6 +82,12 @@ class MemberDispatcher(
     private val autonomyGate: AutonomyGate? = null,
 ) {
     fun dispatch(taskId: String, memberId: String): MemberDispatchResult {
+        if (TaskOrigins.isMcpDispatchTask(taskId)) {
+            return MemberDispatchResult.Refused(
+                MemberDispatchRefusal.TASK_NOT_QUEUED,
+                "MCP 派工任务只能由其指派的 MCP 执行方领取，不能走远程 Agent 派发。",
+            )
+        }
         val member = memberStore.getMember(memberId)
             ?: return MemberDispatchResult.Refused(
                 MemberDispatchRefusal.MEMBER_NOT_FOUND,

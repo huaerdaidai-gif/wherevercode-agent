@@ -686,6 +686,7 @@ class HandServer:
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps({"authorized": True,
                                           "requested_folder": requested,
+                                          "agent_id": agent_id,
                                           "already": already,
                                           "folder": canonical}, ensure_ascii=False)},
                    seq + 1)

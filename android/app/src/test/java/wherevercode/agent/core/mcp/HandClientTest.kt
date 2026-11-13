@@ -206,6 +206,30 @@ class HandClientTest {
     }
 
     @Test
+    fun mismatchedResponseIdentityAndScope_areBlockedBeforeResult() = runBlocking {
+        val valid = responseEnvelope(HandClient.TYPE_RESULT, 2, mapOf("output" to "ok"))
+        val invalidResponses = listOf(
+            valid.copy(agentId = "other-agent"),
+            valid.copy(sourceDeviceId = "other-device"),
+            valid.copy(targetDeviceId = "other-app"),
+            valid.copy(folder = "/other-project"),
+            valid.copy(action = "write"),
+            valid.copy(taskId = "other-task"),
+        )
+
+        for (invalid in invalidResponses) {
+            nowSeconds = 1_000_000L
+            val connection = FakeTransportConnection(listOf(sealedFrame(sessionKey(), invalid)))
+            val events = client(FakeTransport(connection), FakeTrustChecker()).call(request()).toList()
+            assertEquals(1, events.size)
+            val blocked = events.single() as HandEvent.Blocked
+            assertEquals(HandProtocol.Errors.INVALID_CREDENTIAL.takeIf { invalid.taskId == "task-1" }
+                ?: HandProtocol.Errors.WRONG_TASK, blocked.code)
+            assertTrue(connection.closed)
+        }
+    }
+
+    @Test
     fun credentialExpiresMidFlight_blocks() = runBlocking {
         // 凭证 TTL 900s：1_000_000 发出，1_000_900 过期。
         val connection = FakeTransportConnection(

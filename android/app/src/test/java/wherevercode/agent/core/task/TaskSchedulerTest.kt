@@ -12,6 +12,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import wherevercode.agent.core.control.InMemoryControlStore
 import wherevercode.agent.AgentDiscovery
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * TaskScheduler freeze tests (M2, plan §2.1). In-memory task store +
@@ -27,6 +29,7 @@ class TaskSchedulerTest {
 
     private class FakeTaskStore : TaskStore, TaskControlCounterStore {
         val tasks = LinkedHashMap<String, TaskRecord>()
+        @Volatile var beforeUpdate: ((String, Map<String, Any?>) -> Unit)? = null
 
         override fun createTask(record: TaskRecord): TaskRecord {
             tasks[record.taskId] = record
@@ -45,6 +48,7 @@ class TaskSchedulerTest {
             expectedGoalVersion: Long,
             expectedAuthEpoch: Long,
         ): TaskRecord? {
+            beforeUpdate?.invoke(taskId, changes)
             val current = tasks[taskId] ?: return null
             if (current.version != expectedVersion) throw StaleTaskUpdate(taskId, expectedVersion, current.version)
             if (current.goalVersion != expectedGoalVersion) {
@@ -105,9 +109,79 @@ class TaskSchedulerTest {
     fun `frozen dispatch blocks new claims`() {
         queued("t1")
         controlStore.setDispatchFrozen("t1", true)
-        assertFalse("冻结时 canClaim 为 false", scheduler.canClaim())
+        assertTrue("canClaim 只表示本机是否空闲", scheduler.canClaim())
         assertNull("冻结时 claimTask 返回 null", scheduler.claimTask("t1", "agent-1"))
         assertEquals("queued", taskStore.getTask("t1")?.state)
+    }
+
+    @Test
+    fun `paused task does not block an unrelated member claim`() {
+        queued("paused-task")
+        queued("available-task")
+        controlStore.setDispatchFrozen("paused-task", true)
+        controlStore.setControlStatus("paused-task", wherevercode.agent.core.control.ControlStatus.PAUSED)
+
+        assertTrue(scheduler.canClaimForMember("member-a"))
+        assertNotNull(scheduler.claimTaskForMember("available-task", "member-a", "attempt-a"))
+        assertNull(scheduler.claimTaskForMember("paused-task", "member-b", "attempt-b"))
+    }
+
+    @Test
+    fun `pause racing claim prevents later start`() {
+        queued("race-task")
+        val updateReached = CountDownLatch(1)
+        val allowUpdate = CountDownLatch(1)
+        taskStore.beforeUpdate = { _, changes ->
+            if (changes["state"] == "assigned") {
+                updateReached.countDown()
+                check(allowUpdate.await(5, TimeUnit.SECONDS))
+            }
+        }
+        var claimed: TaskRecord? = null
+        val claimThread = Thread {
+            claimed = scheduler.claimTaskForMember("race-task", "member-a", "attempt-race")
+        }
+        claimThread.start()
+        assertTrue("claim reaches its write", updateReached.await(5, TimeUnit.SECONDS))
+
+        val pauseThread = Thread {
+            controlStore.runTransaction {
+                val task = taskStore.getTask("race-task")!!
+                controlStore.setDispatchFrozen("race-task", true)
+                controlStore.setControlStatus(
+                    "race-task",
+                    if (task.state == "assigned" || task.state == "working") {
+                        wherevercode.agent.core.control.ControlStatus.PAUSING
+                    } else {
+                        wherevercode.agent.core.control.ControlStatus.PAUSED
+                    },
+                )
+            }
+        }
+        pauseThread.start()
+        allowUpdate.countDown()
+        claimThread.join(5_000)
+        pauseThread.join(5_000)
+        taskStore.beforeUpdate = null
+
+        assertFalse("claim thread completed", claimThread.isAlive)
+        assertFalse("pause thread completed", pauseThread.isAlive)
+        assertNotNull(claimed)
+        assertEquals(wherevercode.agent.core.control.ControlStatus.PAUSING,
+            controlStore.getControlStatus("race-task"))
+        assertNull("paused task cannot transition into execution", scheduler.startTask("race-task"))
+        assertEquals("assigned", taskStore.getTask("race-task")?.state)
+    }
+
+    @Test
+    fun `MCP task can only be claimed through its assigned dispatcher path`() {
+        taskStore.createTask(TaskRecord(
+            taskId = "mcp-owned-task", title = "MCP", state = "queued", assignedAgentId = "grok-bot",
+        ))
+
+        assertNull(scheduler.claimTaskForMember("mcp-owned-task", "grok-bot", "wrong-path"))
+        assertNull(scheduler.claimMcpTaskForMember("mcp-owned-task", "codex", "wrong-owner", 1_700_000_000))
+        assertNotNull(scheduler.claimMcpTaskForMember("mcp-owned-task", "GROK-BOT", "right-owner", 1_700_000_000))
     }
 
     @Test
@@ -149,7 +223,7 @@ class TaskSchedulerTest {
         controlStore.setDispatchFrozen("t1", true)
         assertEquals("assigned", taskStore.getTask("t1")?.state)
         assertEquals(1, scheduler.activeWorkCount())
-        // And a second task cannot be claimed while any task is frozen.
+        // The local single-task limit, not another task's freeze, blocks this claim.
         queued("t2")
         assertNull(scheduler.claimTask("t2", "agent-1"))
     }

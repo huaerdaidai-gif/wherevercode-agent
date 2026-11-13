@@ -155,6 +155,39 @@ class Client:
 
 
 class BundledHandAuthorizationTest(unittest.TestCase):
+    def test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized(self):
+        bundled = load_bundled_hand_server()
+        with tempfile.TemporaryDirectory() as temp:
+            base = os.path.join(temp, "agent-home")
+            project = os.path.join(temp, "project")
+            os.mkdir(base)
+            os.mkdir(project)
+            server = bundled.HandServer(os.path.join(temp, "state"), "device", "test")
+            server.state.save_json("auth.json", {
+                "agent": {"folders": [base], "authorized_project_folders": []}
+            })
+            signing_key = b"s" * 32
+            task_id = "authorize-test"
+            events = []
+            server._send = lambda conn, key, envelope, kind, args, seq: events.append((kind, args))
+            envelope = {
+                "type": "cross_device_tool_call", "version": 1, "seq": 1,
+                "task_id": task_id, "agent_id": "agent",
+                "source_device_id": "client", "target_device_id": "device",
+                "folder": project, "action": "authorize_project_folder",
+                "args": {
+                    "credential": make_credential(signing_key, task_id, "device", project, "agent"),
+                    "folder": project,
+                },
+            }
+
+            server._dispatch(None, b"k" * 32, signing_key, "client", envelope)
+
+            self.assertEqual("cross_device_error", events[-1][0])
+            self.assertEqual(bundled.ERR_WRONG_FOLDER, events[-1][1]["code"])
+            auth = server.state.load_json("auth.json", {})
+            self.assertEqual([], auth["agent"]["authorized_project_folders"])
+
     def test_authorization_uses_requested_args_folder_and_echoes_it(self):
         bundled = load_bundled_hand_server()
         with tempfile.TemporaryDirectory() as temp:
@@ -428,6 +461,7 @@ class HandServerTest(unittest.TestCase):
         self.assertTrue(result["authorized"])
         self.assertFalse(result["already"])
         self.assertEqual(extra, result["requested_folder"])
+        self.assertEqual("fake-agent", result["agent_id"])
         self.assertIn(os.path.realpath(extra), self.server.authorized_folders("fake-agent"))
 
         repeated = self.client.tool_call(

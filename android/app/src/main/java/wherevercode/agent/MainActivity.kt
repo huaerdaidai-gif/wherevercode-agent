@@ -8788,6 +8788,11 @@ class MainActivity : AppCompatActivity() {
                         }
                     },
                 )
+                McpDispatchRuntime.configureRemoteControl(
+                    targetResolver = ::resolveRemoteTargetForMember,
+                    controlSender = remoteControlSender,
+                )
+                components.controlPlane?.let { McpDispatchRuntime.bindControlPlane(it) }
                 runOnUiThread {
                     brainComponents = components
                     chatViewModel.attach(components, toolApprovalGate)

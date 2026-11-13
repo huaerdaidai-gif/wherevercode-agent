@@ -193,6 +193,23 @@ class MemberDispatchTest {
     }
 
     @Test
+    fun `member dispatcher cannot route MCP task to a same named remote agent`() {
+        val (taskStore, _, manager, dispatcher, _) = setup()
+        connectedMember(manager)
+        taskStore.createTask(
+            TaskRecord(
+                taskId = "mcp-codex-cli-collision", projectId = "proj-a", title = "MCP task",
+                state = "queued", assignedAgentId = "codex-cli",
+            ),
+        )
+
+        val result = dispatcher.dispatch("mcp-codex-cli-collision", "codex-mac")
+
+        assertTrue(result is MemberDispatchResult.Refused)
+        assertEquals("queued", taskStore.getTask("mcp-codex-cli-collision")?.state)
+    }
+
+    @Test
     fun `lease expiry returns task to requeued and keeps attempt for re-claim`() {
         val (taskStore, _, manager, dispatcher, _) = setup()
         connectedMember(manager)

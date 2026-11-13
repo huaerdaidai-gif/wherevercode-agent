@@ -88,9 +88,9 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 - `authorize_project_folder` 的信封 `folder` 与凭证仍绑定到该 Agent
   已授权的目录；`args.folder` 是用户明确批准、且必须已存在的绝对目录。
   Hand 只在配对、密封信封和任务凭证通过校验后，将其 canonical 路径
-  加入该 Agent 的授权列表；回执包含原样 `requested_folder` 和 canonical
-  `folder`，客户端须校验回执对应本次请求；重复授权幂等，不接受相对路径
-  或不存在的目录。
+  加入该 Agent 的授权列表；回执包含原样 `requested_folder`、`agent_id`
+  和 canonical `folder`，客户端须校验回执对应本次请求；重复授权幂等，
+  不接受相对路径或不存在的目录。
 - `control` 是执行栅栏快照（JSON 字符串）：改目标/撤销后服务端
   goal_version / epoch 已涨，旧快照的调用以 `stale_goal_version` /
   `stale_epoch` 拒绝，旧执行不复活。

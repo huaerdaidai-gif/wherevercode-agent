@@ -2,7 +2,10 @@ package wherevercode.agent.core.dispatch
 
 import android.content.Context
 import java.io.File
-import wherevercode.agent.core.task.TaskDatabase
+import wherevercode.agent.core.mcp.RemoteControlSender
+import wherevercode.agent.core.mcp.RemoteTarget
+import wherevercode.agent.core.control.ControlPlane
+import wherevercode.agent.core.task.TaskDatabaseProvider
 
 /**
  * App lifecycle for the MCP dispatch endpoint. State and audit files live in
@@ -15,6 +18,27 @@ object McpDispatchRuntime {
 
     private val lock = Any()
     @Volatile private var host: McpDispatchHost? = null
+    @Volatile private var sharedControlPlane: ControlPlane? = null
+    @Volatile private var remoteTargetResolver: ((String?) -> RemoteTarget?)? = null
+    @Volatile private var remoteControlSender: RemoteControlSender? = null
+
+    fun configureRemoteControl(
+        targetResolver: ((String?) -> RemoteTarget?)?,
+        controlSender: RemoteControlSender?,
+    ) {
+        synchronized(lock) {
+            remoteTargetResolver = targetResolver
+            remoteControlSender = controlSender
+            host?.service?.configureRemoteControl(targetResolver, controlSender)
+        }
+    }
+
+    fun bindControlPlane(controlPlane: ControlPlane) {
+        synchronized(lock) {
+            sharedControlPlane = controlPlane
+            host?.service?.useControlPlane(controlPlane)
+        }
+    }
 
     fun isEnabled(context: Context): Boolean =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -87,10 +111,13 @@ object McpDispatchRuntime {
         check(stateDir.exists() || stateDir.mkdirs()) { "无法创建本机 MCP 状态目录" }
         return McpDispatchHost.create(
             appContext = app,
-            taskDb = TaskDatabase.create(app),
+            taskDb = TaskDatabaseProvider.get(app),
             stateDir = stateDir,
             port = PORT,
             bindHost = "127.0.0.1",
+            controlPlane = sharedControlPlane,
+            remoteTargetResolver = remoteTargetResolver,
+            remoteControlSender = remoteControlSender,
         ).start().also { host = it }
     }
 }

@@ -14,9 +14,17 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import wherevercode.agent.core.control.ControlAction
+import wherevercode.agent.core.control.ControlPlane
+import wherevercode.agent.core.control.InMemoryControlAuditLog
 import wherevercode.agent.core.dispatch.DispatchTestFixture.Companion.args
+import wherevercode.agent.core.mcp.RemoteControlCommand
+import wherevercode.agent.core.mcp.RemoteControlSender
+import wherevercode.agent.core.mcp.RemoteTarget
+import wherevercode.agent.core.security.InMemoryAuthorizationStore
 import wherevercode.agent.core.security.auditEntryToJson
 import wherevercode.agent.core.task.TaskRecord
+import wherevercode.agent.core.transport.DiscoveredPeer
 
 @RunWith(RobolectricTestRunner::class)
 class McpDispatchServiceTest {
@@ -102,6 +110,44 @@ class McpDispatchServiceTest {
         assertEquals("grok-bot", t.getString("assigned_agent_id"))
         val st = f.call(a.owner, "get_task_status", args("task_id" to t.getString("task_id")))
         assertEquals("queued", st.getJSONObject("task").getString("state"))
+    }
+
+    @Test
+    fun `MCP pause reaches the shared remote control sender for an in flight task`() {
+        val target = RemoteTarget(
+            peer = DiscoveredPeer(
+                deviceId = "device-grok", displayName = "Grok device", host = "192.0.2.10",
+                port = 18743, fingerprintSha256 = "ab".repeat(32), capabilities = listOf("hand"),
+            ),
+            agentId = "grok-bot", folder = "/workspace",
+        )
+        val sent = mutableListOf<RemoteControlCommand>()
+        val sharedPlane = ControlPlane(
+            taskStore = f.taskStore,
+            authStore = InMemoryAuthorizationStore(),
+            revocationStore = f.revocationStore,
+            controlStore = f.controlStore,
+            auditLog = InMemoryControlAuditLog(),
+            remoteTargetResolver = { if (it == "grok-bot") target else null },
+            remoteControlSender = object : RemoteControlSender {
+                override fun send(
+                    target: RemoteTarget,
+                    taskId: String,
+                    command: RemoteControlCommand,
+                    onResult: (wherevercode.agent.core.mcp.RemoteControlResult) -> Unit,
+                ) { sent += command }
+            },
+        )
+        f.service.useControlPlane(sharedPlane)
+        val taskId = create(key = "remote-pause-control")
+        assign(taskId)
+        claim(taskId)
+
+        val result = f.call(a.chatgpt, "pause_task", args("task_id" to taskId))
+
+        assertEquals("PAUSING", result.getString("control_status"))
+        assertEquals(1, sent.size)
+        assertEquals(ControlAction.PAUSE, sent.single().action)
     }
 
     // ---- authorization ------------------------------------------------------

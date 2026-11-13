@@ -42,6 +42,8 @@ class McpDispatchHost(
             stateDir: File,
             taskStore: TaskStore = RoomTaskStore(taskDb),
             controlPlane: ControlPlane? = null,
+            remoteTargetResolver: ((String?) -> wherevercode.agent.core.mcp.RemoteTarget?)? = null,
+            remoteControlSender: wherevercode.agent.core.mcp.RemoteControlSender? = null,
         ): McpDispatchService {
             val controlStore = RoomControlStore(taskDb)
             val revocationStore = RoomRevocationStore(taskDb)
@@ -52,6 +54,8 @@ class McpDispatchHost(
                 controlStore = controlStore,
                 auditLog = RoomControlAuditLog(taskDb.controlAuditDao()),
                 actor = "mcp-dispatch",
+                remoteTargetResolver = remoteTargetResolver,
+                remoteControlSender = remoteControlSender,
             )
             val state = FileDispatchStateStore(File(stateDir, "dispatch-state.json"))
             val scheduler = TaskScheduler(taskStore, AgentDiscovery(appContext), controlStore)
@@ -73,8 +77,16 @@ class McpDispatchHost(
             stateDir: File,
             port: Int = 0,
             bindHost: String = "127.0.0.1",
+            controlPlane: ControlPlane? = null,
+            remoteTargetResolver: ((String?) -> wherevercode.agent.core.mcp.RemoteTarget?)? = null,
+            remoteControlSender: wherevercode.agent.core.mcp.RemoteControlSender? = null,
         ): McpDispatchHost {
-            val service = buildService(appContext, taskDb, stateDir)
+            val service = buildService(
+                appContext, taskDb, stateDir,
+                controlPlane = controlPlane,
+                remoteTargetResolver = remoteTargetResolver,
+                remoteControlSender = remoteControlSender,
+            )
             return McpDispatchHost(service, McpDispatchHttpServer(service, bindHost = bindHost, requestedPort = port))
         }
     }
