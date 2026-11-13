@@ -1,9 +1,11 @@
 package wherevercode.agent.core.extension.mcp
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import wherevercode.agent.core.extension.mcp.McpJsonRpc.McpNotification
@@ -36,6 +38,17 @@ import wherevercode.agent.core.extension.mcp.McpJsonRpc.McpNotification
  *
  * 会话过期（Streamable HTTP 的 404）：[requestWithSessionRetry] 会
  * 重新 initialize 一次再重试本次请求（只重试一次）。
+ *
+ * 超时、取消与重试（2026-11-13，MCP 能力补齐）：
+ * - 每次调用都可带 [DEFAULT_TIMEOUT_MS] 起的 `timeoutMs`（透传给
+ *   传输层的读超时；取消是协作式的——取消只保证调用方不再等结果，
+ *   底层阻塞读由读超时兜底，不会无限挂起）。
+ * - 幂等读（ping / tools/list / resources/list / prompts/list）遇
+ *   瞬时传输失败（连接失败、超时、HTTP 层错误、发送失败）自动重试
+ *   一次（500ms 后）；取消从不重试，会话过期走已有的重建一次。
+ * - `tools/call` 绝不自动重试：建任务、发消息这类调用不是幂等的，
+ *   重试可能造成重复执行；失败时把真实错误原样抛给调用方，由用户
+ *   或调用方决定是否重发。
  */
 data class McpTool(
     val name: String,
@@ -171,8 +184,8 @@ class McpClient(
         return server
     }
 
-    suspend fun ping() {
-        requestWithSessionRetry("ping", JSONObject())
+    suspend fun ping(timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
+        retryIdempotentRead(timeoutMs) { t -> requestWithSessionRetry("ping", JSONObject(), t) }
     }
 
     /**
@@ -180,15 +193,21 @@ class McpClient(
      * 供测试钩子（如本仓库 minimal_mcp_server.py 的 test/… 方法）
      * 与未来扩展方法调用；服务端回 -32601 等 RPC 错误时抛
      * [McpException]（code=mcp_rpc_error）。会话过期同样自动重建
-     * 一次再重试。
+     * 一次再重试。原始请求不自动重试（调用方自担幂等性）。
      */
-    suspend fun rawRequest(method: String, params: Map<String, Any?> = emptyMap()): Any? =
-        requestWithSessionRetry(method, McpJsonRpc.mapToJson(params))
+    suspend fun rawRequest(
+        method: String,
+        params: Map<String, Any?> = emptyMap(),
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): Any? =
+        requestWithSessionRetry(method, McpJsonRpc.mapToJson(params), timeoutMs)
 
-    /** 列出工具；结果缓存到 [tools]。 */
-    suspend fun listTools(): List<McpTool> {
-        val result = requestWithSessionRetry("tools/list", JSONObject()) as? JSONObject
-            ?: throw McpException("tools/list 回包不是对象", "mcp_bad_response")
+    /** 列出工具；结果缓存到 [tools]。幂等读：瞬时传输失败重试一次。 */
+    suspend fun listTools(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpTool> {
+        val result = retryIdempotentRead(timeoutMs) { t ->
+            requestWithSessionRetry("tools/list", JSONObject(), t) as? JSONObject
+                ?: throw McpException("tools/list 回包不是对象", "mcp_bad_response")
+        }
         val array = result.optJSONArray("tools") ?: return emptyList<McpTool>().also { tools = it }
         val parsed = (0 until array.length()).mapNotNull { i ->
             val item = array.optJSONObject(i) ?: return@mapNotNull null
@@ -208,13 +227,20 @@ class McpClient(
     /**
      * 调一个工具。isError=true 是工具自己的失败（参数/权限/不存在），
      * 以结果返回，不抛错；传输与 JSON-RPC 层失败抛 [McpException]。
+     *
+     * 绝不自动重试（见类注释）：建任务、发消息等调用不是幂等的。
+     * 取消（[CancellationException]）原样传播，不转成失败结果。
      */
-    suspend fun callTool(name: String, arguments: Map<String, Any?>): McpToolResult {
+    suspend fun callTool(
+        name: String,
+        arguments: Map<String, Any?>,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): McpToolResult {
         val params = JSONObject().apply {
             put("name", name)
             put("arguments", McpJsonRpc.mapToJson(arguments))
         }
-        val result = requestWithSessionRetry("tools/call", params) as? JSONObject
+        val result = requestWithSessionRetry("tools/call", params, timeoutMs) as? JSONObject
             ?: throw McpException("tools/call 回包不是对象", "mcp_bad_response")
         val content = result.optJSONArray("content")
         val text = buildString {
@@ -242,11 +268,13 @@ class McpClient(
         return resources.optBoolean("subscribe", false)
     }
 
-    /** 列出资源；结果缓存到 [resources]。服务端没声明该能力时直接返回空列表。 */
-    suspend fun listResources(): List<McpResource> {
+    /** 列出资源；结果缓存到 [resources]。服务端没声明该能力时直接返回空列表。幂等读：瞬时传输失败重试一次。 */
+    suspend fun listResources(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpResource> {
         if (!supportsResources()) return emptyList<McpResource>().also { resources = it }
         val result = try {
-            requestWithSessionRetry("resources/list", JSONObject()) as? JSONObject
+            retryIdempotentRead(timeoutMs) { t ->
+                requestWithSessionRetry("resources/list", JSONObject(), t) as? JSONObject
+            }
         } catch (e: McpException) {
             if (e.code == "mcp_rpc_error") {
                 // 服务端没声明却调了（或谎报能力）：按“没有资源”处理。
@@ -272,9 +300,9 @@ class McpClient(
     }
 
     /** 读一个资源的内容（`contents[]`，文本进 text、二进制进 blob）。 */
-    suspend fun readResource(uri: String): List<McpResourceContent> {
+    suspend fun readResource(uri: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpResourceContent> {
         val params = JSONObject().apply { put("uri", uri) }
-        val result = requestWithSessionRetry("resources/read", params) as? JSONObject
+        val result = requestWithSessionRetry("resources/read", params, timeoutMs) as? JSONObject
             ?: throw McpException("resources/read 回包不是对象", "mcp_bad_response")
         val array = result.optJSONArray("contents") ?: return emptyList()
         return (0 until array.length()).mapNotNull { i ->
@@ -291,13 +319,13 @@ class McpClient(
     }
 
     /** 订阅一个资源：内容变时服务端发 notifications/resources/updated。 */
-    suspend fun subscribeResource(uri: String) {
+    suspend fun subscribeResource(uri: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
         if (!supportsResourceSubscribe()) {
             throw McpException("MCP 服务器不支持订阅资源（未声明 resources.subscribe）", "mcp_not_supported")
         }
         val params = JSONObject().apply { put("uri", uri) }
         try {
-            requestWithSessionRetry("resources/subscribe", params)
+            requestWithSessionRetry("resources/subscribe", params, timeoutMs)
         } catch (e: McpException) {
             if (e.code == "mcp_rpc_error") {
                 throw McpException("MCP 服务器不支持订阅资源（resources/subscribe 被拒）", "mcp_not_supported")
@@ -308,14 +336,14 @@ class McpClient(
     }
 
     /** 取消订阅一个资源。 */
-    suspend fun unsubscribeResource(uri: String) {
+    suspend fun unsubscribeResource(uri: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
         if (!supportsResourceSubscribe()) {
             subscribed.remove(uri)
             return
         }
         val params = JSONObject().apply { put("uri", uri) }
         try {
-            requestWithSessionRetry("resources/unsubscribe", params)
+            requestWithSessionRetry("resources/unsubscribe", params, timeoutMs)
         } catch (e: McpException) {
             if (e.code != "mcp_rpc_error") throw e
             // -32601：服务端不支持，本地照样取消订阅。
@@ -328,11 +356,13 @@ class McpClient(
     /** 服务端是否声明了 prompts 能力（没声明就不调，见类注释）。 */
     fun supportsPrompts(): Boolean = serverInfo?.capabilities?.has("prompts") == true
 
-    /** 列出提示模板；结果缓存到 [prompts]。服务端没声明该能力时直接返回空列表。 */
-    suspend fun listPrompts(): List<McpPrompt> {
+    /** 列出提示模板；结果缓存到 [prompts]。服务端没声明该能力时直接返回空列表。幂等读：瞬时传输失败重试一次。 */
+    suspend fun listPrompts(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<McpPrompt> {
         if (!supportsPrompts()) return emptyList<McpPrompt>().also { prompts = it }
         val result = try {
-            requestWithSessionRetry("prompts/list", JSONObject()) as? JSONObject
+            retryIdempotentRead(timeoutMs) { t ->
+                requestWithSessionRetry("prompts/list", JSONObject(), t) as? JSONObject
+            }
         } catch (e: McpException) {
             if (e.code == "mcp_rpc_error") {
                 return emptyList<McpPrompt>().also { prompts = it }
@@ -370,12 +400,16 @@ class McpClient(
     }
 
     /** 取一个提示模板（填好参数，返回 messages[]）。 */
-    suspend fun getPrompt(name: String, arguments: Map<String, Any?> = emptyMap()): McpPromptResult {
+    suspend fun getPrompt(
+        name: String,
+        arguments: Map<String, Any?> = emptyMap(),
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): McpPromptResult {
         val params = JSONObject().apply {
             put("name", name)
             put("arguments", McpJsonRpc.mapToJson(arguments))
         }
-        val result = requestWithSessionRetry("prompts/get", params) as? JSONObject
+        val result = requestWithSessionRetry("prompts/get", params, timeoutMs) as? JSONObject
             ?: throw McpException("prompts/get 回包不是对象", "mcp_bad_response")
         val messagesJson = result.optJSONArray("messages")
         val messages = if (messagesJson == null) {
@@ -506,6 +540,35 @@ class McpClient(
         }
     }
 
+    // -- 幂等读重试 ------------------------------------------------------
+
+    /**
+     * 幂等读（ping / tools/list / resources/list / prompts/list）的
+     * 一次重试：瞬时传输失败（连接失败、超时、HTTP 层错误、发送失败）
+     * 时 500ms 后再试一次；第二次还失败就原样抛。取消从不重试
+     * （[CancellationException] 原样传播）；会话过期不在这里处理，
+     * 由 [requestWithSessionRetry] 的重建会话负责；服务端 RPC 错误
+     * （-32601 等，code=mcp_rpc_error）也不重试——重发救不回来。
+     * tools/call 不走这里（非幂等，见类注释）。
+     */
+    private suspend fun <T> retryIdempotentRead(
+        timeoutMs: Long,
+        block: suspend (Long) -> T,
+    ): T {
+        var attempt = 0
+        while (true) {
+            try {
+                return block(timeoutMs)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: McpException) {
+                if (e.code !in TRANSIENT_READ_RETRY_CODES || attempt >= 1) throw e
+                attempt++
+                delay(READ_RETRY_DELAY_MS)
+            }
+        }
+    }
+
     // -- 会话过期重试 ---------------------------------------------------
 
     /**
@@ -536,6 +599,17 @@ class McpClient(
         const val CLIENT_NAME: String = "wherevercode-agent"
         const val CLIENT_VERSION: String = "0.2.0-ui2"
         const val PROTOCOL_VERSION: String = "2025-11-25"
+        /** 默认单次调用超时（毫秒）；传输层读超时与之同值。 */
+        const val DEFAULT_TIMEOUT_MS: Long = 60_000
+        /** 幂等读重试前等多久（毫秒）。 */
+        const val READ_RETRY_DELAY_MS: Long = 500
+        /** 幂等读值得重试一次的瞬时传输失败码（会话过期除外，由重建会话负责）。 */
+        val TRANSIENT_READ_RETRY_CODES: Set<String> = setOf(
+            "mcp_connect_failed",
+            "mcp_timeout",
+            "mcp_http_error",
+            "mcp_send_failed",
+        )
         /** 见过的协议版本：其余版本不拒，只记录。 */
         val KNOWN_PROTOCOL_VERSIONS: Set<String> = setOf("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
     }

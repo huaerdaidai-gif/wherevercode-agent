@@ -69,6 +69,31 @@ class TurnTaskRecorder(
     fun currentTaskId(): String? = currentTaskId
 
     /**
+     * 最近一次建行失败的原因（纯消息文本，已截断，不含任何凭证）。
+     * 建行成功时清掉。调用方用它向用户说明真实原因——2026-11-12
+     * 20:48 事故里 beginRemoteRound 把 Room 的
+     * IllegalStateException 静吞回 null，界面只能说“任务库不可用”，
+     * 根因（主线程访问被禁）无从得知；有了它，失败消息能写清原因。
+     */
+    @Volatile
+    private var lastFailure: String? = null
+
+    fun lastFailureMessage(): String? = lastFailure
+
+    private fun recordFailure(e: Exception): String {
+        val message = e.message.orEmpty()
+        val reason = if (e is IllegalStateException && message.contains("main thread", ignoreCase = true)) {
+            "任务库禁止主线程访问（建行必须在后台线程）"
+        } else if (message.isNotBlank()) {
+            message.take(200)
+        } else {
+            e.javaClass.simpleName
+        }
+        lastFailure = reason
+        return reason
+    }
+
+    /**
      * Open a task for a turn that is about to run. Returns the task id,
      * or null when no task row could be opened (chat continues without
      * one — the caller must not treat null as an error).
@@ -130,8 +155,10 @@ class TurnTaskRecorder(
                 return null
             }
             currentTaskId = taskId
+            lastFailure = null
             taskId
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            recordFailure(e)
             currentTaskId = null
             null
         }
@@ -175,18 +202,23 @@ class TurnTaskRecorder(
         return try {
             taskStore.createTask(record)
             // 记录行：不经调度器认领门禁，直接按状态机转移。任一
-            // 步失败即取消本行并返回 null（调用方中止轮次）。
+            // 步失败即取消本行并返回 null（调用方中止轮次）。转移失败
+            // （写入后读不到行）也记原因，不让调用方只猜“库不可用”。
             if (updateTask(taskId, mapOf("state" to "assigned")) == null) {
+                lastFailure = "任务行状态转移失败（写入后读不到该行）"
                 updateTask(taskId, mapOf("state" to "cancelled", "result" to "轮次建行失败，未执行。"))
                 return null
             }
             if (updateTask(taskId, mapOf("state" to "working")) == null) {
+                lastFailure = "任务行状态转移失败（写入后读不到该行）"
                 updateTask(taskId, mapOf("state" to "cancelled", "result" to "轮次建行失败，未执行。"))
                 return null
             }
             currentTaskId = taskId
+            lastFailure = null
             taskId
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            recordFailure(e)
             currentTaskId = null
             null
         }

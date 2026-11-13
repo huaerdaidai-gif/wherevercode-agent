@@ -54,6 +54,16 @@ data class RelayOutcome(
  * 两组 id 由调用方（MainActivity）持有、跨中转实例共享；本类只
  * 在同步块里读写它们。
  *
+ * 成员权限门与跨重启去重（2026-11-13 频道能力补齐）：
+ * - [participantIds]：频道参与者名单（`agent_channel_list` 的
+ *   participants）已知时才生效——非成员发来的 @ 不中转，@ 非成员
+ *   不转（[ChannelAccess]）；名单为 null（未接线）时不断言，
+ *   行为与原来一致。名单未知不是“没人是成员”，不要误拦。
+ * - [dedupStore]：可持久化的去重口（见 [ChannelRelayDedupStore]）。
+ *   内存 id 集 App 重启后丢失，feed 首轮拉回的最新 20 条里若有重启
+ *   前已中转过的 @，会再中转一次、频道里出现重复回复；接线持久化
+ *   存储后重启也不重复。为 null（未接线）时只用内存 id 集，与原来一致。
+ *
  * Manus 计费提醒：每次中转首条会在 Manus 侧建一个真实任务（按任务
  * 计费），跟进不建新任务；本类用固定会话 id
  * `team-channel-relay-<agentId>`，同一 Agent 的中转走同一任务线程。
@@ -78,6 +88,16 @@ class ChannelAgentRelay(
     private val timeoutSeconds: Long = TeamChatLimits.RELAY_TIMEOUT_SECONDS,
     /** runAgent/runChat 自身超时之外的兜底余量（秒；与扇出同款 30 秒）。 */
     private val timeoutMarginSeconds: Long = 30,
+    /**
+     * 频道参与者名单（平台侧 agentId 集合；null = 未知，不断言）。
+     * 已知时：非成员发来的消息不中转，@ 非成员不转。
+     */
+    private val participantIds: Set<String>? = null,
+    /**
+     * 可持久化的去重口（null = 只用内存 id 集，与原来一致）。
+     * 接线后 App 重启也不重复中转已中转过的 @ 消息。
+     */
+    private val dedupStore: ChannelRelayDedupStore? = null,
 ) {
     /** 两组 id 共用一把锁（调用方传进来的集合本身也要同步访问，见下）。 */
     private val idLock = Any()
@@ -105,17 +125,28 @@ class ChannelAgentRelay(
 
     /**
      * 中转一条频道消息：对每个 @ 到的 Agent 各转一次（顺序转，失败
-     * 一个不影响下一个）。无 @、已转过、是本机回流时返回空表。
+     * 一个不影响下一个）。无 @、已转过、是本机回流、非成员发来时返回空表。
      * 调用方按返回的 outcomes 写提示；FAILED 的绝不假装回了。
      */
     suspend fun relay(
         message: PlatformChannelMessage,
         agents: List<AgentRecord>,
     ): List<RelayOutcome> {
+        // 成员权限门（2026-11-13）：参与者名单已知时，非成员发来的
+        // 消息不中转——未加入/未授权的成员读不到也发不出，@ 它也不回。
+        // 名单未知（null）时不断言，放行（检查在标记之前，重复来
+        // 的同一条非成员消息每次都只查一次门，不占去重名额）。
+        if (ChannelAccess.isNonMember(message.agentId, participantIds)) return emptyList()
+        if (dedupStore?.isRelayed(message.id) == true ||
+            dedupStore?.isRelayOutput(message.id) == true
+        ) {
+            return emptyList()
+        }
         val alreadyHandled = synchronized(idLock) {
             if (message.id in relayedIds || message.id in relayOutputIds) true
             else {
                 relayedIds += message.id
+                dedupStore?.markRelayed(message.id)
                 false
             }
         }
@@ -134,6 +165,15 @@ class ChannelAgentRelay(
     ): RelayOutcome {
         if (agent.brainKind == BrainKind.PLATFORM_AGENT) {
             return RelayOutcome(agent.agentId, agent.displayName, RelayStatus.SKIPPED, "平台直连，不走代理")
+        }
+        // 成员权限门（2026-11-13）：名单已知且目标不在频道里 → 不转。
+        if (!ChannelAccess.relayTargetAllowed(agent.agentId, participantIds)) {
+            return RelayOutcome(
+                agent.agentId,
+                agent.displayName,
+                RelayStatus.FAILED,
+                "不在频道成员里，不转。",
+            )
         }
         val callId = "relay-${message.id}-${agent.agentId}"
         val reply: String? = try {
@@ -184,6 +224,7 @@ class ChannelAgentRelay(
                 "$header\n${reply.take(TeamChatLimits.RELAY_REPLY_CHARS)}",
             )
             synchronized(idLock) { relayOutputIds += postedId }
+            if (postedId.isNotBlank()) dedupStore?.markRelayOutput(postedId)
             RelayOutcome(agent.agentId, agent.displayName, RelayStatus.RELAYED)
         } catch (e: Exception) {
             RelayOutcome(
