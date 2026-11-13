@@ -105,6 +105,12 @@ class ControlPlane(
     private val authEpoch = AuthorizationEpoch(controlStore)
     private val token = CancellationToken(controlStore, taskStore, nowEpochSeconds)
 
+    @Volatile private var taskTargetResolver: ((TaskRecord) -> RemoteTarget?)? = null
+
+    fun configureTaskTargetResolver(resolver: (TaskRecord) -> RemoteTarget?) {
+        taskTargetResolver = resolver
+    }
+
     fun configureRemoteControl(
         targetResolver: ((String?) -> RemoteTarget?)?,
         controlSender: RemoteControlSender?,
@@ -376,7 +382,8 @@ class ControlPlane(
         if (!needsSend) return
         val task = taskStore.getTask(taskId) ?: return
         if (getControlStatus(taskId) != result.status) return
-        val target = resolver(task.assignedAgentId) ?: return
+        val taskResolver = taskTargetResolver
+        val target = (if (taskResolver != null) taskResolver(task) else resolver(task.assignedAgentId)) ?: return
         if (!sentRemoteControls.add(operationId)) return
         // 快照读任务行（账本权威）：任务行与 ControlStore 计数器正常
         // 是一起涨的；任务行若领先，以任务行为准，绝不发一个比任务行
