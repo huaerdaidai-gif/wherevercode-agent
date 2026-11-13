@@ -14,11 +14,16 @@
 // 3. Real error surfacing: the app is then reconfigured (through
 //    its own Settings UI — the platform credential field inside
 //    the 平台连接 section, where Android's platform-agent form
-//    keeps the same field) with an unresolvable https address and
+//    keeps the same field) with an unreachable https address and
 //    a dummy token typed by the test — not a real credential.
 //    Every page must show the REAL network error and a retry
 //    path, and Settings must show 连接失败 with the real error
-//    text.
+//    text. The unreachable address is the loopback discard port
+//    (127.0.0.1:9): the connection is refused instantly, so the
+//    error is a real network error that does not depend on how
+//    slowly the runner's DNS resolver gives up on an
+//    unresolvable name (an earlier .invalid run lost the race
+//    against the client's own 60 s request timeout).
 // 4. The platform-not-connected home is a page, not a gate: on
 //    first launch the chat tab shows the conversation home with
 //    its 平台连接 card and the channel setup hint, and every tab
@@ -85,8 +90,8 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Reconfigure with an unresolvable https address.
         scrollToTop(app)
         XCTAssertTrue(urlField.waitForExistence(timeout: 10))
-        replaceText(in: urlField, with: "https://uitest.invalid")
-        XCTAssertEqual(urlField.value as? String, "https://uitest.invalid",
+        replaceText(in: urlField, with: "https://127.0.0.1:9")
+        XCTAssertEqual(urlField.value as? String, "https://127.0.0.1:9",
                        "Address field must contain exactly the fake address after replacement")
         app.buttons["settings.saveAddressChannel"].tap()
 
@@ -94,10 +99,15 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // the 平台连接 section (the platform-agent form's field —
         // in the form itself since the Android-parity restructure,
         // not behind a collapsed "advanced" disclosure). The field
-        // is queried by placeholder text.
-        let tokenField = app.secureTextFields.matching(
-            NSPredicate(format: "placeholderValue BEGINSWITH %@", "粘贴平台凭证")
-        ).firstMatch
+        // is queried by its own accessibility identifier: the
+        // phase-2 placeholder query existed only because the old
+        // DisclosureGroup's identifier propagated to (and shadowed)
+        // its children; with the group gone the identifier is the
+        // stable route — the placeholder predicate matched nothing
+        // for the always-visible field in run 43438600602 (the
+        // field renders fine; see the page-05 render).
+        scrollToTop(app)
+        let tokenField = app.secureTextFields["settings.tokenField"]
         reveal(tokenField, in: app)
         XCTAssertTrue(tokenField.waitForExistence(timeout: 15))
         tokenField.tap()
@@ -108,7 +118,27 @@ final class WhereverCodeAgentUITests: XCTestCase {
         let failedLabel = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "连接失败")
         ).firstMatch
-        XCTAssertTrue(failedLabel.waitForExistence(timeout: 60),
+        // The 连接状态 section sits below the fold and a SwiftUI
+        // List only materializes rows near the viewport (the same
+        // behaviour that hid the credential field), so scroll the
+        // section into view while waiting — an existence wait
+        // alone never sees it from the top of the page. The
+        // keyboard is deliberately NOT dismissed before this
+        // search: the press-and-drag dismissal gesture gets the
+        // app process terminated by the test framework in the
+        // simulator (SIGTERM, no crash report; runs
+        // 43446321473–43456659182), after which the relaunched app
+        // lands on the chat tab and every Settings assertion
+        // searches the wrong page. With plain swipes only, the
+        // save → failure-label path is stable. Dismissal stays
+        // after the assertion, where it always was.
+        var revealAttempts = 0
+        while !failedLabel.exists && revealAttempts < 30 {
+            app.swipeUp()
+            revealAttempts += 1
+            if failedLabel.waitForExistence(timeout: 1) { break }
+        }
+        XCTAssertTrue(failedLabel.exists,
                       "Settings must show 连接失败 with the real error after save")
         snap(app, "ui-03-settings-connection-failed")
 
