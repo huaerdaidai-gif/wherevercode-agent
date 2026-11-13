@@ -521,8 +521,8 @@ class ChatTurnViewTest {
         assertTrue(shown.contains("查看原始诊断"))
         assertTrue(shown.contains("重试本轮"))
         assertFalse(shown.any { it.contains("unsupported_country_region_territory") })
-        visibleTexts(view).first { it.text == "查看原始诊断" }.performClick()
-        assertTrue(visibleTexts(view).any { it.text.contains("unsupported_country_region_territory") })
+        texts(view).first { it.text == "查看原始诊断" }.performClick()
+        assertTrue(visibleTexts(view).any { it.contains("unsupported_country_region_territory") })
     }
 
     @Test

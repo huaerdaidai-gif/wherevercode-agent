@@ -53,6 +53,7 @@ class ProjectScreenControllerTest {
         )
         val rootLabel = TextView(context)
         val treePane = LinearLayout(context)
+        val breadcrumb = LinearLayout(context)
         val treeList = LinearLayout(context)
         val treeScroll = ScrollView(context)
         val emptyView = TextView(context)
@@ -84,6 +85,7 @@ class ProjectScreenControllerTest {
             context = context,
             rootLabel = rootLabel,
             treePane = treePane,
+            breadcrumb = breadcrumb,
             treeList = treeList,
             treeScroll = treeScroll,
             emptyView = emptyView,
@@ -335,6 +337,11 @@ class ProjectScreenControllerTest {
         assertEquals(View.GONE, h.projectListPane.visibility)
         assertTrue(h.rootLabel.text.toString().contains("ux-test-proj"))
         assertTrue(collectText(h.treeList).contains("hello.txt"))
+        assertEquals(listOf("工作区", "›", "ux-test-proj"), (0 until h.breadcrumb.childCount).map { index ->
+            (h.breadcrumb.getChildAt(index) as TextView).text.toString()
+        })
+        (h.breadcrumb.getChildAt(0) as TextView).performClick()
+        assertEquals("工作区", (h.breadcrumb.getChildAt(0) as TextView).text.toString())
     }
 
     // ---- 项目页清理（2026-11-11）：管理入口看得见、死来源灰显、啰嗦文案删掉 ----
