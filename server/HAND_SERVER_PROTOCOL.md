@@ -65,12 +65,8 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
   以下字段以 `|` 连接的 UTF-8：
   `user_id|task_id|attempt|source_device_id|target_device_id|agent_id|
   folder|iat|exp|jti|scope_agent_id|scope_folder|epoch|goal_version`。
-- App 侧 HandClient 目前签发的是 legacy v2 凭证（user_id / attempt /
-  source_device_id / agent_id 为空串）；服务端按 legacy 绑定校验
-  （签名 → 过期 → 撤销 → 任务/目标/文件夹），agent 归属由信封
-  agentId + auth.json 授权表约束，epoch / goal_version 由下述
-  control 快照约束。legacy 校验是完整 v2 校验的子集，未来客户端
-  改签完整凭证时同样通过。
+- Hand 校验凭证的 Agent、来源设备、目标设备和文件夹。来源设备须与
+  已批准的配对公钥及信封一致。控制快照仍提供 goal_version 和 epoch。
 
 ## 调用信封（密封帧内 JSON）
 
@@ -78,7 +74,7 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 {"type": "cross_device_tool_call", "version": 1, "seq": 1,
  "task_id": "…", "agent_id": "example-agent",
  "source_device_id": "<app 设备 id>", "target_device_id": "<vps 设备 id>",
- "folder": "/workspace/example-project", "action": "list|read|write|run|authorize_project_folder",
+ "folder": "/workspace/example-project", "action": "list|read|write|run|authorize_project_folder|get_artifact",
  "args": {"credential": "<v2 凭证>", "argv": "[\"agent\",\"example-agent\",\"在吗\"]",
           "timeout": "600",
           "control": "{\"goal_version\": 1, \"epoch\": 1}"}}
@@ -88,7 +84,7 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 - `authorize_project_folder` 的信封 `folder` 与凭证仍绑定到该 Agent
   已授权的目录；`args.folder` 是用户明确批准、且必须已存在的绝对目录。
   Hand 只在配对、密封信封和任务凭证通过校验后，将其 canonical 路径
-  加入该 Agent 的授权列表；回执包含原样 `requested_folder`、`agent_id`
+  加入 `project_grants.json` 中该配对设备与 Agent 的授权列表；回执包含原样 `requested_folder`、`agent_id`
   和 canonical `folder`，客户端须校验回执对应本次请求；重复授权幂等，
   不接受相对路径或不存在的目录。
 - `control` 是执行栅栏快照（JSON 字符串）：改目标/撤销后服务端
@@ -97,6 +93,16 @@ VPS → App（同 type/version，另附设备名、公钥、agent 列表）：
 - run 的 argv 只接受两种：`["agent", agentId, 文本]`（调注册的 agent
   命令）与 `["__control__", pause|resume|stop|change_goal,
   operationId, 新目标?]`（控制在途进程）。不接受任意 shell 命令。
+
+## 任务产物
+
+- 带 `args.attempt` 的 `run` 向 Agent 提供一次性目录中的固定文件
+  `delivery.bin`。支持单个不超过 1 MiB 的普通文件。Hand 在返回前保存
+  终态回执，回包附带 `artifact_present`、Base64 数据和 SHA-256。
+- `get_artifact` 使用相同任务、设备、Agent、目录和 `args.attempt`。
+  它返回已保存的回执。响应丢失时可重试此调用，无需再次执行 Agent。
+- Android 在应用私有 `task-artifacts` 目录原子落盘，在任务结果中记录
+  文件名。纯文本旧版 Hand 回执仍可解析。
 
 ## 回包（密封帧内 JSON，type 三种，终态后服务端关闭连接）
 

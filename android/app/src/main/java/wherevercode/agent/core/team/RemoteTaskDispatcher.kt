@@ -1,11 +1,15 @@
 package wherevercode.agent.core.team
 
+import java.io.File
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import wherevercode.agent.core.mcp.HandClient
 import wherevercode.agent.core.mcp.HandEvent
 import wherevercode.agent.core.mcp.RemoteAgentChatPort
 import wherevercode.agent.core.mcp.RemoteTarget
@@ -70,8 +74,35 @@ class RemoteTaskDispatcher(
      * completed（[finishAsCompleted] 查它）。
      */
     private val pipelineHook: PipelineRunnerHook? = null,
+    private val artifactDirectory: File? = null,
+    /**
+     * Bounded backoff for recovering a delivery from the Host (lost result
+     * frame, transient `artifact_unavailable`, or an artifact that failed the
+     * integrity check in transit). One fetch per delay; never unbounded.
+     */
+    private val artifactRetryDelaysMs: List<Long> = DEFAULT_ARTIFACT_RETRY_DELAYS_MS,
 ) {
+    /** A delivered artifact that does not match its declared size/SHA-256. */
+    private class ArtifactIntegrityException(message: String) : Exception(message)
+
+    private class VerifiedArtifact(val bytes: ByteArray, val sha256: String)
+
+    /** Result of a bounded delivery fetch. */
+    private sealed class Fetch {
+        class Delivered(val result: HandEvent.Result) : Fetch()
+        /** The Host says refetching cannot help (nothing delivered / corrupt / stale). */
+        object Terminal : Fetch()
+        /** Every bounded attempt hit a transient failure. */
+        object Exhausted : Fetch()
+    }
+
     companion object {
+        /** Retry schedule for artifact recovery: 3 fetches, 250ms -> 1s. */
+        val DEFAULT_ARTIFACT_RETRY_DELAYS_MS: List<Long> = listOf(250L, 500L, 1_000L)
+
+        /** Host codes after which refetching cannot help. */
+        private val TERMINAL_ARTIFACT_CODES = setOf("artifact_missing", "artifact_corrupt", "artifact_invalid", "stale_attempt")
+
         /** 服务端在运行被控制指令停掉时，终态 error 帧用的 code。 */
         const val REMOTE_CONTROLLED_STOP_CODE: String = "remote_controlled_stop"
 
@@ -125,30 +156,20 @@ class RemoteTaskDispatcher(
         startGoalVersion: Long,
         attemptId: String?,
     ): RemoteTaskOutcome {
-        var finalOutput: String? = null
+        var finalResult: HandEvent.Result? = null
         var finalBlocked: HandEvent.Blocked? = null
-        port.runAgent(
-            target = target,
-            taskId = task.taskId,
-            // P0：发给远端的是任务包（目标原文在前、契约段落在后），
-            // 不是裸目标；跨设备只传任务包，不传聊天记录。
-            // P2：流水线任务发 plan 批准后的包（验收标准与文件清单已
-            // 填进包里，见 PipelineRunnerHook.coderPrompt）。
-            // V5 跨设备开发（2026-11-12，A4）：包里只加信息性工作目录
-            // （target.folder 已是解析后的派活文件夹，项目检出或回落
-            // 的 Agent 文件夹）；执行仍以信封/凭证的 folder 为准。
-            text = pipelineHook?.coderPrompt(task) ?: TaskPacket.fromTask(
-                task,
-                folder = target.folder,
-                folderSource = target.folderSource.name.lowercase(),
-            ).toPromptText(),
-            timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
-            goalVersion = startGoalVersion,
-            epoch = task.authEpoch,
-        ).collect { event ->
+        val text = pipelineHook?.coderPrompt(task) ?: TaskPacket.fromTask(
+            task, folder = target.folder, folderSource = target.folderSource.name.lowercase(),
+        ).toPromptText()
+        val events = if (attemptId == null) {
+            port.runAgent(target, task.taskId, text, DEFAULT_TIMEOUT_SECONDS, startGoalVersion, task.authEpoch)
+        } else {
+            port.runTask(target, task.taskId, text, DEFAULT_TIMEOUT_SECONDS, startGoalVersion, task.authEpoch, attemptId)
+        }
+        events.collect { event ->
             when (event) {
                 is HandEvent.Progress -> recordProgress(task.taskId, event)
-                is HandEvent.Result -> finalOutput = event.output
+                is HandEvent.Result -> finalResult = event
                 is HandEvent.Blocked -> finalBlocked = event
             }
         }
@@ -164,6 +185,16 @@ class RemoteTaskDispatcher(
             )
             return RemoteTaskOutcome.Cancelled("目标已变更，本次结果作废，请按新目标重新派发。")
         }
+        // A response lost after the Host committed the delivery can be
+        // recovered without invoking the Agent a second time.
+        if (attemptId != null && finalResult == null &&
+            (finalBlocked == null || finalBlocked?.code == HandClient.TRANSPORT_INTERRUPTED)
+        ) {
+            // First fetch immediately, then the bounded backoff schedule.
+            finalResult = (fetchDelivery(target, task.taskId, attemptId, listOf(0L) + artifactRetryDelaysMs.drop(1))
+                as? Fetch.Delivered)?.result
+            if (finalResult != null) finalBlocked = null
+        }
         val blocked = finalBlocked
         if (blocked != null) {
             if (blocked.code == REMOTE_CONTROLLED_STOP_CODE) {
@@ -173,7 +204,7 @@ class RemoteTaskDispatcher(
             finishAsFailed(task.taskId, blocked.reason, attemptId)
             return RemoteTaskOutcome.Failed(blocked.reason)
         }
-        val output = finalOutput
+        val output = finalResult?.output
         if (output == null) {
             finishAsFailed(task.taskId, "远端连接中断，未收到结果：请检查网络与远端设备后重新派发", attemptId)
             return RemoteTaskOutcome.Failed("远端连接中断，未收到结果")
@@ -187,10 +218,129 @@ class RemoteTaskDispatcher(
                 RemoteTaskOutcome.Failed(verdict.reason)
             }
             RemoteMemberVerdict.Success -> {
-                finishAsCompleted(task.taskId, output, attemptId)
-                RemoteTaskOutcome.Completed(output)
+                val result = checkNotNull(finalResult)
+                val artifact = if (result.artifactPresent == true) {
+                    val verified = verifyOrRefetchArtifact(target, task.taskId, attemptId, result)
+                    if (verified == null) {
+                        val reason = "产物校验失败：已向远端重取 ${artifactRetryDelaysMs.size} 次仍不一致，未保存产物"
+                        finishAsFailed(task.taskId, reason, attemptId)
+                        return RemoteTaskOutcome.Failed(reason)
+                    }
+                    storeArtifact(task.taskId, checkNotNull(attemptId), verified)
+                } else null
+                val delivery = if (artifact == null) output else "产物：$artifact\n\n$output"
+                finishAsCompleted(task.taskId, delivery, attemptId)
+                RemoteTaskOutcome.Completed(delivery)
             }
         }
+    }
+
+    /**
+     * Fetch the Host's persisted delivery record for [attemptId] with bounded
+     * backoff. Retries transport failures and `artifact_unavailable`; stops on
+     * terminal codes (nothing delivered, corrupt on the Host, stale attempt).
+     */
+    private suspend fun fetchDelivery(
+        target: RemoteTarget,
+        taskId: String,
+        attemptId: String,
+        delays: List<Long>,
+    ): Fetch {
+        for (wait in delays) {
+            if (wait > 0) delay(wait)
+            var result: HandEvent.Result? = null
+            var blocked: HandEvent.Blocked? = null
+            try {
+                port.getArtifact(target, taskId, attemptId).collect { event ->
+                    when (event) {
+                        is HandEvent.Result -> result = event
+                        is HandEvent.Blocked -> blocked = event
+                        else -> Unit
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                continue // Transport failure: next bounded attempt.
+            }
+            result?.let { return Fetch.Delivered(it) }
+            if (blocked?.code in TERMINAL_ARTIFACT_CODES) return Fetch.Terminal
+        }
+        return Fetch.Exhausted
+    }
+
+    /**
+     * Verify the artifact carried by [first]; when it fails integrity (bytes
+     * damaged or truncated in transit) refetch the Host's persisted record
+     * with bounded backoff. Returns null when no intact copy was obtained.
+     */
+    private suspend fun verifyOrRefetchArtifact(
+        target: RemoteTarget,
+        taskId: String,
+        attemptId: String?,
+        first: HandEvent.Result,
+    ): VerifiedArtifact? {
+        try {
+            return verifyArtifact(first)
+        } catch (_: ArtifactIntegrityException) {
+            // Fall through to bounded refetch below.
+        }
+        val attempt = attemptId ?: return null
+        for (wait in artifactRetryDelaysMs) {
+            val again = when (val fetched = fetchDelivery(target, taskId, attempt, listOf(wait))) {
+                is Fetch.Delivered -> fetched.result
+                Fetch.Terminal -> return null
+                Fetch.Exhausted -> continue
+            }
+            if (again.artifactPresent != true) return null
+            try {
+                return verifyArtifact(again)
+            } catch (_: ArtifactIntegrityException) {
+                // Damaged again: next bounded attempt.
+            }
+        }
+        return null
+    }
+
+    private fun sha256Hex(data: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(data)
+        .joinToString("") { "%02x".format(it) }
+
+    private fun verifyArtifact(result: HandEvent.Result): VerifiedArtifact {
+        val encoded = result.artifactBase64 ?: throw ArtifactIntegrityException("产物内容缺失")
+        val declared = result.artifactSha256?.lowercase()
+            ?: throw ArtifactIntegrityException("产物缺少校验和")
+        if (!declared.matches(Regex("[0-9a-f]{64}"))) throw ArtifactIntegrityException("产物校验和格式无效")
+        require(encoded.length <= 1_398_104) { "产物过大" }
+        val bytes = try {
+            Base64.getDecoder().decode(encoded)
+        } catch (_: IllegalArgumentException) {
+            throw ArtifactIntegrityException("产物编码损坏")
+        }
+        require(bytes.size <= 1_048_576) { "产物过大" }
+        val hash = sha256Hex(bytes)
+        if (!MessageDigest.isEqual(hash.toByteArray(), declared.toByteArray())) {
+            throw ArtifactIntegrityException("产物校验失败")
+        }
+        return VerifiedArtifact(bytes, hash)
+    }
+
+    private fun storeArtifact(taskId: String, attemptId: String, artifact: VerifiedArtifact): String {
+        val directory = checkNotNull(artifactDirectory) { "产物目录不可用" }
+        val bytes = artifact.bytes
+        val hash = artifact.sha256
+        check(directory.isDirectory || directory.mkdirs()) { "无法创建产物目录" }
+        val key = sha256Hex("$taskId\n$attemptId".toByteArray())
+        val destination = File(directory, "$key-$hash.bin")
+        val temp = File.createTempFile("delivery-", ".tmp", directory)
+        try {
+            temp.outputStream().use { it.write(bytes); it.fd.sync() }
+            // Re-read what landed on disk before publishing it.
+            check(sha256Hex(temp.readBytes()) == hash) { "产物落盘校验失败" }
+            check(temp.renameTo(destination)) { "无法保存任务产物" }
+        } finally {
+            temp.delete()
+        }
+        return destination.name
     }
 
     private fun recordProgress(taskId: String, event: HandEvent.Progress) {

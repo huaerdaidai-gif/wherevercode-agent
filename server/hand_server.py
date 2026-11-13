@@ -84,6 +84,8 @@ import socket
 import socketserver
 import subprocess
 import sys
+import stat
+import tempfile
 import threading
 import time
 import uuid
@@ -102,6 +104,7 @@ CREDENTIAL_SIGNING_INFO = b"wherevercode-credential-signing/v1"
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_CHARS = 20_000
+MAX_ARTIFACT_BYTES = 1024 * 1024
 DEFAULT_PORT = 18743
 DEFAULT_TIMEOUT_SECONDS = 600
 CREDENTIAL_TTL_SECONDS = 900
@@ -299,13 +302,9 @@ def verify_credential(
     """返回 None 表示通过，否则返回错误码。校验顺序与 App 侧一致：
     签名 → 过期 → 撤销 → 绑定（任务/目标/文件夹）→ 授权仍存在。
 
-    注意：App 侧 HandClient 目前签发的是 legacy v2 凭证（user_id /
-    attempt / source_device_id / agent_id 为空串，见
-    TaskCredentialIssuer.issue 的 legacy 重载），所以这里不校验
-    agent 绑定——agent 归属由信封 agentId + auth.json 授权表约束
-    （folder 必须在该 agent 的授权列表里）；epoch / goal_version
-    由 args["control"] 快照约束（见 _check_fence）。legacy 校验是
-    完整 v2 校验的子集，未来客户端改签完整凭证时同样通过。"""
+    Older paired clients may omit agent_id. When the credential carries
+    an agent binding, it must match the requested Agent.
+    """
     mac_key = hashlib.sha256(signing_key).digest()
     expected_sig = hmac.new(mac_key, canonical_payload(cred), hashlib.sha256).digest()
     if not hmac.compare_digest(expected_sig, cred["sig"]):
@@ -322,6 +321,8 @@ def verify_credential(
         return ERR_WRONG_FOLDER
     if canonical_folder(expected_folder) not in [canonical_folder(f) for f in authorized_folders]:
         return ERR_WRONG_FOLDER
+    if cred["agent_id"] and cred["agent_id"] != expected_agent_id:
+        return ERR_WRONG_TASK
     return None
 
 
@@ -397,6 +398,70 @@ def git_repos_for_folder(folder: str) -> list[dict]:
         return []
 
 
+# A detached watchdog owns the read end of a pipe held by Hand. EOF
+# means the server exited (including SIGKILL) or finished the run.
+_PROCESS_WATCHDOG = """
+import os, signal, sys
+read_fd = int(sys.argv[1])
+group = os.getpgrp()
+if os.fork() == 0:
+    os.setsid()
+    for fd in (0, 1, 2):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    try:
+        os.read(read_fd, 1)
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    finally:
+        os._exit(0)
+os.close(read_fd)
+os.execv(sys.argv[2], sys.argv[2:])
+"""
+
+
+
+# Dead-peer detection without waiting for a write: a phone that loses power
+# or network never sends FIN, so a paused (SIGSTOP) run would otherwise sit
+# until its timeout. Keepalive probes make the socket readable with an error
+# within ~35s, and the run loops treat a readable connection as closed.
+KEEPALIVE_IDLE_SECONDS = 20
+KEEPALIVE_INTERVAL_SECONDS = 5
+KEEPALIVE_PROBES = 3
+
+
+def enable_keepalive(conn) -> None:
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        idle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+        if idle is not None:
+            conn.setsockopt(socket.IPPROTO_TCP, idle, KEEPALIVE_IDLE_SECONDS)
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, KEEPALIVE_INTERVAL_SECONDS)
+        if hasattr(socket, "TCP_KEEPCNT"):
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, KEEPALIVE_PROBES)
+    except (OSError, AttributeError, ValueError):
+        pass  # Best effort: unsupported platforms keep the old behavior.
+
+
+def spawn_agent(argv, **kwargs):
+    read_fd, lease_fd = os.pipe()
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _PROCESS_WATCHDOG, str(read_fd), *argv],
+            pass_fds=(read_fd,), start_new_session=True, **kwargs,
+        )
+    except BaseException:
+        os.close(lease_fd)
+        raise
+    finally:
+        os.close(read_fd)
+    return proc, lease_fd
+
+
 class HandServer:
     def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT):
         self.state = StateStore(state_dir)
@@ -405,10 +470,15 @@ class HandServer:
         self.port = port
         self.private_key, self.public_key = self._load_or_create_key()
         self.processes: dict[str, subprocess.Popen] = {}  # task_id → 进程
-        self.process_lock = threading.Lock()
+        self.process_lock = threading.RLock()
+        self.starting_tasks: set[str] = set()
         self.task_meta: dict[str, dict] = {}  # task_id → {goal_version, epoch}
         self.revoked_jtis: set[str] = set()
-        self.revoked_tasks: set[str] = set()
+        self.revoked_tasks: set[str] = set(self.state.load_json("stopped_tasks.json", []))
+        # task_id -> attempt id of the process currently registered for it.
+        self.process_attempts: dict[str, str] = {}
+        # pids killed because their attempt was superseded (not a user stop).
+        self.superseded_pids: set[int] = set()
 
     # -- 密钥与状态 -------------------------------------------------------
 
@@ -463,10 +533,15 @@ class HandServer:
         cfg = raw.get(agent_id)
         return cfg if isinstance(cfg, dict) else None
 
-    def authorized_folders(self, agent_id: str) -> list[str]:
+    def authorized_folders(self, agent_id: str, client_id: str | None = None) -> list[str]:
+        """Host-configured folders are shared; project grants belong to a paired client."""
         auth = self.state.load_json("auth.json", {})
-        folders = auth.get(agent_id, [])
-        return folders if isinstance(folders, list) else []
+        entry = auth.get(agent_id, []) if isinstance(auth, dict) else []
+        folders = list(entry) if isinstance(entry, list) else []
+        if client_id:
+            grants = self.state.load_json("project_grants.json", {})
+            folders.extend(grants.get(client_id, {}).get(agent_id, []))
+        return folders
 
     # -- 配对 --------------------------------------------------------------
 
@@ -484,6 +559,8 @@ class HandServer:
                 }
                 clients[device_id] = entry
                 self.state.save_json("paired_clients.json", clients)
+            elif not hmac.compare_digest(entry.get("public_key_b64", ""), public_key_b64):
+                return "KEY_MISMATCH"
             return entry.get("status", "PENDING")
 
     def client_status(self, device_id: str) -> str | None:
@@ -504,6 +581,7 @@ class HandServer:
     # -- 连接处理 ------------------------------------------------------------
 
     def handle_connection(self, conn: socket.socket, addr) -> None:
+        enable_keepalive(conn)
         try:
             self._handle_connection(conn, addr)
         except (ConnectionError, ValueError, OSError) as e:
@@ -595,7 +673,7 @@ class HandServer:
             args = {}
         if envelope.get("type") != "cross_device_tool_call" or envelope.get("version") != VERSION:
             return
-        if action not in ("list", "read", "write", "run", "authorize_project_folder"):
+        if action not in ("list", "read", "write", "run", "authorize_project_folder", "get_artifact"):
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
                         "不支持的操作：跨设备只允许 list/read/write/run/authorize_project_folder")
             return
@@ -614,34 +692,56 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_INVALID_CREDENTIAL,
                         "任务连接凭证无效，请重新下达任务。")
             return
+        if (cred["source_device_id"] != client_id
+                or envelope.get("source_device_id") != client_id
+                or cred["agent_id"] != agent_id):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TASK,
+                        "连接凭证不属于此设备。")
+            return
         err = verify_credential(
             cred, signing_key,
             expected_task_id=task_id,
             expected_target_device_id=self.device_id,
             expected_folder=folder,
             expected_agent_id=agent_id,
-            authorized_folders=self.authorized_folders(agent_id),
+            authorized_folders=self.authorized_folders(agent_id, client_id),
             revoked_jtis=self.revoked_jtis,
-            revoked_tasks=self.revoked_tasks,
+            revoked_tasks=set() if self._is_stop_call(action, args) else self.revoked_tasks,
             now=int(time.time()),
         )
         if err is not None:
             self._error(conn, session_key, envelope, seq + 1, err,
                         _credential_error_message(err))
             return
-        # 执行栅栏：args["control"] 快照必须不旧于服务端记录。
-        # 先记下本次调用的凭证 jti：stop/change_goal 只撤销当次凭证。
-        self.task_meta.setdefault(task_id, {})["credential_jti"] = cred["jti"]
-        control_err = self._check_fence(task_id, args)
-        if control_err is not None:
-            code, message = control_err
-            self._error(conn, session_key, envelope, seq + 1, code, message)
+        if not os.path.isabs(folder) or os.path.realpath(folder) != os.path.realpath(cred["folder"]):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
+                        _credential_error_message(ERR_WRONG_FOLDER))
             return
+        if not any(os.path.realpath(folder) == os.path.realpath(grant) for grant in
+                   self.authorized_folders(agent_id, client_id)):
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
+                        _credential_error_message(ERR_WRONG_FOLDER))
+            return
+        if action == "run":
+            # Reserve the task identity before a run or control can touch its process.
+            owner = (client_id, agent_id, os.path.realpath(folder))
+            with self.process_lock:
+                meta = self.task_meta.setdefault(task_id, {})
+                if meta.setdefault("owner", owner) != owner:
+                    control_err = (ERR_WRONG_TASK, _credential_error_message(ERR_WRONG_TASK))
+                else:
+                    control_err = self._check_fence(task_id, args)
+            if control_err is not None:
+                code, message = control_err
+                self._error(conn, session_key, envelope, seq + 1, code, message)
+                return
         self.state.audit({"event": "call", "task": task_id, "agent": agent_id,
                           "action": action, "client": client_id})
         if action == "authorize_project_folder":
             self._do_authorize_project_folder(
-                conn, session_key, envelope, seq, agent_id, args)
+                conn, session_key, envelope, seq, agent_id, args, client_id)
+        elif action == "get_artifact":
+            self._get_artifact(conn, session_key, envelope, seq, client_id, args)
         elif action == "list":
             self._do_list(conn, session_key, envelope, seq, folder, args)
         elif action == "read":
@@ -649,37 +749,29 @@ class HandServer:
         elif action == "write":
             self._do_write(conn, session_key, envelope, seq, folder, args)
         else:
-            self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args)
+            self._do_run(conn, session_key, envelope, seq, task_id, agent_id, folder, args, client_id)
 
     def _do_authorize_project_folder(
-        self, conn, session_key, envelope, seq, agent_id, args,
+        self, conn, session_key, envelope, seq, agent_id, args, client_id,
     ) -> None:
-        """Grant one existing canonical directory after the normal sealed,
-        paired-client and task-credential checks in _dispatch have passed.
-        The credential remains bound to an already-authorized folder; only
-        this explicit operation can add the user-approved target folder.
-        """
+        """Save a project grant for the authenticated device and Agent."""
         requested = args.get("folder", "")
         if not isinstance(requested, str) or not requested or not os.path.isabs(requested):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         "授权目录必须是已存在的绝对路径。")
             return
         canonical = os.path.realpath(requested)
-        if not os.path.isdir(canonical):
+        if canonical == os.path.abspath(os.sep) or not os.path.isdir(canonical):
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         "授权目录不存在或不是文件夹。")
             return
         with self.state.lock:
-            auth = self.state.load_json("auth.json", {})
-            folders = auth.setdefault(agent_id, [])
-            if not isinstance(folders, list):
-                folders = []
-                auth[agent_id] = folders
-            already = canonical in [os.path.realpath(item) for item in folders
-                                    if isinstance(item, str)]
+            grants = self.state.load_json("project_grants.json", {})
+            folders = grants.setdefault(client_id, {}).setdefault(agent_id, [])
+            already = canonical in folders
             if not already:
                 folders.append(canonical)
-                self.state.save_json("auth.json", auth)
+                self.state.save_json("project_grants.json", grants)
         self.state.audit({"event": "folder_authorized", "agent": agent_id,
                           "folder": canonical, "already": already,
                           "task": envelope.get("task_id", "")})
@@ -691,21 +783,28 @@ class HandServer:
                                           "folder": canonical}, ensure_ascii=False)},
                    seq + 1)
 
+    @staticmethod
+    def _is_stop_call(action: str, args: dict) -> bool:
+        if action != "run":
+            return False
+        try:
+            argv = json.loads(args.get("argv", "[]"))
+        except (TypeError, ValueError):
+            return False
+        return isinstance(argv, list) and argv[:2] == ["__control__", "stop"]
+
     def _check_fence(self, task_id: str, args: dict) -> tuple[str, str] | None:
         """goal_version/epoch 快照：旧于服务端记录即拒绝（改目标后旧执行不复活）。"""
-        raw = args.get("control", "")
-        if not raw:
-            return None
         try:
-            snap = json.loads(raw)
-        except Exception:
+            snap = json.loads(args.get("control") or "{}")
+            epoch = int(snap.get("epoch", 1))
+            goal_version = int(snap.get("goal_version", 1))
+        except (AttributeError, TypeError, ValueError, OverflowError):
             return (ERR_STALE_GOAL_VERSION, "控制快照格式不对，请重新下达任务。")
-        meta = self.task_meta.get(task_id)
-        if meta is None:
-            return None
-        if int(snap.get("epoch", 1)) < int(meta.get("epoch", 1)):
+        meta = self.task_meta.get(task_id, {})
+        if epoch < meta.get("epoch", 1):
             return (ERR_STALE_EPOCH, "凭证已过期（授权已变更）：授权版本已更新，请重新发起任务")
-        if int(snap.get("goal_version", 1)) < int(meta.get("goal_version", 1)):
+        if goal_version < meta.get("goal_version", 1):
             return (ERR_STALE_GOAL_VERSION, "凭证已过期（目标已变更）：任务目标已更新，请重新发起任务")
         return None
 
@@ -713,6 +812,8 @@ class HandServer:
 
     def _resolve_path(self, folder: str, rel: str) -> str | None:
         """把相对路径解析到 folder 内；越界（.. 逃出）返回 None。"""
+        if not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.split(os.sep):
+            return None
         base = os.path.realpath(folder)
         target = os.path.realpath(os.path.join(base, rel or ""))
         if target != base and not target.startswith(base + os.sep):
@@ -793,7 +894,7 @@ class HandServer:
 
     # -- run -------------------------------------------------------------------
 
-    def _do_run(self, conn, session_key, envelope, seq, task_id, agent_id, folder, args) -> None:
+    def _do_run(self, conn, session_key, envelope, seq, task_id, agent_id, folder, args, client_id) -> None:
         try:
             argv = json.loads(args.get("argv", "[]"))
         except Exception:
@@ -811,7 +912,7 @@ class HandServer:
             timeout_s = DEFAULT_TIMEOUT_SECONDS
         timeout_s = max(1.0, min(timeout_s, 3600.0))
         if argv[0] == "__control__":
-            self._do_control(conn, session_key, envelope, seq, task_id, argv)
+            self._do_control(conn, session_key, envelope, seq, task_id, argv, args)
             return
         if argv[0] != "agent" or len(argv) < 3:
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
@@ -833,34 +934,91 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"Agent 入口不存在（{run_agent_id}）：请先在设备上确认 Agent 已安装。")
             return
+        env = dict(os.environ)
+        env.update(cfg.get("env", {}) or {})
+        attempt_id = args.get("attempt", "")
+        if not isinstance(attempt_id, str) or len(attempt_id) > 64:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "执行轮次格式错误。")
+            return
+        staging = None
+        with self.process_lock:
+            if task_id in self.revoked_tasks:
+                self._error(conn, session_key, envelope, seq + 1, ERR_REVOKED_CREDENTIAL,
+                            "任务已停止。")
+                return
+            # A new attempt id means the App released the old attempt (its
+            # ledger only re-claims after the old lease is gone): the old
+            # process, possibly SIGSTOPped, must not survive next to it.
+            if (attempt_id and task_id in self.processes
+                    and self.process_attempts.get(task_id, "") != attempt_id
+                    and self._check_fence(task_id, args) is None):
+                self._supersede_stale_process(task_id, "new_attempt")
+            if task_id in self.starting_tasks or task_id in self.processes:
+                self._error(conn, session_key, envelope, seq + 1, "task_in_flight",
+                            "该任务已有执行正在进行。")
+                return
+            meta = self.task_meta.get(task_id, {})
+            if meta.get("paused") and attempt_id and meta.get("paused_attempt", "") != attempt_id:
+                # The pause belonged to an earlier attempt; the App only
+                # claims a new attempt after resuming the task.
+                meta["paused"] = False
+                meta.pop("paused_attempt", None)
+            if meta.get("paused"):
+                self._error(conn, session_key, envelope, seq + 1, "task_paused", "任务已暂停。")
+                return
+            fence_error = self._check_fence(task_id, args)
+            if fence_error is not None:
+                self._error(conn, session_key, envelope, seq + 1, *fence_error)
+                return
+            if attempt_id:
+                path = self._artifact_path(envelope, client_id, attempt_id)
+                if os.path.isfile(path):
+                    self._get_artifact(conn, session_key, envelope, seq, client_id, args)
+                    return
+                os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                try:
+                    fd = os.open(path + ".started", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    self._error(conn, session_key, envelope, seq + 1, "stale_attempt",
+                                "此轮次已执行且没有成功回执，请重新认领。")
+                    return
+                os.close(fd)
+                staging = tempfile.TemporaryDirectory(prefix="hand-delivery-")
+                prompt += ("\n\n如有文件产物，把单个文件写入以下绝对路径（最多 1 MiB）："
+                           + os.path.join(staging.name, "delivery.bin"))
+            self.starting_tasks.add(task_id)
+            meta = self.task_meta.setdefault(task_id, {})
+            snap = json.loads(args.get("control") or "{}")
+            meta.update(goal_version=int(snap.get("goal_version", 1)),
+                        epoch=int(snap.get("epoch", 1)), control_stopped=False)
         full_argv = [
             part.replace("{prompt}", prompt).replace("{task_id}", task_id)
             for part in command
         ]
-        env = dict(os.environ)
-        env.update(cfg.get("env", {}) or {})
-        self.task_meta[task_id] = {
-            "goal_version": self.task_meta.get(task_id, {}).get("goal_version", 1),
-            "epoch": self.task_meta.get(task_id, {}).get("epoch", 1),
-            "agent_id": run_agent_id,
-            "folder": folder,
-        }
         try:
-            proc = subprocess.Popen(
+            proc, lease_fd = spawn_agent(
                 full_argv,
                 cwd=folder,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 bufsize=0,  # 二进制无缓冲：下文用 os.read + select 直接读 fd
                 env=env,
-                start_new_session=True,
             )
         except OSError as e:
+            with self.process_lock:
+                self.starting_tasks.discard(task_id)
+            if staging is not None:
+                staging.cleanup()
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"无法启动 Agent：{e}")
             return
         with self.process_lock:
             self.processes[task_id] = proc
+            self.process_attempts[task_id] = attempt_id
+            if task_id in self.revoked_tasks:
+                self.task_meta[task_id]["control_stopped"] = True
+                self._kill_process(task_id)
         output_lines: list[str] = []
         next_seq = seq + 1
         try:
@@ -874,13 +1032,16 @@ class HandServer:
             buf = ""
             timed_out = False
             while True:
-                if proc.poll() is not None and not buf:
-                    break
                 if time.time() > deadline:
                     timed_out = True
                     break
-                ready, _, _ = _select.select([out_fd], [], [], 0.2)
-                if ready:
+                exited = proc.poll() is not None
+                ready, _, _ = _select.select([out_fd, conn], [], [], 0 if exited else 0.2)
+                if exited and out_fd not in ready:
+                    break
+                if conn in ready:
+                    raise ConnectionError("Hand run connection closed")
+                if out_fd in ready:
                     chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
                     if not chunk:
                         break
@@ -892,15 +1053,13 @@ class HandServer:
                         self._send(conn, session_key, envelope, "cross_device_progress",
                                    {"message": line.rstrip("\n")[-1000:]}, next_seq)
                         next_seq += 1
-                elif proc.poll() is not None:
-                    break
             if buf:
                 output_lines.append(buf)
                 self._send(conn, session_key, envelope, "cross_device_progress",
                            {"message": buf[-1000:]}, next_seq)
                 next_seq += 1
             if timed_out:
-                self._kill_process(task_id)
+                self._kill_proc(proc)
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
@@ -908,14 +1067,41 @@ class HandServer:
                 self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT,
                             f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
                 return
-            proc.wait(timeout=max(0.0, deadline - time.time()))
+            try:
+                proc.wait(timeout=max(0.0, deadline - time.time()))
+            except subprocess.TimeoutExpired:
+                self._kill_proc(proc)
+                proc.wait(timeout=5)
+                self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT, "Agent 执行超时。")
+                return
+            result = {"output": "".join(output_lines)[-MAX_OUTPUT_CHARS:]}
+            if proc.returncode == 0 and staging is not None:
+                with self.process_lock:
+                    if not self._was_control_stopped(task_id):
+                        result = self._save_artifact(envelope, client_id, attempt_id, staging.name, result["output"])
+
+        except ValueError:
+            self._error(conn, session_key, envelope, next_seq, "artifact_invalid", "产物类型或大小不受支持。")
+            return
         except (BrokenPipeError, ConnectionError, OSError):
-            # 客户端已断开：杀掉子进程，不再回包。
-            self._kill_process(task_id)
+            # 客户端已断开：杀掉子进程，不再回包。只杀本次执行自己的进程。
+            self._kill_proc(proc)
+            proc.wait(timeout=5)
             return
         finally:
+            os.close(lease_fd)
+            if staging is not None:
+                staging.cleanup()
+            if proc.stdout is not None:
+                proc.stdout.close()
             with self.process_lock:
-                self.processes.pop(task_id, None)
+                self._release_if_owned(task_id, proc)
+                superseded = proc.pid in self.superseded_pids
+                self.superseded_pids.discard(proc.pid)
+        if superseded:
+            self._error(conn, session_key, envelope, next_seq, "stale_attempt",
+                        "此执行轮次已被新的轮次取代，已终止。")
+            return
         if proc.returncode is not None and proc.returncode < 0:
             # 负退出码 = 被信号杀死。SIGTERM/SIGKILL 且是控制停掉的，
             # 走 remote_controlled_stop；否则按失败。
@@ -932,8 +1118,143 @@ class HandServer:
                         f"Agent 执行失败（退出码 {proc.returncode}）："
                         + output[-2000:])
             return
-        self._send(conn, session_key, envelope, "cross_device_result",
-                   {"output": output[-MAX_OUTPUT_CHARS:]}, next_seq)
+        if self._was_control_stopped(task_id):
+            self._error(conn, session_key, envelope, next_seq, ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
+            return
+        self._send(conn, session_key, envelope, "cross_device_result", result, next_seq)
+
+    def _artifact_path(self, envelope, client_id, attempt_id):
+        identity = [client_id, envelope["agent_id"], envelope["task_id"],
+                    os.path.realpath(envelope["folder"]), attempt_id]
+        key = hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
+        return os.path.join(self.state.dir, "artifacts", key + ".json")
+
+    # Bounded retry for transient local I/O while persisting/reading a
+    # delivery record (e.g. a busy or briefly unavailable state disk).
+    ARTIFACT_IO_RETRY_DELAYS = (0.05, 0.1, 0.2)
+
+    @staticmethod
+    def _verify_artifact_record(record) -> str | None:
+        """Integrity check of a stored delivery record; returns a reason or None."""
+        if not isinstance(record, dict) or not isinstance(record.get("output"), str):
+            return "record"
+        if record.get("artifact_present") != "true":
+            return None
+        encoded, digest = record.get("artifact_b64"), record.get("artifact_sha256")
+        if not isinstance(encoded, str) or not isinstance(digest, str):
+            return "fields"
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            return "encoding"
+        if len(content) > MAX_ARTIFACT_BYTES:
+            return "size"
+        size = record.get("artifact_size")
+        if size is not None and str(size) != str(len(content)):
+            return "size"
+        if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), digest):
+            return "sha256"
+        return None
+
+    def _get_artifact(self, conn, session_key, envelope, seq, client_id, args):
+        attempt = args.get("attempt", "")
+        if not isinstance(attempt, str) or not 1 <= len(attempt) <= 64:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "产物请求缺少执行轮次。")
+            return
+        path = self._artifact_path(envelope, client_id, attempt)
+        record = None
+        for delay in (0.0, *self.ARTIFACT_IO_RETRY_DELAYS):
+            if delay:
+                time.sleep(delay)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    record = json.load(f)
+                break
+            except FileNotFoundError:
+                self._error(conn, session_key, envelope, seq + 1, "artifact_missing", "此轮次没有已交付产物。")
+                return
+            except (OSError, ValueError):
+                record = None
+        if record is None:
+            self._error(conn, session_key, envelope, seq + 1, "artifact_unavailable", "暂时无法读取已交付产物。")
+            return
+        problem = self._verify_artifact_record(record)
+        if problem is not None:
+            self.state.audit({"event": "artifact_corrupt", "task": envelope.get("task_id", ""),
+                              "attempt": attempt, "check": problem})
+            self._error(conn, session_key, envelope, seq + 1, "artifact_corrupt",
+                        "已交付产物校验失败，无法安全交付。")
+            return
+        self._send(conn, session_key, envelope, "cross_device_result", record, seq + 1)
+
+    def _save_artifact(self, envelope, client_id, attempt_id, staging, output):
+        # Open the fixed name relative to a directory descriptor. A symlink,
+        # directory or FIFO supplied by the runner is never a delivery.
+        directory = os.open(staging, os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            try:
+                fd = os.open("delivery.bin", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
+            except FileNotFoundError:
+                fd = None
+            except OSError as e:
+                raise ValueError("cannot open artifact") from e
+            content = None
+            if fd is not None:
+                with os.fdopen(fd, "rb") as artifact:
+                    info = os.fstat(artifact.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError("invalid artifact type")
+                    content = artifact.read(MAX_ARTIFACT_BYTES + 1)
+                if len(content) > MAX_ARTIFACT_BYTES:
+                    raise ValueError("artifact too large")
+        finally:
+            os.close(directory)
+        record = {"output": output, "artifact_present": "false"}
+        if content is not None:
+            record.update(artifact_present="true", artifact_b64=b64e(content),
+                          artifact_sha256=hashlib.sha256(content).hexdigest(),
+                          artifact_size=str(len(content)))
+        path = self._artifact_path(envelope, client_id, attempt_id)
+        last_error = None
+        for delay in (0.0, *self.ARTIFACT_IO_RETRY_DELAYS):
+            if delay:
+                time.sleep(delay)
+            try:
+                self._write_artifact_record(path, record)
+                last_error = None
+                break
+            except OSError as e:
+                last_error = e
+        if last_error is not None:
+            raise last_error
+        return record
+
+    def _write_artifact_record(self, path, record) -> None:
+        """Atomic, durable write; the stored record is re-read and verified."""
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         dir=os.path.dirname(path), delete=False) as f:
+            tmp = f.name
+            try:
+                json.dump(record, f)
+                f.flush()
+                os.fsync(f.fileno())
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        try:
+            dir_fd = os.open(os.path.dirname(path), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass  # Directory fsync is not supported everywhere.
+        with open(path, encoding="utf-8") as f:
+            if json.load(f) != record:
+                raise OSError("delivery record verification failed")
 
     def _was_control_stopped(self, task_id: str) -> bool:
         meta = self.task_meta.get(task_id, {})
@@ -944,16 +1265,54 @@ class HandServer:
             proc = self.processes.get(task_id)
         if proc is not None and proc.poll() is None:
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                try:
-                    proc.terminate()
-                except OSError:
-                    pass
+                # SIGTERM remains pending while a process is SIGSTOP'ed.
+                # Kill the group without resuming paused user code.
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     # -- 控制 -------------------------------------------------------------------
 
-    def _do_control(self, conn, session_key, envelope, seq, task_id, argv) -> None:
+
+    # -- Dead-attempt process cleanup ------------------------------------------
+
+    def _kill_proc(self, proc) -> None:
+        """Kill exactly this process group (never whatever now runs the task)."""
+        if proc is not None and proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    def _supersede_stale_process(self, task_id: str, reason: str) -> bool:
+        """Kill the process of a dead attempt so it can never be resumed or
+        keep running next to a newer attempt. Caller holds process_lock."""
+        proc = self.processes.get(task_id)
+        if proc is None:
+            return False
+        self.superseded_pids.add(proc.pid)
+        self._kill_proc(proc)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        self.processes.pop(task_id, None)
+        self.process_attempts.pop(task_id, None)
+        self.starting_tasks.discard(task_id)
+        meta = self.task_meta.setdefault(task_id, {})
+        meta["paused"] = False
+        meta.pop("paused_attempt", None)
+        self.state.audit({"event": "stale_attempt_killed", "task": task_id, "reason": reason})
+        return True
+
+    def _release_if_owned(self, task_id: str, proc) -> None:
+        """Run-thread cleanup: only release bookkeeping this run still owns."""
+        if self.processes.get(task_id) is proc:
+            self.processes.pop(task_id, None)
+            self.process_attempts.pop(task_id, None)
+            self.starting_tasks.discard(task_id)
+
+    def _do_control(self, conn, session_key, envelope, seq, task_id, argv, args=None) -> None:
         """argv = ["__control__", pause|resume|stop|change_goal, operationId, newGoal?]
         回执是 result 帧，output 为 JSON {"control":…,"confirmed":bool,"message":…}。"""
         if len(argv) < 3:
@@ -969,59 +1328,94 @@ class HandServer:
             return
         with self.process_lock:
             proc = self.processes.get(task_id)
-        running = proc is not None and proc.poll() is None
-        confirmed = True
-        message = ""
-        if action == "pause":
-            if running:
-                assert proc is not None
-                try:
-                    os.killpg(proc.pid, signal.SIGSTOP)
-                    message = "远端执行已暂停。"
-                except (OSError, ProcessLookupError):
-                    confirmed = False
-                    message = "暂停失败：进程已不存在。"
-            else:
-                message = "任务未在运行，无需暂停。"
-        elif action == "resume":
-            if running:
-                assert proc is not None
-                try:
-                    os.killpg(proc.pid, signal.SIGCONT)
-                    message = "远端执行已继续。"
-                except (OSError, ProcessLookupError):
-                    confirmed = False
-                    message = "继续失败：进程已不存在。"
-            else:
-                message = "任务未在运行，无需继续。"
-        elif action == "stop":
-            if running:
-                assert proc is not None
-                self._kill_process(task_id)
+            if action == "stop":
                 self.task_meta.setdefault(task_id, {})["control_stopped"] = True
-                message = "远端执行已停止。"
-            else:
-                message = "任务未在运行，无需停止。"
-        else:  # change_goal
-            if running:
-                self._kill_process(task_id)
-                self.task_meta.setdefault(task_id, {})["control_stopped"] = True
-            meta = self.task_meta.setdefault(task_id, {})
-            meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
-            if new_goal:
-                meta["new_goal"] = new_goal
-            message = f"目标已更新（goal_version={meta['goal_version']}），旧执行已停止，请按新目标重新派发。"
-            self.state.audit({"event": "change_goal", "task": task_id,
-                              "operation": operation_id,
-                              "goal_version": meta["goal_version"]})
-        if action in ("stop", "change_goal"):
-            # 只撤销当次运行的凭证（jti），不撤销整个任务：改目标后
-            # 任务要能凭新凭证、新 goal_version 快照重新派发；整任务
-            # 撤销会让重派永远失败。
-            jti = self.task_meta.get(task_id, {}).get("credential_jti")
-            if jti:
-                self.revoked_jtis.add(jti)
-        result = {"control": action, "confirmed": confirmed, "message": message}
+                self.revoked_tasks.add(task_id)
+                self.state.save_json("stopped_tasks.json", sorted(self.revoked_tasks))
+            if task_id in self.starting_tasks and proc is None:
+                self._send(conn, session_key, envelope, "cross_device_result",
+                           {"output": json.dumps({"control": action, "confirmed": False,
+                                                  "message": "任务正在启动，请重试。"})}, seq + 1)
+                return
+            running = proc is not None and proc.poll() is None
+            try:
+                snap = json.loads((args or {}).get("control") or "{}")
+            except (AttributeError, TypeError, ValueError):
+                snap = {}
+            # Newer Apps name the live attempt in the control snapshot. A
+            # running process of any other attempt is a leftover of a dead
+            # attempt: kill it instead of pausing or waking it (SIGCONT would
+            # let it run next to the re-dispatched attempt).
+            if (running and action in ("pause", "resume") and isinstance(snap, dict)
+                    and "attempt" in snap
+                    and self.process_attempts.get(task_id, "") != str(snap.get("attempt") or "")):
+                self._supersede_stale_process(task_id, f"control_{action}")
+                self._send(conn, session_key, envelope, "cross_device_result",
+                           {"output": json.dumps({"control": action, "confirmed": True,
+                                                  "message": "旧执行轮次已作废并终止，不会被继续。"},
+                                                 ensure_ascii=False)}, seq + 1)
+                return
+            confirmed = True
+            message = ""
+            if action == "pause":
+                if running:
+                    assert proc is not None
+                    try:
+                        os.killpg(proc.pid, signal.SIGSTOP)
+                        message = "远端执行已暂停。"
+                    except (OSError, ProcessLookupError):
+                        confirmed = False
+                        message = "暂停失败：进程已不存在。"
+                else:
+                    message = "任务未在运行，无需暂停。"
+            elif action == "resume":
+                if running:
+                    assert proc is not None
+                    try:
+                        os.killpg(proc.pid, signal.SIGCONT)
+                        message = "远端执行已继续。"
+                    except (OSError, ProcessLookupError):
+                        confirmed = False
+                        message = "继续失败：进程已不存在。"
+                else:
+                    message = "任务未在运行，无需继续。"
+            elif action == "stop":
+                if running:
+                    assert proc is not None
+                    self.task_meta.setdefault(task_id, {})["control_stopped"] = True
+                    self._kill_process(task_id)
+                    try:
+                        proc.wait(timeout=5)
+                        message = "远端执行已停止。"
+                    except subprocess.TimeoutExpired:
+                        confirmed = False
+                        message = "执行进程尚未退出，请重试。"
+                else:
+                    message = "任务未在运行，无需停止。"
+            else:  # change_goal
+                if running:
+                    self.task_meta.setdefault(task_id, {})["control_stopped"] = True
+                    self._kill_process(task_id)
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        confirmed = False
+                meta = self.task_meta.setdefault(task_id, {})
+                meta["goal_version"] = int(meta.get("goal_version", 1)) + 1
+                if new_goal:
+                    meta["new_goal"] = new_goal
+                message = f"目标已更新（goal_version={meta['goal_version']}），旧执行已停止，请按新目标重新派发。"
+                self.state.audit({"event": "change_goal", "task": task_id,
+                                  "operation": operation_id,
+                                  "goal_version": meta["goal_version"]})
+            if confirmed and action in ("pause", "resume"):
+                meta = self.task_meta.setdefault(task_id, {})
+                meta["paused"] = action == "pause"
+                if action == "pause":
+                    meta["paused_attempt"] = self.process_attempts.get(task_id, "")
+                else:
+                    meta.pop("paused_attempt", None)
+            result = {"control": action, "confirmed": confirmed, "message": message}
         self._send(conn, session_key, envelope, "cross_device_result",
                    {"output": json.dumps(result, ensure_ascii=False)}, seq + 1)
 

@@ -34,7 +34,7 @@ jobs:
       - name: Run JVM tests
         run: gradle -p android :app:testDebugUnitTest --stacktrace
       - name: Build debug and compatibility APKs
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: gradle -p android :app:assembleDebug :app:assembleCompat --stacktrace
       - name: Upload unit test reports
         if: ${{ !cancelled() }}
@@ -47,7 +47,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload debug APK
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: actions/upload-artifact@v4
         with:
           name: wherevercode-agent-ci-apk-${{ github.sha }}
@@ -55,10 +55,130 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload compatibility APK
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: actions/upload-artifact@v4
         with:
           name: wherevercode-agent-compat-apk-${{ github.sha }}
           path: android/app/build/outputs/apk/compat/*.apk
           if-no-files-found: warn
           retention-days: 14
+
+  # Installable, maintainer-signed APK (in-place update of the existing
+  # `wherevercode.agent` install). Only on pushes inside this repository:
+  # pull_request runs (including forks) never see the signing secrets.
+  signed-apk:
+    if: ${{ github.event_name == 'push' && github.repository == 'huaerdaidai-gif/wherevercode-agent' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Expected maintainer certificate (SHA-256 prefix, public value).
+      EXPECTED_CERT_SHA256_PREFIX: ee743f03
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.0"
+      - name: Compute versionCode
+        # Monotonic and above the checked-in versionCode (5).
+        run: echo "WHEREVERCODE_VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+      - name: Restore signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then echo "::error::missing secret $name"; exit 1; fi
+          done
+          umask 077
+          # Tolerate line-wrapped / CRLF / URL-safe base64 as stored in the secret.
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n\t' | tr -- '-_' '+/' > "$RUNNER_TEMP/keystore.b64"
+          pad=$(( (4 - $(wc -c < "$RUNNER_TEMP/keystore.b64") % 4) % 4 ))
+          if [ "$pad" -gt 0 ]; then printf '%*s' "$pad" '' | tr ' ' '=' >> "$RUNNER_TEMP/keystore.b64"; fi
+          if ! base64 -d "$RUNNER_TEMP/keystore.b64" > "$RUNNER_TEMP/maintainer.keystore"; then
+            # Diagnostics without revealing the value: only sizes / character classes.
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not valid base64 (normalized length $(wc -c < "$RUNNER_TEMP/keystore.b64"), non-alphabet chars $(tr -d 'A-Za-z0-9+/=' < "$RUNNER_TEMP/keystore.b64" | wc -c))"
+            rm -f "$RUNNER_TEMP/keystore.b64" "$RUNNER_TEMP/maintainer.keystore"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/keystore.b64"
+          echo "decoded keystore: $(wc -c < "$RUNNER_TEMP/maintainer.keystore") bytes"
+          ks="$RUNNER_TEMP/maintainer.keystore"
+          # keytool prints errors on stdout; they never contain the password and
+          # GitHub masks secret values (alias) in logs.
+          if ! out=$(keytool -list -keystore "$ks" -storepass:env ANDROID_KEYSTORE_PASSWORD 2>&1); then
+            echo "::error::keystore does not open with ANDROID_KEYSTORE_PASSWORD: $(printf '%s' "$out" | grep -m1 -i 'keytool error' || echo unknown)"
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -E '^(Keystore type|Your keystore contains)' || true
+          if ! out=$(keytool -list -keystore "$ks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" 2>&1); then
+            echo "::error::ANDROID_KEY_ALIAS not found in keystore: $(printf '%s' "$out" | grep -m1 -i 'keytool error' || echo unknown)"
+            exit 1
+          fi
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/maintainer.keystore" >> "$GITHUB_ENV"
+      - name: Build signed compat APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # In-app updater (update/ package) reads the Drive file id from
+          # BuildConfig.UPDATE_DRIVE_FILE_ID. Pass-through only: set it as a
+          # repo secret or variable; this job never uploads anything to Drive.
+          WHEREVERCODE_UPDATE_DRIVE_FILE_ID: ${{ secrets.WHEREVERCODE_UPDATE_DRIVE_FILE_ID || vars.WHEREVERCODE_UPDATE_DRIVE_FILE_ID }}
+        run: |
+          if [ -n "${WHEREVERCODE_UPDATE_DRIVE_FILE_ID:-}" ]; then
+            echo "UPDATE_DRIVE_FILE_ID_STATUS=set" >> "$GITHUB_ENV"
+          else
+            echo "::warning::WHEREVERCODE_UPDATE_DRIVE_FILE_ID is not set; in-app update check will be disabled in this APK"
+            echo "UPDATE_DRIVE_FILE_ID_STATUS=not set" >> "$GITHUB_ENV"
+          fi
+          gradle -p android :app:assembleCompat --stacktrace
+      - name: Verify signing certificate and version
+        run: |
+          set -euo pipefail
+          apk=$(ls android/app/build/outputs/apk/compat/*.apk | head -n1)
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)
+          "$bt/apksigner" verify --verbose "$apk" | grep -E '^Verifie[sd]' || true
+          certs=$("$bt/apksigner" verify --print-certs "$apk")
+          sha=$(printf '%s\n' "$certs" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')
+          echo "Signer #1 certificate SHA-256: $sha"
+          case "$sha" in
+            "$EXPECTED_CERT_SHA256_PREFIX"*) echo "certificate matches expected prefix $EXPECTED_CERT_SHA256_PREFIX" ;;
+            *) echo "::error::unexpected signing certificate"; exit 1 ;;
+          esac
+          # aapt (v1) exits non-zero on adaptive-icon references even though it
+          # prints the package line; read badging tolerantly (aapt2 first) and
+          # check the versionCode explicitly instead of relying on exit codes.
+          badging=$({ "$bt/aapt2" dump badging "$apk" || true; } 2>/dev/null)
+          if ! printf '%s\n' "$badging" | grep -q '^package:'; then
+            badging=$({ "$bt/aapt" dump badging "$apk" || true; } 2>/dev/null)
+          fi
+          pkg=$(printf '%s\n' "$badging" | grep -m1 '^package:' || true)
+          echo "$pkg"
+          case "$pkg" in
+            *"versionCode='$WHEREVERCODE_VERSION_CODE'"*) echo "versionCode $WHEREVERCODE_VERSION_CODE confirmed" ;;
+            *) echo "::error::APK versionCode does not match $WHEREVERCODE_VERSION_CODE"; exit 1 ;;
+          esac
+          {
+            echo "### Signed APK"
+            echo "- file: $(basename "$apk")"
+            echo "- versionCode: $WHEREVERCODE_VERSION_CODE"
+            echo "- signer SHA-256: $sha"
+            echo "- update Drive file id: ${UPDATE_DRIVE_FILE_ID_STATUS:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-agent-signed-apk-${{ github.sha }}
+          path: android/app/build/outputs/apk/compat/*.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove signing keystore
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/maintainer.keystore"

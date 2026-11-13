@@ -30,10 +30,12 @@ import wherevercode.agent.core.transport.DiscoveredPeer
 class McpDispatchServiceTest {
     private lateinit var f: DispatchTestFixture
     private lateinit var a: DispatchActors
+    private var now = 0L
 
     @Before
     fun setUp() {
-        f = DispatchTestFixture()
+        now = System.currentTimeMillis() / 1000
+        f = DispatchTestFixture(nowEpochSeconds = { now })
         a = DispatchActors(f.tokens)
     }
 
@@ -266,6 +268,18 @@ class McpDispatchServiceTest {
     }
 
     @Test
+    fun `replayed progress cannot return continue while task is paused`() {
+        val taskId = create()
+        assign(taskId)
+        val attempt = claim(taskId).getString("attempt_id")
+        val progress = args("task_id" to taskId, "attempt_id" to attempt,
+            "message" to "step", "idempotency_key" to "pause-replay")
+        f.call(a.grok, "report_progress", progress)
+        f.call(a.chatgpt, "pause_task", args("task_id" to taskId))
+        assertEquals(DispatchErrors.TASK_PAUSED, f.fail(a.grok, "report_progress", progress).code)
+    }
+
+    @Test
     fun `expected_version mismatch is rejected without writing`() {
         val taskId = create()
         val v = f.taskStore.getTask(taskId)!!.version
@@ -372,6 +386,74 @@ class McpDispatchServiceTest {
         f.controlPlane.revoke(taskId, "user-revoke-1", "用户撤销")
         assertEquals(DispatchErrors.TASK_REVOKED,
             f.fail(a.grok, "report_progress", args("task_id" to taskId, "attempt_id" to attempt, "message" to "x")).code)
+    }
+
+    @Test
+    fun `project scope applies to creation assignment and executor identity`() {
+        val dispatcher = f.tokens.issue("project-dispatcher", DispatchRole.AGENT,
+            setOf(DispatchCapability.DISPATCH), projectIds = setOf("project-a")).principal
+        val executor = f.tokens.issue("project-executor", DispatchRole.AGENT,
+            setOf(DispatchCapability.EXECUTE), projectIds = setOf("project-a")).principal
+        val otherProject = f.tokens.issue("project-executor", DispatchRole.AGENT,
+            setOf(DispatchCapability.EXECUTE), projectIds = setOf("project-b")).principal
+        val request = args("title" to "Scoped", "goal" to "Verify scope",
+            "project_id" to "project-a", "idempotency_key" to "scoped-create")
+        assertEquals(DispatchErrors.FORBIDDEN, f.fail(a.chatgpt, "create_task", request).code)
+        val unscoped = JSONObject(request.toString()).apply { remove("project_id") }
+        assertEquals(DispatchErrors.FORBIDDEN, f.fail(dispatcher, "create_task", unscoped).code)
+        val id = f.call(dispatcher, "create_task", request).getJSONObject("task").getString("task_id")
+        assertEquals(DispatchErrors.UNKNOWN_AGENT, f.fail(dispatcher, "assign_task",
+            args("task_id" to id, "agent_id" to a.grok.id)).code)
+        assign(id, to = executor.id, by = dispatcher)
+        assertEquals(0, f.call(otherProject, "list_my_tasks").getInt("count"))
+        assertEquals(DispatchErrors.FORBIDDEN, f.fail(otherProject, "claim_task", args("task_id" to id)).code)
+        assertEquals("working", claim(id, executor).getJSONObject("task").getString("state"))
+    }
+
+    @Test
+    fun `disconnected pause preserves assignment and requires explicit resume before a fresh attempt`() {
+        val taskId = create()
+        assign(taskId)
+        val claimArgs = args("task_id" to taskId, "idempotency_key" to "initial-claim")
+        val first = f.call(a.grok, "claim_task", claimArgs)
+        val old = first.getString("attempt_id")
+        f.call(a.chatgpt, "pause_task", args("task_id" to taskId))
+        assertEquals(DispatchErrors.TASK_PAUSED, f.fail(a.grok, "claim_task", claimArgs).code)
+        assertEquals(DispatchErrors.TASK_PAUSED, f.fail(a.grok, "claim_task", args("task_id" to taskId)).code)
+
+        now = first.getLong("lease_expires_at")
+        assertEquals(DispatchErrors.STALE_ATTEMPT, f.fail(a.grok, "report_progress",
+            args("task_id" to taskId, "attempt_id" to old, "ack" to "paused")).code)
+        f.taskStore.expireLeases(now)
+        f.controlPlane.reconcileExpiredControls()
+        val paused = f.call(a.chatgpt, "get_task_status", args("task_id" to taskId)).getJSONObject("task")
+        assertEquals("requeued", paused.getString("state"))
+        assertEquals("PAUSED", paused.getString("control_status"))
+        assertEquals(DispatchErrors.TASK_PAUSED, f.fail(a.grok, "claim_task", args("task_id" to taskId)).code)
+
+        f.call(a.chatgpt, "resume_task", args("task_id" to taskId))
+        assertEquals(DispatchErrors.STALE_ATTEMPT, f.fail(a.grok, "claim_task", claimArgs).code)
+        val fresh = claim(taskId).getString("attempt_id")
+        assertNotEquals(old, fresh)
+        assertEquals(DispatchErrors.STALE_ATTEMPT, f.fail(a.grok, "report_progress",
+            args("task_id" to taskId, "attempt_id" to old, "message" to "late")).code)
+        f.call(a.grok, "report_progress", args("task_id" to taskId, "attempt_id" to fresh, "message" to "fresh"))
+    }
+
+    @Test
+    fun `stop supersedes a disconnected pause and cannot be resumed`() {
+        val taskId = create()
+        assign(taskId)
+        val first = claim(taskId)
+        f.call(a.chatgpt, "pause_task", args("task_id" to taskId))
+        f.call(a.chatgpt, "stop_task", args("task_id" to taskId))
+        assertEquals(DispatchErrors.TASK_STOPPED, f.fail(a.grok, "claim_task", args("task_id" to taskId)).code)
+        now = first.getLong("lease_expires_at")
+        f.taskStore.expireLeases(now)
+        f.controlPlane.reconcileExpiredControls()
+        assertEquals("cancelled", f.taskStore.getTask(taskId)!!.state)
+        assertEquals("control_terminal_task", f.fail(a.chatgpt, "resume_task", args("task_id" to taskId)).code)
+        assertEquals(DispatchErrors.TASK_TERMINAL, f.fail(a.grok, "claim_task", args("task_id" to taskId)).code)
     }
 
     @Test

@@ -14,6 +14,7 @@ data class DispatchTokenRecord(
     val label: String,
     val createdAt: Long,
     val revoked: Boolean = false,
+    val projectIds: Set<String> = emptySet(),
 )
 
 /**
@@ -147,6 +148,9 @@ class FileDispatchStateStore(
                     label = o.optString("label", ""),
                     createdAt = o.getLong("created_at"),
                     revoked = o.optBoolean("revoked", false),
+                    projectIds = o.optJSONArray("project_ids")?.let { ids ->
+                        (0 until ids.length()).map { ids.getString(it) }.toSet()
+                    } ?: emptySet(),
                 )
                 tokenMap[rec.tokenId] = rec
             }
@@ -208,6 +212,7 @@ class FileDispatchStateStore(
                     put("label", r.label)
                     put("created_at", r.createdAt)
                     put("revoked", r.revoked)
+                    put("project_ids", JSONArray(r.projectIds.sorted()))
                 })
             }
         })

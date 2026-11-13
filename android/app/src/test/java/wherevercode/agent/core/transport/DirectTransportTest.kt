@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -48,7 +49,7 @@ class DirectTransportTest {
 
     /** 启动一个回环服务端：读一帧请求，按 [handler] 回包。 */
     private fun startServer(handler: (request: ByteArray, out: OutputStream) -> Unit): Int {
-        val srv = ServerSocket(0)
+        val srv = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         server = srv
         serverThread = Thread {
             try {
@@ -106,7 +107,7 @@ class DirectTransportTest {
         frameCount: Int,
         handler: (requests: List<ByteArray>, out: OutputStream) -> Unit,
     ): Int {
-        val srv = ServerSocket(0)
+        val srv = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         server = srv
         serverThread = Thread {
             try {
@@ -459,8 +460,8 @@ class DirectTransportTest {
     fun `call falls back to fallback host when preferred host is unreachable`() = runBlocking {
         // V5 公网直连（2026-11-11）：首选地址（公网）连不上时自动
         // 回落备用地址（内网），本次调用继续走通，不用用户手动切换。
-        // 首选用文档网段 192.0.2.1（不可达，5 秒连接超时后回落），
-        // 回落用本机回环服务端。
+        // Only the fallback address has a listener on this port.
+        // Keep both addresses on loopback to avoid dependence on host routing.
         val serverPubKey = ByteArray(32) { 7 }
         val fingerprint = java.security.MessageDigest.getInstance("SHA-256")
             .digest(serverPubKey).joinToString("") { "%02x".format(it) }
@@ -474,7 +475,7 @@ class DirectTransportTest {
             writeFrame(out, "sealed-result".toByteArray(Charsets.UTF_8))
         }
         val fallbackPeer = peer.copy(
-            host = "192.0.2.1",
+            host = "127.0.0.2",
             port = port,
             fallbackHost = "127.0.0.1",
             fingerprintSha256 = fingerprint,
@@ -498,7 +499,7 @@ class DirectTransportTest {
         }
         val fallbackLog = mutableListOf<String>()
         val hello = DirectTransport(onFallback = { fallbackLog += it }).fetchHello(
-            peer.copy(host = "192.0.2.1", port = port, fallbackHost = "127.0.0.1"),
+            peer.copy(host = "127.0.0.2", port = port, fallbackHost = "127.0.0.1"),
             ownDeviceId = "k70",
             ownPublicKey = ByteArray(32) { 3 },
         )
@@ -564,7 +565,7 @@ class DirectTransportTest {
     @Test
     fun `hello socket timeout is bounded`() {
         // 占住端口但永不回包：fetchHello 必须在读超时内失败，而不是无限等。
-        val srv = ServerSocket(0)
+        val srv = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         server = srv
         serverThread = Thread {
             try {

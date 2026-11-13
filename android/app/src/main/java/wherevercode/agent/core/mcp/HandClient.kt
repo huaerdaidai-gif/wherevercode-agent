@@ -51,7 +51,13 @@ sealed class HandEvent {
     data class Progress(val seq: Long, val message: String, val percent: Int? = null) : HandEvent()
 
     /** 终态：成功结果。 */
-    data class Result(val seq: Long, val output: String) : HandEvent()
+    data class Result(
+        val seq: Long,
+        val output: String,
+        val artifactPresent: Boolean? = null,
+        val artifactBase64: String? = null,
+        val artifactSha256: String? = null,
+    ) : HandEvent()
 
     /** 终态：被拒绝，任务进 blocked（可恢复）。reason 必须是中文可操作文案。 */
     data class Blocked(val reason: String, val code: String) : HandEvent()
@@ -154,6 +160,7 @@ class HandClient(
         const val TYPE_PROGRESS = "cross_device_progress"
         const val TYPE_RESULT = "cross_device_result"
         const val TYPE_ERROR = "cross_device_error"
+        const val TRANSPORT_INTERRUPTED = "transport_interrupted"
 
         /** 控制台 WS token 的请求 / 回包类型（与 Hand 侧 WS 端点定死的同一份）。 */
         const val TYPE_WS_TOKEN = "wherevercode_ws_token"
@@ -162,7 +169,7 @@ class HandClient(
         // V5 跨设备开发（2026-11-12，D2）：authorize_project_folder
         // 是管理动作（把项目文件夹记入 Agent 的 auth.json），不执行
         // 命令；与 list/read/write/run 同走密封通道与任务凭证。
-        val ALLOWED_ACTIONS = setOf("list", "read", "write", "run", "authorize_project_folder")
+        val ALLOWED_ACTIONS = setOf("list", "read", "write", "run", "authorize_project_folder", "get_artifact")
     }
 
     /**
@@ -400,8 +407,12 @@ class HandClient(
 
         // 5. 任务凭证（TTL 900s），随信封发送。
         val credential = TaskCredentialIssuer.issue(
+            userId = "",
             taskId = request.taskId,
+            attempt = "",
+            sourceDeviceId = ownDeviceId,
             targetDeviceId = request.peer.deviceId,
+            agentId = request.agentId,
             folder = request.folder,
             signingKey = signingKey,
             ttlSeconds = request.credentialTtlSeconds,
@@ -554,7 +565,13 @@ class HandClient(
                         }
 
                         TYPE_RESULT -> {
-                            emit(HandEvent.Result(response.seq, response.args["output"].orEmpty()))
+                            emit(HandEvent.Result(
+                                response.seq,
+                                response.args["output"].orEmpty(),
+                                response.args["artifact_present"]?.toBooleanStrictOrNull(),
+                                response.args["artifact_b64"],
+                                response.args["artifact_sha256"],
+                            ))
                             done = true
                             connection.close()
                         }
@@ -611,7 +628,7 @@ class HandClient(
                     emit(
                         HandEvent.Blocked(
                             message,
-                            HandProtocol.Errors.NOT_AUTHORIZED,
+                            TRANSPORT_INTERRUPTED,
                         ),
                     )
                     done = true
@@ -626,7 +643,7 @@ class HandClient(
                 emit(
                     HandEvent.Blocked(
                         "远端设备没有返回结果（连接已关闭）：请检查设备配对与 Hand 服务",
-                        HandProtocol.Errors.NOT_AUTHORIZED,
+                        TRANSPORT_INTERRUPTED,
                     ),
                 )
             }
