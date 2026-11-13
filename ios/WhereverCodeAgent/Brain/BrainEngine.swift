@@ -99,6 +99,7 @@ public struct ChatOutcome: Equatable {
         self.conversationId = conversationId
         self.assistantText = assistantText
         self.toolCallsExecuted = toolCallsExecuted
+        self.brainId = brainId
         self.switchedBrain = switchedBrain
     }
 }
