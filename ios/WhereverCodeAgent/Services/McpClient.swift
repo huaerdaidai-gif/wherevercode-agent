@@ -43,7 +43,7 @@ public enum McpError: Error, Equatable {
 /// Builds and executes MCP `tools/call` requests. The token is supplied
 /// per call by `tokenProvider` and is never retained or logged.
 public struct McpClient {
-    public static let userAgent = "WhereverCode-iOS/1.0 (WhereverCodeAgent)"
+    public static let userAgent = "WhereverCode-iOS/1.1 (WhereverCodeAgent)"
 
     private let endpoint: URL
     private let tokenProvider: () -> String?
@@ -96,7 +96,7 @@ public struct McpClient {
             throw McpError.transport("网络请求失败：\(shortError(error))")
         }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw McpError.transport("平台返回 HTTP \(http.statusCode)")
+            throw Self.httpError(statusCode: http.statusCode, body: data)
         }
         return try Self.unwrapToolResult(data: data)
     }
@@ -122,9 +122,15 @@ public struct McpClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 30
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw McpError.transport("网络请求失败：\(shortError(error))")
+        }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw McpError.transport("平台返回 HTTP \(http.statusCode)")
+            throw Self.httpError(statusCode: http.statusCode, body: data)
         }
         let json = try Self.decodeJSON(data)
         guard let result = json["result"] as? [String: Any],
@@ -155,6 +161,20 @@ public struct McpClient {
             throw McpError.unparsableResponse
         }
         return dict
+    }
+
+    /// Build the error for a non-2xx HTTP response, including the
+    /// platform's own response body when it sent one (truncated).
+    /// Showing only "HTTP 401" hides the server's real reason; the
+    /// body is the platform's error text, never our token (the
+    /// server does not echo request headers back).
+    public static func httpError(statusCode: Int, body: Data) -> McpError {
+        let text = String(data: body, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !text.isEmpty else {
+            return .transport("平台返回 HTTP \(statusCode)")
+        }
+        return .transport("平台返回 HTTP \(statusCode)：\(String(text.prefix(200)))")
     }
 
     // MARK: - Private helpers

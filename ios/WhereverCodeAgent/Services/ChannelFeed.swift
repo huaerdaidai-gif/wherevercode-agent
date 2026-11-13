@@ -117,6 +117,10 @@ public final class ChannelFeed {
 
     public var onMessages: (([ChannelMessage]) -> Void)?
     public var onStateChange: ((ChannelConnectionState, String?) -> Void)?
+    /// Fired exactly once, after the first history poll completes:
+    /// nil on success, the real error text on failure. Lets the UI
+    /// stop its "loading history" indicator and surface poll errors.
+    public var onInitialPoll: ((String?) -> Void)?
 
     public private(set) var lastError: String?
 
@@ -156,7 +160,9 @@ public final class ChannelFeed {
     // MARK: - Loop
 
     private func loop() async {
-        await pollOnce()
+        let firstPollError = await pollOnce()
+        let callback = onInitialPoll
+        Task { @MainActor in callback?(firstPollError) }
         while running && !Task.isCancelled {
             if stateMachine.state == .polling {
                 setState(.reconnectDue) // polling -> connecting
@@ -181,13 +187,18 @@ public final class ChannelFeed {
         }
     }
 
-    private func pollOnce() async {
+    /// One poll. Returns nil on success, the real error text on failure.
+    @discardableResult
+    private func pollOnce() async -> String? {
         do {
             let messages = try await transport.pollMessages(channelID: channelID, afterID: lastSeenID)
             deliver(messages)
+            return nil
         } catch {
-            lastError = (error as? McpError)?.message ?? "轮询失败。"
+            let text = (error as? McpError)?.message ?? "轮询失败。"
+            lastError = text
             publishState()
+            return text
         }
     }
 
@@ -235,7 +246,11 @@ public final class ChannelFeed {
                 }
             } catch {
                 if running && !Task.isCancelled {
-                    lastError = "频道连接断开。"
+                    // Surface the real socket error (domain/code and
+                    // the system description), never a generic line.
+                    // The token is in a header, never in an error.
+                    let detail = (error as NSError).localizedDescription
+                    lastError = "频道实时连接断开：\(String(detail.prefix(200)))"
                 }
                 return true
             }

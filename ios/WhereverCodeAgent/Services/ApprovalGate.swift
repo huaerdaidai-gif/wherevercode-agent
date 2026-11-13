@@ -45,16 +45,24 @@ public enum ReservedFeature: String, CaseIterable {
     }
 
     /// Short honest note shown next to the disabled control.
+    /// For the task controls the blocker is named exactly: the V5
+    /// server's 13 MCP tools contain no such tool, so the action
+    /// cannot be wired to anything real — it stays labelled as
+    /// blocked instead of being faked.
     public var note: String {
         switch self {
         case .approval:
-            return "未实现：审批流程尚未接入，任务提交前请在频道里人工确认。"
-        case .pauseTask, .resumeTask, .stopTask:
-            return "未实现：任务暂停 / 恢复 / 停止尚未接入，当前只能领取、汇报、交活或放手。"
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有审批工具，无法真实执行；任务提交前请先在频道里人工确认。"
+        case .pauseTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有暂停任务工具，无法真实执行。"
+        case .resumeTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有恢复任务工具，无法真实执行。"
+        case .stopTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有停止任务工具，无法真实执行；不要的任务请用「放手任务」交回。"
         case .retargetTask:
-            return "未实现：改目标尚未接入，请放手任务后由调度重新派发。"
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有改目标工具，无法真实执行；请放手任务后由调度重新派发。"
         case .deviceManagement:
-            return "未实现：设备添加与配对尚未接入，设备需先在 Android 端或平台侧添加。"
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有设备 / Agent 列表与配对工具，本页读不到真实设备；设备需先在 Android 端或平台侧添加。"
         case .brainChat:
             return "未实现：大脑对话尚未接入，先用团队频道与任务页。"
         case .singleAgentChat:
