@@ -75,8 +75,34 @@ class RemoteTaskDispatcher(
      */
     private val pipelineHook: PipelineRunnerHook? = null,
     private val artifactDirectory: File? = null,
+    /**
+     * Bounded backoff for recovering a delivery from the Host (lost result
+     * frame, transient `artifact_unavailable`, or an artifact that failed the
+     * integrity check in transit). One fetch per delay; never unbounded.
+     */
+    private val artifactRetryDelaysMs: List<Long> = DEFAULT_ARTIFACT_RETRY_DELAYS_MS,
 ) {
+    /** A delivered artifact that does not match its declared size/SHA-256. */
+    private class ArtifactIntegrityException(message: String) : Exception(message)
+
+    private class VerifiedArtifact(val bytes: ByteArray, val sha256: String)
+
+    /** Result of a bounded delivery fetch. */
+    private sealed class Fetch {
+        class Delivered(val result: HandEvent.Result) : Fetch()
+        /** The Host says refetching cannot help (nothing delivered / corrupt / stale). */
+        object Terminal : Fetch()
+        /** Every bounded attempt hit a transient failure. */
+        object Exhausted : Fetch()
+    }
+
     companion object {
+        /** Retry schedule for artifact recovery: 3 fetches, 250ms -> 1s. */
+        val DEFAULT_ARTIFACT_RETRY_DELAYS_MS: List<Long> = listOf(250L, 500L, 1_000L)
+
+        /** Host codes after which refetching cannot help. */
+        private val TERMINAL_ARTIFACT_CODES = setOf("artifact_missing", "artifact_corrupt", "artifact_invalid", "stale_attempt")
+
         /** 服务端在运行被控制指令停掉时，终态 error 帧用的 code。 */
         const val REMOTE_CONTROLLED_STOP_CODE: String = "remote_controlled_stop"
 
@@ -164,14 +190,9 @@ class RemoteTaskDispatcher(
         if (attemptId != null && finalResult == null &&
             (finalBlocked == null || finalBlocked?.code == HandClient.TRANSPORT_INTERRUPTED)
         ) {
-            repeat(3) { retry ->
-                if (finalResult == null) {
-                    if (retry > 0) delay(250L * retry)
-                    port.getArtifact(target, task.taskId, attemptId).collect { event ->
-                        if (event is HandEvent.Result) finalResult = event
-                    }
-                }
-            }
+            // First fetch immediately, then the bounded backoff schedule.
+            finalResult = (fetchDelivery(target, task.taskId, attemptId, listOf(0L) + artifactRetryDelaysMs.drop(1))
+                as? Fetch.Delivered)?.result
             if (finalResult != null) finalBlocked = null
         }
         val blocked = finalBlocked
@@ -199,7 +220,13 @@ class RemoteTaskDispatcher(
             RemoteMemberVerdict.Success -> {
                 val result = checkNotNull(finalResult)
                 val artifact = if (result.artifactPresent == true) {
-                    storeArtifact(task.taskId, checkNotNull(attemptId), result)
+                    val verified = verifyOrRefetchArtifact(target, task.taskId, attemptId, result)
+                    if (verified == null) {
+                        val reason = "产物校验失败：已向远端重取 ${artifactRetryDelaysMs.size} 次仍不一致，未保存产物"
+                        finishAsFailed(task.taskId, reason, attemptId)
+                        return RemoteTaskOutcome.Failed(reason)
+                    }
+                    storeArtifact(task.taskId, checkNotNull(attemptId), verified)
                 } else null
                 val delivery = if (artifact == null) output else "产物：$artifact\n\n$output"
                 finishAsCompleted(task.taskId, delivery, attemptId)
@@ -208,22 +235,107 @@ class RemoteTaskDispatcher(
         }
     }
 
-    private fun storeArtifact(taskId: String, attemptId: String, result: HandEvent.Result): String {
-        val directory = checkNotNull(artifactDirectory) { "产物目录不可用" }
-        val encoded = checkNotNull(result.artifactBase64)
+    /**
+     * Fetch the Host's persisted delivery record for [attemptId] with bounded
+     * backoff. Retries transport failures and `artifact_unavailable`; stops on
+     * terminal codes (nothing delivered, corrupt on the Host, stale attempt).
+     */
+    private suspend fun fetchDelivery(
+        target: RemoteTarget,
+        taskId: String,
+        attemptId: String,
+        delays: List<Long>,
+    ): Fetch {
+        for (wait in delays) {
+            if (wait > 0) delay(wait)
+            var result: HandEvent.Result? = null
+            var blocked: HandEvent.Blocked? = null
+            try {
+                port.getArtifact(target, taskId, attemptId).collect { event ->
+                    when (event) {
+                        is HandEvent.Result -> result = event
+                        is HandEvent.Blocked -> blocked = event
+                        else -> Unit
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                continue // Transport failure: next bounded attempt.
+            }
+            result?.let { return Fetch.Delivered(it) }
+            if (blocked?.code in TERMINAL_ARTIFACT_CODES) return Fetch.Terminal
+        }
+        return Fetch.Exhausted
+    }
+
+    /**
+     * Verify the artifact carried by [first]; when it fails integrity (bytes
+     * damaged or truncated in transit) refetch the Host's persisted record
+     * with bounded backoff. Returns null when no intact copy was obtained.
+     */
+    private suspend fun verifyOrRefetchArtifact(
+        target: RemoteTarget,
+        taskId: String,
+        attemptId: String?,
+        first: HandEvent.Result,
+    ): VerifiedArtifact? {
+        try {
+            return verifyArtifact(first)
+        } catch (_: ArtifactIntegrityException) {
+            // Fall through to bounded refetch below.
+        }
+        val attempt = attemptId ?: return null
+        for (wait in artifactRetryDelaysMs) {
+            val again = when (val fetched = fetchDelivery(target, taskId, attempt, listOf(wait))) {
+                is Fetch.Delivered -> fetched.result
+                Fetch.Terminal -> return null
+                Fetch.Exhausted -> continue
+            }
+            if (again.artifactPresent != true) return null
+            try {
+                return verifyArtifact(again)
+            } catch (_: ArtifactIntegrityException) {
+                // Damaged again: next bounded attempt.
+            }
+        }
+        return null
+    }
+
+    private fun sha256Hex(data: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(data)
+        .joinToString("") { "%02x".format(it) }
+
+    private fun verifyArtifact(result: HandEvent.Result): VerifiedArtifact {
+        val encoded = result.artifactBase64 ?: throw ArtifactIntegrityException("产物内容缺失")
+        val declared = result.artifactSha256?.lowercase()
+            ?: throw ArtifactIntegrityException("产物缺少校验和")
+        if (!declared.matches(Regex("[0-9a-f]{64}"))) throw ArtifactIntegrityException("产物校验和格式无效")
         require(encoded.length <= 1_398_104) { "产物过大" }
-        val bytes = Base64.getDecoder().decode(encoded)
+        val bytes = try {
+            Base64.getDecoder().decode(encoded)
+        } catch (_: IllegalArgumentException) {
+            throw ArtifactIntegrityException("产物编码损坏")
+        }
         require(bytes.size <= 1_048_576) { "产物过大" }
-        fun sha256(data: ByteArray) = MessageDigest.getInstance("SHA-256").digest(data)
-            .joinToString("") { "%02x".format(it) }
-        val hash = sha256(bytes)
-        require(hash == result.artifactSha256) { "产物校验失败" }
+        val hash = sha256Hex(bytes)
+        if (!MessageDigest.isEqual(hash.toByteArray(), declared.toByteArray())) {
+            throw ArtifactIntegrityException("产物校验失败")
+        }
+        return VerifiedArtifact(bytes, hash)
+    }
+
+    private fun storeArtifact(taskId: String, attemptId: String, artifact: VerifiedArtifact): String {
+        val directory = checkNotNull(artifactDirectory) { "产物目录不可用" }
+        val bytes = artifact.bytes
+        val hash = artifact.sha256
         check(directory.isDirectory || directory.mkdirs()) { "无法创建产物目录" }
-        val key = sha256("$taskId\n$attemptId".toByteArray())
+        val key = sha256Hex("$taskId\n$attemptId".toByteArray())
         val destination = File(directory, "$key-$hash.bin")
         val temp = File.createTempFile("delivery-", ".tmp", directory)
         try {
             temp.outputStream().use { it.write(bytes); it.fd.sync() }
+            // Re-read what landed on disk before publishing it.
+            check(sha256Hex(temp.readBytes()) == hash) { "产物落盘校验失败" }
             check(temp.renameTo(destination)) { "无法保存任务产物" }
         } finally {
             temp.delete()

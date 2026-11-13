@@ -2127,19 +2127,61 @@ class HandServer:
         key = hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
         return os.path.join(self.state.dir, "artifacts", key + ".json")
 
+    # Bounded retry for transient local I/O while persisting/reading a
+    # delivery record (e.g. a busy or briefly unavailable state disk).
+    ARTIFACT_IO_RETRY_DELAYS = (0.05, 0.1, 0.2)
+
+    @staticmethod
+    def _verify_artifact_record(record) -> str | None:
+        """Integrity check of a stored delivery record; returns a reason or None."""
+        if not isinstance(record, dict) or not isinstance(record.get("output"), str):
+            return "record"
+        if record.get("artifact_present") != "true":
+            return None
+        encoded, digest = record.get("artifact_b64"), record.get("artifact_sha256")
+        if not isinstance(encoded, str) or not isinstance(digest, str):
+            return "fields"
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            return "encoding"
+        if len(content) > MAX_ARTIFACT_BYTES:
+            return "size"
+        size = record.get("artifact_size")
+        if size is not None and str(size) != str(len(content)):
+            return "size"
+        if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), digest):
+            return "sha256"
+        return None
+
     def _get_artifact(self, conn, session_key, envelope, seq, client_id, args):
         attempt = args.get("attempt", "")
         if not isinstance(attempt, str) or not 1 <= len(attempt) <= 64:
             self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "产物请求缺少执行轮次。")
             return
-        try:
-            with open(self._artifact_path(envelope, client_id, attempt), encoding="utf-8") as f:
-                record = json.load(f)
-        except FileNotFoundError:
-            self._error(conn, session_key, envelope, seq + 1, "artifact_missing", "此轮次没有已交付产物。")
-            return
-        except (OSError, ValueError):
+        path = self._artifact_path(envelope, client_id, attempt)
+        record = None
+        for delay in (0.0, *self.ARTIFACT_IO_RETRY_DELAYS):
+            if delay:
+                time.sleep(delay)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    record = json.load(f)
+                break
+            except FileNotFoundError:
+                self._error(conn, session_key, envelope, seq + 1, "artifact_missing", "此轮次没有已交付产物。")
+                return
+            except (OSError, ValueError):
+                record = None
+        if record is None:
             self._error(conn, session_key, envelope, seq + 1, "artifact_unavailable", "暂时无法读取已交付产物。")
+            return
+        problem = self._verify_artifact_record(record)
+        if problem is not None:
+            self.state.audit({"event": "artifact_corrupt", "task": envelope.get("task_id", ""),
+                              "attempt": attempt, "check": problem})
+            self._error(conn, session_key, envelope, seq + 1, "artifact_corrupt",
+                        "已交付产物校验失败，无法安全交付。")
             return
         self._send(conn, session_key, envelope, "cross_device_result", record, seq + 1)
 
@@ -2169,8 +2211,25 @@ class HandServer:
         record = {"output": output, "artifact_present": "false"}
         if content is not None:
             record.update(artifact_present="true", artifact_b64=b64e(content),
-                          artifact_sha256=hashlib.sha256(content).hexdigest())
+                          artifact_sha256=hashlib.sha256(content).hexdigest(),
+                          artifact_size=str(len(content)))
         path = self._artifact_path(envelope, client_id, attempt_id)
+        last_error = None
+        for delay in (0.0, *self.ARTIFACT_IO_RETRY_DELAYS):
+            if delay:
+                time.sleep(delay)
+            try:
+                self._write_artifact_record(path, record)
+                last_error = None
+                break
+            except OSError as e:
+                last_error = e
+        if last_error is not None:
+            raise last_error
+        return record
+
+    def _write_artifact_record(self, path, record) -> None:
+        """Atomic, durable write; the stored record is re-read and verified."""
         os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
                                          dir=os.path.dirname(path), delete=False) as f:
@@ -2183,7 +2242,17 @@ class HandServer:
             finally:
                 if os.path.exists(tmp):
                     os.unlink(tmp)
-        return record
+        try:
+            dir_fd = os.open(os.path.dirname(path), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass  # Directory fsync is not supported everywhere.
+        with open(path, encoding="utf-8") as f:
+            if json.load(f) != record:
+                raise OSError("delivery record verification failed")
 
     def _was_control_stopped(self, task_id: str) -> bool:
         meta = self.task_meta.get(task_id, {})

@@ -380,6 +380,100 @@ class HandDeadAttemptCleanupTest(unittest.TestCase):
                     self._cleanup()
 
 
+class HandArtifactIntegrityTest(unittest.TestCase):
+    """Delivery records: bounded write/read retry and integrity verification
+    in both Hand copies."""
+
+    def _server(self, module, temp):
+        server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+        server.ARTIFACT_IO_RETRY_DELAYS = (0, 0, 0)
+        self.events = []
+        server._send = lambda conn, key, envelope, kind, args, seq: self.events.append((kind, args))
+        self.envelope = {"agent_id": "agent", "task_id": "task-1", "folder": temp}
+        return server
+
+    def _staging(self, temp, content):
+        staging = os.path.join(temp, "staging")
+        os.makedirs(staging, exist_ok=True)
+        if content is not None:
+            with open(os.path.join(staging, "delivery.bin"), "wb") as f:
+                f.write(content)
+        return staging
+
+    def _get(self, server, attempt="att-1"):
+        server._get_artifact(None, b"", self.envelope, 1, "client", {"attempt": attempt})
+        return self.events[-1]
+
+    def test_saved_record_carries_size_and_verifies_on_read(self):
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                server = self._server(module, temp)
+                record = server._save_artifact(self.envelope, "client", "att-1",
+                                               self._staging(temp, b"payload"), "out")
+                self.assertEqual("7", record["artifact_size"])
+                self.assertEqual(hashlib.sha256(b"payload").hexdigest(), record["artifact_sha256"])
+                kind, args = self._get(server)
+                self.assertEqual("cross_device_result", kind)
+                self.assertEqual(record, args)
+                kind, args = self._get(server, "att-unknown")
+                self.assertEqual("artifact_missing", args["code"])
+
+    def test_corrupt_stored_record_is_never_delivered(self):
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                server = self._server(module, temp)
+                server._save_artifact(self.envelope, "client", "att-1", self._staging(temp, b"payload"), "out")
+                path = server._artifact_path(self.envelope, "client", "att-1")
+                with open(path, encoding="utf-8") as f:
+                    stored = json.load(f)
+                for tamper in (
+                    {"artifact_b64": base64.b64encode(b"paylaod").decode()},   # bytes changed
+                    {"artifact_size": "8"},                                    # size mismatch
+                    {"artifact_b64": "!!not base64!!"},                        # encoding broken
+                    {"artifact_sha256": None},                                 # checksum missing
+                ):
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump({**stored, **tamper}, f)
+                    kind, args = self._get(server)
+                    self.assertEqual("cross_device_error", kind, tamper)
+                    self.assertEqual("artifact_corrupt", args["code"], tamper)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write('{"output": "trunc')
+                kind, args = self._get(server)
+                self.assertEqual("artifact_unavailable", args["code"])
+                # A record without an artifact still verifies.
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"output": "ok", "artifact_present": "false"}, f)
+                self.assertEqual("cross_device_result", self._get(server)[0])
+
+    def test_record_write_is_retried_a_bounded_number_of_times(self):
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                server = self._server(module, temp)
+                real = server._write_artifact_record
+                calls = []
+
+                def flaky(path, record):
+                    calls.append(path)
+                    if len(calls) <= 2:
+                        raise OSError("disk busy")
+                    return real(path, record)
+                server._write_artifact_record = flaky
+                server._save_artifact(self.envelope, "client", "att-1", self._staging(temp, b"x"), "out")
+                self.assertEqual(3, len(calls))
+                self.assertEqual("cross_device_result", self._get(server)[0])
+
+                always = []
+
+                def broken(path, record):
+                    always.append(path)
+                    raise OSError("disk gone")
+                server._write_artifact_record = broken
+                with self.assertRaises(OSError):
+                    server._save_artifact(self.envelope, "client", "att-2", self._staging(temp, b"y"), "out")
+                self.assertEqual(1 + len(server.ARTIFACT_IO_RETRY_DELAYS), len(always))
+
+
 class BundledHandAuthorizationTest(unittest.TestCase):
     def test_source_and_bundled_dispatch_authorization_accept_and_reject_matrix(self):
         """Exercise the same authenticated _dispatch path shipped by both copies."""
