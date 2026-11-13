@@ -722,8 +722,9 @@ class ChatTurnView(
     }
 
     private fun friendlyError(raw: String): String {
-        val json = runCatching { org.json.JSONObject(raw) }.getOrNull()
-            ?: runCatching { org.json.JSONObject(raw.substringAfter(": ")) }.getOrNull()
+        val payloadStart = raw.indexOf('{')
+        val payload = if (payloadStart >= 0) raw.substring(payloadStart) else raw.substringAfter(": ")
+        val json = runCatching { org.json.JSONObject(payload) }.getOrNull()
         val code = json?.optJSONObject("error")?.optString("code")
             ?: json?.optString("code")
             ?: ""

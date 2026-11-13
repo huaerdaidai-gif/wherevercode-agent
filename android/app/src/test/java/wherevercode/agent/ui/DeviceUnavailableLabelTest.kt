@@ -91,7 +91,8 @@ class DeviceUnavailableLabelTest {
         val (controller, list) = controller()
         controller.renderDevices(emptyList(), listOf(record(PairingState.CONFIRMED)), {}, {}, {}, {})
         val text = collectText(list)
-        assertTrue(text.contains("已配对"))
+        assertTrue(text.contains("配对：已完成"))
+        assertTrue(text.contains("当前在线：未检测"))
         assertFalse(text.contains("（不可用）"))
     }
 
@@ -119,7 +120,7 @@ class DeviceUnavailableLabelTest {
         assertTrue(text.contains("端口 18743"))
         assertFalse(text.contains("192.0.2.10"))
         assertFalse(text.contains("192.168.1.7"))
-        assertTrue(text.contains("已配对"))
+        assertTrue(text.contains("配对：已完成"))
         assertTrue(text.contains("未配对（不可用）"))
         assertTrue(text.contains("添加远程设备"))
         // 添加入口可点。

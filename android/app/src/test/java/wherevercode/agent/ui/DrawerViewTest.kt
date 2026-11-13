@@ -57,7 +57,7 @@ class DrawerViewTest {
         activeTargetProvider = { activeTarget },
         userLabelProvider = { userLabel },
         themeLabelProvider = { themeLabel },
-    )
+    ).also { it.setGroupCollapsed("extensions", false) }
 
     @Test
     fun `top group exposes all ten V5 defaults in order`() {
@@ -108,7 +108,7 @@ class DrawerViewTest {
 
     @Test
     fun `default drawer keeps secondary resources folded below primary navigation`() {
-        val drawerView = view()
+        val drawerView = view().apply { setGroupCollapsed("extensions", true) }
         assertTrue(drawerView.isGroupCollapsed("extensions"))
         // 一级 10 + 工作空间 2 + 底部用户行 1；次级入口由可见分组头展开。
         assertEquals(13, drawerView.renderedIds().size)
