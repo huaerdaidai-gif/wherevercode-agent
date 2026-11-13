@@ -1,6 +1,12 @@
 package wherevercode.agent.core.agent
 
 import kotlinx.coroutines.runBlocking
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.security.cert.CertificateExpiredException
+import java.security.cert.CertificateException
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -14,6 +20,45 @@ import org.junit.Test
  * 假 HTTP 客户端，不发真实调用。
  */
 class PlatformChannelTransportTest {
+
+    @Test
+    fun `network errors have actionable messages and do not reveal raw causes`() {
+        assertTrue(
+            UrlConnectionPlatformHttpClient.networkFailureMessage(
+                UnknownHostException("secret-host"),
+            )!!.contains("无法解析平台地址"),
+        )
+        assertTrue(
+            UrlConnectionPlatformHttpClient.networkFailureMessage(
+                SocketTimeoutException("read timed out"),
+            )!!.contains("连接平台超时"),
+        )
+        assertTrue(
+            UrlConnectionPlatformHttpClient.networkFailureMessage(
+                SSLPeerUnverifiedException("hostname mismatch"),
+            )!!.contains("主机名校验失败"),
+        )
+        val expired = java.io.IOException("handshake", CertificateExpiredException("certificate expired"))
+        assertTrue(
+            UrlConnectionPlatformHttpClient.networkFailureMessage(expired)!!
+                .contains("证书已过期"),
+        )
+        val pinMismatch = java.io.IOException(
+            "handshake", CertificateException("The configured platform endpoint certificate pin did not match."),
+        )
+        assertTrue(
+            UrlConnectionPlatformHttpClient.networkFailureMessage(pinMismatch)!!
+                .contains("证书指纹与本地配置不一致"),
+        )
+        assertTrue(
+            UrlConnectionPlatformHttpClient.networkFailureMessage(SSLHandshakeException("handshake failed"))!!
+                .contains("TLS 握手失败"),
+        )
+        assertEquals(
+            null,
+            UrlConnectionPlatformHttpClient.networkFailureMessage(java.io.IOException("HTTP 401")),
+        )
+    }
 
     private fun envelope(toolJson: String): String = JSONObject().apply {
         put("jsonrpc", "2.0")

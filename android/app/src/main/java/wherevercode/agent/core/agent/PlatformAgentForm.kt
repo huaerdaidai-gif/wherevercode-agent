@@ -58,6 +58,7 @@ object PlatformAgentForm {
             ?: return Result.Rejected("平台 Agent ID 不能为空，如 example-agent。")
         val host = platformHost?.trim().takeIf { !it.isNullOrBlank() }
             ?: PlatformAgent.DEFAULT_PLATFORM_HOST
+        PlatformAgent.platformHostIssue(host)?.let { return Result.Rejected(it) }
         // 专用频道：填了就走该频道，空着即仍走共享“第一批”群
         // （null，见 PlatformAgent.effectiveChannelId），绝不伪造
         // 一个不存在的频道 ID、绝不把空着说成已走专用频道。

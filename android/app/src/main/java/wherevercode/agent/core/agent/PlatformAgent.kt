@@ -1,6 +1,7 @@
 package wherevercode.agent.core.agent
 
 import wherevercode.agent.BuildConfig
+import java.net.URI
 
 /**
  * 平台 Agent（Webhook 唤醒，V5，2026-11-11）。
@@ -47,7 +48,29 @@ object PlatformAgent {
     fun mcpEndpoint(platformHost: String?): String {
         val host = platformHost?.trim().takeIf { !it.isNullOrBlank() }
             ?: DEFAULT_PLATFORM_HOST
-        return host.takeIf { it.isNotBlank() }?.let { "https://$it$MCP_PATH" }.orEmpty()
+        return host.takeIf { it.isNotBlank() && platformHostIssue(it) == null }
+            ?.let { "https://$it$MCP_PATH" }.orEmpty()
+    }
+
+    /** Return an actionable validation error for the host-only platform address field. */
+    fun platformHostIssue(value: String?): String? {
+        val host = value?.trim().orEmpty()
+        if (host.isBlank()) return "平台地址不能为空。"
+        if (host.any { it.isWhitespace() } || host.any { it in "/?#@" } || host.endsWith(':')) {
+            return "平台地址只填主机名或主机名:端口，不要填写协议、路径或凭证。"
+        }
+        val parsed = try {
+            URI("https://$host")
+        } catch (_: Exception) {
+            return "平台地址格式无效，请填写主机名或主机名:端口。"
+        }
+        if (parsed.host.isNullOrBlank() || parsed.rawUserInfo != null ||
+            parsed.rawPath.orEmpty().isNotEmpty() || parsed.rawQuery != null || parsed.rawFragment != null ||
+            parsed.port == 0 || parsed.port > 65535
+        ) {
+            return "平台地址格式无效，请填写主机名或主机名:端口。"
+        }
+        return null
     }
 
     /** 默认平台地址（表单可改；端点由它拼出，见 [mcpEndpoint]）。 */

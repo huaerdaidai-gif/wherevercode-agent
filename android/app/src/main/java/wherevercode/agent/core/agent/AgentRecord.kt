@@ -201,8 +201,7 @@ data class AgentRecord(
                 // 引用名，不记在记录里）；binary/deviceId 必须为空。
                 if (platformAgentId.isNullOrBlank()) errors += "平台 Agent 需要填写平台 Agent ID，如 example-agent"
                 val host = platformHost
-                if (host.isNullOrBlank()) errors += "平台 Agent 需要填写平台地址"
-                else if (host.contains("://") || host.contains("/")) errors += "平台地址只填主机名，如 example.invalid"
+                PlatformAgent.platformHostIssue(host)?.let(errors::add)
                 if (authRef != null) errors += "平台 Agent 没有密钥输入框：平台凭证是 App 级的，填在表单的平台凭证栏（只存本机 Keystore）"
                 if (binary != null) errors += "平台 Agent 不是 CLI：请去掉 CLI 二进制名"
                 if (deviceId != null) errors += "平台 Agent 不在任何设备上：请去掉设备归属"
