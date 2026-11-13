@@ -171,7 +171,13 @@ struct SettingsView: View {
                         }
                         LabeledContent("Token 状态", value: appState.hasToken ? "已保存" : "未保存")
                     }
-                    .accessibilityIdentifier("settings.advancedToken")
+                    // NOTE: no accessibilityIdentifier on the
+                    // DisclosureGroup itself — SwiftUI propagates a
+                    // container's identifier to every child, which
+                    // shadowed settings.tokenField / settings.saveToken
+                    // in the accessibility tree (found via CI screen
+                    // recording + element dump). The UI test finds this
+                    // header by its label instead.
                 }
                 Section("连接状态") {
                     connectionStatusContent

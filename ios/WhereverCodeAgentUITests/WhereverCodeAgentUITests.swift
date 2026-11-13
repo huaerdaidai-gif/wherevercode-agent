@@ -85,16 +85,20 @@ final class WhereverCodeAgentUITests: XCTestCase {
         app.buttons["settings.saveAddressChannel"].tap()
 
         // --- Paste the dummy token through the advanced fallback.
-        let advancedToggle = app.buttons["settings.advancedToken"]
+        // The disclosure header is found by label: an identifier on
+        // the DisclosureGroup container itself would propagate to
+        // (and shadow) every control inside it.
+        let advancedToggle = app.buttons["手工粘贴 Token（兜底）"]
         reveal(advancedToggle, in: app)
         XCTAssertTrue(advancedToggle.waitForExistence(timeout: 10))
         advancedToggle.tap()
-        // Query the token field by its placeholder (the phase-2 way):
-        // an identifier query on a SecureField inside a
-        // DisclosureGroup does not match even while the field is on
-        // screen — verified from the previous run's screen
-        // recording, which showed the expanded group and the field
-        // while the identifier query timed out.
+        // Query the token field by its placeholder (the phase-2 way).
+        // An earlier failure had a subtle cause, proven by that run's
+        // element dump: the DisclosureGroup's own identifier had
+        // propagated to every child inside it, shadowing
+        // settings.tokenField — the group no longer carries an
+        // identifier, and the placeholder query is kept as the
+        // proven route regardless.
         let tokenField = app.secureTextFields.matching(
             NSPredicate(format: "placeholderValue BEGINSWITH %@", "粘贴 Agent Token")
         ).firstMatch
