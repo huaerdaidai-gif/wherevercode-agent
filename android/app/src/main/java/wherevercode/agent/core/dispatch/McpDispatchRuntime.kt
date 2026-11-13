@@ -32,16 +32,13 @@ object McpDispatchRuntime {
         return synchronized(lock) {
             if (!enabled) {
                 prefs.edit().putBoolean(KEY_ENABLED, false).apply()
-                host?.service?.tokens?.tokens()
-                    ?.filterNot { it.revoked }
-                    ?.forEach { host?.service?.tokens?.revoke(it.tokenId) }
+                host?.service?.tokens?.revokeAll()
                 host?.stop()
                 host = null
                 null
             } else {
                 val active = ensureHost(app)
-                active.service.tokens.tokens().filterNot { it.revoked }
-                    .forEach { active.service.tokens.revoke(it.tokenId) }
+                active.service.tokens.revokeAll()
                 prefs.edit().putBoolean(KEY_ENABLED, true).apply()
                 active.server.url
             }
@@ -53,9 +50,7 @@ object McpDispatchRuntime {
         check(isEnabled(app)) { "请先启用 MCP 派工服务" }
         return synchronized(lock) {
             val active = ensureHost(app)
-            active.service.tokens.tokens()
-                .filter { it.role == DispatchRole.OWNER && !it.revoked }
-                .forEach { active.service.tokens.revoke(it.tokenId) }
+            active.service.tokens.revokePrincipal("owner")
             active.service.tokens.issue(
                 principalId = "owner",
                 role = DispatchRole.OWNER,

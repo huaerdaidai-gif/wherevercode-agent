@@ -46,6 +46,17 @@ class DispatchTokenRegistryTest {
     }
 
     @Test
+    fun `revoke all invalidates every active token`() {
+        val registry = DispatchTokenRegistry(InMemoryDispatchStateStore())
+        val owner = registry.issue("owner", DispatchRole.OWNER, emptySet())
+        val agent = registry.issue("chatgpt", DispatchRole.AGENT, setOf(DispatchCapability.DISPATCH))
+
+        assertEquals(2, registry.revokeAll())
+        assertNull(registry.authenticate(owner.token))
+        assertNull(registry.authenticate(agent.token))
+    }
+
+    @Test
     fun `each issue yields a distinct token`() {
         val registry = DispatchTokenRegistry(InMemoryDispatchStateStore())
         val tokens = (1..20).map { registry.issue("a$it", DispatchRole.AGENT, setOf(DispatchCapability.EXECUTE)).token }.toSet()

@@ -81,6 +81,13 @@ class DispatchTokenRegistry(
         return n
     }
 
+    /** Revoke every active credential, optionally limited to one role. */
+    fun revokeAll(role: DispatchRole? = null): Int {
+        val active = state.tokens().filter { !it.revoked && (role == null || it.role == role) }
+        active.forEach { state.putToken(it.copy(revoked = true)) }
+        return active.size
+    }
+
     /** [principalId] 是否是一个有效（未吊销）且具备 execute 能力的执行方。 */
     fun isActiveExecutor(principalId: String): Boolean =
         state.tokens().any {
