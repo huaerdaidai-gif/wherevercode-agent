@@ -7,6 +7,7 @@ import wherevercode.agent.core.mcp.RemoteTarget
 import wherevercode.agent.core.security.AuthorizationStore
 import wherevercode.agent.core.security.RevocationStore
 import wherevercode.agent.core.task.TaskControlCounterStore
+import wherevercode.agent.core.task.LocalTaskRunner
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStore
@@ -94,6 +95,7 @@ class ControlPlane(
      */
     @Volatile private var remoteTargetResolver: ((String?) -> RemoteTarget?)? = null,
     @Volatile private var remoteControlSender: RemoteControlSender? = null,
+    @Volatile private var localExecutionIsActive: ((String) -> Boolean)? = null,
     @Volatile private var localExecutionControl: ((String, ControlAction) -> Boolean)? = null,
 ) : ControlCommandPort {
     private val counters: TaskControlCounterStore? =
@@ -111,7 +113,11 @@ class ControlPlane(
     }
 
     /** Connect local task controls to the active executor's safe-point signal. */
-    fun configureLocalExecutionControl(handler: ((String, ControlAction) -> Boolean)?) {
+    fun configureLocalExecutionControl(
+        isExecuting: ((String) -> Boolean)?,
+        handler: ((String, ControlAction) -> Boolean)?,
+    ) {
+        localExecutionIsActive = isExecuting
         localExecutionControl = handler
     }
 
@@ -123,6 +129,13 @@ class ControlPlane(
                 return@execute ControlResult(
                     ok = false, confirmed = false, status = getControlStatus(taskId),
                     errorCode = "control_terminal_task", reason = "任务已结束（${task.state}），无法暂停",
+                )
+            }
+            if (isLocalTaskInFlight(task) && localExecutionIsActive?.invoke(taskId) == false) {
+                return@execute ControlResult(
+                    ok = false, confirmed = false, status = getControlStatus(taskId),
+                    errorCode = "control_local_executor_inactive",
+                    reason = "本机当前没有执行此任务，未向其他会话发送暂停",
                 )
             }
             when (getControlStatus(taskId)) {
@@ -206,6 +219,13 @@ class ControlPlane(
                 return@execute ControlResult(
                     ok = false, confirmed = false, status = status,
                     errorCode = "control_terminal_task", reason = "任务已结束（${task.state}），无需停止",
+                )
+            }
+            if (isLocalTaskInFlight(task) && localExecutionIsActive?.invoke(taskId) == false) {
+                return@execute ControlResult(
+                    ok = false, confirmed = false, status = status,
+                    errorCode = "control_local_executor_inactive",
+                    reason = "本机当前没有执行此任务，未向其他会话发送停止",
                 )
             }
             if (status == ControlStatus.STOPPING) {
@@ -473,6 +493,7 @@ class ControlPlane(
                 ControlStatus.PAUSING -> {
                     if (TaskStates.isTerminal(task.state) || !isTaskInFlight(task.state) || leaseExpired(task)) {
                         controlStore.setControlStatus(taskId, ControlStatus.PAUSED)
+                        controlStore.setDispatchFrozen(taskId, false)
                         ControlResult(
                             ok = true, confirmed = true, status = ControlStatus.PAUSED,
                             reason = "暂停已确认：执行已实际终止",
@@ -580,6 +601,10 @@ class ControlPlane(
         val lease = task.leaseExpiresAt ?: return true
         return lease <= nowEpochSeconds()
     }
+
+    private fun isLocalTaskInFlight(task: TaskRecord): Boolean =
+        task.assignedAgentId.equals(LocalTaskRunner.LOCAL_AGENT_ID, ignoreCase = true) &&
+            isTaskInFlight(task.state)
 
     /**
      * One command, one transaction: dedup check, state change, counter

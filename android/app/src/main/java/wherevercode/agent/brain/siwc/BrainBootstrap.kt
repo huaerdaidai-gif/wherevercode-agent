@@ -1433,7 +1433,12 @@ object BrainBootstrap {
             // P2：plan 未批准不认领、编码完成停 review（见 LocalTaskRunner）。
             pipelineHook = pipelineHook,
         )
-        controlPlane.configureLocalExecutionControl { taskId, action ->
+        controlPlane.configureLocalExecutionControl(
+            isExecuting = { taskId -> taskRunner.isExecuting(taskId) },
+        ) { taskId, action ->
+            // TurnController is shared with foreground chat. Never let a
+            // stale/orphaned task control interrupt a different live turn.
+            if (!taskRunner.isExecuting(taskId)) return@configureLocalExecutionControl false
             val task = taskStore.getTask(taskId) ?: return@configureLocalExecutionControl false
             if (!task.assignedAgentId.equals(LocalTaskRunner.LOCAL_AGENT_ID, ignoreCase = true)) {
                 return@configureLocalExecutionControl false

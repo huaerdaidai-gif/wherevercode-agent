@@ -136,25 +136,40 @@ class LocalTaskRunnerVerdictTest {
     }
 
     @Test
-    fun `cooperative pause and stop safe point cancel task and acknowledge only after it returns`() = runBlocking {
-        for ((id, code, expected) in listOf(
-            Triple("local-pause", "turn_paused", "paused"),
-            Triple("local-stop", "turn_stopped", "stopped"),
-        )) {
-            queued(id)
-            val runner = runnerWith(TaskExecutionResult(success = false, summary = "", error = "$code：安全检查点"))
-            var acknowledged: String? = null
-            runner.onControlCheckpoint = { taskId, outcome ->
-                assertEquals(id, taskId)
-                acknowledged = outcome
-            }
-            try {
-                runner.pumpOnce()
-                assertEquals("cancelled", taskStore.getTask(id)!!.state)
-                assertEquals(expected, acknowledged)
-            } finally {
-                runner.stop()
-            }
+    fun `cooperative pause requeues task and acknowledges at safe point`() = runBlocking {
+        val id = "local-pause"
+        queued(id)
+        val runner = runnerWith(TaskExecutionResult(success = false, summary = "", error = "turn_paused：安全检查点"))
+        var acknowledged: String? = null
+        runner.onControlCheckpoint = { taskId, outcome ->
+            assertEquals(id, taskId)
+            acknowledged = outcome
+        }
+        try {
+            runner.pumpOnce()
+            assertEquals("requeued", taskStore.getTask(id)!!.state)
+            assertEquals("paused", acknowledged)
+        } finally {
+            runner.stop()
+        }
+    }
+
+    @Test
+    fun `cooperative stop cancels task and acknowledges at safe point`() = runBlocking {
+        val id = "local-stop"
+        queued(id)
+        val runner = runnerWith(TaskExecutionResult(success = false, summary = "", error = "turn_stopped：安全检查点"))
+        var acknowledged: String? = null
+        runner.onControlCheckpoint = { taskId, outcome ->
+            assertEquals(id, taskId)
+            acknowledged = outcome
+        }
+        try {
+            runner.pumpOnce()
+            assertEquals("cancelled", taskStore.getTask(id)!!.state)
+            assertEquals("stopped", acknowledged)
+        } finally {
+            runner.stop()
         }
     }
 }

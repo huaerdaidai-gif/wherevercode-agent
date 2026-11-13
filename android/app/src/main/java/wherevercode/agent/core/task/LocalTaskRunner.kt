@@ -424,13 +424,11 @@ class LocalTaskRunner(
             // Pause and stop are confirmed only after the brain reports its
             // next safe point. A blocked/non-cooperative tool remains in its
             // real in-flight state until it returns; no false acknowledgement.
-            finishAsCancelled(
-                taskId,
-                if (controlCode == "paused") "任务已在安全检查点暂停；恢复需重新发起后续轮次。"
-                else "任务已在安全检查点停止。",
-                attemptId,
-                startedAtMs,
-            )
+            if (controlCode == "paused") {
+                finishAsPaused(taskId, "任务已在安全检查点暂停，可恢复后继续。", attemptId)
+            } else {
+                finishAsCancelled(taskId, "任务已在安全检查点停止。", attemptId, startedAtMs)
+            }
             onControlCheckpoint?.invoke(taskId, controlCode)
             return
         }
@@ -539,6 +537,12 @@ class LocalTaskRunner(
         // P1 eval 日志（取消也是终态结论，记一条；outcome=CANCELLED）。
         recordEval(taskId, EvalOutcome.CANCELLED, startedAtMs)
         onTasksChanged?.invoke()
+    }
+
+    /** Keep a safely paused task resumable; cancellation is terminal. */
+    private fun finishAsPaused(taskId: String, note: String, attemptId: String?) {
+        val landed = updateTask(taskId, mapOf("state" to "requeued", "result" to note), attemptId) != null
+        if (landed) onTasksChanged?.invoke()
     }
 
     /**
