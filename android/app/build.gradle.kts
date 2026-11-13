@@ -84,8 +84,16 @@ android {
     // No shared private key or signing password is stored in this repository.
     // APKs signed with a new key cannot update installations signed by the
     // historical pinned debug key; users may need to uninstall first.
-    
     buildTypes {
+        debug {
+            // CI/debug installs coexist with the established app and its data.
+            applicationIdSuffix = ".ci"
+        }
+        create("compat") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ""
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
         }
