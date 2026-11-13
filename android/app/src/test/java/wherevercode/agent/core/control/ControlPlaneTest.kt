@@ -156,7 +156,7 @@ class ControlPlaneTest {
     }
 
     @Test
-    fun `orphaned local task control is rejected before freezing or touching shared turn`() {
+    fun `orphaned local task pause freezes then requeues only after lease expiry`() {
         taskStore.createTask(
             task("orphan", "working", leaseExpiresAt = now + 90)
                 .copy(assignedAgentId = "local"),
@@ -169,12 +169,52 @@ class ControlPlaneTest {
 
         val result = plane.pause("orphan", "op-orphan-pause", "user pause")
 
-        assertFalse(result.ok)
-        assertEquals("control_local_executor_inactive", result.errorCode)
-        assertEquals(ControlStatus.RUNNING, plane.getControlStatus("orphan"))
-        assertFalse(controlStore.isDispatchFrozen("orphan"))
+        assertTrue(result.ok)
+        assertFalse(result.confirmed)
+        assertEquals(ControlStatus.PAUSING, result.status)
+        assertTrue(controlStore.isDispatchFrozen("orphan"))
         assertEquals(0, controlCalls)
         assertEquals("working", taskStore.getTask("orphan")!!.state)
+        assertFalse(plane.resume("orphan", "op-orphan-early-resume", "too early").ok)
+        assertTrue(controlStore.isDispatchFrozen("orphan"))
+
+        now += 91
+        plane.reconcileExpiredLocalControls()
+        assertEquals("requeued", taskStore.getTask("orphan")!!.state)
+        assertEquals(ControlStatus.PAUSED, plane.getControlStatus("orphan"))
+        assertFalse(controlStore.isDispatchFrozen("orphan"))
+        assertTrue(plane.resume("orphan", "op-orphan-resume", "continue").ok)
+        assertEquals(ControlStatus.RUNNING, plane.getControlStatus("orphan"))
+    }
+
+    @Test
+    fun `orphaned local stop stays frozen then cancels after lease expiry without rerun`() {
+        taskStore.createTask(
+            task("orphan-stop", "working", leaseExpiresAt = now + 90)
+                .copy(assignedAgentId = "local"),
+        )
+        var controlCalls = 0
+        plane.configureLocalExecutionControl(
+            isExecuting = { false },
+            handler = { _, _ -> controlCalls++; true },
+        )
+
+        val result = plane.stop("orphan-stop", "op-orphan-stop", "user stop")
+        assertTrue(result.ok)
+        assertFalse(result.confirmed)
+        assertEquals(ControlStatus.STOPPING, result.status)
+        assertTrue(controlStore.isDispatchFrozen("orphan-stop"))
+        assertEquals(0, controlCalls)
+
+        now += 91
+        plane.reconcileExpiredLocalControls()
+
+        val stopped = taskStore.getTask("orphan-stop")!!
+        assertEquals("cancelled", stopped.state)
+        assertFalse(TaskStates.isClaimable(stopped.state))
+        assertEquals(ControlStatus.STOPPING, plane.getControlStatus("orphan-stop"))
+        assertFalse(controlStore.isDispatchFrozen("orphan-stop"))
+        assertEquals(0, controlCalls)
     }
 
     @Test

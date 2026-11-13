@@ -171,6 +171,10 @@ class LocalTaskRunner(
     @Volatile
     var onControlCheckpoint: ((String, String) -> Unit)? = null
 
+    /** Reconcile persisted local controls after expired leases are swept. */
+    @Volatile
+    var onLeaseSweep: (() -> Unit)? = null
+
     fun isExecuting(): Boolean = executingTaskId != null
 
     fun isExecuting(taskId: String): Boolean = executingTaskId == taskId
@@ -247,6 +251,11 @@ class LocalTaskRunner(
             scheduler.releaseExpiredLeases()
         } catch (_: Exception) {
             // Sweep failure never kills the pump; next round retries.
+        }
+        try {
+            onLeaseSweep?.invoke()
+        } catch (_: Exception) {
+            // Control reconciliation is retried on the next sweep.
         }
         val candidate = pickNext() ?: return
         if (scheduler.activeWorkCount() != 0) return

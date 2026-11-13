@@ -131,13 +131,6 @@ class ControlPlane(
                     errorCode = "control_terminal_task", reason = "任务已结束（${task.state}），无法暂停",
                 )
             }
-            if (isLocalTaskInFlight(task) && localExecutionIsActive?.invoke(taskId) == false) {
-                return@execute ControlResult(
-                    ok = false, confirmed = false, status = getControlStatus(taskId),
-                    errorCode = "control_local_executor_inactive",
-                    reason = "本机当前没有执行此任务，未向其他会话发送暂停",
-                )
-            }
             when (getControlStatus(taskId)) {
                 ControlStatus.PAUSED -> ControlResult(
                     ok = true, confirmed = true, status = ControlStatus.PAUSED,
@@ -168,7 +161,9 @@ class ControlPlane(
             }
         }
         maybeSendRemoteControl(ControlAction.PAUSE, taskId, operationId, result)
-        if (result.status == ControlStatus.PAUSING) localExecutionControl?.invoke(taskId, ControlAction.PAUSE)
+        if (result.status == ControlStatus.PAUSING && localExecutionIsActive?.invoke(taskId) != false) {
+            localExecutionControl?.invoke(taskId, ControlAction.PAUSE)
+        }
         return result
     }
 
@@ -188,6 +183,10 @@ class ControlPlane(
                 ControlStatus.STOPPING -> ControlResult(
                     ok = false, confirmed = false, status = ControlStatus.STOPPING,
                     errorCode = "control_stopping", reason = "任务正在停止，无法恢复",
+                )
+                ControlStatus.PAUSING -> ControlResult(
+                    ok = false, confirmed = false, status = ControlStatus.PAUSING,
+                    errorCode = "control_pausing", reason = "暂停尚未确认，不能恢复",
                 )
                 else -> {
                     token.confirm(taskId)
@@ -221,13 +220,6 @@ class ControlPlane(
                     errorCode = "control_terminal_task", reason = "任务已结束（${task.state}），无需停止",
                 )
             }
-            if (isLocalTaskInFlight(task) && localExecutionIsActive?.invoke(taskId) == false) {
-                return@execute ControlResult(
-                    ok = false, confirmed = false, status = status,
-                    errorCode = "control_local_executor_inactive",
-                    reason = "本机当前没有执行此任务，未向其他会话发送停止",
-                )
-            }
             if (status == ControlStatus.STOPPING) {
                 return@execute ControlResult(
                     ok = true, confirmed = false, status = ControlStatus.STOPPING,
@@ -259,7 +251,9 @@ class ControlPlane(
             }
         }
         maybeSendRemoteControl(ControlAction.STOP, taskId, operationId, result)
-        if (result.status == ControlStatus.STOPPING) localExecutionControl?.invoke(taskId, ControlAction.STOP)
+        if (result.status == ControlStatus.STOPPING && localExecutionIsActive?.invoke(taskId) != false) {
+            localExecutionControl?.invoke(taskId, ControlAction.STOP)
+        }
         return result
     }
 
@@ -492,6 +486,21 @@ class ControlPlane(
                 )
                 ControlStatus.PAUSING -> {
                     if (TaskStates.isTerminal(task.state) || !isTaskInFlight(task.state) || leaseExpired(task)) {
+                        if (isTaskInFlight(task.state) && leaseExpired(task)) {
+                            taskStore.updateTask(
+                                taskId,
+                                mapOf(
+                                    "state" to "requeued",
+                                    "assigned_agent_id" to null,
+                                    "lease_owner" to null,
+                                    "lease_expires_at" to null,
+                                    "member_id" to null,
+                                    "attempt_id" to null,
+                                    "needs_attention" to true,
+                                ),
+                                task.version, task.goalVersion, task.authEpoch,
+                            )
+                        }
                         controlStore.setControlStatus(taskId, ControlStatus.PAUSED)
                         controlStore.setDispatchFrozen(taskId, false)
                         ControlResult(
@@ -565,6 +574,34 @@ class ControlPlane(
             }
         }
 
+    /**
+     * Finalize local pause/stop requests once a crashed executor's lease
+     * expires. Called after each lease sweep; the sweep preserves pending
+     * control states so they cannot be silently requeued first.
+     */
+    fun reconcileExpiredLocalControls() {
+        val expired = try {
+            taskStore.listTasks().filter { task ->
+                isLocalDispatchedTask(task) && isTaskInFlight(task.state) && leaseExpired(task)
+            }
+        } catch (_: Exception) {
+            return
+        }
+        for (task in expired) {
+            when (getControlStatus(task.taskId)) {
+                ControlStatus.PAUSING -> confirmPaused(
+                    task.taskId, "lease-pause-${java.util.UUID.randomUUID()}",
+                    "本机执行器租约过期，已安全回队等待恢复",
+                )
+                ControlStatus.STOPPING -> confirmStop(
+                    task.taskId, "lease-stop-${java.util.UUID.randomUUID()}",
+                    "本机执行器租约过期，已确认停止",
+                )
+                else -> Unit
+            }
+        }
+    }
+
     /** Current counters, for callers that snapshot them (claim / issue). */
     fun currentGoalVersion(taskId: String): Long =
         maxOf(goalVersion.current(taskId), taskStore.getTask(taskId)?.goalVersion ?: 0)
@@ -602,9 +639,9 @@ class ControlPlane(
         return lease <= nowEpochSeconds()
     }
 
-    private fun isLocalTaskInFlight(task: TaskRecord): Boolean =
-        task.assignedAgentId.equals(LocalTaskRunner.LOCAL_AGENT_ID, ignoreCase = true) &&
-            isTaskInFlight(task.state)
+    private fun isLocalDispatchedTask(task: TaskRecord): Boolean =
+        task.sessionId == null &&
+            task.assignedAgentId.equals(LocalTaskRunner.LOCAL_AGENT_ID, ignoreCase = true)
 
     /**
      * One command, one transaction: dedup check, state change, counter
