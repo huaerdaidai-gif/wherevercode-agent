@@ -28,14 +28,14 @@ import wherevercode.agent.core.task.TaskOrigins
  */
 interface DispatchClaimPort {
     fun claim(taskId: String, agentId: String, attemptId: String, nowEpochSeconds: Long): TaskRecord?
-    fun start(taskId: String): TaskRecord?
+    fun start(taskId: String, attemptId: String): TaskRecord?
 }
 
 class SchedulerClaimPort(private val scheduler: TaskScheduler) : DispatchClaimPort {
     override fun claim(taskId: String, agentId: String, attemptId: String, nowEpochSeconds: Long): TaskRecord? =
         scheduler.claimMcpTaskForMember(taskId, agentId, attemptId, nowEpochSeconds)
 
-    override fun start(taskId: String): TaskRecord? = scheduler.startTask(taskId)
+    override fun start(taskId: String, attemptId: String): TaskRecord? = scheduler.startTask(taskId, attemptId)
 }
 
 /**
@@ -317,20 +317,28 @@ class McpDispatchService(
             task.leaseOwner.equals(principal.id, ignoreCase = true) && task.attemptId != null &&
             hasLiveLease(task)
         ) {
-            val current = if (task.state == "assigned") claimPort.start(task.taskId) ?: task else task
+            val current = if (task.state == "assigned") startClaim(task.taskId, task.attemptId) else task
             return claimResponse(principal, current, resumed = true)
         }
         if (!TaskStates.isClaimable(task.state)) {
             throw DispatchException(DispatchErrors.CLAIM_REJECTED, "任务当前不可认领（${task.state}）")
         }
         val attemptId = newId()
-        val claimed = claimPort.claim(task.taskId, principal.id, attemptId, nowEpochSeconds())
+        claimPort.claim(task.taskId, principal.id, attemptId, nowEpochSeconds())
             ?: throw DispatchException(
                 DispatchErrors.CLAIM_REJECTED,
                 "认领被调度器拒绝：你手上已有执行中的任务，或有任务处于冻结（暂停/停止待确认）",
             )
-        val started = claimPort.start(task.taskId) ?: claimed
+        val started = startClaim(task.taskId, attemptId)
         return claimResponse(principal, started, resumed = false)
+    }
+
+    private fun startClaim(taskId: String, attemptId: String): TaskRecord {
+        return claimPort.start(taskId, attemptId) ?: run {
+            val current = taskStore.getTask(taskId) ?: throw notFound(taskId)
+            executorFence(current)
+            throw DispatchException(DispatchErrors.CLAIM_REJECTED, "认领已变化，任务未启动")
+        }
     }
 
     private fun claimResponse(principal: DispatchPrincipal, task: TaskRecord, resumed: Boolean): JSONObject =
