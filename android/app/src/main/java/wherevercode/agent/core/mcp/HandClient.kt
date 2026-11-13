@@ -400,8 +400,12 @@ class HandClient(
 
         // 5. 任务凭证（TTL 900s），随信封发送。
         val credential = TaskCredentialIssuer.issue(
+            userId = "",
             taskId = request.taskId,
+            attempt = "",
+            sourceDeviceId = ownDeviceId,
             targetDeviceId = request.peer.deviceId,
+            agentId = request.agentId,
             folder = request.folder,
             signingKey = signingKey,
             ttlSeconds = request.credentialTtlSeconds,

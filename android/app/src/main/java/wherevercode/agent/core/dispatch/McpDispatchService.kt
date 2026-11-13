@@ -165,6 +165,7 @@ class McpDispatchService(
             val response = JSONObject(existing.responseJson)
             val savedProject = response.optJSONObject("task")?.let { optText(it, "project_id", 128) }
             if (!principal.canAccessProject(savedProject)) throw forbiddenTask()
+            if (def.name in CONTROL_TOOLS) return work().put("replayed", true)
             if (def.name == DispatchTools.CLAIM_TASK) {
                 val task = requireTask(args)
                 requireExecutorScope(principal, task)
@@ -596,6 +597,7 @@ class McpDispatchService(
     private fun terminal(task: TaskRecord) = DispatchException(DispatchErrors.TASK_TERMINAL, "任务已结束（${task.state}）")
 
     companion object {
+        private val CONTROL_TOOLS = setOf(DispatchTools.PAUSE_TASK, DispatchTools.RESUME_TASK, DispatchTools.STOP_TASK)
         const val EVENT_MCP_CREATED = "mcp_created"
         const val EVENT_MCP_ASSIGNED = "mcp_assigned"
         const val EVENT_MCP_PROGRESS = "mcp_progress"

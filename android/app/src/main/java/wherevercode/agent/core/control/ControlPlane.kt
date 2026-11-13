@@ -374,9 +374,10 @@ class ControlPlane(
             ControlAction.TAKEOVER -> true
         }
         if (!needsSend) return
-        if (!sentRemoteControls.add(operationId)) return
         val task = taskStore.getTask(taskId) ?: return
+        if (getControlStatus(taskId) != result.status) return
         val target = resolver(task.assignedAgentId) ?: return
+        if (!sentRemoteControls.add(operationId)) return
         // 快照读任务行（账本权威）：任务行与 ControlStore 计数器正常
         // 是一起涨的；任务行若领先，以任务行为准，绝不发一个比任务行
         // 旧的快照（远端会当成过期拒绝）。
@@ -389,7 +390,10 @@ class ControlPlane(
         )
         try {
             sender.send(target, taskId, command) { remoteResult ->
-                if (!remoteResult.confirmed) return@send
+                if (!remoteResult.confirmed) {
+                    sentRemoteControls.remove(operationId)
+                    return@send
+                }
                 // 确认用派生的新 operationId：execute() 按 operationId
                 // 去重，复用原 operationId 会被当成重放而直接返回旧结果。
                 val confirmOpId = "$operationId:remote-confirm"

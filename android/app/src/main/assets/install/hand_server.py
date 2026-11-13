@@ -513,13 +513,9 @@ def verify_credential(
     """返回 None 表示通过，否则返回错误码。校验顺序与 App 侧一致：
     签名 → 过期 → 撤销 → 绑定（任务/目标/文件夹）→ 授权仍存在。
 
-    注意：App 侧 HandClient 目前签发的是 legacy v2 凭证（user_id /
-    attempt / source_device_id / agent_id 为空串，见
-    TaskCredentialIssuer.issue 的 legacy 重载），所以这里不校验
-    agent 绑定——agent 归属由信封 agentId + auth.json 授权表约束
-    （folder 必须在该 agent 的授权列表里）；epoch / goal_version
-    由 args["control"] 快照约束（见 _check_fence）。legacy 校验是
-    完整 v2 校验的子集，未来客户端改签完整凭证时同样通过。"""
+    Older paired clients may omit agent_id. When the credential carries
+    an agent binding, it must match the requested Agent.
+    """
     mac_key = hashlib.sha256(signing_key).digest()
     expected_sig = hmac.new(mac_key, canonical_payload(cred), hashlib.sha256).digest()
     if not hmac.compare_digest(expected_sig, cred["sig"]):
@@ -1358,6 +1354,10 @@ class HandServer:
         # 新项目目录仅从 args.folder 读取；绝不能把信封目录临时加入
         # 授权列表来绕过凭证的现有目录授权检查。
         authorized = self.authorized_folders(agent_id)
+        if cred["source_device_id"] and cred["source_device_id"] != client_id:
+            self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TASK,
+                        "连接凭证不属于此设备。")
+            return
         err = verify_credential(
             cred, signing_key,
             expected_task_id=task_id,

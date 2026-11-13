@@ -198,6 +198,10 @@ class BundledHandAuthorizationTest(unittest.TestCase):
                 self.assertEqual("cross_device_error", kind)
                 self.assertEqual(module.ERR_WRONG_FOLDER, args["code"])
 
+                kind, args = dispatch(task="wrong-agent-same-folder", envelope_agent="other")
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_WRONG_TASK, args["code"])
+
                 kind, args = dispatch(task="folder", envelope_folder=project,
                                       credential_folder=base, requested=outside)
                 self.assertEqual("cross_device_error", kind)
