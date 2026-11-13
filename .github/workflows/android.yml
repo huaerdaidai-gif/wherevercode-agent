@@ -24,11 +24,50 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.0"
-      - name: Run JVM tests and build debug APK
-        run: gradle -p android :app:testDebugUnitTest :app:assembleDebug --stacktrace
-      - uses: actions/upload-artifact@v4
-        if: success()
+      # Tests and APK are separate steps so the APK is still built when
+      # tests fail. A failing test step still fails the job (no
+      # continue-on-error): the run stays red, artifacts are only for triage.
+      - name: Run JVM tests
+        id: tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          gradle -p android :app:testDebugUnitTest --continue --stacktrace 2>&1 | tee ci-logs/test.log
+      - name: Build debug APK
+        id: apk
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          gradle -p android :app:assembleDebug --stacktrace 2>&1 | tee ci-logs/assemble.log
+      - name: Upload test reports and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
         with:
-          name: wherevercode-agent-debug-apk
+          name: wherevercode-agent-test-reports-${{ github.sha }}
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/**
+            android/app/build/test-results/testDebugUnitTest/**
+            ci-logs/**
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload debug APK
+        if: ${{ always() && steps.apk.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-agent-debug-apk-${{ github.sha }}
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
+      - name: Summarize
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "### Android CI"
+            echo "- tests: ${{ steps.tests.outcome }}"
+            echo "- debug APK: ${{ steps.apk.outcome }}"
+            grep -hE "tests completed|FAILED$" ci-logs/test.log 2>/dev/null | head -60 | sed 's/^/    /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
