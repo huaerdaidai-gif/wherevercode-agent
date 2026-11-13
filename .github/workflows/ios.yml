@@ -1,7 +1,9 @@
 # iOS — WhereverCode Agent (unsigned IPA)
 #
 # Builds the native Swift/SwiftUI app on a GitHub-hosted macOS runner,
-# runs the XCTest suite on an iPhone simulator, then packages an
+# runs the XCTest suite (unit + UI tests) on an iPhone simulator,
+# exports the screenshot attachments from the test result bundle as
+# the "ios-screenshots-simulator" artifact, then packages an
 # UNSIGNED .app into an .ipa for self-signed sideloading (Sideloadly /
 # AltStore). No user signing identity is ever stored in CI.
 #
@@ -112,11 +114,41 @@ jobs:
         # stays fully unsigned.
         run: |
           set -euo pipefail
+          rm -rf .build/TestResults.xcresult
           xcodebuild test \
             -project ios/WhereverCodeAgent.xcodeproj \
             -scheme WhereverCodeAgent \
             -configuration Debug \
             -destination 'platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}' \
             -derivedDataPath .build/derived \
+            -resultBundlePath .build/TestResults.xcresult \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_IDENTITY="-"
+
+      - name: Export simulator screenshots
+        # Screenshot evidence lives in the test result bundle as
+        # XCTAttachments (page renders from the unit tests + live UI
+        # test captures). Export them so they can be reviewed without
+        # opening the whole bundle. Never fail the job over this —
+        # the test step above is the gate.
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p .build/screenshots
+          if [ -d .build/TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments \
+              --path .build/TestResults.xcresult \
+              --output-path .build/screenshots || true
+            find .build/screenshots -type f | sort | head -80 || true
+          else
+            echo "No result bundle found; nothing to export."
+          fi
+
+      - name: Upload simulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots-simulator
+          path: .build/screenshots
+          retention-days: 30
+          if-no-files-found: warn

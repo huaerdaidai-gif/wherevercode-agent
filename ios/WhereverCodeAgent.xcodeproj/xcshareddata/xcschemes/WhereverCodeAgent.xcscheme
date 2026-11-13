@@ -35,6 +35,20 @@
                ReferencedContainer = "container:WhereverCodeAgent.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D4E5F6000000000014"
+               BuildableName = "WhereverCodeAgentUITests.xctest"
+               BlueprintName = "WhereverCodeAgentUITests"
+               ReferencedContainer = "container:WhereverCodeAgent.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -51,6 +65,17 @@
                BlueprintIdentifier = "96D98ED529C3FE45773F4B2D"
                BuildableName = "WhereverCodeAgentTests.xctest"
                BlueprintName = "WhereverCodeAgentTests"
+               ReferencedContainer = "container:WhereverCodeAgent.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D4E5F6000000000014"
+               BuildableName = "WhereverCodeAgentUITests.xctest"
+               BlueprintName = "WhereverCodeAgentUITests"
                ReferencedContainer = "container:WhereverCodeAgent.xcodeproj">
             </BuildableReference>
          </TestableReference>

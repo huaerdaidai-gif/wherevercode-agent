@@ -1,36 +1,38 @@
-# WhereverCode Agent — iOS 版（MVP）
+# WhereverCode Agent — iOS 版
 
-原生 Swift / SwiftUI iPhone 客户端，与 Android V5 同一个仓库（`android/`、`ios/`、`shared/` 单仓库方案）。MVP 只做已验证的事：团队频道读 / 发、我的任务领取与交付、设置。不做假入口——未实现的功能在界面上明确标注“未实现”。
+原生 Swift / SwiftUI iPhone 客户端，与 Android V5 同一个仓库（`android/`、`ios/`、`shared/` 单仓库方案）。只做服务端真实有的事：团队频道读 / 发、我的任务领取与交付、设置与连接状态。不做假入口——服务端没有的接口在界面上明确标注“服务端无此接口，阻塞中”，未实现的功能标注“未实现”。
 
 > 开发状态：源码在分支上，CI 编包中。源码存在不等于真机验证通过；真机安装与实测结果以交付记录为准。
 
 ## 这是什么
 
-- **对话**：团队频道列表（来自平台 `agent_channel_list`）+ 频道聊天。WebSocket 推送为主，断线 15 秒轮询兜底，45 秒后重连；连接状态（实时 / 轮询兜底 / 连接中 / 未连接）如实显示在聊天页顶栏。
-- **任务**：`list_my_tasks` 列表；领取、汇报进度（续租 2 小时）、心跳、交活、放手。平台没有创建 / 指派任务的接口，本 App 不发明任务。
-- **设置**：平台地址与频道 ID（普通配置）、Agent Token（只存本机 Keychain）、连接测试（`tools/list`）。
-- **未实现**（入口处有明确标注，不冒充已实现）：审批、暂停 / 恢复 / 停止、改目标、设备管理、大脑对话、单兵对话。边界集中在 `Services/ApprovalGate.swift`（`CapabilityGate`）。
+- **对话**：团队频道列表（来自平台 `agent_channel_list`）+ 频道聊天。WebSocket 推送为主，断线 15 秒轮询兜底，45 秒后重连，断线期间的消息在重连后自动补拉。连接状态（实时 / 轮询兜底 / 连接中 / 未连接）与真实错误原文显示在聊天页顶部；加载失败在列表里内联显示并可重试。
+- **任务**：`list_my_tasks` 列表 + 任务详情页；领取、汇报进度（续租 2 小时）、心跳、交活（分支 / 提交 / PR 链接）、放手（可填原因）。每次操作后都从平台回拉任务状态，页面显示的是服务端的当前状态与版本。平台没有创建 / 指派任务的接口，本 App 不发明任务。
+- **设置**：平台地址与频道 ID（普通配置）、Agent Token（只存本机 Keychain）。每次保存后自动做一次真实连接检查（`tools/list` + 可见频道数），结果（已连接 / 还缺什么 / 连接失败的错误原文）就显示在设置页。
+- **导航**：四个标签页的选中状态由 `AppState.selectedTab` 统一持有；“去设置”永远是切换到设置标签，不往当前页的导航栈里再压一个设置页。
+- **阻塞中**（服务端无此接口，入口处明确标注，不冒充已实现）：审批、暂停 / 恢复 / 停止、改目标、设备管理——V5 的 13 个 MCP 工具里没有对应工具。**未实现**：大脑对话、单兵对话。边界集中在 `Services/ApprovalGate.swift`（`CapabilityGate`）。
 
 ## 仓库结构
 
 ```
 ios/
-  WhereverCodeAgent.xcodeproj/     # Xcode 工程（app + tests 两个 target）
+  WhereverCodeAgent.xcodeproj/     # Xcode 工程（app + 单元测试 + UI 测试三个 target）
   WhereverCodeAgent/
-    App/WhereverCodeAgentApp.swift # 入口 + AppState（设置、Token、客户端工厂）
+    App/WhereverCodeAgentApp.swift # 入口 + AppState（标签选中、设置、Token、连接状态、客户端工厂）
     Models/                        # ChannelMessage / AgentTask / ChannelInfo / AppSettings
     Services/
-      McpClient.swift              # MCP tools/call（JSON-RPC 信封、isError 处理）
+      McpClient.swift              # MCP tools/call（JSON-RPC 信封、isError 处理、HTTP 错误带回原文）
       ChannelTransport.swift       # agent_channel_* 三个调用
       ChannelFeed.swift            # WS 推送 + 轮询兜底 + 去重 + 重连状态机
       TaskService.swift            # list/claim/report/heartbeat/submit/release
       KeychainStore.swift          # Token 的唯一存放处
-      ApprovalGate.swift           # 未实现能力的边界（调用即抛错）
-    Views/                         # 对话列表、频道聊天、任务、设备（占位）、设置
+      ApprovalGate.swift           # 未实现 / 阻塞中能力的边界（调用即抛错）
+    Views/                         # 对话列表、频道聊天、任务列表与详情、设备（阻塞说明）、设置
     Resources/
       Info.plist                   # Bundle ID wherevercode.agent，最低 iOS 17.0
       Assets.xcassets/             # AppIcon + AccentColor
-  WhereverCodeAgentTests/          # XCTest：频道解析、MCP 信封、设置校验、Keychain、Feed 状态机
+  WhereverCodeAgentTests/          # 单元测试：解析、MCP 信封、设置校验、Keychain、Feed、导航与连接状态、页面截图渲染
+  WhereverCodeAgentUITests/        # UI 测试：标签导航回归 + 配置不可达地址后的真实错误态 + 截图
 ```
 
 ## 协议（已按 2026-11-13 实测核对，不要编造）
@@ -72,4 +74,6 @@ CI 不存任何用户签名私钥；每次安装后 7 天需重签是 Apple 免�
 
 ## 测试
 
-`xcodebuild test`（见上）跑全部 XCTest：频道 WS 事件解析、消息 / 频道 / 任务宽容解码、MCP 信封解包与 `isError`、设置校验（https 强制、userinfo 拒绝）、Keychain 存取删、Feed 重连状态机与 1000 条去重上限。测试不发真实网络请求。
+`xcodebuild test`（见上）跑全部测试：频道 WS 事件解析、消息 / 频道 / 任务宽容解码、MCP 信封解包与 `isError`、HTTP 错误原文透传、设置校验（https 强制、userinfo 拒绝）、Keychain 存取删、Feed 重连状态机与 1000 条去重上限、标签导航回归（选中状态归 AppState）、连接状态、阻塞标注文案。另有 UI 测试驱动真实 App：从“去设置”切标签、在设置里填不可达地址后各页显示真实网络错误。测试不使用真实账号；网络相关用例走 URLProtocol 替身或不可达的 `.invalid` 地址。
+
+CI 每次运行把模拟器截图（五个主页面渲染 + UI 测试截图）作为 `ios-screenshots-simulator` Artifact 一并上传——那是模拟器证据，不冒充真机。
