@@ -89,8 +89,17 @@ final class WhereverCodeAgentUITests: XCTestCase {
         reveal(advancedToggle, in: app)
         XCTAssertTrue(advancedToggle.waitForExistence(timeout: 10))
         advancedToggle.tap()
-        let tokenField = app.secureTextFields["settings.tokenField"]
-        XCTAssertTrue(tokenField.waitForExistence(timeout: 10))
+        // Query the token field by its placeholder (the phase-2 way):
+        // an identifier query on a SecureField inside a
+        // DisclosureGroup does not match even while the field is on
+        // screen — verified from the previous run's screen
+        // recording, which showed the expanded group and the field
+        // while the identifier query timed out.
+        let tokenField = app.secureTextFields.matching(
+            NSPredicate(format: "placeholderValue BEGINSWITH %@", "粘贴 Agent Token")
+        ).firstMatch
+        reveal(tokenField, in: app)
+        XCTAssertTrue(tokenField.waitForExistence(timeout: 15))
         tokenField.tap()
         tokenField.typeText("uitest-dummy-token")
         app.buttons["settings.saveToken"].tap()
