@@ -109,8 +109,7 @@ import wherevercode.agent.core.agent.ManusChatBridge
 import wherevercode.agent.core.agent.ManusChatPort
 import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
-import wherevercode.agent.core.agent.ChannelFeed
-import wherevercode.agent.core.agent.ChannelWsClient
+import wherevercode.agent.core.agent.McpChannelEventFeed
 import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.agent.PlatformAgentChatBridge
 import wherevercode.agent.core.agent.PlatformAgentCredentialStore
@@ -381,7 +380,7 @@ class MainActivity : AppCompatActivity() {
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天 + 只读扇出。 */
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
-    private var teamChannelFeed: ChannelFeed? = null
+    private var teamChannelFeed: McpChannelEventFeed? = null
     /** 频道消息（feed 推送 + 首轮轮询攒的，时间升序；最多留 100 条）。 */
     private val teamChannelMessages = mutableListOf<PlatformChannelMessage>()
     /**
@@ -5461,9 +5460,11 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 组装频道页快照（后台线程调；每块 try/catch，坏一块不拖垮整页）。
-     * 未读数口径：上次“标为已读”之后到的消息条数；第一次打开没有
-     * 标记时，首屏即视为已读（未读 0，标记记到最新一条）——用户正
-     * 看着首屏，没必要再标一遍未读。
+     * 未读数口径：服务端 onlyUnread 探针（已读标记之后的消息条数，
+     * 超过 50 条记 capped）；服务端问不到时回落本地口径（上次
+     * “标为已读”之后到的消息条数）。第一次打开没有标记时，首屏即
+     * 视为已读（未读 0，标记记到最新一条）——用户正看着首屏，没必
+     * 要再标一遍未读。
      */
     private fun buildTeamChannelSnapshot(): TeamChannelSnapshot {
         val endpoint = teamChannelEndpoint()
@@ -5489,12 +5490,17 @@ class MainActivity : AppCompatActivity() {
         val (host, channelId) = endpoint
         val messages = synchronized(teamChannelMessages) { teamChannelMessages.toList() }
         val lastReadId = teamChannelLastReadId(channelId)
-        val unreadCount = if (lastReadId == null) {
+        val (unreadCount, unreadCapped) = if (lastReadId == null) {
             messages.lastOrNull()?.let { saveTeamChannelLastReadId(channelId, it.id) }
-            0
+            0 to false
         } else {
-            val index = messages.indexOfFirst { it.id == lastReadId }
-            if (index < 0) messages.size else messages.size - index - 1
+            // 未读数改走服务端口径（onlyUnread 原样透传）：已读过的不再
+            // 计入，别处不再重复通知；服务端问不到时回落本地口径。
+            serverTeamChannelUnread(host, channelId) ?: run {
+                val index = messages.indexOfFirst { it.id == lastReadId }
+                val count = if (index < 0) messages.size else messages.size - index - 1
+                count to false
+            }
         }
         val fanoutRuns = try {
             brainComponents?.fanoutStore?.listRuns(5) ?: emptyList()
@@ -5512,7 +5518,7 @@ class MainActivity : AppCompatActivity() {
             members = teamChannelMembers(),
             messages = messages,
             unreadCount = unreadCount,
-            unreadCapped = false,
+            unreadCapped = unreadCapped,
             roundsUsed = teamChannelRoundsUsed,
             fanoutRuns = fanoutRuns,
             fanoutRunning = teamChannelFanoutRunning,
@@ -5537,6 +5543,13 @@ class MainActivity : AppCompatActivity() {
                 if (!::teamChannelController.isInitialized) return@runOnUiThread
                 if (snapshot != null) {
                     teamChannelController.render(snapshot)
+                    // 刷新后：用户正看着频道页，刚渲染的消息即视为已读，
+                    // 把服务端标记推到最新一条，别处（另一台设备 /
+                    // MCP onlyUnread）不再重复通知。后台线程、失败静默，
+                    // 手动“标为已读”仍会报失败原因。
+                    if (screenTeamChannel.visibility == View.VISIBLE) {
+                        pushTeamChannelReadMark()
+                    }
                 } else {
                     // 快照组装失败也至少把失败原因刷出来，不静默。
                     refreshTeamChannelFallback()
@@ -5569,44 +5582,47 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** 起频道消息流（WS 推送为主，断线轮询兜底；离开页面即停）。 */
+    /**
+     * 起频道消息流（WS 推送为主，断线轮询兜底；离开页面即停）。
+     *
+     * 经 McpChannelEventFeed 接线（2026-11-13）：复用 ChannelFeed
+     * 同一套行为（WS 推送为主、15 秒轮询兜底、45 秒后重连 WS、按 id
+     * 去重），只多一层转交——每条新消息还会以 MCP 通知
+     * `notifications/channel/message` 交给已连的 MCP 客户端。
+     * 本轮 mcpClient 传 null：MainActivity 手里没有已连的平台 MCP
+     * 客户端（McpServerManager 的 clients 不对外，也没有哪一处给
+     * onNotification 登记了观察者），转交口留给以后接平台 MCP 客户端
+     * 时用；频道页本身是本轮的消费者。注意口径：这只是 App 内把 WS
+     * 消息转交给 MCP 层，不是服务端 MCP 通知，更不能唤醒外部 Agent
+     * （ChatGPT / Grok Bot 从不连这个 WS，只能自己轮询查消息）。
+     */
     private fun startTeamChannelFeed() {
         val (host, channelId) = teamChannelEndpoint() ?: return
         if (teamChannelFeed != null) return
-        val transport = PlatformChannelMcpTransport(
-            tokenProvider = { platformCredentialStore.loadPlatformToken() },
-            endpoint = PlatformAgent.mcpEndpoint(host),
-        )
-        val feed = ChannelFeed(
+        val feed = McpChannelEventFeed.forPlatformChannel(
+            host = host,
             channelId = channelId,
-            transport = transport,
-            wsFactory = { _, onClosed ->
-                ChannelWsClient(
-                    host = host,
-                    port = 443,
-                    channelId = channelId,
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
-                ).also { it.onClosed = onClosed }
-            },
-            onMessages = { messages ->
-                synchronized(teamChannelMessages) {
-                    teamChannelMessages.addAll(messages)
-                    if (teamChannelMessages.size > 100) {
-                        teamChannelMessages.subList(
-                            0,
-                            teamChannelMessages.size - 100,
-                        ).clear()
-                    }
-                }
-                // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
-                // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
-                maybeRelayChannelMessages(messages)
-                runOnUiThread { refreshTeamChannel() }
-            },
-            onConnectionChange = { _, _ ->
-                runOnUiThread { refreshTeamChannel() }
-            },
+            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+            mcpClient = null,
         )
+        feed.onChannelMessage = { message ->
+            synchronized(teamChannelMessages) {
+                teamChannelMessages.add(message)
+                if (teamChannelMessages.size > 100) {
+                    teamChannelMessages.subList(
+                        0,
+                        teamChannelMessages.size - 100,
+                    ).clear()
+                }
+            }
+            // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
+            // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
+            maybeRelayChannelMessages(listOf(message))
+            runOnUiThread { refreshTeamChannel() }
+        }
+        feed.onConnectionChange = { _, _ ->
+            runOnUiThread { refreshTeamChannel() }
+        }
         teamChannelFeed = feed
         feed.start()
     }
@@ -5694,6 +5710,52 @@ class MainActivity : AppCompatActivity() {
                     "发帖失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
             }
             runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /**
+     * 服务端未读数（onlyUnread 原样透传；失败返回 null，调用方回落本地口径）。
+     * 探针拉 51 条：超过 50 条即记 capped（界面文案是“50+ 条未读”）。
+     * 在频道刷新线程调（已是后台线程），直接 runBlocking。
+     */
+    private fun serverTeamChannelUnread(host: String, channelId: String): Pair<Int, Boolean>? {
+        return try {
+            val transport = PlatformChannelMcpTransport(
+                tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                endpoint = PlatformAgent.mcpEndpoint(host),
+            )
+            val unread = runBlocking {
+                transport.pollMessages(channelId, null, 51, onlyUnread = true)
+            }
+            minOf(unread.size, 50) to (unread.size > 50)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 频道刷新后把服务端已读标记推到最新一条（后台线程；失败静默，
+     * 下次刷新或手动“标为已读”再推）。只调 pollMessages 的 markRead
+     * 参数，不改消息内容、不建任务。
+     */
+    private fun pushTeamChannelReadMark() {
+        val (host, channelId) = teamChannelEndpoint() ?: return
+        Thread {
+            try {
+                val transport = PlatformChannelMcpTransport(
+                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                    endpoint = PlatformAgent.mcpEndpoint(host),
+                )
+                runBlocking {
+                    transport.pollMessages(channelId, null, 1, markRead = true)
+                }
+                val latestId = synchronized(teamChannelMessages) {
+                    teamChannelMessages.lastOrNull()?.id
+                }
+                if (latestId != null) saveTeamChannelLastReadId(channelId, latestId)
+            } catch (_: Exception) {
+                // 静默：自动标记失败不打扰用户，手动“标为已读”会报错。
+            }
         }.start()
     }
 
