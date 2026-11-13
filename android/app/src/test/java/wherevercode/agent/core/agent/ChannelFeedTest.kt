@@ -180,6 +180,82 @@ class ChannelFeedTest {
         assertTrue(delivered.none { it.id == "m2" })
     }
 
+
+    @Test
+    fun `ws drop reconnects after the reconnect window`() {
+        val transport = FakeTransport(mutableListOf(message("m1", "在吗")))
+        val wsUses = AtomicInteger(0)
+        val feed = ChannelFeed(
+            channelId = "ch-1",
+            transport = transport,
+            wsFactory = { _, _ ->
+                if (wsUses.getAndIncrement() == 0) ScriptedWs(emptyList()) else HangingWs()
+            },
+            onMessages = {},
+            pollIntervalMs = 100,
+            reconnectAfterMs = 300,
+        )
+        feed.start()
+        try {
+            assertTrue("WS 断后应在重连窗口内重新建连", waitUntil(30_000) { wsUses.get() >= 2 })
+            assertEquals(ChannelConnectionState.CONNECTING, feed.connectionState)
+        } finally {
+            feed.stop()
+        }
+    }
+
+    @Test
+    fun `poll fallback repeats on the poll interval while ws is down`() {
+        val transport = FakeTransport(mutableListOf(message("m1", "在吗")))
+        val feed = ChannelFeed(
+            channelId = "ch-1",
+            transport = transport,
+            wsFactory = { _, _ -> ScriptedWs(emptyList()) },
+            onMessages = {},
+            pollIntervalMs = 100,
+            reconnectAfterMs = 5_000,
+        )
+        feed.start()
+        try {
+            assertTrue("断线兜底应在轮询间隔内反复拉取", waitUntil(30_000) { transport.pollCalls.size >= 3 })
+        } finally {
+            feed.stop()
+        }
+    }
+
+    @Test
+    fun `unauthorized poll fails loudly without delivering or crashing`() {
+        val transport = object : PlatformChannelTransport {
+            override suspend fun postMessage(channelId: String, text: String): String = ""
+            override suspend fun pollMessages(
+                channelId: String,
+                afterId: String?,
+                limit: Int,
+                onlyUnread: Boolean,
+                markRead: Boolean,
+            ): List<PlatformChannelMessage> {
+                throw java.io.IOException("平台返回 HTTP 403：未加入频道")
+            }
+        }
+        val delivered = mutableListOf<PlatformChannelMessage>()
+        val feed = ChannelFeed(
+            channelId = "ch-1",
+            transport = transport,
+            wsFactory = { _, _ -> ScriptedWs(emptyList()) },
+            onMessages = { batch -> synchronized(delivered) { delivered += batch } },
+            pollIntervalMs = 100,
+            reconnectAfterMs = 300,
+        )
+        feed.start()
+        try {
+            assertTrue(waitUntil(30_000) { feed.connectionState == ChannelConnectionState.POLLING })
+            assertTrue(delivered.isEmpty())
+            assertTrue(feed.lastError?.contains("403") == true)
+        } finally {
+            feed.stop()
+            assertEquals(ChannelConnectionState.STOPPED, feed.connectionState)
+        }
+    }
     @Test
     fun `postMessage goes through the transport`() {
         val transport = FakeTransport(mutableListOf())

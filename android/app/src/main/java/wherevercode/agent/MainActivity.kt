@@ -109,8 +109,7 @@ import wherevercode.agent.core.agent.ManusChatBridge
 import wherevercode.agent.core.agent.ManusChatPort
 import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
-import wherevercode.agent.core.agent.ChannelFeed
-import wherevercode.agent.core.agent.ChannelWsClient
+import wherevercode.agent.core.agent.McpChannelEventFeed
 import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.agent.PlatformAgentChatBridge
 import wherevercode.agent.core.agent.PlatformAgentCredentialStore
@@ -195,6 +194,8 @@ import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.TeamFanoutRunner
 import wherevercode.agent.core.team.buildChannelMembers
+import wherevercode.agent.core.team.visibleTeamChannelMembers
+import wherevercode.agent.core.dispatch.McpDispatchRuntime
 import wherevercode.agent.core.team.loadPairingRecord
 import wherevercode.agent.core.team.resolveRemoteTargetFromRecords
 import wherevercode.agent.core.transport.DirectTransport
@@ -381,7 +382,7 @@ class MainActivity : AppCompatActivity() {
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天 + 只读扇出。 */
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
-    private var teamChannelFeed: ChannelFeed? = null
+    private var teamChannelFeed: McpChannelEventFeed? = null
     /** 频道消息（feed 推送 + 首轮轮询攒的，时间升序；最多留 100 条）。 */
     private val teamChannelMessages = mutableListOf<PlatformChannelMessage>()
     /**
@@ -5446,7 +5447,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             emptyList()
         }
-        return buildChannelMembers(agents)
+        return visibleTeamChannelMembers(buildChannelMembers(agents))
     }
 
     /** 已读标记（本机持久化，键按频道分；服务端标记由 markTeamChannelRead 同步推）。 */
@@ -5461,9 +5462,11 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 组装频道页快照（后台线程调；每块 try/catch，坏一块不拖垮整页）。
-     * 未读数口径：上次“标为已读”之后到的消息条数；第一次打开没有
-     * 标记时，首屏即视为已读（未读 0，标记记到最新一条）——用户正
-     * 看着首屏，没必要再标一遍未读。
+     * 未读数口径：服务端 onlyUnread 探针（已读标记之后的消息条数，
+     * 超过 50 条记 capped）；服务端问不到时回落本地口径（上次
+     * “标为已读”之后到的消息条数）。第一次打开没有标记时，首屏即
+     * 视为已读（未读 0，标记记到最新一条）——用户正看着首屏，没必
+     * 要再标一遍未读。
      */
     private fun buildTeamChannelSnapshot(): TeamChannelSnapshot {
         val endpoint = teamChannelEndpoint()
@@ -5489,12 +5492,17 @@ class MainActivity : AppCompatActivity() {
         val (host, channelId) = endpoint
         val messages = synchronized(teamChannelMessages) { teamChannelMessages.toList() }
         val lastReadId = teamChannelLastReadId(channelId)
-        val unreadCount = if (lastReadId == null) {
+        val (unreadCount, unreadCapped) = if (lastReadId == null) {
             messages.lastOrNull()?.let { saveTeamChannelLastReadId(channelId, it.id) }
-            0
+            0 to false
         } else {
-            val index = messages.indexOfFirst { it.id == lastReadId }
-            if (index < 0) messages.size else messages.size - index - 1
+            // 未读数改走服务端口径（onlyUnread 原样透传）：已读过的不再
+            // 计入，别处不再重复通知；服务端问不到时回落本地口径。
+            serverTeamChannelUnread(host, channelId) ?: run {
+                val index = messages.indexOfFirst { it.id == lastReadId }
+                val count = if (index < 0) messages.size else messages.size - index - 1
+                count to false
+            }
         }
         val fanoutRuns = try {
             brainComponents?.fanoutStore?.listRuns(5) ?: emptyList()
@@ -5512,7 +5520,7 @@ class MainActivity : AppCompatActivity() {
             members = teamChannelMembers(),
             messages = messages,
             unreadCount = unreadCount,
-            unreadCapped = false,
+            unreadCapped = unreadCapped,
             roundsUsed = teamChannelRoundsUsed,
             fanoutRuns = fanoutRuns,
             fanoutRunning = teamChannelFanoutRunning,
@@ -5537,6 +5545,13 @@ class MainActivity : AppCompatActivity() {
                 if (!::teamChannelController.isInitialized) return@runOnUiThread
                 if (snapshot != null) {
                     teamChannelController.render(snapshot)
+                    // 刷新后：用户正看着频道页，刚渲染的消息即视为已读，
+                    // 把服务端标记推到最新一条，别处（另一台设备 /
+                    // MCP onlyUnread）不再重复通知。后台线程、失败静默，
+                    // 手动“标为已读”仍会报失败原因。
+                    if (screenTeamChannel.visibility == View.VISIBLE) {
+                        pushTeamChannelReadMark()
+                    }
                 } else {
                     // 快照组装失败也至少把失败原因刷出来，不静默。
                     refreshTeamChannelFallback()
@@ -5569,44 +5584,47 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** 起频道消息流（WS 推送为主，断线轮询兜底；离开页面即停）。 */
+    /**
+     * 起频道消息流（WS 推送为主，断线轮询兜底；离开页面即停）。
+     *
+     * 经 McpChannelEventFeed 接线（2026-11-13）：复用 ChannelFeed
+     * 同一套行为（WS 推送为主、15 秒轮询兜底、45 秒后重连 WS、按 id
+     * 去重），只多一层转交——每条新消息还会以 MCP 通知
+     * `notifications/channel/message` 交给已连的 MCP 客户端。
+     * 本轮 mcpClient 传 null：MainActivity 手里没有已连的平台 MCP
+     * 客户端（McpServerManager 的 clients 不对外，也没有哪一处给
+     * onNotification 登记了观察者），转交口留给以后接平台 MCP 客户端
+     * 时用；频道页本身是本轮的消费者。注意口径：这只是 App 内把 WS
+     * 消息转交给 MCP 层，不是服务端 MCP 通知，更不能唤醒外部 Agent
+     * （ChatGPT / Grok Bot 从不连这个 WS，只能自己轮询查消息）。
+     */
     private fun startTeamChannelFeed() {
         val (host, channelId) = teamChannelEndpoint() ?: return
         if (teamChannelFeed != null) return
-        val transport = PlatformChannelMcpTransport(
-            tokenProvider = { platformCredentialStore.loadPlatformToken() },
-            endpoint = PlatformAgent.mcpEndpoint(host),
-        )
-        val feed = ChannelFeed(
+        val feed = McpChannelEventFeed.forPlatformChannel(
+            host = host,
             channelId = channelId,
-            transport = transport,
-            wsFactory = { _, onClosed ->
-                ChannelWsClient(
-                    host = host,
-                    port = 443,
-                    channelId = channelId,
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
-                ).also { it.onClosed = onClosed }
-            },
-            onMessages = { messages ->
-                synchronized(teamChannelMessages) {
-                    teamChannelMessages.addAll(messages)
-                    if (teamChannelMessages.size > 100) {
-                        teamChannelMessages.subList(
-                            0,
-                            teamChannelMessages.size - 100,
-                        ).clear()
-                    }
-                }
-                // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
-                // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
-                maybeRelayChannelMessages(messages)
-                runOnUiThread { refreshTeamChannel() }
-            },
-            onConnectionChange = { _, _ ->
-                runOnUiThread { refreshTeamChannel() }
-            },
+            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+            mcpClient = null,
         )
+        feed.onChannelMessage = { message ->
+            synchronized(teamChannelMessages) {
+                teamChannelMessages.add(message)
+                if (teamChannelMessages.size > 100) {
+                    teamChannelMessages.subList(
+                        0,
+                        teamChannelMessages.size - 100,
+                    ).clear()
+                }
+            }
+            // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
+            // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
+            maybeRelayChannelMessages(listOf(message))
+            runOnUiThread { refreshTeamChannel() }
+        }
+        feed.onConnectionChange = { _, _ ->
+            runOnUiThread { refreshTeamChannel() }
+        }
         teamChannelFeed = feed
         feed.start()
     }
@@ -5694,6 +5712,52 @@ class MainActivity : AppCompatActivity() {
                     "发帖失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
             }
             runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /**
+     * 服务端未读数（onlyUnread 原样透传；失败返回 null，调用方回落本地口径）。
+     * 探针拉 51 条：超过 50 条即记 capped（界面文案是“50+ 条未读”）。
+     * 在频道刷新线程调（已是后台线程），直接 runBlocking。
+     */
+    private fun serverTeamChannelUnread(host: String, channelId: String): Pair<Int, Boolean>? {
+        return try {
+            val transport = PlatformChannelMcpTransport(
+                tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                endpoint = PlatformAgent.mcpEndpoint(host),
+            )
+            val unread = runBlocking {
+                transport.pollMessages(channelId, null, 51, onlyUnread = true)
+            }
+            minOf(unread.size, 50) to (unread.size > 50)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 频道刷新后把服务端已读标记推到最新一条（后台线程；失败静默，
+     * 下次刷新或手动“标为已读”再推）。只调 pollMessages 的 markRead
+     * 参数，不改消息内容、不建任务。
+     */
+    private fun pushTeamChannelReadMark() {
+        val (host, channelId) = teamChannelEndpoint() ?: return
+        Thread {
+            try {
+                val transport = PlatformChannelMcpTransport(
+                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                    endpoint = PlatformAgent.mcpEndpoint(host),
+                )
+                runBlocking {
+                    transport.pollMessages(channelId, null, 1, markRead = true)
+                }
+                val latestId = synchronized(teamChannelMessages) {
+                    teamChannelMessages.lastOrNull()?.id
+                }
+                if (latestId != null) saveTeamChannelLastReadId(channelId, latestId)
+            } catch (_: Exception) {
+                // 静默：自动标记失败不打扰用户，手动“标为已读”会报错。
+            }
         }.start()
     }
 
@@ -8300,6 +8364,7 @@ class MainActivity : AppCompatActivity() {
             },
         )
         appUpdateSettings.bind(screenSettings)
+        bindMcpDispatchSettings()
         // git 家授权（2026-11-11）：设置页每站一行“授权”——填/换 token、
         // 清除、只显示“已配/未配”，绝不显示 token 值。token 只存本机 Keystore。
         gitHostAuthRows.clear()
@@ -8345,6 +8410,126 @@ class MainActivity : AppCompatActivity() {
      * 不用用户再输凭证、不用去终端；签发出的令牌只在弹窗里显示一次，
      * 带“复制”按钮，关闭后不再显示、不存任何地方。
      */
+    /** 独立 MCP 派工服务设置：默认关闭，访问令牌只生成并展示一次。 */
+    private fun bindMcpDispatchSettings() {
+        val content = (screenSettings as? ScrollView)?.getChildAt(0) as? LinearLayout ?: return
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(20), 0, dp(8))
+        }
+        val title = TextView(this).apply {
+            text = "本机 MCP 派工"
+            textSize = 18f
+            setTextColor(getColor(R.color.text_primary))
+        }
+        val note = TextView(this).apply {
+            text = "开启后使用本机任务库；服务默认只监听 127.0.0.1:18744。云端接入需要另配可信反向隧道，不要直接暴露到公网。"
+            textSize = 13f
+            setTextColor(getColor(R.color.text_secondary))
+        }
+        val toggle = CheckBox(this).apply {
+            text = "启用 MCP 派工服务"
+            isChecked = McpDispatchRuntime.isEnabled(applicationContext)
+        }
+        val status = TextView(this).apply {
+            text = if (toggle.isChecked) "正在恢复服务…" else "服务已关闭"
+            textSize = 13f
+        }
+        val tokenButton = Button(this).apply {
+            text = "生成访问令牌（只显示一次）"
+            isEnabled = toggle.isChecked
+        }
+        val endpoint = TextView(this).apply { textSize = 12f }
+
+        fun updateEndpoint(value: String?) {
+            endpoint.text = value?.let { "本机 MCP 地址：$it" } ?: ""
+        }
+        if (toggle.isChecked) {
+            Thread {
+                val url = runCatching { McpDispatchRuntime.ensureRunning(applicationContext) }.getOrNull()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        updateEndpoint(url)
+                        status.text = if (url == null) "服务恢复失败，请关闭后重新开启。" else "服务已启用"
+                    }
+                }
+            }.start()
+        }
+
+        toggle.setOnCheckedChangeListener { _, enabled ->
+            toggleMcpDispatchService(enabled, toggle, tokenButton, status, endpoint)
+        }
+        tokenButton.setOnClickListener {
+            tokenButton.isEnabled = false
+            Thread {
+                val issued = runCatching { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    tokenButton.isEnabled = toggle.isChecked
+                    issued.onSuccess { credential ->
+                        val dialog = android.app.AlertDialog.Builder(this)
+                            .setTitle("访问令牌（仅显示本次）")
+                            .setMessage("请立即复制并妥善保存。令牌只在本机显示，App 仅保存其哈希，日志不记录令牌。\n\n${credential.token}")
+                            .setPositiveButton("复制") { _, _ ->
+                                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("MCP 访问令牌", credential.token))
+                                toast("令牌已复制；请妥善保存")
+                            }
+                            .setNegativeButton("关闭", null)
+                            .create()
+                        dialog.setOnShowListener {
+                            dialog.window?.setFlags(
+                                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                            )
+                        }
+                        dialog.show()
+                    }.onFailure { error ->
+                        status.text = "令牌生成失败：${error.message ?: "未知错误"}"
+                    }
+                }
+            }.start()
+        }
+        section.addView(title)
+        section.addView(note)
+        section.addView(toggle)
+        section.addView(status)
+        section.addView(endpoint)
+        section.addView(tokenButton)
+        content.addView(section, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
+    }
+
+    private fun toggleMcpDispatchService(
+        enabled: Boolean,
+        toggle: CheckBox,
+        tokenButton: Button,
+        status: TextView,
+        endpoint: TextView,
+    ) {
+        tokenButton.isEnabled = false
+        status.text = if (enabled) "正在启动…" else "正在关闭…"
+        Thread {
+            val result = runCatching { McpDispatchRuntime.setEnabled(applicationContext, enabled) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (result.isSuccess) {
+                    endpoint.text = result.getOrNull()?.let { "本机 MCP 地址：$it" } ?: ""
+                    status.text = if (enabled) "服务已启用" else "服务已关闭；访问令牌已撤销"
+                    tokenButton.isEnabled = enabled
+                } else {
+                    toggle.setOnCheckedChangeListener(null)
+                    toggle.isChecked = !enabled
+                    toggle.setOnCheckedChangeListener { _, checked ->
+                        toggleMcpDispatchService(checked, toggle, tokenButton, status, endpoint)
+                    }
+                    status.text = "服务切换失败：${result.exceptionOrNull()?.message ?: "未知错误"}"
+                }
+            }
+        }.start()
+    }
+
     private fun bindPlatformTokenSettings() {
         platformTokenStatus = screenSettings.findViewById(R.id.platformTokenStatus)
         platformTokenAgentId = screenSettings.findViewById(R.id.platformTokenAgentId)
