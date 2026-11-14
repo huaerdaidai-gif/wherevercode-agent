@@ -585,6 +585,34 @@ class StateStore:
 # 服务端
 # --------------------------------------------------------------------------
 
+def git_repos_for_folder(folder: str) -> list[dict]:
+    """P1 能力卡（2026-11-11）：读一个文件夹的 git 检出信息。
+
+    只读 `git rev-parse`（分支 + 12 位短 commit），不写任何东西。
+    不是 git 仓库、git 不在、超时、任何异常都返回 []——调用方按
+    “未知”处理，绝不编造分支/commit。"""
+    if not folder or not os.path.isdir(folder):
+        return []
+    try:
+        branch = subprocess.run(
+            ["git", "-C", folder, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        commit = subprocess.run(
+            ["git", "-C", folder, "rev-parse", "--short=12", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if branch.returncode != 0 or commit.returncode != 0:
+            return []
+        b = branch.stdout.strip()
+        c = commit.stdout.strip()
+        if not b or not c:
+            return []
+        return [{"path": folder, "branch": b, "commit": c}]
+    except Exception:
+        return []
+
+
 # A detached watchdog owns the read end of a pipe held by Hand. EOF
 # means the server exited (including SIGKILL) or finished the run.
 _PROCESS_WATCHDOG = """
@@ -650,7 +678,11 @@ def spawn_agent(argv, **kwargs):
 
 
 class HandServer:
-    def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT):
+    def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT,
+                 config_policy: str = "standalone"):
+        if config_policy not in ("standalone", "bundled"):
+            raise ValueError("unknown config policy: " + str(config_policy))
+        self.config_policy = config_policy
         self.state = StateStore(state_dir)
         self.device_id = device_id
         self.display_name = display_name
@@ -791,6 +823,7 @@ class HandServer:
                 "capabilities": cfg.get("capabilities", []),
                 "folder": cfg.get("folder", reg["folder"]),
                 "available": available,
+                "repos": git_repos_for_folder(cfg.get("folder", reg["folder"])),
                 "source": reg["source"],
                 "discovered": reg["discovered"],
             })
@@ -808,13 +841,15 @@ class HandServer:
                 "capabilities": cfg.get("capabilities", []),
                 "folder": cfg.get("folder", ""),
                 "available": available,
+                "repos": git_repos_for_folder(cfg.get("folder", "")),
                 "source": "agents-json",
                 "discovered": available,
             })
         return out
 
     def agent_config(self, agent_id: str) -> dict | None:
-        """解析后的 Agent 配置：注册表是“怎么跑”的事实来源
+        """配置冲突：standalone 保留 agents.json command；bundled 注册表优先。
+        bundled 下注册表是“怎么跑”的事实来源
         （argv 模板 + 二进制解析 + 登录检查）；agents.json 是遗留
         的设备层覆盖，只覆盖 display_name/kind/capabilities/
         folder/env，以及注册表里没有的 Agent 的整条 command。
@@ -841,7 +876,7 @@ class HandServer:
             for key in ("display_name", "kind", "capabilities", "folder", "env"):
                 if legacy.get(key) not in (None, "", {}):
                     cfg[key] = legacy[key]
-            if reg is None:
+            if reg is None or self.config_policy == "standalone":
                 if legacy.get("command"):
                     cfg["command"] = legacy["command"]
             elif legacy.get("command") and legacy["command"] != reg["command"]:
@@ -857,12 +892,22 @@ class HandServer:
         raw_folders = entry if isinstance(entry, list) else (
             entry.get("folders", []) if isinstance(entry, dict) else [])
         folders = list(raw_folders) if isinstance(raw_folders, list) else []
-        reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
-        if reg is not None and reg.get("folder"):
-            folders.append(reg["folder"])
-        cfg_folder = (self.agent_config(agent_id) or {}).get("folder", "")
-        if cfg_folder:
-            folders.append(cfg_folder)
+        if self.config_policy == "bundled":
+            reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
+            automatic = [
+                ("registry", reg.get("folder", "") if reg else ""),
+                ("agent_config", (self.agent_config(agent_id) or {}).get("folder", "")),
+            ]
+            explicit = {canonical_folder(f) for f in folders if isinstance(f, str)}
+            for source, folder in automatic:
+                if isinstance(folder, str) and folder:
+                    folders.append(folder)
+                    if canonical_folder(folder) not in explicit:
+                        # Audit each implicit authorization decision; do not log credentials.
+                        self.state.audit({"event": "folder_auto_authorized",
+                                          "policy": self.config_policy, "agent": agent_id,
+                                          "client": client_id, "source": source,
+                                          "folder": canonical_folder(folder)})
         if client_id:
             grants = self.state.load_json("project_grants.json", {})
             folders.extend(grants.get(client_id, {}).get(agent_id, []))
@@ -1652,7 +1697,8 @@ class HandServer:
                                [sys.executable, live, "--state-dir", state_dir,
                                 "--device-id", self.device_id,
                                 "--display-name", self.display_name,
-                                "--host", "0.0.0.0", "--port", str(self.port), "serve"])
+                                "--host", "0.0.0.0", "--port", str(self.port),
+                                "--config-policy", self.config_policy, "serve"])
         sh = []
         sh.append('#!/bin/sh')
         sh.append('# V5 Hand 自更新看门狗（apply 时生成，检查完自删）。')
@@ -2664,8 +2710,9 @@ def start_mdns_advertiser(hand: "HandServer") -> MdnsAdvertiser | None:
         return None
 
 
-def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int) -> None:
-    hand = HandServer(state_dir, device_id, display_name, port)
+def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int,
+          config_policy: str = "standalone") -> None:
+    hand = HandServer(state_dir, device_id, display_name, port, config_policy)
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
@@ -2696,6 +2743,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--display-name", default=socket.gethostname())
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--config-policy", choices=("standalone", "bundled"), default="standalone",
+                        help="standalone: explicit grants/legacy command; bundled: registry defaults (audited)")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("serve", help="启动 Hand 服务")
@@ -2744,10 +2793,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp", help="启动 stdio MCP 服务（list/read/write/run）")
 
     args = parser.parse_args(argv)
-    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port)
+    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy)
 
     if args.command in (None, "serve"):
-        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port)
+        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy)
         return 0
     if args.command == "fingerprint":
         print(hand.fingerprint())
@@ -3079,6 +3128,8 @@ BUILTIN_EXTENSIONS: dict[str, dict[str, dict]] = {
         },
     },
     "wakeup": {
+        # T4: preserve sender; dispatch-to-webhook-to-MCP claim wiring is incomplete.
+        # The missing end-to-end wiring is excluded from executable-union acceptance.
         "webhook": {
             "display_name": "Webhook 唤醒",
             "implementation": "webhook_deliver()（本文件）：出站 POST，"
@@ -3115,6 +3166,8 @@ BUILTIN_EXTENSIONS: dict[str, dict[str, dict]] = {
                               "epoch/goal_version 栅栏）。",
             "status": "live",
         },
+        # T4: design registration only; no Hand implementation or fake executor.
+        # Future bus: control/message ledger; unwakeable Agents remain pending-claim.
         "wacf": {
             "display_name": "WACF 自有总线",
             "implementation": "WACF 设计（2026-11-08，U1–U12 已定：控制 + "

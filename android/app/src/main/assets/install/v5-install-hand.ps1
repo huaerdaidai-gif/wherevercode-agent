@@ -105,7 +105,7 @@ $CurrentPy = Join-Path $ReleaseDir "hand_server.py"
 $Launcher = Join-Path $HostDir "wherevercode-hand.bat"
 @"
 @echo off
-"$Python" "$CurrentPy" --state-dir "$HostDir" --device-id "$DeviceId" --display-name "$DisplayName" --host 0.0.0.0 --port $Port %*
+"$Python" "$CurrentPy" --state-dir "$HostDir" --device-id "$DeviceId" --display-name "$DisplayName" --config-policy bundled --host 0.0.0.0 --port $Port %*
 "@ | Set-Content -Path $Launcher -Encoding ascii
 
 # --- 自启：计划任务（登录时），用户级，不需管理员。建失败只启动本次、明说。---

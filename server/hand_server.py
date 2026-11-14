@@ -79,6 +79,7 @@ import hashlib
 import hmac
 import json
 import os
+import shutil
 import signal
 import socket
 import socketserver
@@ -463,7 +464,11 @@ def spawn_agent(argv, **kwargs):
 
 
 class HandServer:
-    def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT):
+    def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT,
+                 config_policy: str = "standalone"):
+        if config_policy not in ("standalone", "bundled"):
+            raise ValueError("unknown config policy: " + str(config_policy))
+        self.config_policy = config_policy
         self.state = StateStore(state_dir)
         self.device_id = device_id
         self.display_name = display_name
@@ -510,9 +515,40 @@ class HandServer:
         return hashlib.sha256(self.public_key).hexdigest()
 
     def agents(self) -> list[dict]:
-        raw = self.state.load_json("agents.json", {})
+        """hello 用的 Agent 列表：注册表（内置 + 自定义行）解析出的
+        Agent + agents.json 里独有的遗留条目，合成一张表。
+        字段形状与旧版完全兼容（agent_id、display_name、kind、
+        capabilities、folder、available 一个不少），只加两个可选字段：
+        source（builtin/custom/agents-json）与 discovered（二进制
+        是否在本机找到）。自动发现的 Agent 在这里出现，不用改
+        agents.json、不用重启。"""
         out = []
+        seen: set[str] = set()
+        resolved = resolve_adapters(self.state.dir, self.device_id)
+        for agent_id, reg in resolved.items():
+            if not reg["discovered"]:
+                # 注册表里已知、但本机没装的 Agent 不进 hello（App 只需
+                # 看到本机能用的）；完整已知表走 extensions / discover 查。
+                continue
+            cfg = self.agent_config(agent_id) or {}
+            command = cfg.get("command", []) or reg["command"]
+            available = bool(command) and os.path.exists(command[0])
+            out.append({
+                "agent_id": agent_id,
+                "display_name": cfg.get("display_name", reg["display_name"]),
+                "kind": cfg.get("kind", "agent"),
+                "capabilities": cfg.get("capabilities", []),
+                "folder": cfg.get("folder", reg["folder"]),
+                "available": available,
+                "repos": git_repos_for_folder(cfg.get("folder", reg["folder"])),
+                "source": reg["source"],
+                "discovered": reg["discovered"],
+            })
+            seen.add(agent_id)
+        raw = self.state.load_json("agents.json", {})
         for agent_id, cfg in raw.items():
+            if agent_id in seen or not isinstance(cfg, dict):
+                continue
             command = cfg.get("command", [])
             available = bool(command) and os.path.exists(command[0])
             out.append({
@@ -522,26 +558,86 @@ class HandServer:
                 "capabilities": cfg.get("capabilities", []),
                 "folder": cfg.get("folder", ""),
                 "available": available,
-                # P1 能力卡：工作文件夹的 git 检出（分支/commit），不是
-                # git 仓库时为空数组。
                 "repos": git_repos_for_folder(cfg.get("folder", "")),
+                "source": "agents-json",
+                "discovered": available,
             })
         return out
 
     def agent_config(self, agent_id: str) -> dict | None:
+        """配置冲突：standalone 保留 agents.json command；bundled 注册表优先。
+        bundled 下注册表是“怎么跑”的事实来源
+        （argv 模板 + 二进制解析 + 登录检查）；agents.json 是遗留
+        的设备层覆盖，只覆盖 display_name/kind/capabilities/
+        folder/env，以及注册表里没有的 Agent 的整条 command。
+        注册表已有的 Agent，agents.json 里的 command 不再生效
+        （避免 wrapper 脚本死灰复燃；冲突时记一条审计，不静默覆盖）。"""
         raw = self.state.load_json("agents.json", {})
-        cfg = raw.get(agent_id)
-        return cfg if isinstance(cfg, dict) else None
+        legacy = raw.get(agent_id) if isinstance(raw, dict) else None
+        reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
+        if reg is None and not isinstance(legacy, dict):
+            return None
+        cfg: dict = {}
+        if reg is not None:
+            cfg = {
+                "display_name": reg["display_name"],
+                "kind": reg.get("kind", "agent"),
+                "execution": reg.get("execution", "cli"),
+                "executor": reg.get("executor", ""),
+                "capabilities": reg.get("capabilities", []),
+                "folder": reg["folder"],
+                "command": list(reg["command"]),
+                "env": dict(reg.get("env", {}) or {}),
+            }
+        if isinstance(legacy, dict):
+            for key in ("display_name", "kind", "capabilities", "folder", "env"):
+                if legacy.get(key) not in (None, "", {}):
+                    cfg[key] = legacy[key]
+            if reg is None or self.config_policy == "standalone":
+                if legacy.get("command"):
+                    cfg["command"] = legacy["command"]
+            elif legacy.get("command") and legacy["command"] != reg["command"]:
+                self.state.audit({
+                    "event": "legacy_command_ignored", "agent": agent_id,
+                    "note": "agents.json command ignored; registry argv wins"})
+        return cfg or None
 
     def authorized_folders(self, agent_id: str, client_id: str | None = None) -> list[str]:
         """Host-configured folders are shared; project grants belong to a paired client."""
         auth = self.state.load_json("auth.json", {})
         entry = auth.get(agent_id, []) if isinstance(auth, dict) else []
-        folders = list(entry) if isinstance(entry, list) else []
+        raw_folders = entry if isinstance(entry, list) else (
+            entry.get("folders", []) if isinstance(entry, dict) else [])
+        folders = list(raw_folders) if isinstance(raw_folders, list) else []
+        if self.config_policy == "bundled":
+            reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
+            automatic = [
+                ("registry", reg.get("folder", "") if reg else ""),
+                ("agent_config", (self.agent_config(agent_id) or {}).get("folder", "")),
+            ]
+            explicit = {canonical_folder(f) for f in folders if isinstance(f, str)}
+            for source, folder in automatic:
+                if isinstance(folder, str) and folder:
+                    folders.append(folder)
+                    if canonical_folder(folder) not in explicit:
+                        # Audit each implicit authorization decision; do not log credentials.
+                        self.state.audit({"event": "folder_auto_authorized",
+                                          "policy": self.config_policy, "agent": agent_id,
+                                          "client": client_id, "source": source,
+                                          "folder": canonical_folder(folder)})
         if client_id:
             grants = self.state.load_json("project_grants.json", {})
             folders.extend(grants.get(client_id, {}).get(agent_id, []))
-        return folders
+        seen: set[str] = set()
+        out: list[str] = []
+        for folder in folders:
+            if not isinstance(folder, str) or not folder:
+                continue
+            canon = canonical_folder(folder)
+            if canon not in seen:
+                seen.add(canon)
+                out.append(canon)
+        return out
 
     # -- 配对 --------------------------------------------------------------
 
@@ -1453,8 +1549,9 @@ class HandConnectionHandler(socketserver.BaseRequestHandler):
         self.server.hand_server.handle_connection(self.request, self.client_address)
 
 
-def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int) -> None:
-    hand = HandServer(state_dir, device_id, display_name, port)
+def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int,
+          config_policy: str = "standalone") -> None:
+    hand = HandServer(state_dir, device_id, display_name, port, config_policy)
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
@@ -1480,6 +1577,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--display-name", default=socket.gethostname())
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--config-policy", choices=("standalone", "bundled"), default="standalone",
+                        help="standalone: explicit grants/legacy command; bundled: registry defaults (audited)")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("serve", help="启动 Hand 服务")
@@ -1495,11 +1594,32 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("agents", help="列出已注册的 agent 及其可用性")
     sub.add_parser("init-agents", help="写入默认 agents.json（example-agent）")
 
+    # 统一扩展注册表 CLI：注册 / 发现 / 启用三步的入口。
+    ext_list = sub.add_parser("extensions", help="列出注册表里的全部扩展（七类）")
+    ext_list.add_argument("--kind", default=None,
+                          choices=list(EXTENSION_KINDS))
+    ext = sub.add_parser("extension", help="注册 / 启用 / 停用 / 删除一个扩展")
+    ext_sub = ext.add_subparsers(dest="ext_action")
+    reg = ext_sub.add_parser("register", help="注册一个扩展（写自定义行）")
+    reg.add_argument("--kind", required=True, choices=list(EXTENSION_KINDS))
+    reg.add_argument("--id", required=True)
+    reg.add_argument("--json", required=True, help="扩展行 JSON 对象")
+    ena = ext_sub.add_parser("enable", help="启用一个扩展")
+    ena.add_argument("--kind", required=True, choices=list(EXTENSION_KINDS))
+    ena.add_argument("--id", required=True)
+    dis = ext_sub.add_parser("disable", help="停用一个扩展（行保留，随时可再启用）")
+    dis.add_argument("--kind", required=True, choices=list(EXTENSION_KINDS))
+    dis.add_argument("--id", required=True)
+    rem = ext_sub.add_parser("remove", help="删除一个自定义行（只能手动删）")
+    rem.add_argument("--kind", required=True, choices=list(EXTENSION_KINDS))
+    rem.add_argument("--id", required=True)
+    sub.add_parser("discover", help="扫描本机已装的 Agent CLI（自动发现）")
+
     args = parser.parse_args(argv)
-    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port)
+    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy)
 
     if args.command in (None, "serve"):
-        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port)
+        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy)
         return 0
     if args.command == "fingerprint":
         print(hand.fingerprint())
@@ -1533,7 +1653,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "grant":
         with hand.state.lock:
             auth = hand.state.load_json("auth.json", {})
-            folders = auth.setdefault(args.agent_id, [])
+            if not isinstance(auth, dict):
+                auth = {}
+            entry = auth.get(args.agent_id)
+            if isinstance(entry, dict):
+                # 字典形：授权文件夹在 "folders" 键下（authorize 动作
+                # 写入 authorized_project_folders 后仍走这里）。
+                folders = entry.get("folders", [])
+                if not isinstance(folders, list):
+                    folders = []
+                entry["folders"] = folders
+            else:
+                folders = list(entry) if isinstance(entry, list) else []
+                auth[args.agent_id] = folders
             if args.folder not in folders:
                 folders.append(args.folder)
             hand.state.save_json("auth.json", auth)
@@ -1560,8 +1692,619 @@ def main(argv: list[str] | None = None) -> int:
         hand.state.save_json("agents.json", default)
         print(f"已写入默认 agents.json：{path}")
         return 0
+    if args.command == "extensions":
+        print(json.dumps(registry_list(args.state_dir, args.kind, args.device_id),
+                         ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "extension":
+        if args.ext_action == "register":
+            try:
+                entry = json.loads(args.json)
+            except Exception as e:
+                print(f"注册内容不是合法 JSON：{e}", file=sys.stderr)
+                return 1
+            try:
+                saved = registry_register(args.state_dir, args.kind, args.id, entry)
+            except (ValueError, KeyError) as e:
+                print(f"注册失败：{e}", file=sys.stderr)
+                return 1
+            print(json.dumps(saved, ensure_ascii=False, indent=2))
+            return 0
+        if args.ext_action in ("enable", "disable"):
+            try:
+                saved = registry_set_enabled(args.state_dir, args.kind, args.id,
+                                             args.ext_action == "enable",
+                                             args.device_id)
+            except (ValueError, KeyError) as e:
+                print(f"操作失败：{e}", file=sys.stderr)
+                return 1
+            print(json.dumps(saved, ensure_ascii=False, indent=2))
+            return 0
+        if args.ext_action == "remove":
+            removed = registry_remove(args.state_dir, args.kind, args.id)
+            print("已删除自定义行。" if removed else
+                  "没有可删的自定义行（内置行删不掉）。")
+            return 0 if removed else 1
+        print("用法：extension {register|enable|disable|remove} …", file=sys.stderr)
+        return 1
+    if args.command == "discover":
+        resolved = resolve_adapters(args.state_dir, args.device_id)
+        out = []
+        for ext_id, reg in resolved.items():
+            out.append({
+                "agent_id": ext_id,
+                "display_name": reg["display_name"],
+                "binary": reg["binary_path"],
+                "discovered": reg["discovered"],
+                "folder": reg["folder"],
+                "login_check": reg["login_check"],
+                "login": check_login(reg),
+                "source": reg["source"],
+                "verified": reg["verified"],
+            })
+        brains = [{"brain_id": bid,
+                   "display_name": brow.get("display_name", bid),
+                   "backend_type": brow.get("backend_type", ""),
+                   "source_adapter": brow.get("source_adapter", ""),
+                   "login": brow.get("login"),
+                   "status": brow.get("status", ""),
+                   "enabled": brow.get("enabled", True)}
+                  for bid, brow in registry_all(
+                      args.state_dir, args.device_id).get("brain", {}).items()
+                  if brow.get("source") == "discovered"]
+        print(json.dumps({"agents": out, "brains": brains},
+                         ensure_ascii=False, indent=2))
+        return 0
     parser.print_help()
     return 1
+
+
+# --------------------------------------------------------------------------
+# 统一扩展注册表：七类扩展同一套注册 / 发现 / 启用机制
+# --------------------------------------------------------------------------
+# 种类：adapter（Agent 适配器）、connector（连接器）、plugin（插件）、
+# mcp（MCP 服务）、wakeup（唤醒机制）、protocol（通信协议）、
+# brain（推理后端——App 给自己找的推理后端，不是成员 Agent）。
+# 核心代码不认识具体扩展，只认注册表。注册表 = 内置注册（下表，纯数据）
+# + 各设备 state-dir 下 extensions.json（用户自定义行）。
+# 自定义行与内置行同等对待：注册、发现、启用三步全通；停用只改
+# enabled 标志，行保留；代码里没有任何自动清理自定义行的逻辑，
+# 部署也不会碰 extensions.json。加新扩展 = 注册表里加一行，
+# 不写新脚本、不改核心、不重启（注册表每次调用都重新读文件）。
+# 功能种类一个不减：七类分开留着，不合并；MCP 是 protocol 的一种
+# 实现，不是唯一协议；webhook 是 wakeup 的一种实现，不是唯一唤醒。
+# 大脑扫描的发现来源（只写真实来源，不探沙箱目录）：
+#   (a) App BrainConfig：API Key 的模型（OpenAI 兼容、Cloudflare、
+#       DeepSeek、自定义添加）与会员（ChatGPT 会员等）；
+#   (b) Hand 发现：设备上已装已登录的 CLI，其会员额度可作推理后端
+#       （见 derived_brains()，由 adapter 发现结果派生）。
+# 沙箱成员 Agent 扫描（探沙箱目录找第三方 CLI 当成员）是已删的错误
+# 方向，与大脑扫描无关，本文件任何地方都不探沙箱目录。
+
+EXTENSION_KINDS = ("adapter", "connector", "plugin", "mcp", "wakeup",
+                   "protocol", "brain")
+REGISTRY_VERSION = 1
+OVERLAY_FILENAME = "extensions.json"
+
+DEVICE_ALIASES = {"MacBook-Air": "mac"}
+
+
+def canonical_device_id(device_id: str) -> str:
+    return DEVICE_ALIASES.get(device_id, device_id)
+
+
+# 内置注册：只写“已知”的扩展（检测方法、调用模板、实现指向）。
+# 其中 adapter 行是“已知 Agent 表”：加新 Agent = 表里加一行。
+# claude 不在内置表里——它是本次“只加表一行”的证明对象，见 Mac
+# 的 extensions.json overlay（设备上已装、OAuth 已过期，见 DELIVERY）。
+# App 自己也是 adapter 表里一等的行（wherevercode-agent，
+# execution=internal）：id 不是凭空发明的——取自 App 的 applicationId
+# "wherevercode.agent"（android/app/build.gradle.kts:35，namespace
+# 同值），AgentRecord 的 id 形状（^[a-z0-9][a-z0-9_-]*$，见
+# AgentRecord.kt）不许点，点改横线，与仓库名 wherevercode-agent 同形；
+# 显示名“本机 · WhereverCode”是 App 内默认对话方（代码里今天用
+# ChatViewModel selectedAgent==null 表示“不选 Agent、直接走大脑”，
+# 尚无自我 AgentRecord；本行就是把这个默认对话方登记在册）。
+# 执行方式 internal：BrainEngine（聊天/大脑）+ TaskScheduler（任务引擎）
+# + ChatTaskDispatcher（聊天→任务行）+ 泵（远端走 RemoteTaskPump），
+# 全在 App 内，不 spawn 外部二进制，不经过设备 Hand。
+BUILTIN_EXTENSIONS: dict[str, dict[str, dict]] = {
+    "adapter": {
+        "wherevercode-agent": {
+            "display_name": "本机 · WhereverCode",
+            "execution": "internal",
+            "executor": "BrainEngine + TaskScheduler + ChatTaskDispatcher + 泵（App 内）",
+            "app_identity": "applicationId wherevercode.agent（build.gradle.kts:35）",
+            "addressable_as": "默认对话方（ChatViewModel selectedAgent==null 即指它）；"
+                              "任务行 assignedAgentId/memberId 可填本 id",
+            "login_check": {"type": "none", "how": "App 自身，无需登录"},
+            "folders_by_device": {},
+            "capabilities": ["chat", "dev"],
+            "consumes": "brain（推理后端）：App 作为 Agent 消费大脑——扫描、"
+                        "注册、切换大脑；大脑是独立一类扩展，不是 App 自己。",
+            "env": {}, "verified": False,
+            "note": "App-as-Agent：能聊天、能执行（经任务引擎+工具）、能协作，"
+                    "与外部 CLI Agent 地位相同，区别只在执行方式。"
+                    "Hand 不执行 internal 行（见 run_agent_entry）；"
+                    "App 侧 AgentRecord/TeamMember 落册是后续 App 工作，见 DELIVERY。",
+        },
+        "codex": {
+            "display_name": "Codex", "binary": "codex",
+            "binary_candidates": ["/usr/bin/codex", "~/.local/bin/codex"],
+            "argv": ["codex", "exec", "--skip-git-repo-check", "-s",
+                     "workspace-write", "{prompt}"],
+            "login_check": {"type": "file", "path": "~/.codex/auth.json"},
+            "folders_by_device": {
+                "remote-device": ["/workspace/codex"],
+                "mac": ["/Users/example-user/v5-codex-work"],
+            },
+            "capabilities": ["dev"], "env": {}, "verified": True,
+        },
+        "codebuddy": {
+            "display_name": "CodeBuddy", "binary": "codebuddy",
+            "binary_candidates": ["/usr/bin/codebuddy"],
+            "argv": ["codebuddy", "-p", "-y", "{prompt}"],
+            "login_check": {"type": "smoke",
+                            "how": "无本地凭证文件可查；以一次真实小提示冒烟为准"},
+            "folders_by_device": {"remote-device": ["/workspace/codebuddy"]},
+            "capabilities": ["dev"], "env": {}, "verified": True,
+        },
+        # 注册表 id = App 侧 agentId（与已配对的 agents.json / App 记录
+        # 一致），binary 是另外的字段。grok 行的 id 是 example-agent
+        #（VPS 上一直用的 id，App 已按此配对），不是二进制名 grok。
+        "example-agent": {
+            "display_name": "Example Agent", "binary": "grok",
+            "binary_candidates": ["/usr/local/bin/grok", "~/.local/bin/grok"],
+            "argv": ["grok", "-p", "{prompt}", "--always-approve",
+                     "--sandbox", "workspace", "--output-format", "plain"],
+            "login_check": {"type": "file", "path": "~/.grok/auth.json"},
+            "folders_by_device": {
+                "remote-device": ["/workspace/example-project"],
+                "mac": ["/Users/example-user/v5-grok-work"],
+            },
+            "log_template": {
+                "remote-device": "/workspace/example-project/log-grok-{task_id}.txt",
+                "mac": "/Users/example-user/v5-grok-work/log-grok-{task_id}.txt",
+            },
+            "capabilities": ["dev"], "env": {}, "verified": True,
+        },
+        "gemini": {
+            "display_name": "Gemini", "binary": "gemini",
+            "binary_candidates": ["gemini"],
+            "argv": ["gemini", "-p", "{prompt}"],
+            "login_check": {"type": "file",
+                            "path": "~/.gemini/oauth_creds.json"},
+            "folders_by_device": {},
+            "capabilities": ["dev"], "env": {}, "verified": False,
+            "note": "已知行，未在 VPS/Mac 上装过；argv 与凭证路径待真机核实。",
+        },
+        "agy": {
+            "display_name": "agy", "binary": "agy",
+            "binary_candidates": ["~/.local/bin/agy", "agy"],
+            "argv": ["agy", "--dangerously-skip-permissions", "{prompt}"],
+            "login_check": {"type": "smoke",
+                            "how": "无头模式冒烟为准；凭证位置待小米 12 上核实"},
+            "folders_by_device": {},
+            "capabilities": ["dev"], "env": {}, "verified": False,
+            "note": "已知行，只在小米 12 Termux 见过（1.5.4）；本次不在范围，"
+                    "argv 待小米 12 Hand 接入时核实。",
+        },
+    },
+    "connector": {
+        "hand-tcp-transport": {
+            "display_name": "Hand 直连传输",
+            "implementation": "hand_server.py 本进程：TCP 18743 + 密封信封"
+                              "（X25519+HKDF 会话，AES-256-GCM，v2 任务凭证）",
+            "status": "live",
+            "note": "Hand 正在用的传输本身；VPS/Mac 两边都在跑。",
+        },
+        "tailscale": {
+            "display_name": "Tailscale 组网",
+            "implementation": "Tailnet：VPS 192.0.2.10，Mac 198.51.100.10；"
+                              "Hand 经该网络可达，2026-11-10/11 实测连通。",
+            "status": "live",
+        },
+    },
+    "plugin": {
+        "healthcheck": {
+            "display_name": "健康检查",
+            "implementation": "run_healthcheck()（本文件）；"
+                              "CLI：hand_server.py plugin run healthcheck",
+            "status": "live",
+        },
+    },
+    "mcp": {
+        "hand-mcp-stdio": {
+            "display_name": "Hand MCP 服务（stdio）",
+            "implementation": "mcp_serve()（本文件）：stdio JSON-RPC 2.0，"
+                              "协议 2024-11-05，工具 list/read/write/run；"
+                              "run 走通用 runner，文件夹须在授权表里。",
+            "status": "live",
+        },
+    },
+    "wakeup": {
+        # T4: preserve sender; dispatch-to-webhook-to-MCP claim wiring is incomplete.
+        # The missing end-to-end wiring is excluded from executable-union acceptance.
+        "webhook": {
+            "display_name": "Webhook 唤醒",
+            "implementation": "webhook_deliver()（本文件）：出站 POST，"
+                              "Standard Webhooks HMAC 签名，https-only，"
+                              "重试 (0, 5, 30, 120) 秒；设计见老项目 C3 审计 §3.2 "
+                              "（两段式：webhook 只叫醒，执行走 MCP 领单）。",
+            "status": "mechanism-live",
+            "gap": "端到端接线（派单→webhook→Agent 经 MCP 认领）依赖 maintainer 对"
+                   "两段式口径的确认（2026-11-10 13:10 已报、未回）；"
+                   "手机无公网地址，直接收公网 webhook 的可达方案也未定。",
+        },
+        "polling": {
+            "display_name": "轮询唤醒",
+            "implementation": "已有机制：App HandClient hello 轮询 + "
+                              "WhereverCode 队列 10 分钟轮询；"
+                              "webhook 失败时的兜底也是轮询（老项目同款规则）。",
+            "status": "live",
+        },
+    },
+    "protocol": {
+        "mcp": {
+            "display_name": "MCP（通信协议）",
+            "implementation": "JSON-RPC 2.0，protocolVersion 2024-11-05；"
+                              "由 hand-mcp-stdio 提供；工具 list/read/write/run。",
+            "status": "live",
+            "note": "MCP 只是协议之一，与 direct-transport、WACF 并列，"
+                    "不是唯一协议；A2A 不引入（maintainer 已定）。",
+        },
+        "direct-transport": {
+            "display_name": "Hand 直连协议",
+            "implementation": "hand_server.py 本进程的密封信封协议："
+                              "wherevercode_hello 握手 + cross_device_tool_call "
+                              "信封（X25519+HKDF，AES-256-GCM，v2 凭证，"
+                              "epoch/goal_version 栅栏）。",
+            "status": "live",
+        },
+        # T4: design registration only; no Hand implementation or fake executor.
+        # Future bus: control/message ledger; unwakeable Agents remain pending-claim.
+        "wacf": {
+            "display_name": "WACF 自有总线",
+            "implementation": "WACF 设计（2026-11-08，U1–U12 已定：控制 + "
+                              "消息账本，凭证 v2 + AES-GCM v2）；"
+                              "Hand 内暂无实现代码。",
+            "status": "design-only",
+            "gap": "只登记设计，未实现；实现时按 WACF 设计接进注册表，不改核心。",
+        },
+    },
+    # brain（推理后端）：App 给自己找的推理后端。两类来源——
+    # (a) 下表是 App 侧 BrainConfig 里已配置的模型后端（K70 C3 实测：
+    #     ChatGPT 会员已接、Cloudflare/DeepSeek 已配、自定义添加走
+    #     OpenRouter；Key 在 App BrainKeyStore，Hand 不存 Key、不验证，
+    #     只登记类型与配置位置，status=app-configured）；
+    # (b) CLI 会员额度后端由 Hand 发现派生（见 derived_brains()），
+    #     不在下表里写死——设备上新装已登录的 CLI，brain 行自动出现。
+    # 消费方：wherevercode-agent（App 自己）——使用者与后端的关系。
+    "brain": {
+        "openai-compatible": {
+            "display_name": "OpenAI 兼容模型",
+            "backend_type": "model-api",
+            "implementation": "App BrainConfig：OpenAI 兼容 /v1/models；"
+                              "Key 在 BrainKeyStore；自定义添加走同一入口。",
+            "status": "app-configured",
+            "consumed_by": "wherevercode-agent",
+            "verified": False,
+            "note": "在 App 侧配置与验证；Hand 只登记，不存 Key。",
+        },
+        "cloudflare": {
+            "display_name": "Cloudflare Workers AI",
+            "backend_type": "model-api",
+            "implementation": "App BrainConfig：Workers AI（免费 10,000 "
+                              "Neurons/天）；默认模型待 maintainer 在控制台核对"
+                              "免费资格后切换；绝不自动切付费。",
+            "status": "app-configured",
+            "consumed_by": "wherevercode-agent",
+            "verified": False,
+        },
+        "deepseek": {
+            "display_name": "DeepSeek",
+            "backend_type": "model-api",
+            "implementation": "App BrainConfig：DeepSeek API；Key 在 BrainKeyStore。",
+            "status": "app-configured",
+            "consumed_by": "wherevercode-agent",
+            "verified": False,
+        },
+        "chatgpt-membership": {
+            "display_name": "ChatGPT 会员",
+            "backend_type": "membership",
+            "implementation": "App BrainConfig：ChatGPT 会员（SIWC；"
+                              "K70 上已接通，模型 gpt-6.1-sol）；"
+                              "会员额度，非 API Key。",
+            "status": "app-configured",
+            "consumed_by": "wherevercode-agent",
+            "verified": False,
+        },
+        "custom-model-api": {
+            "display_name": "自定义模型 API",
+            "backend_type": "model-api",
+            "implementation": "App BrainConfig 自定义添加（如 OpenRouter；"
+                              "Key 由 maintainer 在 App 内自己填，绝不经手 Muse）。",
+            "status": "app-configured",
+            "consumed_by": "wherevercode-agent",
+            "verified": False,
+        },
+    },
+}
+
+
+def _overlay_path(state_dir: str) -> str:
+    return os.path.join(os.path.expanduser(state_dir), OVERLAY_FILENAME)
+
+
+def load_overlay_extensions(state_dir: str) -> dict:
+    """读用户自定义行（extensions.json）。文件不存在或损坏返回空表，
+    损坏时不删文件、不覆盖——宁可读不到，不可丢自定义。"""
+    try:
+        with open(_overlay_path(state_dir), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        exts = data.get("extensions", {}) if isinstance(data, dict) else {}
+        return exts if isinstance(exts, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_overlay_extensions(state_dir: str, extensions: dict) -> None:
+    path = _overlay_path(state_dir)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"version": REGISTRY_VERSION, "extensions": extensions},
+                  f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _derived_brains(state_dir: str, device_id: str, merged: dict) -> dict[str, dict]:
+    """Hand 发现派生的推理后端：设备上已装的 CLI adapter，其会员额度
+    可作 App 的推理后端。每发现一个已装 CLI，brain 行自动出现一条；
+    设备上新装已登录的 CLI，下次发现自动多一条，不用改表。
+    login 证据优先用行里的 smoke_status（冒烟实测），其次用
+    login_check（文件/命令 cheap 检查）；smoke 型且无实测记录时为
+    None（未知，不猜）。internal 行（App 自身）不派生——它消费大脑，
+    不是大脑。"""
+    brains: dict[str, dict] = {}
+    for ext_id, adapter in resolve_adapters(state_dir, device_id).items():
+        if adapter.get("execution", "cli") != "cli":
+            continue
+        if not adapter.get("discovered"):
+            continue
+        raw = merged.get("adapter", {}).get(ext_id, {})
+        smoke = raw.get("smoke_status", "") or ""
+        if isinstance(smoke, str) and smoke.startswith("passed"):
+            login: bool | None = True
+        elif isinstance(smoke, str) and smoke.startswith("failed"):
+            login = False
+        else:
+            login = check_login(adapter)
+        brains[f"{ext_id}-membership"] = {
+            "kind": "brain",
+            "id": f"{ext_id}-membership",
+            "display_name": f"{adapter['display_name']} 会员额度",
+            "backend_type": "cli-membership",
+            "source_adapter": ext_id,
+            "login": login,
+            "login_check": adapter.get("login_check", {}) or {},
+            "smoke_status": smoke,
+            "implementation": f"经 {adapter['display_name']} CLI 的会员额度推理；"
+                              "Hand 在本设备上发现已装 CLI。",
+            "status": "live" if login else "login-unconfirmed",
+            "consumed_by": "wherevercode-agent",
+            "source": "discovered",
+            "enabled": True,
+        }
+    return brains
+
+
+def registry_all(state_dir: str, device_id: str | None = None) -> dict[str, dict[str, dict]]:
+    """合并后的注册表：内置 + 自定义行（自定义同 id 覆盖内置行其余字段
+    保留合并；自定义独有 id 直接加入）+ device_id 给出时派生的 brain 行。
+    每次调用都重新读文件，所以加一行不用重启。注意：resolve_adapters
+    内部调本函数时不传 device_id（只取 adapter 行），避免派生递归。"""
+    merged: dict[str, dict[str, dict]] = {}
+    for kind in EXTENSION_KINDS:
+        merged[kind] = {}
+        for ext_id, entry in BUILTIN_EXTENSIONS.get(kind, {}).items():
+            item = dict(entry)
+            item["kind"] = kind
+            item["id"] = ext_id
+            item["source"] = "builtin"
+            item.setdefault("enabled", True)
+            merged[kind][ext_id] = item
+    overlay = load_overlay_extensions(state_dir)
+    for kind, items in overlay.items():
+        if kind not in EXTENSION_KINDS or not isinstance(items, dict):
+            continue
+        for ext_id, entry in items.items():
+            if not isinstance(entry, dict):
+                continue
+            base = merged[kind].get(ext_id, {})
+            item = dict(base)
+            item.update(entry)
+            item["kind"] = kind
+            item["id"] = ext_id
+            item["source"] = "custom"
+            item.setdefault("enabled", True)
+            merged[kind][ext_id] = item
+    if device_id is not None:
+        for brain_id, row in _derived_brains(state_dir, device_id, merged).items():
+            base = merged["brain"].get(brain_id, {})
+            item = dict(row)
+            item.update(base)  # 用户 overlay / 内置行优先于派生默认值
+            item.setdefault("enabled", True)
+            merged["brain"][brain_id] = item
+    return merged
+
+
+def registry_list(state_dir: str, kind: str | None = None,
+                  device_id: str | None = None) -> dict:
+    all_exts = registry_all(state_dir, device_id)
+    if kind is None:
+        return all_exts
+    return {kind: all_exts.get(kind, {})} if kind in EXTENSION_KINDS else {}
+
+
+def registry_register(state_dir: str, kind: str, ext_id: str, entry: dict) -> dict:
+    """注册一个扩展（写自定义行）。只写 overlay 文件，绝不改内置表；
+    同名自定义行整体替换（用户自己动手才删，见 registry_remove）。"""
+    if kind not in EXTENSION_KINDS:
+        raise ValueError(f"未知的扩展类型：{kind}（应为 {EXTENSION_KINDS} 之一）")
+    if not ext_id or not all(c.isalnum() or c in "-_" for c in ext_id):
+        raise ValueError(f"扩展 id 非法：{ext_id!r}（只许字母数字、-、_）")
+    if not isinstance(entry, dict):
+        raise ValueError("注册内容须为 JSON 对象")
+    overlay = load_overlay_extensions(state_dir)
+    overlay.setdefault(kind, {})[ext_id] = dict(entry)
+    overlay[kind][ext_id]["added_at"] = int(time.time())
+    save_overlay_extensions(state_dir, overlay)
+    return registry_all(state_dir)[kind][ext_id]
+
+
+def registry_set_enabled(state_dir: str, kind: str, ext_id: str, enabled: bool,
+                         device_id: str | None = None) -> dict:
+    """启用 / 停用。停用只写 enabled=false 覆盖行，行保留、随时可再启用；
+    对内置行同样只写 overlay 覆盖，不动内置表。device_id 给出时，
+    派生的 brain 行也能被停用/启用。"""
+    if kind not in EXTENSION_KINDS:
+        raise ValueError(f"未知的扩展类型：{kind}")
+    current = registry_all(state_dir, device_id)
+    if ext_id not in current.get(kind, {}):
+        raise KeyError(f"未注册的扩展：{kind}/{ext_id}")
+    overlay = load_overlay_extensions(state_dir)
+    row = dict(overlay.get(kind, {}).get(ext_id, {}))
+    row["enabled"] = bool(enabled)
+    overlay.setdefault(kind, {})[ext_id] = row
+    save_overlay_extensions(state_dir, overlay)
+    return registry_all(state_dir, device_id)[kind][ext_id]
+
+
+def registry_remove(state_dir: str, kind: str, ext_id: str) -> bool:
+    """删自定义行：只能用户自己动手调这一个函数删；代码里任何地方
+    都不自动调它，不自动清理自定义行。内置行删不掉（只会清掉 overlay
+    覆盖，内置行恢复）。"""
+    overlay = load_overlay_extensions(state_dir)
+    items = overlay.get(kind, {})
+    if ext_id in items:
+        del items[ext_id]
+        if not items:
+            del overlay[kind]
+        save_overlay_extensions(state_dir, overlay)
+        return True
+    return False
+
+
+def registry_summary(state_dir: str, device_id: str | None = None) -> dict:
+    """hello 里带的注册表摘要（只读、可选字段）：App 由此列出七类扩展与自定义项。"""
+    all_exts = registry_all(state_dir, device_id)
+    custom = [{"kind": k, "id": i} for k in EXTENSION_KINDS
+              for i, e in all_exts[k].items() if e.get("source") == "custom"]
+    disabled = [{"kind": k, "id": i} for k in EXTENSION_KINDS
+                for i, e in all_exts[k].items() if not e.get("enabled", True)]
+    return {
+        "kinds": list(EXTENSION_KINDS),
+        "counts": {k: len(all_exts[k]) for k in EXTENSION_KINDS},
+        "custom": custom,
+        "disabled": disabled,
+    }
+
+
+def resolve_binary(entry: dict) -> str | None:
+    """按 binary_candidates 找二进制：绝对路径先验存在，~ 展开，
+    否则按 binary 名查 PATH。找不到返回 None。"""
+    seen: list[str] = []
+    for cand in entry.get("binary_candidates", []) or []:
+        seen.append(os.path.expanduser(str(cand)))
+    if entry.get("binary"):
+        seen.append(str(entry["binary"]))
+    for cand in seen:
+        if os.path.isabs(cand):
+            if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                return cand
+        else:
+            found = shutil.which(cand)
+            if found:
+                return found
+    return None
+
+
+def adapter_folder(entry: dict, device_id: str) -> str:
+    dev = canonical_device_id(device_id)
+    by_device = entry.get("folders_by_device", {}) or {}
+    folders = by_device.get(dev) or by_device.get(device_id) or []
+    if folders:
+        return folders[0]
+    plain = entry.get("folders", []) or []
+    return plain[0] if plain else ""
+
+
+def adapter_log_path(entry: dict, device_id: str, task_id: str) -> str | None:
+    dev = canonical_device_id(device_id)
+    tmpl = entry.get("log_template", {}) or {}
+    raw = tmpl.get(dev) or tmpl.get(device_id)
+    safe_id = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
+    return raw.replace("{task_id}", safe_id) if raw else None
+
+
+def resolve_adapters(state_dir: str, device_id: str) -> dict[str, dict]:
+    """已启用的 adapter 行 + 本机解析结果（二进制绝对路径、文件夹）。
+    新装一个 Agent 只要注册表里有它的行，hello 里自动出现。"""
+    out: dict[str, dict] = {}
+    for ext_id, entry in registry_all(state_dir).get("adapter", {}).items():
+        if not entry.get("enabled", True):
+            continue
+        execution = entry.get("execution", "cli")
+        binary_path = resolve_binary(entry) if execution == "cli" else None
+        argv = list(entry.get("argv", []) or [])
+        if argv and binary_path:
+            argv = [binary_path] + argv[1:]
+        out[ext_id] = {
+            "id": ext_id,
+            "display_name": entry.get("display_name", ext_id),
+            "kind": "agent",
+            "execution": execution,
+            "executor": entry.get("executor", ""),
+            "capabilities": entry.get("capabilities", []),
+            "folder": adapter_folder(entry, device_id),
+            "command": argv,
+            "env": entry.get("env", {}) or {},
+            "binary_path": binary_path,
+            "discovered": binary_path is not None if execution == "cli" else False,
+            "source": entry.get("source", "builtin"),
+            "login_check": entry.get("login_check", {}) or {},
+            "log_template": entry.get("log_template", {}) or {},
+            "verified": entry.get("verified", False),
+        }
+    return out
+
+
+def check_login(entry: dict, timeout: float = 10.0) -> bool | None:
+    """按注册行声明的方式确认登录。返回 True/False；smoke 型返回 None
+    （只有一次真实运行才能证明，不在 hello 里跑模型调用）。"""
+    lc = entry.get("login_check", {}) or {}
+    kind = lc.get("type")
+    if kind == "file":
+        path = os.path.expanduser(lc.get("path", ""))
+        try:
+            return os.path.isfile(path) and os.path.getsize(path) > 0
+        except OSError:
+            return False
+    if kind == "command":
+        argv = lc.get("argv", []) or []
+        if not argv:
+            return None
+        try:
+            result = subprocess.run(
+                argv, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=timeout)
+            return result.returncode == 0
+        except Exception:
+            return False
+    return None
+
+
 
 
 if __name__ == "__main__":

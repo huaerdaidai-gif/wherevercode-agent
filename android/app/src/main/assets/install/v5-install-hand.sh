@@ -139,7 +139,7 @@ DISPLAY_NAME="$(printf '%s' "$DISPLAY_NAME" | tr -d "'\"" | tr -d '\n\r')"
 # --- 启动器：wherevercode-hand（固定 python + current + 参数）。---
 cat > "$HOST_DIR/wherevercode-hand" <<EOF2
 #!/bin/sh
-exec '$HAND_PYTHON' '$HOST_DIR/current/hand_server.py' --state-dir '$HOST_DIR' --device-id '$DEVICE_ID' --display-name '$DISPLAY_NAME' --host 0.0.0.0 --port $PORT "\$@"
+exec '$HAND_PYTHON' '$HOST_DIR/current/hand_server.py' --state-dir '$HOST_DIR' --device-id '$DEVICE_ID' --display-name '$DISPLAY_NAME' --config-policy bundled --host 0.0.0.0 --port $PORT "\$@"
 EOF2
 chmod 700 "$HOST_DIR/wherevercode-hand"
 mkdir -p "$HOME/.local/bin"
@@ -154,7 +154,7 @@ Darwin)
   PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
   CLI_PATH="$(dirname "$HAND_PYTHON"):/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"
   cat > "$PLIST.new" <<EOF2
-<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>$LABEL</string><key>ProgramArguments</key><array><string>$HAND_PYTHON</string><string>$HOST_DIR/current/hand_server.py</string><string>--state-dir</string><string>$HOST_DIR</string><string>--device-id</string><string>$DEVICE_ID</string><string>--display-name</string><string>$DISPLAY_NAME</string><string>--host</string><string>0.0.0.0</string><string>--port</string><string>$PORT</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>PATH</key><string>$CLI_PATH</string><key>WHEREVERCODE_V5_HAND_STATE_DIR</key><string>$HOST_DIR</string></dict><key>StandardOutPath</key><string>$HOST_DIR/v5-hand.log</string><key>StandardErrorPath</key><string>$HOST_DIR/v5-hand.log</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>
+<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>$LABEL</string><key>ProgramArguments</key><array><string>$HAND_PYTHON</string><string>$HOST_DIR/current/hand_server.py</string><string>--state-dir</string><string>$HOST_DIR</string><string>--device-id</string><string>$DEVICE_ID</string><string>--display-name</string><string>$DISPLAY_NAME</string><string>--config-policy</string><string>bundled</string><string>--host</string><string>0.0.0.0</string><string>--port</string><string>$PORT</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>PATH</key><string>$CLI_PATH</string><key>WHEREVERCODE_V5_HAND_STATE_DIR</key><string>$HOST_DIR</string></dict><key>StandardOutPath</key><string>$HOST_DIR/v5-hand.log</string><key>StandardErrorPath</key><string>$HOST_DIR/v5-hand.log</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>
 EOF2
   chmod 600 "$PLIST.new"
   if [ -f "$PLIST" ] && cmp -s "$PLIST.new" "$PLIST" && launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
@@ -172,7 +172,7 @@ Linux)
 [Unit]
 Description=WhereverCode V5 Hand
 [Service]
-ExecStart=$HAND_PYTHON $HOST_DIR/current/hand_server.py --state-dir "$HOST_DIR" --device-id "$DEVICE_ID" --display-name "$DISPLAY_NAME" --host 0.0.0.0 --port $PORT serve
+ExecStart=$HAND_PYTHON $HOST_DIR/current/hand_server.py --state-dir "$HOST_DIR" --device-id "$DEVICE_ID" --display-name "$DISPLAY_NAME" --config-policy bundled --host 0.0.0.0 --port $PORT serve
 Environment=WHEREVERCODE_V5_HAND_STATE_DIR=$HOST_DIR
 Environment=PATH=$HOME/.local/bin:$PATH
 Restart=always
