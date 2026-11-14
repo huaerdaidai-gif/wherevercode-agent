@@ -91,7 +91,9 @@ class DrawerView(
 
     private var badges: DrawerBadges = DrawerBadges()
 
-    /** 折叠的分组（内存态，默认全展开；分组头点按切换）。 */
+    /** 折叠的分组（内存态；低频扩展默认收起，分组头点按切换）。 */
+    // Keep low-frequency plugins/resources below the fold without forcing the
+    // user to scroll past six secondary entries on every drawer open.
     private val collapsedGroups: MutableSet<String> = mutableSetOf("extensions")
 
     /** 某分组是否折叠（测试口径）。 */

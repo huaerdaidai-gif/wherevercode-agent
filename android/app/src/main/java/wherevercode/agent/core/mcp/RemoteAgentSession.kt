@@ -62,6 +62,13 @@ data class RemoteControlCommand(
     val newGoal: String? = null,
     val goalVersion: Long = 0,
     val epoch: Long = 0,
+    /**
+     * Attempt-scoped controls: when true the snapshot names the task's live
+     * attempt ([attemptId], "" = none). The Hand then kills a running process
+     * of any other (dead) attempt instead of pausing or waking it.
+     */
+    val attemptScoped: Boolean = false,
+    val attemptId: String? = null,
 )
 
 /** 远端 Agent 的聊天/任务/控制口：调用方只认接口，不认 HandClient。 */
@@ -78,6 +85,14 @@ interface RemoteAgentChatPort {
         goalVersion: Long = 1,
         epoch: Long = 1,
     ): Flow<HandEvent>
+
+    fun runTask(
+        target: RemoteTarget, taskId: String, text: String, timeoutSeconds: Long,
+        goalVersion: Long, epoch: Long, attemptId: String,
+    ): Flow<HandEvent> = runAgent(target, taskId, text, timeoutSeconds, goalVersion, epoch)
+
+    fun getArtifact(target: RemoteTarget, taskId: String, attemptId: String): Flow<HandEvent> =
+        flowOf(HandEvent.Blocked("此端口不支持接收产物", HandProtocol.Errors.COMMAND_NOT_ALLOWED))
 
     /**
      * 列出远端文件夹（Hand list）。target.folder 是该 Agent 在设备上
@@ -107,18 +122,8 @@ interface RemoteAgentChatPort {
      *   （[HandClient] 的 action 白名单已放行本动作）；
      * - 参数：args["agent_id"] = 目标 Agent id，args["folder"] = 要
      *   授权的项目文件夹（绝对路径，精确相等，D3）；
-     * - 信封 folder = 待授权的项目文件夹（`folder` 参数），凭证绑
-     *   它——Hand 的 verify 例外把信封 folder 临时并入授权表再校验，
-     *   凭证 folder 与信封 folder 须一致；taskId 用 `authorize-<hex>`
-     *   （非任务调用，与任务 id 命名空间分开）；
-     * - Hand 侧把该文件夹逐项记入该 Agent 的 `auth.json` 新 key
-     *   `authorized_project_folders`（与现有三路授权合并），回
-     *   cross_device_result；尚未实现该动作的 Hand 回
-     *   cross_device_error，调用方按 Blocked 如实报告同步失败。
-     * 不走 project_folders.json、不走 project-folder CLI——那两个
-     * 方案已被新口径取代。
      * 信封 folder 与凭证继续绑定 Agent 已授权的 target.folder；待授权
-     * 目录仅在 args.folder。Hand 必须把 args.folder 写入项目授权列表，
+     * 目录仅在 args.folder。Hand 按配对设备与 Agent 保存授权，
      * 并回显 requested_folder 与 agent_id，客户端据此校验本次授权。
      *
      * 默认实现直接拒绝：只有真正接 Hand 的端口才实现它
@@ -187,12 +192,30 @@ class HandRemoteAgentChatPort(
     }
 
     override fun runAgent(
-        target: RemoteTarget,
-        taskId: String,
-        text: String,
-        timeoutSeconds: Long,
-        goalVersion: Long,
-        epoch: Long,
+        target: RemoteTarget, taskId: String, text: String, timeoutSeconds: Long,
+        goalVersion: Long, epoch: Long,
+    ): Flow<HandEvent> = run(target, taskId, text, timeoutSeconds, goalVersion, epoch, null)
+
+    override fun runTask(
+        target: RemoteTarget, taskId: String, text: String, timeoutSeconds: Long,
+        goalVersion: Long, epoch: Long, attemptId: String,
+    ): Flow<HandEvent> = run(target, taskId, text, timeoutSeconds, goalVersion, epoch, attemptId)
+
+    override fun getArtifact(target: RemoteTarget, taskId: String, attemptId: String): Flow<HandEvent> {
+        val blocked = blockedReason(target.peer)
+        if (blocked != null) return flowOf(HandEvent.Blocked(blocked, HandProtocol.Errors.NOT_AUTHORIZED))
+        val client = clientFor(target.peer) ?: return flowOf(
+            HandEvent.Blocked("会话密钥协商失败，请重新配对", HandProtocol.Errors.NOT_AUTHORIZED),
+        )
+        return client.call(HandCallRequest(
+            taskId = taskId, agentId = target.agentId, peer = target.peer,
+            folder = target.folder, action = "get_artifact", args = mapOf("attempt" to attemptId),
+        ))
+    }
+
+    private fun run(
+        target: RemoteTarget, taskId: String, text: String, timeoutSeconds: Long,
+        goalVersion: Long, epoch: Long, attemptId: String?,
     ): Flow<HandEvent> {
         val blocked = blockedReason(target.peer)
         if (blocked != null) {
@@ -216,11 +239,12 @@ class HandRemoteAgentChatPort(
                 peer = target.peer,
                 folder = target.folder,
                 action = "run",
-                args = mapOf(
-                    "argv" to argv.toString(),
-                    "timeout" to timeoutSeconds.toString(),
-                    "control" to fenceSnapshot(goalVersion, epoch),
-                ),
+                args = buildMap {
+                    put("argv", argv.toString())
+                    put("timeout", timeoutSeconds.toString())
+                    put("control", fenceSnapshot(goalVersion, epoch))
+                    if (attemptId != null) put("attempt", attemptId)
+                },
             ),
         )
     }
@@ -256,7 +280,10 @@ class HandRemoteAgentChatPort(
                 args = mapOf(
                     "argv" to argv.toString(),
                     "timeout" to "30",
-                    "control" to fenceSnapshot(command.goalVersion, command.epoch),
+                    "control" to fenceSnapshot(
+                        command.goalVersion, command.epoch,
+                        attempt = if (command.attemptScoped) command.attemptId.orEmpty() else null,
+                    ),
                 ),
             ),
         )
@@ -363,10 +390,18 @@ class HandRemoteAgentChatPort(
         )
     }
 
-    private fun fenceSnapshot(goalVersion: Long, epoch: Long): String {
-        val obj = JSONObject()
-        obj.put("goal_version", goalVersion)
-        obj.put("epoch", epoch)
-        return obj.toString()
-    }
+    private fun fenceSnapshot(goalVersion: Long, epoch: Long, attempt: String? = null): String =
+        controlFenceSnapshot(goalVersion, epoch, attempt)
+}
+
+/**
+ * Control/run fence snapshot sent as args["control"]. [attempt] is included
+ * only for attempt-scoped controls ("" means the task has no live attempt).
+ */
+internal fun controlFenceSnapshot(goalVersion: Long, epoch: Long, attempt: String? = null): String {
+    val obj = JSONObject()
+    obj.put("goal_version", goalVersion)
+    obj.put("epoch", epoch)
+    if (attempt != null) obj.put("attempt", attempt)
+    return obj.toString()
 }

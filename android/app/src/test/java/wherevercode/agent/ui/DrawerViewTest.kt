@@ -100,6 +100,7 @@ class DrawerViewTest {
     @Test
     fun `extensions group keeps console mcp plugins and three resource placeholders in order`() {
         val drawerView = view()
+        drawerView.setGroupCollapsed("extensions", false)
         assertEquals(
             listOf("nav_console", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
             drawerView.renderedGroupIds("extensions"),
@@ -126,6 +127,7 @@ class DrawerViewTest {
     @Test
     fun `all ten V5-UI section-three entries are reachable from the drawer or top bar`() {
         val drawerView = view()
+        drawerView.setGroupCollapsed("extensions", false)
         val targets = drawerView.renderedIds().mapNotNull { EntryRegistry.find(it) }
             .filter { it.targetKind == EntryRegistry.TargetKind.DRAWER }
             .map { it.target }

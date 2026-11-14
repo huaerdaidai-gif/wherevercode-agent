@@ -56,10 +56,12 @@ object RemoteMemberVerdictClassifier {
     private val FAILURE_MARKERS: List<String> = listOf(
         // 中文（大小写不敏感；英文统一小写后匹配）。
         "未能完成", "无法完成", "未完成", "执行失败", "任务失败", "操作失败", "失败了",
+        "被审批策略拦截", "审批策略拦截", "需要审批", "等待审批", "尚待审批", "审批未通过",
         // 英文。
         "failed to", "could not complete", "couldn't complete",
         "unable to complete", "did not complete", "was not completed",
-        "task failed", "execution failed", "operation failed",
+        "task failed", "execution failed", "operation failed", "blocked by approval",
+        "requires approval", "awaiting approval", "approval required",
     )
 
     /**

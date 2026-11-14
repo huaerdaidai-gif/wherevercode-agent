@@ -638,11 +638,19 @@ class ConsoleScreenController(
                     setPadding(0, dp(4), 0, 0)
                 },
             )
-            row.addView(
-                UiKit.text(context, agent.detail, 11f, R.color.text_tertiary).apply {
-                    setPadding(0, dp(2), 0, 0)
-                },
-            )
+            val detail = UiKit.text(context, agent.detail, 10f, R.color.text_tertiary).apply {
+                visibility = View.GONE
+                setPadding(0, dp(4), 0, 0)
+            }
+            val detailToggle = UiKit.text(context, "查看连接诊断", 10f, R.color.accent).apply {
+                setPadding(0, dp(3), 0, 0)
+                setOnClickListener {
+                    detail.visibility = if (detail.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                    text = if (detail.visibility == View.VISIBLE) "收起连接诊断" else "查看连接诊断"
+                }
+            }
+            row.addView(detailToggle)
+            row.addView(detail)
             row.addView(
                 UiKit.text(
                     context,
@@ -695,13 +703,26 @@ class ConsoleScreenController(
                 row.addView(
                     UiKit.text(
                         context,
-                        "${device.host}:${device.port} · " +
-                            if (device.paired) "已配对" else "未配对" +
-                            " · ${device.agentCount} 个 Agent",
+                        "配对：${if (device.paired) "已完成" else "未完成"} · 当前在线：未检测 · ${device.agentCount} 个 Agent",
                         11f,
                         R.color.text_secondary,
                     ).apply { setPadding(0, dp(4), 0, 0) },
                 )
+                val networkDetails = UiKit.text(
+                    context,
+                    "高级诊断 · ${device.host}:${device.port}",
+                    10f,
+                    R.color.text_tertiary,
+                ).apply { visibility = View.GONE; setPadding(0, dp(4), 0, 0) }
+                val detailsToggle = UiKit.text(context, "查看网络诊断", 10f, R.color.accent).apply {
+                    setPadding(0, dp(4), 0, 0)
+                    setOnClickListener {
+                        networkDetails.visibility = if (networkDetails.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                        text = if (networkDetails.visibility == View.VISIBLE) "收起网络诊断" else "查看网络诊断"
+                    }
+                }
+                row.addView(detailsToggle)
+                row.addView(networkDetails)
                 section.addView(row)
             }
         }

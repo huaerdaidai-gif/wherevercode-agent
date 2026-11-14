@@ -1456,7 +1456,7 @@ object BrainBootstrap {
                 "stopped" -> controlPlane.confirmStop(taskId, operationId, "本机执行器到达大脑安全检查点")
             }
         }
-        taskRunner.onLeaseSweep = { controlPlane.reconcileExpiredLocalControls() }
+        taskRunner.onLeaseSweep = { controlPlane.reconcileExpiredControls() }
 
         val components = BrainComponents(
             engine = engine,

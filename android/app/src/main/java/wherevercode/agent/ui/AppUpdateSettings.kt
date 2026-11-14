@@ -16,6 +16,7 @@ import wherevercode.agent.update.AppUpdateError
 import wherevercode.agent.update.AppUpdateInstaller
 import wherevercode.agent.update.DriveFileInfo
 import wherevercode.agent.update.DriveUpdateSource
+import wherevercode.agent.update.DRIVE_APK_FILE_ID
 import wherevercode.agent.update.GoogleDriveAuth
 import wherevercode.agent.update.UpdateDecision
 import wherevercode.agent.update.UrlConnectionDriveHttpPort
@@ -55,6 +56,7 @@ class AppUpdateSettings(
     private val note: (String) -> Unit,
     private val openAuthUrl: (String) -> Unit,
     private val prefs: SharedPreferences,
+    private val updateSourceConfigured: Boolean = DRIVE_APK_FILE_ID.isNotBlank(),
 ) {
     private lateinit var statusView: TextView
     private lateinit var buttonCheckUpdate: TextView
@@ -105,6 +107,7 @@ class AppUpdateSettings(
     /** 设置页每次打开时调：已登录且上次检查超过 5 分钟就自动检查一次。 */
     fun onSettingsShown() {
         if (busy) return
+        if (!updateSourceConfigured) return
         if (clientId().isBlank()) return
         if (!auth.isSignedIn()) return
         if (System.currentTimeMillis() - lastCheckMillis < AUTO_CHECK_INTERVAL_MILLIS) return
@@ -143,6 +146,11 @@ class AppUpdateSettings(
     /** 手动检查更新。 */
     fun checkUpdate() {
         if (busy) return
+        if (!updateSourceConfigured) {
+            setStatus("更新源未配置：此版本没有可检查的 APK 文件。")
+            refreshButtons()
+            return
+        }
         val clientId = clientId()
         if (clientId.isBlank()) {
             setStatus("未设置 Google OAuth 客户端 ID：点“设置客户端 ID”，按说明在 Google Cloud Console 建一个（类型：桌面应用），把客户端 ID 填进来；再点“设置客户端密钥”把同个客户端的密钥（以 GOCSPX- 开头）填进来，只存本机 Keystore。")
@@ -419,6 +427,9 @@ class AppUpdateSettings(
         val signedIn = auth.isSignedIn()
         val email = auth.loadTokens()?.accountLabel
         when {
+            !updateSourceConfigured -> {
+                setStatus("更新源未配置：此版本没有可检查的 APK 文件，检查按钮已停用。")
+            }
             id.isBlank() -> {
                 setStatus("应用更新未配置：点“设置客户端 ID”，按说明在 Google Cloud Console 建一个 OAuth 客户端 ID（类型：桌面应用），把客户端 ID 填进来；再点“设置客户端密钥”把同个客户端的密钥（以 GOCSPX- 开头）填进来，只存本机 Keystore。")
             }
@@ -447,7 +458,7 @@ class AppUpdateSettings(
     private fun refreshButtons() {
         val id = clientId()
         val signedIn = auth.isSignedIn()
-        buttonCheckUpdate.isEnabled = !busy && id.isNotBlank() && signedIn
+        buttonCheckUpdate.isEnabled = updateSourceConfigured && !busy && id.isNotBlank() && signedIn
         buttonDownloadUpdate.visibility =
             if (pendingRemote != null || pendingInstallFile != null) View.VISIBLE else View.GONE
         buttonDownloadUpdate.isEnabled = !busy && id.isNotBlank() && signedIn
