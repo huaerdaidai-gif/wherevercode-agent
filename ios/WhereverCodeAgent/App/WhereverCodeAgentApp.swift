@@ -40,10 +40,12 @@ enum PlatformConnectionStatus: Equatable {
 @main
 struct WhereverCodeAgentApp: App {
     @StateObject private var appState = AppState()
+    @State private var isDrawerOpen = false
 
     var body: some Scene {
         WindowGroup {
-            TabView(selection: $appState.selectedTab) {
+            ZStack(alignment: .topLeading) {
+                TabView(selection: $appState.selectedTab) {
                 ChatListView()
                     .tabItem { Label("对话", systemImage: "bubble.left.and.bubble.right") }
                     .tag(AppTab.chat)
@@ -57,7 +59,44 @@ struct WhereverCodeAgentApp: App {
                     .tabItem { Label("设置", systemImage: "gearshape") }
                     .tag(AppTab.settings)
             }
-            .environmentObject(appState)
+                .toolbar(.hidden, for: .tabBar)
+                .environmentObject(appState)
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isDrawerOpen.toggle() }
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 19, weight: .medium))
+                        .frame(width: 44, height: 44)
+                        .background(.regularMaterial, in: Circle())
+                }
+                .accessibilityLabel("打开导航")
+                .padding(.leading, 12)
+                .padding(.top, 4)
+
+                if isDrawerOpen {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .onTapGesture { withAnimation { isDrawerOpen = false } }
+                    HStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("WhereverCode")
+                                .font(.title2.bold())
+                                .padding(.bottom, 12)
+                            drawerItem("对话", icon: "bubble.left", tab: .chat)
+                            drawerItem("任务", icon: "checklist", tab: .tasks)
+                            drawerItem("设备", icon: "iphone", tab: .devices)
+                            Spacer()
+                            drawerItem("设置", icon: "gearshape", tab: .settings)
+                        }
+                        .padding(20)
+                        .frame(width: 264, maxHeight: .infinity, alignment: .topLeading)
+                        .background(.regularMaterial)
+                        Spacer(minLength: 0)
+                    }
+                    .transition(.move(edge: .leading))
+                }
+            }
             .task {
                 // Launch check: the connection status must be
                 // truthful from the first second — with a complete
@@ -82,6 +121,19 @@ struct WhereverCodeAgentApp: App {
             }
             #endif
         }
+    }
+    private func drawerItem(_ title: String, icon: String, tab: AppTab) -> some View {
+        Button {
+            appState.selectedTab = tab
+            withAnimation(.easeInOut(duration: 0.2)) { isDrawerOpen = false }
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .foregroundStyle(.primary)
+        }
+        .accessibilityIdentifier("drawer_\\(tab)")
     }
 }
 
