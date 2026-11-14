@@ -71,7 +71,12 @@ android {
 
         ndk {
             // K70 is arm64; one ABI keeps the APK small and the spike focused.
-            abiFilters += "arm64-v8a"
+            val requestedAbis = providers.gradleProperty("androidAbis")
+                .getOrElse("arm64-v8a").split(",")
+            require(requestedAbis.isNotEmpty() && requestedAbis.all { it in setOf("arm64-v8a", "x86_64") }) {
+                "androidAbis supports arm64-v8a and x86_64 only"
+            }
+            abiFilters += requestedAbis
         }
     }
 
