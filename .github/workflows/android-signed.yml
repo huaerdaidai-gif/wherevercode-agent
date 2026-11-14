@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --only-binary=:all: 'cryptography>=41,<47'
+      - run: "python -m pip install --only-binary=:all: 'cryptography>=41,<47'"
       - run: python -m unittest server.test_hand_server scripts.release.test_android_release -v
       - uses: actions/setup-java@v4
         with:
