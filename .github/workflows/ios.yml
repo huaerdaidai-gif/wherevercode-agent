@@ -25,11 +25,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ios-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ios-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-test-package:
+    # Same-repository pushes already test the exact source SHA. Avoid a
+    # duplicate PR run cancelling its still-starting macOS worker. Forks
+    # still need the pull_request build because their pushes do not run here.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: macos-15
     timeout-minutes: 45
     steps:
