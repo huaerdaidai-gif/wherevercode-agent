@@ -101,7 +101,7 @@ class DrawerViewTest {
     fun `extensions group keeps console mcp plugins and three resource placeholders in order`() {
         val drawerView = view()
         assertEquals(
-            listOf("nav_console", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center", "nav_flagship_70"),
+            listOf("nav_console", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
             drawerView.renderedGroupIds("extensions"),
         )
     }
@@ -120,7 +120,7 @@ class DrawerViewTest {
     fun `default drawer renders ten primary rows and secondary groups`() {
         val drawerView = view()
         // 一级 12 + 工作空间 1 + 扩展与资源 6（双端组装第一轮加 70 屏导航）+ 底部用户行 1。
-        assertEquals(20, drawerView.renderedIds().size)
+        assertEquals(19, drawerView.renderedIds().size)
     }
 
     @Test
@@ -183,7 +183,6 @@ class DrawerViewTest {
             "nav_models_skills" to R.drawable.ic_cube,
             "nav_custom_modules" to R.drawable.ic_grid,
             "nav_feature_center" to R.drawable.ic_dashboard,
-            "nav_flagship_70" to R.drawable.ic_grid,
         )
         // 底部用户行（头像 + 登录状态 + 齿轮）原样保留，不参与图标映射。
         drawerView.renderedRows().filter { it.group != "bottom" }.forEach { row ->
@@ -201,7 +200,7 @@ class DrawerViewTest {
         val rows = (0 until content.childCount).map { content.getChildAt(it) }
             .filter { it.tag is String }
         // 19 个入口行 + 底部用户行（tag 与工作台行相同，排最后，原样保留不查图标）。
-        assertEquals(20, rows.size)
+        assertEquals(19, rows.size)
         rows.dropLast(1).forEach { row ->
             val first = (row as LinearLayout).getChildAt(0)
             assertTrue("row ${row.tag} first child must be an ImageView", first is ImageView)
@@ -281,7 +280,7 @@ class DrawerViewTest {
         assertTrue(controller.hide(DrawerController.ID_PROJECTS))
         drawerView.refresh()
         assertFalse(drawerView.renderedIds().contains("nav_projects"))
-        assertEquals(19, drawerView.renderedIds().size)
+        assertEquals(18, drawerView.renderedIds().size)
         assertTrue(controller.hide(DrawerController.ID_RESULTS))
         drawerView.refresh()
         assertFalse(drawerView.renderedIds().contains("nav_results"))
@@ -305,7 +304,7 @@ class DrawerViewTest {
             listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench", "nav_team_channel", "nav_pending_approval"),
             drawerView.renderedGroupIds("top"),
         )
-        assertEquals(20, drawerView.renderedIds().size)
+        assertEquals(19, drawerView.renderedIds().size)
         val ids = drawerView.renderedIds()
         assertEquals("nav_devices", ids[ids.indexOf("nav_team") + 1])
         assertTrue(drawerView.renderedRowIndent("nav_devices") == 1)
@@ -323,7 +322,7 @@ class DrawerViewTest {
             ),
         )
         val drawerView = view(controller)
-        assertEquals(20, drawerView.renderedIds().size)
+        assertEquals(19, drawerView.renderedIds().size)
     }
 
     @Test
@@ -333,7 +332,7 @@ class DrawerViewTest {
         drawerView.setGroupCollapsed("workspace", true)
         assertTrue(drawerView.isGroupCollapsed("workspace"))
         assertEquals(emptyList<String>(), drawerView.renderedGroupIds("workspace"))
-        assertEquals(19, drawerView.renderedIds().size)
+        assertEquals(18, drawerView.renderedIds().size)
         drawerView.setGroupCollapsed("workspace", false)
         assertEquals(1, drawerView.renderedGroupIds("workspace").size)
     }
