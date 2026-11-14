@@ -72,6 +72,16 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle -p android :app:assembleCompat --stacktrace
+      - name: Preserve built candidate before verification
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-agent-maintainer-unverified-${{ github.sha }}
+          path: |
+            android/app/build/outputs/apk/compat/app-compat.apk
+            android/app/build/generated/source/buildConfig/compat/wherevercode/agent/BuildConfig.java
+          if-no-files-found: error
+          retention-days: 30
       - name: Verify certificate, version, identity and update-source pass-through
         run: |
           set -euo pipefail

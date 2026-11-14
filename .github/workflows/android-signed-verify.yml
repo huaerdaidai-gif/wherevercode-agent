@@ -1,0 +1,78 @@
+name: Android maintainer-signed verify-only
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Run id of the signed-candidate run that built the unverified candidate'
+        required: true
+        type: string
+      source_commit:
+        description: 'Full commit SHA the candidate APK was built from'
+        required: true
+        type: string
+      version_code:
+        description: 'Global counter the candidate was built with'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: android-production-signing-verify
+  cancel-in-progress: false
+jobs:
+  verify-only:
+    if: ${{ github.repository == 'huaerdaidai-gif/wherevercode-agent' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: android-production-signing
+    env:
+      WHEREVERCODE_VERSION_CODE: ${{ inputs.version_code }}
+      ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+      ANDROID_LAST_PUBLISHED_VERSION_CODE: ${{ vars.ANDROID_LAST_PUBLISHED_VERSION_CODE }}
+      WHEREVERCODE_UPDATE_DRIVE_FILE_ID: ${{ secrets.WHEREVERCODE_UPDATE_DRIVE_FILE_ID || vars.WHEREVERCODE_UPDATE_DRIVE_FILE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download unverified candidate from the build run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wherevercode-agent-maintainer-unverified-*
+          path: candidate
+          merge-multiple: true
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore and verify historical certificate
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python scripts/release/android_release.py prepare --keystore "$RUNNER_TEMP/maintainer.keystore" --version "$WHEREVERCODE_VERSION_CODE"
+      - name: Verify certificate, version, identity and update-source pass-through
+        env:
+          GITHUB_SHA: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          python scripts/release/android_release.py verify --keystore "$RUNNER_TEMP/maintainer.keystore" --version "$WHEREVERCODE_VERSION_CODE" --apk candidate/app-compat.apk --apksigner "$bt/apksigner" --aapt "$bt/aapt2" --build-config candidate/BuildConfig.java --manifest android-release-candidate.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-agent-maintainer-candidate-${{ inputs.source_commit }}
+          path: |
+            candidate/app-compat.apk
+            android-release-candidate.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/maintainer.keystore"
