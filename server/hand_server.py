@@ -80,6 +80,7 @@ import hmac
 import json
 import logging
 import os
+import queue
 import shutil
 import secrets
 import signal
@@ -268,6 +269,138 @@ def write_frame(conn: socket.socket, payload: bytes) -> None:
     if len(payload) > MAX_FRAME_BYTES:
         raise ValueError("frame too large")
     conn.sendall(len(payload).to_bytes(4, "big") + payload)
+
+
+# --------------------------------------------------------------------------
+# WebSocket 事件流（2026-11-11 控制台 WebSocket，控制台实时推送的服务端一半）
+# --------------------------------------------------------------------------
+# 零新依赖：Python 标准库自己实现最小 WebSocket 服务端（握手 + 帧
+# 编解码）。服务端只发 text 帧（JSON，不掩码）、ping/pong、close；
+# 读客户端帧要处理掩码、分片、ping→pong；单条消息上限 1MB。
+# 事件信封（定死，App 侧按这个接）：
+#   {"v":1,"type":"event","event":"<名>","ts":<unix 秒>,
+#    "device_id":"<Hand 设备 id>","data":{...}}
+
+WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WS_TOKEN_TTL_SECONDS = 120
+WS_MAX_MESSAGE_BYTES = 1024 * 1024
+WS_PING_INTERVAL_SECONDS = 30.0
+WS_QUEUE_MAX = 100
+
+WS_OP_CONTINUATION = 0x0
+WS_OP_TEXT = 0x1
+WS_OP_BINARY = 0x2
+WS_OP_CLOSE = 0x8
+WS_OP_PING = 0x9
+WS_OP_PONG = 0xA
+
+
+class WsClosed(Exception):
+    """对端已关闭 WebSocket 连接（收到 close 帧或连接断开）。"""
+
+
+class _WsSubscriber:
+    """一个 WS 订阅者：有界队列，上限 WS_QUEUE_MAX 条；满了丢最旧的，
+    慢订阅者绝不能堵住 Agent 执行（offer 永不阻塞）。"""
+
+    def __init__(self, client_id: str) -> None:
+        self.client_id = client_id
+        self.queue: queue.Queue = queue.Queue(maxsize=WS_QUEUE_MAX)
+
+    def offer(self, payload: bytes) -> None:
+        try:
+            self.queue.put_nowait(payload)
+        except queue.Full:
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                self.queue.put_nowait(payload)
+            except queue.Full:
+                pass
+
+
+def ws_compute_accept(key: str) -> str:
+    digest = hashlib.sha1((key + WS_MAGIC_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def ws_encode_frame(payload: bytes, opcode: int = WS_OP_TEXT) -> bytes:
+    header = bytes([0x80 | (opcode & 0x0F)])
+    n = len(payload)
+    if n < 126:
+        header += bytes([n])
+    elif n < 65536:
+        header += bytes([126]) + n.to_bytes(2, "big")
+    else:
+        header += bytes([127]) + n.to_bytes(8, "big")
+    return header + payload
+
+
+def _ws_recv_exact(conn: socket.socket, n: int, timeout: float) -> bytes:
+    conn.settimeout(timeout)
+    buf = b""
+    while len(buf) < n:
+        chunk = conn.recv(n - len(buf))
+        if not chunk:
+            raise WsClosed("connection closed while reading websocket frame")
+        buf += chunk
+    return buf
+
+
+def ws_read_message(conn: socket.socket, timeout: float = 5.0) -> tuple[int, bytes]:
+    """读一条完整客户端消息：处理掩码、分片；ping 当场回 pong；
+    收到 close 帧时回一个 close 帧再抛 WsClosed。返回 (opcode, payload)，
+    opcode 只会是 TEXT 或 BINARY。单条消息超过上限抛 ValueError。"""
+    fragments: list[bytes] = []
+    message_opcode: int | None = None
+    while True:
+        head = _ws_recv_exact(conn, 2, timeout)
+        b1, b2 = head[0], head[1]
+        fin = bool(b1 & 0x80)
+        opcode = b1 & 0x0F
+        masked = bool(b2 & 0x80)
+        length = b2 & 0x7F
+        if length == 126:
+            length = int.from_bytes(_ws_recv_exact(conn, 2, timeout), "big")
+        elif length == 127:
+            length = int.from_bytes(_ws_recv_exact(conn, 8, timeout), "big")
+        if length > WS_MAX_MESSAGE_BYTES:
+            raise ValueError("websocket message too large")
+        mask = _ws_recv_exact(conn, 4, timeout) if masked else b""
+        payload = _ws_recv_exact(conn, length, timeout) if length else b""
+        if masked:
+            payload = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+        if opcode == WS_OP_PING:
+            conn.sendall(ws_encode_frame(payload, WS_OP_PONG))
+            continue
+        if opcode == WS_OP_PONG:
+            continue
+        if opcode == WS_OP_CLOSE:
+            try:
+                conn.sendall(ws_encode_frame(payload, WS_OP_CLOSE))
+            except OSError:
+                pass
+            raise WsClosed("close frame received")
+        if opcode in (WS_OP_TEXT, WS_OP_BINARY):
+            if message_opcode is not None:
+                raise ValueError("unexpected data frame during fragmentation")
+            message_opcode = opcode
+            fragments = [payload]
+        elif opcode == WS_OP_CONTINUATION:
+            if message_opcode is None:
+                raise ValueError("continuation without start")
+            fragments.append(payload)
+        else:
+            raise ValueError(f"unknown websocket opcode: {opcode}")
+        if fin:
+            total = sum(len(f) for f in fragments)
+            if total > WS_MAX_MESSAGE_BYTES:
+                raise ValueError("websocket message too large")
+            assert message_opcode is not None
+            return message_opcode, b"".join(fragments)
+
 
 
 # --------------------------------------------------------------------------
@@ -522,6 +655,13 @@ class HandServer:
         self.process_attempts: dict[str, str] = {}
         # pids killed because their attempt was superseded (not a user stop).
         self.superseded_pids: set[int] = set()
+        # 2026-11-11 控制台 WebSocket：事件订阅者集合与票据表。
+        # 票据只放内存（token → {client_id, expires_at}），绝不落盘、
+        # 绝不记日志；订阅者队列有界，慢订阅者不堵 Agent 执行。
+        self.ws_subscribers: set[_WsSubscriber] = set()
+        self.ws_subscribers_lock = threading.Lock()
+        self.ws_tokens: dict[str, dict] = {}
+        self.ws_tokens_lock = threading.Lock()
 
     # -- 密钥与状态 -------------------------------------------------------
 
@@ -771,7 +911,15 @@ class HandServer:
     def handle_connection(self, conn: socket.socket, addr) -> None:
         enable_keepalive(conn)
         try:
-            self._handle_connection(conn, addr)
+            # 2026-11-11 控制台 WebSocket：同端口复用，先偷看前 4 字节。
+            # 是 "GET " 走 WebSocket 路径，否则走原有密封协议（一字不动）。
+            peeked = self._peek_first_bytes(conn)
+            if not peeked:
+                return
+            if peeked.startswith(b"GET"):
+                self._handle_websocket(conn, addr)
+            else:
+                self._handle_connection(conn, addr)
         except (ConnectionError, ValueError, OSError) as e:
             self.state.audit({"event": "connection_error", "from": str(addr), "error": str(e)[:200]})
         except Exception as e:  # 绝不让一个连接杀死服务进程
@@ -821,7 +969,7 @@ class HandServer:
             # 同款定义：文件内容 SHA-256 前 12 位）。旧版 App 不识这
             # 两个字段，直接忽略，hello 兼容不变。
             "hand_version": hand_code_version(),
-            "update_supported": False,  # S3f migration pending; never advertise a missing endpoint.
+            "update_supported": False,  # S3f migration pending.
             # 可选字段：注册表摘要（App 由此列出七类扩展与自定义项；
             # 不识该字段的旧版 App 直接忽略，hello 兼容不变）。
             "extensions": registry_summary(self.state.dir, self.device_id),
@@ -848,7 +996,239 @@ class HandServer:
             envelope = json.loads(plaintext.decode("utf-8"))
         except Exception:
             return
+        if envelope.get("type") == "wherevercode_ws_token" \
+                and envelope.get("version") == VERSION:
+            # 2026-11-11 控制台 WebSocket：签发 WS 票据。这条分支仍在
+            # APPROVED 检查之后——只有已配对客户端能领票。票据不记日志。
+            token, expires_in = self.issue_ws_token(client_id)
+            self._send(conn, session_key, envelope,
+                       "wherevercode_ws_token_reply",
+                       {"token": token, "expires_in": expires_in},
+                       int(envelope.get("seq", 1)) + 1)
+            return
         self._dispatch(conn, session_key, signing_key, client_id, envelope)
+
+    def publish_event(self, client_id: str, event: str, data: dict) -> None:
+        """往所有 WS 订阅者发一条事件（定死的事件信封格式）。"""
+        payload = json.dumps({
+            "v": 1, "type": "event", "event": event,
+            "ts": int(time.time()), "device_id": self.device_id,
+            "data": data,
+        }, ensure_ascii=False).encode("utf-8")
+        with self.ws_subscribers_lock:
+            subscribers = list(self.ws_subscribers)
+        for sub in subscribers:
+            if sub.client_id == client_id:
+                sub.offer(payload)
+
+    def _ws_subscribe(self, client_id: str) -> _WsSubscriber:
+        sub = _WsSubscriber(client_id)
+        with self.ws_subscribers_lock:
+            self.ws_subscribers.add(sub)
+        return sub
+
+    def _ws_unsubscribe(self, sub: _WsSubscriber) -> None:
+        with self.ws_subscribers_lock:
+            self.ws_subscribers.discard(sub)
+
+    def issue_ws_token(self, client_id: str) -> tuple[str, int]:
+        """签发一张 WS 票据：32 字节随机数 hex（64 字符），绑 client_id，
+        120 秒过期，单次使用。返回值以外的地方绝不记录 token。"""
+        token = secrets.token_hex(32)
+        now = time.time()
+        with self.ws_tokens_lock:
+            expired = [t for t, rec in self.ws_tokens.items()
+                       if rec["expires_at"] <= now]
+            for t in expired:
+                del self.ws_tokens[t]
+            self.ws_tokens[token] = {"client_id": client_id,
+                                     "expires_at": now + WS_TOKEN_TTL_SECONDS}
+        return token, WS_TOKEN_TTL_SECONDS
+
+    def consume_ws_token(self, token: str | None) -> str | None:
+        """握手时核销票据：通过返回绑定的 client_id，否则返回 None。
+        无论通过与否票据都只用一次（查到即删，过期也删）。"""
+        if not isinstance(token, str) or len(token) != 64:
+            return None
+        try:
+            int(token, 16)
+        except ValueError:
+            return None
+        with self.ws_tokens_lock:
+            rec = self.ws_tokens.pop(token, None)
+        if rec is None or rec["expires_at"] <= time.time():
+            return None
+        client_id = rec["client_id"]
+        return client_id if self.client_status(client_id) == "APPROVED" else None
+
+    def _peek_first_bytes(self, conn: socket.socket, timeout: float = 30.0) -> bytes:
+        """偷看连接前 4 字节（MSG_PEEK，不消费），区分 WebSocket/HTTP
+        与密封帧协议。返回看到的前缀（可能短于 4 字节）；空表示对端
+        已关闭或超时无数据。"""
+        data = b""
+        deadline = time.time() + timeout
+        conn.settimeout(1.0)
+        while time.time() < deadline:
+            try:
+                data = conn.recv(4, socket.MSG_PEEK)
+            except socket.timeout:
+                continue
+            except OSError:
+                return b""
+            if not data:
+                return b""
+            if len(data) >= 4 or data.startswith(b"GET"):
+                return data
+            time.sleep(0.05)
+        return data
+
+    def _read_http_request(self, conn: socket.socket):
+        """读一个 HTTP 请求头（上限 8KB，10 秒超时）。返回
+        (method, target, headers)；headers 的键全小写。读不到/超限/
+        格式不对返回 None。"""
+        conn.settimeout(10.0)
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            if len(buf) > 8192:
+                return None
+            try:
+                chunk = conn.recv(4096)
+            except (OSError, ValueError):
+                return None
+            if not chunk:
+                return None
+            buf += chunk
+        head, _ = buf.split(b"\r\n\r\n", 1)
+        try:
+            lines = head.decode("iso-8859-1").split("\r\n")
+            method, target, _version = lines[0].split(" ", 2)
+            headers: dict[str, str] = {}
+            for line in lines[1:]:
+                if ":" not in line:
+                    continue
+                name, value = line.split(":", 1)
+                headers[name.strip().lower()] = value.strip()
+            return method, target, headers
+        except (ValueError, IndexError):
+            return None
+
+    def _send_http_error(self, conn: socket.socket, status: int,
+                         reason: str, message: str) -> None:
+        body = message.encode("utf-8")
+        resp = (f"HTTP/1.1 {status} {reason}\r\n"
+                "Content-Type: text/plain; charset=utf-8\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n").encode("ascii") + body
+        try:
+            conn.sendall(resp)
+        except OSError:
+            pass
+
+    def _ws_send_json(self, conn: socket.socket, event: dict) -> None:
+        payload = json.dumps(event, ensure_ascii=False).encode("utf-8")
+        conn.sendall(ws_encode_frame(payload, WS_OP_TEXT))
+
+    def _handle_websocket(self, conn: socket.socket, addr) -> None:
+        """WebSocket 路径：握手 → 订阅事件流。外层 handle_connection
+        负责关连接，这里只管握手与事件循环。"""
+        from urllib.parse import parse_qs, urlparse
+
+        request = self._read_http_request(conn)
+        if request is None:
+            return
+        method, target, headers = request
+        parsed = urlparse(target)
+        if method != "GET" or parsed.path != "/events":
+            self._send_http_error(conn, 400, "Bad Request",
+                                  "Bad Request: expected GET /events")
+            return
+        if (headers.get("upgrade", "").lower() != "websocket"
+                or "upgrade" not in headers.get("connection", "").lower()
+                or headers.get("sec-websocket-version", "") != "13"
+                or not headers.get("sec-websocket-key", "")):
+            self._send_http_error(conn, 400, "Bad Request",
+                                  "Bad Request: expected WebSocket upgrade")
+            return
+        token = (parse_qs(parsed.query).get("token") or [None])[0]
+        client_id = self.consume_ws_token(token)
+        if client_id is None:
+            self._send_http_error(conn, 403, "Forbidden",
+                                  "Forbidden: invalid or expired token")
+            return
+        accept = ws_compute_accept(headers["sec-websocket-key"])
+        try:
+            conn.sendall(
+                ("HTTP/1.1 101 Switching Protocols\r\n"
+                 "Upgrade: websocket\r\n"
+                 "Connection: Upgrade\r\n"
+                 f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode("ascii"))
+        except OSError:
+            return
+        self.state.audit({"event": "ws_connected", "client": client_id,
+                          "from": str(addr)})
+        sub = self._ws_subscribe(client_id)
+        try:
+            # 连上先发一次 device.info，再补发当前正在跑的任务。
+            agents = [{"agent_id": a.get("agent_id", ""),
+                       "display_name": a.get("display_name", ""),
+                       "kind": a.get("kind", "")}
+                      for a in self.agents()]
+            now = int(time.time())
+            self._ws_send_json(conn, {
+                "v": 1, "type": "event", "event": "device.info",
+                "ts": now, "device_id": self.device_id,
+                "data": {"device_id": self.device_id,
+                         "display_name": self.display_name,
+                         "agents": agents, "server_time": now}})
+            with self.process_lock:
+                running = [(tid, proc) for tid, proc in self.processes.items()
+                           if proc.poll() is None]
+            for task_id, _proc in running:
+                meta = self.task_meta.get(task_id, {})
+                if meta.get("owner", (None,))[0] != client_id:
+                    continue
+                self._ws_send_json(conn, {
+                    "v": 1, "type": "event", "event": "agent.run.started",
+                    "ts": int(time.time()), "device_id": self.device_id,
+                    "data": {"task_id": task_id,
+                             "agent_id": meta.get("agent_id", ""),
+                             "folder": meta.get("folder", "")}})
+            self._ws_loop(conn, sub)
+        except OSError:
+            pass
+        finally:
+            self._ws_unsubscribe(sub)
+            self.state.audit({"event": "ws_disconnected", "client": client_id})
+
+    def _ws_loop(self, conn: socket.socket, sub: _WsSubscriber) -> None:
+        """事件循环：队列有事件就发；空闲 30 秒发一个 ping；客户端
+        发来的消息一律忽略（控制台只订阅事件，不接受指令）。"""
+        import select as _select
+
+        last_send = time.time()
+        while self.client_status(sub.client_id) == "APPROVED":
+            try:
+                while True:
+                    payload = sub.queue.get_nowait()
+                    conn.sendall(ws_encode_frame(payload, WS_OP_TEXT))
+                    last_send = time.time()
+            except queue.Empty:
+                pass
+            if time.time() - last_send >= WS_PING_INTERVAL_SECONDS:
+                conn.sendall(ws_encode_frame(b"", WS_OP_PING))
+                last_send = time.time()
+            try:
+                readable, _, _ = _select.select([conn], [], [], 0.5)
+            except (OSError, ValueError):
+                return
+            if not readable:
+                continue
+            try:
+                ws_read_message(conn, timeout=5.0)
+            except WsClosed:
+                return
+            except (ValueError, OSError):
+                return
 
     def _handle_pending_pairing(
         self, conn: socket.socket, client_id: str, client_pub: bytes, status: str
@@ -1290,9 +1670,29 @@ class HandServer:
                         epoch=int(snap.get("epoch", 1)), control_stopped=False,
                         agent_id=run_agent_id, folder=folder)
         next_seq = seq + 1
+        # 2026-11-11 控制台 WebSocket：run 真正开始（只发真实事件）。
+        # finished 用守卫保证所有出口只发一次。
+        self.publish_event(client_id, "agent.run.started",
+                           {"task_id": task_id, "agent_id": run_agent_id,
+                            "folder": folder})
+        finished_sent = False
+
+        def _finish_run(status: str, detail: str) -> None:
+            nonlocal finished_sent
+            if finished_sent:
+                return
+            finished_sent = True
+            self.publish_event(client_id, "agent.run.finished",
+                               {"task_id": task_id, "agent_id": run_agent_id,
+                                "status": status, "detail": detail})
+
         def _on_line(line: str) -> None:
             nonlocal next_seq
             message = line.rstrip("\n")[-1000:]
+            # 先发 WS 事件再回密封 progress：密封连接断了 WS 侧也不丢行。
+            self.publish_event(client_id, "agent.run.progress",
+                               {"task_id": task_id, "agent_id": run_agent_id,
+                                "message": message})
             self._send(conn, session_key, envelope, "cross_device_progress",
                        {"message": message}, next_seq)
             next_seq += 1
@@ -1323,9 +1723,11 @@ class HandServer:
                     if not self._was_control_stopped(task_id):
                         result = self._save_artifact(envelope, client_id, attempt_id, staging.name, result["output"])
         except ValueError:
+            _finish_run("error", "产物类型或大小不受支持。")
             self._error(conn, session_key, envelope, next_seq, "artifact_invalid", "产物类型或大小不受支持。")
             return
         except InternalAgentExecution as e:
+            _finish_run("error", str(e)[:200])
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         str(e))
             return
@@ -1335,11 +1737,13 @@ class HandServer:
             # 子类，必须放在 except OSError 之前，否则这个分支永远是
             # 死代码（旧版就是这个 bug：断开时 _kill_process 没跑到，
             # _error 里再抛一次才由外层关连接）。
+            _finish_run("stopped", "客户端已断开，执行已终止。")
             # 只杀本次执行自己的进程：任务可能已被新轮次接管。
             for own in owned_proc:
                 self._kill_proc(own)
             return
         except OSError as e:
+            _finish_run("error", f"无法启动 Agent：{e}"[:200])
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"无法启动 Agent：{e}")
             return
@@ -1353,10 +1757,12 @@ class HandServer:
                 if mine is not None:
                     self.superseded_pids.discard(mine.pid)
         if superseded:
+            _finish_run("stopped", "此执行轮次已被新的轮次取代，已终止。")
             self._error(conn, session_key, envelope, next_seq, "stale_attempt",
                         "此执行轮次已被新的轮次取代，已终止。")
             return
         if timed_out:
+            _finish_run("timeout", f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
             self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT,
                         f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
             return
@@ -1364,17 +1770,21 @@ class HandServer:
             # 负退出码 = 被信号杀死。SIGTERM/SIGKILL 且是控制停掉的，
             # 走 remote_controlled_stop；否则按失败。
             if self._was_control_stopped(task_id):
+                _finish_run("stopped", "已按控制指令停止。")
                 self._error(conn, session_key, envelope, next_seq,
                             ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
                 return
+            _finish_run("error", f"Agent 被信号终止（退出码 {returncode}）。")
             self._error(conn, session_key, envelope, next_seq, ERR_AGENT_NOT_FOUND,
                         f"Agent 被信号终止（退出码 {returncode}）。")
             return
         if returncode != 0:
+            _finish_run("error", f"Agent 执行失败（退出码 {returncode}）。")
             self._error(conn, session_key, envelope, next_seq, ERR_AGENT_NOT_FOUND,
                         f"Agent 执行失败（退出码 {returncode}）："
                         + output[-2000:])
             return
+        _finish_run("ok", "执行完成。")
         if self._was_control_stopped(task_id):
             self._error(conn, session_key, envelope, next_seq, ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
             return
