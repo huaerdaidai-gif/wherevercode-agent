@@ -476,10 +476,10 @@ struct LocalChatHomeView: View {
                                     Button("项目 · 选择或切换 ›") { appState.selectedTab = .projects }
                                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(minHeight: 48)
                                     HStack(spacing: 8) {
-                                        suggestion("检查项目并修复问题")
-                                        suggestion("解释这段代码")
+                                        suggestion("检查项目并修复问题", icon: "</>")
+                                        suggestion("解释这段代码", icon: "↓")
                                     }
-                                    suggestion("拆成任务")
+                                    suggestion("拆成任务", icon: "团")
                                 }.padding(.vertical, 12)
                             }
                             ForEach(model.messages, id: \.id) { message in
@@ -520,13 +520,27 @@ struct LocalChatHomeView: View {
                         } label: {
                             Image(systemName: "plus").frame(width: 36, height: 44)
                         }.accessibilityLabel("更多操作")
-                        Picker("模型", selection: $model.selectedBrain) {
-                            Text("选择模型").tag("")
-                            ForEach(appState.brainConfigStore.listConfigs(), id: \.brainId) { config in
-                                Text(config.label + (config.model.isEmpty ? "" : " · " + config.model)).tag(config.brainId)
+                        Menu {
+                            Picker("模型", selection: $model.selectedBrain) {
+                                Text("选择模型").tag("")
+                                ForEach(appState.brainConfigStore.listConfigs(), id: \.brainId) { config in
+                                    Text(config.label + (config.model.isEmpty ? "" : " · " + config.model)).tag(config.brainId)
+                                }
                             }
-                        }.disabled(model.isSending).accessibilityIdentifier("chat.model")
-                        .lineLimit(1)
+                            Button("管理模型与连接") { appState.goToSettings() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(appState.brainConfigStore.getConfig(brainId: model.selectedBrain)?.label ?? "未连接")
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.down").font(.system(size: 10))
+                            }
+                            .font(.system(size: 12)).foregroundStyle(AgentUI.ink)
+                            .padding(.horizontal, 10).frame(minHeight: 36)
+                            .background(AgentUI.card, in: Capsule())
+                            .overlay(Capsule().stroke(AgentUI.border))
+                        }
+                        .frame(maxWidth: 180, alignment: .leading)
+                        .disabled(model.isSending).accessibilityIdentifier("chat.model")
                         Spacer(minLength: 0)
                         if model.isSending {
                             Button { model.stopGenerating() } label: {
@@ -565,11 +579,16 @@ struct LocalChatHomeView: View {
             .onAppear { model.reload() }
         }
     }
-    private func suggestion(_ title: String) -> some View {
+    private func suggestion(_ title: String, icon: String) -> some View {
         Button { model.draft = title + "：" } label: {
-            Text(title).font(.system(size: 12)).frame(maxWidth: .infinity, minHeight: 48)
-        }
-        .buttonStyle(.bordered).tint(.secondary)
+            HStack(spacing: 8) {
+                Text(icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(AgentUI.accent)
+                Text(title).font(.system(size: 12)).foregroundStyle(AgentUI.ink)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(AgentUI.card, in: Capsule())
+            .overlay(Capsule().stroke(AgentUI.border))
+        }.buttonStyle(.plain)
     }
 
 }

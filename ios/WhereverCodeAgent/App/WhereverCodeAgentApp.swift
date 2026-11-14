@@ -54,6 +54,7 @@ struct WhereverCodeAgentApp: App {
                         Button { withAnimation { isDrawerOpen.toggle() } } label: {
                             Image(systemName: "line.3.horizontal").frame(width: 44, height: 44)
                         }
+                        .foregroundStyle(AgentUI.ink)
                         .accessibilityLabel("打开导航")
                         .accessibilityIdentifier("navigation.menu")
                         Text("∞").foregroundStyle(AgentUI.accent).font(.title2.bold())
@@ -61,10 +62,10 @@ struct WhereverCodeAgentApp: App {
                         Spacer()
                         Button { appState.selectedTab = .chat; appState.chat.showHistory = true } label: {
                             Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
-                        }.accessibilityLabel("搜索会话")
+                        }.foregroundStyle(AgentUI.ink).accessibilityLabel("搜索会话")
                         Button { appState.selectedTab = .chat; appState.chat.newConversation() } label: {
                             Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
-                        }.accessibilityLabel("新对话")
+                        }.foregroundStyle(AgentUI.ink).accessibilityLabel("新对话")
                     }
                     .padding(.horizontal, 8).frame(height: 60)
                     Group {
