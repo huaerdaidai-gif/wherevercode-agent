@@ -1,0 +1,174 @@
+
+> Configure project :app
+Warning: Python version 3.11 may have fewer packages available. If you experience problems, try switching to version 3.8.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:extractDebugPythonBuildPackages UP-TO-DATE
+> Task :app:generateDebugPythonRequirements UP-TO-DATE
+> Task :app:mergeDebugPythonSources UP-TO-DATE
+> Task :app:generateDebugPythonProxies UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:generateDebugPythonMiscAssets UP-TO-DATE
+> Task :app:generateDebugPythonRequirementsAssets UP-TO-DATE
+> Task :app:generateDebugPythonSourceAssets UP-TO-DATE
+> Task :app:generateDebugPythonBuildAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:generateDebugPythonJniLibs UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/AndroidApprovalGate.kt:73:23 Parameter 'reason' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/AndroidApprovalGate.kt:181:30 Unnecessary safe call on a non-null receiver of type Runnable?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/AndroidApprovalGate.kt:196:17 Parameter 'context' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:1536:41 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:3382:82 Parameter 'projectName' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:8131:75 There is more than one label with such a name in this scope
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:8907:75 There is more than one label with such a name in this scope
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9044:87 'versionCode: Int' is deprecated. Deprecated in Java
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9222:54 Unnecessary safe call on a non-null receiver of type BrainBootstrap.BrainComponents?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9349:17 Name shadowed: signedIn
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9353:36 Unnecessary safe call on a non-null receiver of type BrainConfig?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9376:36 Condition 'currentBrainId != null' is always 'true'
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/brain/ApprovalBroker.kt:137:28 Variable 'timedOut' initializer is redundant
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/brain/ApprovalFingerprint.kt:123:15 Parameter 'action' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/brain/StreamParser.kt:181:26 Variable 'type' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/brain/ToolRegistry.kt:740:21 Condition 'resolved.second == null' is always 'false'
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/brain/siwc/BrainBootstrap.kt:1191:17 Name shadowed: tokenStore
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:352:66 There is more than one label with such a name in this scope
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:354:50 There is more than one label with such a name in this scope
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpTransport.kt:546:66 Condition 'it != null' is always 'true'
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/mcp/ConsoleWsClient.kt:251:21 The value '-1' assigned to 'var messageOpcode: Int defined in wherevercode.agent.core.mcp.WsFrameReader.readMessage' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/project/HostProject.kt:205:39 Unnecessary non-null assertion (!!) on a non-null receiver of type String
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/project/HostProject.kt:206:70 Unnecessary non-null assertion (!!) on a non-null receiver of type String
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/security/DeviceKeys.kt:199:34 The value 't' assigned to 'var x3: BigInteger defined in wherevercode.agent.core.security.DeviceKeys.x25519' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/security/DeviceKeys.kt:200:35 The value 't2' assigned to 'var z3: BigInteger! defined in wherevercode.agent.core.security.DeviceKeys.x25519' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/session/ControlInstructionRouter.kt:180:13 Elvis operator (?:) always returns the left operand of non-nullable type String
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/task/EvalLog.kt:294:9 Parameter 'nowEpochSeconds' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/task/LocalTaskRunner.kt:320:52 Unnecessary non-null assertion (!!) on a non-null receiver of type String
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/task/PipelineOrchestrator.kt:302:17 Variable 'reworked' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/team/RemoteTaskPump.kt:277:52 Unnecessary non-null assertion (!!) on a non-null receiver of type String
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/transport/LanTransport.kt:85:25 'resolveService(NsdServiceInfo!, NsdManager.ResolveListener!): Unit' is deprecated. Deprecated in Java
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/core/transport/LanTransport.kt:89:52 'getter for host: InetAddress!' is deprecated. Deprecated in Java
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatHistoryStore.kt:68:87 Type mismatch: inferred type is Nothing? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatHistoryStore.kt:71:90 Type mismatch: inferred type is Nothing? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatHistoryStore.kt:72:99 Type mismatch: inferred type is Nothing? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatHistoryStore.kt:73:102 Type mismatch: inferred type is Nothing? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1499:40 Variable 'progressTicker' initializer is redundant
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1520:43 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1536:43 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1543:43 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1556:31 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1804:61 Unnecessary non-null assertion (!!) on a non-null receiver of type TurnStatus
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1955:9 Parameter 'comps' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:2109:9 Parameter 'comps' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/DrawerView.kt:215:9 The value 'addGroupSection(
+            title = "扩展与资源",
+            groupKey = "extensions",
+            planned = EntryRegistry.byGroup(EntryRegistry.Group.DRAWER_EXTENSIONS).map { it to null },
+            rows = rows,
+            sectionShown = sectionShown,
+        )' assigned to 'var sectionShown: Boolean defined in wherevercode.agent.ui.DrawerView.refresh' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/EventLogGrouping.kt:88:20 Unnecessary non-null assertion (!!) on a non-null receiver of type Segment
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/McpPluginScreenController.kt:331:54 Unnecessary safe call on a non-null receiver of type McpPluginScreenController.McpServerFormData?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/update/GoogleDriveAuth.kt:377:13 Variable 'endpoints' is never used
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:processDebugJavaRes
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+> Task :app:dexBuilderDebug
+> Task :app:kaptDebugUnitTestKotlin
+> Task :app:mergeDebugGlobalSynthetics
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeProjectDexDebug
+
+> Task :app:packageDebug
+PackagingOptions.jniLibs.useLegacyPackaging should be set to true because android:extractNativeLibs is set to "true" in AndroidManifest.xml.
+
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:compileDebugUnitTestKotlin
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/brain/GitHostToolsTest.kt:152:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/brain/GitHostToolsTest.kt:194:26 Parameter 'gate' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/brain/ToolRegistryDispatchProjectTest.kt:86:35 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/mcp/AuthorizeProjectFolderE2ETest.kt:49:29 Type mismatch: inferred type is String? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:241:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:260:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:281:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:301:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:321:26 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/DecompositionOrchestratorTest.kt:193:32 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/DecompositionStoreTest.kt:94:13 Variable 'task' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/PipelineStoreTest.kt:94:13 Variable 'task' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/TaskSchedulerMemberParallelTest.kt:63:49 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/TaskSchedulerTest.kt:65:49 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/transport/PairingClientTest.kt:121:21 Unsafe use of a nullable receiver of type String?
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/transport/PairingClientTest.kt:122:37 Type mismatch: inferred type is String? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/MainLayoutTest.kt:85:13 Variable 'root' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/WorkspaceEditTest.kt:29:31 Parameter 'session' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/flagship/V5NavigationTest.kt:11:42 Type mismatch: inferred type is String? but String was expected
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+
+wherevercode.agent.ui.DeviceTapRefreshTest > refresh keeps scroll position so the acted-on device stays visible FAILED
+    java.lang.AssertionError at DeviceTapRefreshTest.kt:108
+
+wherevercode.agent.ui.DeviceTapRefreshTest > entering devices page shows locally added device at once without waiting for lan discovery FAILED
+    java.lang.AssertionError at DeviceTapRefreshTest.kt:108
+
+2735 tests completed, 2 failed, 1 skipped
+
+> Task :app:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///workspace/wherevercode-agent/android/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 10m 44s
+57 actionable tasks: 19 executed, 38 up-to-date
