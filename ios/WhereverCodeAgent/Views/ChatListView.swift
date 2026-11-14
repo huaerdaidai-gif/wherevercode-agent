@@ -127,7 +127,8 @@ struct ConversationHomeContentView: View {
                 }
             }
             Section("其他对话") {
-                ReservedFeatureRow(feature: .brainChat)
+                Text("本地模型对话可从侧边栏「对话」进入，无需平台连接。")
+                    .font(.caption).foregroundStyle(.secondary)
                 ReservedFeatureRow(feature: .singleAgentChat)
             }
         }
@@ -174,7 +175,8 @@ struct ChannelListContentView: View {
                 }
             }
             Section("其他对话") {
-                ReservedFeatureRow(feature: .brainChat)
+                Text("本地模型对话可从侧边栏「对话」进入，无需平台连接。")
+                    .font(.caption).foregroundStyle(.secondary)
                 ReservedFeatureRow(feature: .singleAgentChat)
             }
         }
@@ -335,6 +337,7 @@ final class LocalChatModel: ObservableObject {
     private unowned let appState: AppState
     let eventLog = InMemoryEventLog()
     private let data: LocalData
+    private var currentTurn: Task<Void, Never>?
 
     init(appState: AppState, data: LocalData = .shared) {
         self.appState = appState
@@ -370,6 +373,19 @@ final class LocalChatModel: ObservableObject {
         reload()
     }
 
+    func startSending() {
+        guard currentTurn == nil, !isSending else { return }
+        currentTurn = Task {
+            await send()
+            currentTurn = nil
+        }
+    }
+
+    func stopGenerating() {
+        // Cancel inference only; this is not a task-control receipt.
+        currentTurn?.cancel()
+    }
+
     func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
@@ -388,6 +404,7 @@ final class LocalChatModel: ObservableObject {
                 tools: ChatUnavailableTools(), eventLog: eventLog, approvalGate: DenyApprovalGate())
             for try await event in engine.chat(conversationId: id, userText: text,
                 brainIdOverride: selectedBrain, allowFailover: false) {
+                try Task.checkCancellation()
                 switch event {
                 case .textDelta(let text): streaming += text
                 case .error(let info): error = info.message
@@ -395,6 +412,8 @@ final class LocalChatModel: ObservableObject {
                 }
                 reload()
             }
+        } catch is CancellationError {
+            self.error = "回复已停止"
         } catch {
             self.error = SecretRedactor.redact(error.localizedDescription)
             // Restore unsaved text only; persisted user messages are not duplicated.
@@ -479,11 +498,18 @@ struct LocalChatHomeView: View {
                         }.disabled(model.isSending).accessibilityIdentifier("chat.model")
                         .lineLimit(1)
                         Spacer(minLength: 0)
-                        Button { Task { await model.send() } } label: {
-                            Image(systemName: "arrow.up").frame(width: 36, height: 36)
-                        }.buttonStyle(.borderedProminent).clipShape(Circle())
-                            .disabled(model.isSending || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .accessibilityLabel("发送").accessibilityIdentifier("chat.send")
+                        if model.isSending {
+                            Button { model.stopGenerating() } label: {
+                                Image(systemName: "stop.fill").frame(width: 36, height: 36)
+                            }.buttonStyle(.bordered).clipShape(Circle())
+                                .accessibilityLabel("停止回复").accessibilityIdentifier("chat.stop")
+                        } else {
+                            Button { model.startSending() } label: {
+                                Image(systemName: "arrow.up").frame(width: 36, height: 36)
+                            }.buttonStyle(.borderedProminent).clipShape(Circle())
+                                .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .accessibilityLabel("发送").accessibilityIdentifier("chat.send")
+                        }
                     }.padding(.horizontal, 8)
                 }
                 .padding(4)
