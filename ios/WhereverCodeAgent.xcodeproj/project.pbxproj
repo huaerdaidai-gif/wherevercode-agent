@@ -446,6 +446,7 @@
 		C0DD1C3E4BFC124D878FE440 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ENABLE_TESTABILITY = YES;
 				CODE_SIGN_ENTITLEMENTS = WhereverCodeAgent/WhereverCodeAgent.entitlements;
 				CURRENT_PROJECT_VERSION = 6;
 				GENERATE_INFOPLIST_FILE = NO;
