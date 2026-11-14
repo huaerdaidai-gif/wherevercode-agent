@@ -123,6 +123,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import queue
 import secrets
@@ -2096,7 +2097,8 @@ class HandServer:
                 entry, prompt, task_id, folder,
                 env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
                 on_line=_on_line, log_path=log_path,
-                register_proc=_register_proc, connection=conn)
+                register_proc=_register_proc, connection=conn,
+                on_log_warning=self.state.audit)
             result = {"output": output[-MAX_OUTPUT_CHARS:]}
             if returncode == 0 and not timed_out and staging is not None:
                 with self.process_lock:
@@ -3517,11 +3519,64 @@ def check_login(entry: dict, timeout: float = 10.0) -> bool | None:
 # 通用 runner：一个函数跑任意 CLI Agent
 # --------------------------------------------------------------------------
 
+def _write_log_copy(log_path: str, cwd: str, output: str, task_id: str) -> None:
+    """Configured, task-bound copy inside cwd; reuse Hand path and artifact fd guards.
+
+    No directory creation, symlink traversal, or overwrite. Unsupported fd guards
+    fail closed; the caller reports a non-fatal internal warning.
+    """
+    if not isinstance(log_path, str) or not os.path.isabs(log_path):
+        raise ValueError("log path must be absolute")
+    if ".." in log_path.replace("\\", "/").split("/"):
+        raise ValueError("log path traversal")
+    task_ref = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
+    if task_ref not in os.path.basename(log_path):
+        raise ValueError("log filename must bind the task")
+    base = os.path.abspath(cwd or os.getcwd())
+    rel = os.path.relpath(log_path, base)
+    if HandServer._resolve_path(None, base, rel) is None:
+        raise ValueError("log outside execution folder")
+    # Canonicalize only the already-authorized base. Open every component with
+    # the same no-follow directory-fd primitive used by delivery.bin handling.
+    canonical_base = os.path.realpath(base)
+    if canonical_base == os.path.abspath(os.sep):
+        raise ValueError("filesystem root is not a log scope")
+    parts = [p for p in (canonical_base + os.sep + rel).split(os.sep) if p not in ("", ".")]
+    directory = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(output)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        os.close(directory)
+
+
+def _log_copy_warning(task_id: str, error: Exception, on_warning=None) -> None:
+    # Internal only: do not invent T6 wire fields or log output/path/credentials.
+    event = {"event": "hand_log_copy_failed",
+             "task_ref": hashlib.sha256(task_id.encode("utf-8")).hexdigest(),
+             "error_type": type(error).__name__}
+    logging.warning("hand_log_copy_failed task_ref=%s error_type=%s",
+                    event["task_ref"], event["error_type"])
+    if on_warning is not None:
+        try:
+            on_warning(event)
+        except Exception:
+            logging.warning("hand_log_copy_warning_sink_failed task_ref=%s", event["task_ref"])
+
+
 def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                   task_id: str, cwd: str, env_extra: dict | None = None,
                   timeout_s: float = 600.0,
                   on_line=None, log_path: str | None = None,
-                  register_proc=None, connection=None,
+                  register_proc=None, connection=None, on_log_warning=None,
                   ) -> tuple[int | None, str, bool]:
     """通用 runner：输入（二进制、argv 模板含 {prompt}/{task_id}、
     工作目录、env），跑任意 CLI Agent，stdout 直接抓回。
@@ -3558,21 +3613,14 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
             out_fd = proc.stdout.fileno()
             buf = ""
             while True:
-                if proc.poll() is not None and not buf:
-                    # 2026-11-11 控制台 WebSocket 顺带修：进程已退出时先看
-                    # 管道里还有没有残留输出。旧版这里直接 break，快退出的
-                    # 进程（输出已进管道、父进程还没读）会整段丢输出：
-                    # progress 全丢、result 为空（实测 fake-agent 3/5 次
-                    # 空输出）。残留数据读完后，下面的 os.read 读到 EOF
-                    #（b""）再退出；管道已空才直接 break。
-                    ready_now, _, _ = _select.select([out_fd], [], [], 0)
-                    if not ready_now:
-                        break
                 if time.time() > deadline:
                     timed_out = True
                     break
                 sources = [out_fd] if connection is None else [out_fd, connection]
-                ready, _, _ = _select.select(sources, [], [], 0.2)
+                exited = proc.poll() is not None
+                ready, _, _ = _select.select(sources, [], [], 0 if exited else 0.2)
+                if exited and out_fd not in ready:
+                    break
                 if connection in ready:
                     raise ConnectionError("Hand run connection closed")
                 if out_fd in ready:
@@ -3586,13 +3634,11 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                         output_lines.append(line)
                         if on_line is not None:
                             on_line(line)
-                elif proc.poll() is not None:
-                    break
             if buf:
                 output_lines.append(buf)
                 if on_line is not None:
                     on_line(buf)
-        except OSError:
+        except BaseException:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -3617,10 +3663,17 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                 proc.stdout.close()
         except OSError:
             pass
+        if log_path is not None:
+            try:
+                _write_log_copy(log_path, cwd, output, task_id)
+            except Exception as error:
+                _log_copy_warning(task_id, error, on_log_warning)
         return proc.returncode, output, timed_out
 
     finally:
         os.close(lease_fd)
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 class InternalAgentExecution(Exception):
@@ -3631,7 +3684,7 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
                     env_extra: dict | None = None,
                     timeout_s: float = 600.0,
                     on_line=None, log_path: str | None = None,
-                    register_proc=None, connection=None,
+                    register_proc=None, connection=None, on_log_warning=None,
                     ) -> tuple[int | None, str, bool]:
     """统一分派：按注册行的 execution 分派执行方式，两条都是一等路径。
     - cli：子进程跑 CLI（run_cli_agent）。
@@ -3649,7 +3702,8 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
     return run_cli_agent(command[0], command, prompt, task_id, cwd,
                          env_extra=env_extra, timeout_s=timeout_s,
                          on_line=on_line, log_path=log_path,
-                         register_proc=register_proc, connection=connection)
+                         register_proc=register_proc, connection=connection,
+                         on_log_warning=on_log_warning)
 
 
 # --------------------------------------------------------------------------
@@ -3978,7 +4032,7 @@ def _mcp_call_tool(hand: "HandServer", name: str, args: dict) -> dict:
             returncode, output, timed_out = run_agent_entry(
                 entry, prompt, task_id, folder,
                 env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
-                log_path=log_path)
+                log_path=log_path, on_log_warning=hand.state.audit)
         except InternalAgentExecution as e:
             return _mcp_error_text(str(e), "agent_not_found")
         except OSError as e:

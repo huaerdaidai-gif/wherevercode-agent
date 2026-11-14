@@ -78,6 +78,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import shutil
 import secrets
@@ -1211,13 +1212,27 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"该设备上没有这个 Agent（{run_agent_id}）：请先在设备上确认 Agent 已安装。")
             return
+        reg = resolve_adapters(self.state.dir, self.device_id).get(run_agent_id, {})
+        if reg.get("execution", "cli") == "internal":
+            # App 自身：执行在 App 内，不经过设备 Hand。
+            self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
+                        "该 Agent 在 App 内执行（BrainEngine + TaskScheduler + "
+                        "ChatTaskDispatcher），不经过设备 Hand；"
+                        "请在 App 内直接指派。")
+            return
         command = cfg.get("command", [])
         if not command or not os.path.exists(command[0]):
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"Agent 入口不存在（{run_agent_id}）：请先在设备上确认 Agent 已安装。")
             return
-        env = dict(os.environ)
-        env.update(cfg.get("env", {}) or {})
+        # 执行：走统一分派（按注册行 execution：cli 走子进程，
+        # internal 走 App 内任务引擎——后者在 Hand 上抛错，见上）。
+        # 旧的 run-grok.sh / run-codex.sh wrapper 不再使用：grok 直接调
+        # 二进制（--always-approve --sandbox workspace --output-format plain，
+        # $2 为空的 bug 不再存在），codex 直接调二进制（-s workspace-write
+        # 保留，stdin 恒为 /dev/null）。日志副本只对 grok 写一份（见
+        # 注册表的 log_template），不是 shell 重定向。
+        log_path = adapter_log_path(reg, self.device_id, task_id) if reg else None
         attempt_id = args.get("attempt", "")
         if not isinstance(attempt_id, str) or len(attempt_id) > 64:
             self._error(conn, session_key, envelope, seq + 1, "artifact_invalid", "执行轮次格式错误。")
@@ -1272,121 +1287,80 @@ class HandServer:
             meta = self.task_meta.setdefault(task_id, {})
             snap = json.loads(args.get("control") or "{}")
             meta.update(goal_version=int(snap.get("goal_version", 1)),
-                        epoch=int(snap.get("epoch", 1)), control_stopped=False)
-        full_argv = [
-            part.replace("{prompt}", prompt).replace("{task_id}", task_id)
-            for part in command
-        ]
-        try:
-            proc, lease_fd = spawn_agent(
-                full_argv,
-                cwd=folder,
-                stdout=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                bufsize=0,  # 二进制无缓冲：下文用 os.read + select 直接读 fd
-                env=env,
-            )
-        except OSError as e:
-            with self.process_lock:
-                self.starting_tasks.discard(task_id)
-            if staging is not None:
-                staging.cleanup()
-            self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
-                        f"无法启动 Agent：{e}")
-            return
-        with self.process_lock:
-            self.processes[task_id] = proc
-            self.process_attempts[task_id] = attempt_id
-            if task_id in self.revoked_tasks:
-                self.task_meta[task_id]["control_stopped"] = True
-                self._kill_process(task_id)
-        output_lines: list[str] = []
+                        epoch=int(snap.get("epoch", 1)), control_stopped=False,
+                        agent_id=run_agent_id, folder=folder)
         next_seq = seq + 1
-        try:
-            deadline = time.time() + timeout_s
-            assert proc.stdout is not None
-            # select 循环读行：无输出的挂起进程也能按时超时被杀，
-            # 不会被阻塞在 stdout 读上。
-            import select as _select
+        def _on_line(line: str) -> None:
+            nonlocal next_seq
+            message = line.rstrip("\n")[-1000:]
+            self._send(conn, session_key, envelope, "cross_device_progress",
+                       {"message": message}, next_seq)
+            next_seq += 1
 
-            out_fd = proc.stdout.fileno()
-            buf = ""
-            timed_out = False
-            while True:
-                # An exited child may still have unread bytes in the pipe.
-                # Only EOF (or the deadline) ends draining stdout.
-                if time.time() > deadline:
-                    timed_out = True
-                    break
-                exited = proc.poll() is not None
-                ready, _, _ = _select.select([out_fd, conn], [], [], 0 if exited else 0.2)
-                if exited and out_fd not in ready:
-                    break
-                if conn in ready:
-                    raise ConnectionError("Hand run connection closed")
-                if out_fd in ready:
-                    chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
-                    if not chunk:
-                        break
-                    buf += chunk
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        line += "\n"
-                        output_lines.append(line)
-                        self._send(conn, session_key, envelope, "cross_device_progress",
-                                   {"message": line.rstrip("\n")[-1000:]}, next_seq)
-                        next_seq += 1
-            if buf:
-                output_lines.append(buf)
-                self._send(conn, session_key, envelope, "cross_device_progress",
-                           {"message": buf[-1000:]}, next_seq)
-                next_seq += 1
-            if timed_out:
-                self._kill_proc(proc)
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT,
-                            f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
-                return
-            try:
-                proc.wait(timeout=max(0.0, deadline - time.time()))
-            except subprocess.TimeoutExpired:
-                self._kill_proc(proc)
-                proc.wait(timeout=5)
-                self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT, "Agent 执行超时。")
-                return
-            result = {"output": "".join(output_lines)[-MAX_OUTPUT_CHARS:]}
-            if proc.returncode == 0 and staging is not None:
+        owned_proc = []
+
+        def _register_proc(proc) -> None:
+            with self.process_lock:
+                owned_proc.append(proc)
+                self.processes[task_id] = proc
+                self.process_attempts[task_id] = attempt_id
+                if task_id in self.revoked_tasks:
+                    self.task_meta[task_id]["control_stopped"] = True
+                    self._kill_process(task_id)
+
+        try:
+            entry = dict(reg)
+            entry["command"] = command
+            returncode, output, timed_out = run_agent_entry(
+                entry, prompt, task_id, folder,
+                env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
+                on_line=_on_line, log_path=log_path,
+                register_proc=_register_proc, connection=conn,
+                on_log_warning=self.state.audit)
+            result = {"output": output[-MAX_OUTPUT_CHARS:]}
+            if returncode == 0 and not timed_out and staging is not None:
                 with self.process_lock:
                     if not self._was_control_stopped(task_id):
                         result = self._save_artifact(envelope, client_id, attempt_id, staging.name, result["output"])
-
         except ValueError:
             self._error(conn, session_key, envelope, next_seq, "artifact_invalid", "产物类型或大小不受支持。")
             return
-        except (BrokenPipeError, ConnectionError, OSError):
-            # 客户端已断开：杀掉子进程，不再回包。只杀本次执行自己的进程。
-            self._kill_proc(proc)
-            proc.wait(timeout=5)
+        except InternalAgentExecution as e:
+            self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
+                        str(e))
+            return
+        except (BrokenPipeError, ConnectionError):
+            # 客户端已断开：杀掉子进程，不再回包。
+            # 注意顺序：BrokenPipeError/ConnectionError 都是 OSError 的
+            # 子类，必须放在 except OSError 之前，否则这个分支永远是
+            # 死代码（旧版就是这个 bug：断开时 _kill_process 没跑到，
+            # _error 里再抛一次才由外层关连接）。
+            # 只杀本次执行自己的进程：任务可能已被新轮次接管。
+            for own in owned_proc:
+                self._kill_proc(own)
+            return
+        except OSError as e:
+            self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
+                        f"无法启动 Agent：{e}")
             return
         finally:
-            os.close(lease_fd)
             if staging is not None:
                 staging.cleanup()
-            if proc.stdout is not None:
-                proc.stdout.close()
             with self.process_lock:
-                self._release_if_owned(task_id, proc)
-                superseded = proc.pid in self.superseded_pids
-                self.superseded_pids.discard(proc.pid)
+                mine = owned_proc[0] if owned_proc else None
+                self._release_if_owned(task_id, mine)
+                superseded = mine is not None and mine.pid in self.superseded_pids
+                if mine is not None:
+                    self.superseded_pids.discard(mine.pid)
         if superseded:
             self._error(conn, session_key, envelope, next_seq, "stale_attempt",
                         "此执行轮次已被新的轮次取代，已终止。")
             return
-        if proc.returncode is not None and proc.returncode < 0:
+        if timed_out:
+            self._error(conn, session_key, envelope, next_seq, ERR_AGENT_TIMEOUT,
+                        f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。")
+            return
+        if returncode is not None and returncode < 0:
             # 负退出码 = 被信号杀死。SIGTERM/SIGKILL 且是控制停掉的，
             # 走 remote_controlled_stop；否则按失败。
             if self._was_control_stopped(task_id):
@@ -1394,12 +1368,11 @@ class HandServer:
                             ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
                 return
             self._error(conn, session_key, envelope, next_seq, ERR_AGENT_NOT_FOUND,
-                        f"Agent 被信号终止（退出码 {proc.returncode}）。")
+                        f"Agent 被信号终止（退出码 {returncode}）。")
             return
-        output = "".join(output_lines)
-        if proc.returncode != 0:
+        if returncode != 0:
             self._error(conn, session_key, envelope, next_seq, ERR_AGENT_NOT_FOUND,
-                        f"Agent 执行失败（退出码 {proc.returncode}）："
+                        f"Agent 执行失败（退出码 {returncode}）："
                         + output[-2000:])
             return
         if self._was_control_stopped(task_id):
@@ -2020,6 +1993,8 @@ def main(argv: list[str] | None = None) -> int:
     rem.add_argument("--id", required=True)
     sub.add_parser("discover", help="扫描本机已装的 Agent CLI（自动发现）")
 
+    sub.add_parser("mcp", help="启动 stdio MCP 服务")
+
     args = parser.parse_args(argv)
     hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy)
 
@@ -2166,6 +2141,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"agents": out, "brains": brains},
                          ensure_ascii=False, indent=2))
         return 0
+    if args.command == "mcp":
+        return mcp_serve(hand)
     parser.print_help()
     return 1
 
@@ -2714,6 +2691,434 @@ def check_login(entry: dict, timeout: float = 10.0) -> bool | None:
         except Exception:
             return False
     return None
+
+
+
+
+def _write_log_copy(log_path: str, cwd: str, output: str, task_id: str) -> None:
+    """Configured, task-bound copy inside cwd; reuse Hand path and artifact fd guards.
+
+    No directory creation, symlink traversal, or overwrite. Unsupported fd guards
+    fail closed; the caller reports a non-fatal internal warning.
+    """
+    if not isinstance(log_path, str) or not os.path.isabs(log_path):
+        raise ValueError("log path must be absolute")
+    if ".." in log_path.replace("\\", "/").split("/"):
+        raise ValueError("log path traversal")
+    task_ref = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
+    if task_ref not in os.path.basename(log_path):
+        raise ValueError("log filename must bind the task")
+    base = os.path.abspath(cwd or os.getcwd())
+    rel = os.path.relpath(log_path, base)
+    if HandServer._resolve_path(None, base, rel) is None:
+        raise ValueError("log outside execution folder")
+    # Canonicalize only the already-authorized base. Open every component with
+    # the same no-follow directory-fd primitive used by delivery.bin handling.
+    canonical_base = os.path.realpath(base)
+    if canonical_base == os.path.abspath(os.sep):
+        raise ValueError("filesystem root is not a log scope")
+    parts = [p for p in (canonical_base + os.sep + rel).split(os.sep) if p not in ("", ".")]
+    directory = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(output)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        os.close(directory)
+
+
+def _log_copy_warning(task_id: str, error: Exception, on_warning=None) -> None:
+    # Internal only: do not invent T6 wire fields or log output/path/credentials.
+    event = {"event": "hand_log_copy_failed",
+             "task_ref": hashlib.sha256(task_id.encode("utf-8")).hexdigest(),
+             "error_type": type(error).__name__}
+    logging.warning("hand_log_copy_failed task_ref=%s error_type=%s",
+                    event["task_ref"], event["error_type"])
+    if on_warning is not None:
+        try:
+            on_warning(event)
+        except Exception:
+            logging.warning("hand_log_copy_warning_sink_failed task_ref=%s", event["task_ref"])
+
+
+def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
+                  task_id: str, cwd: str, env_extra: dict | None = None,
+                  timeout_s: float = 600.0,
+                  on_line=None, log_path: str | None = None,
+                  register_proc=None, connection=None, on_log_warning=None,
+                  ) -> tuple[int | None, str, bool]:
+    """通用 runner：输入（二进制、argv 模板含 {prompt}/{task_id}、
+    工作目录、env），跑任意 CLI Agent，stdout 直接抓回。
+    不经 shell，不把输出重定向到日志文件再倒读（run-grok.sh 的
+    `> logfile 2>&1` 是反模式，是 Grok 空响应的根因之一）；
+    log_path 给出时，把抓到的完整输出另外写一份日志副本（可选）。
+    返回 (returncode, 完整输出, 是否超时)。超时时进程组已杀掉。
+    on_line 抛错（客户端已断开）时杀掉进程组再原样抛出。"""
+    import select as _select
+
+    argv = [part.replace("{prompt}", prompt).replace("{task_id}", task_id)
+            for part in argv_template]
+    if argv:
+        argv[0] = binary
+    env = dict(os.environ)
+    env.update(env_extra or {})
+    proc, lease_fd = spawn_agent(
+        argv,
+        cwd=cwd or None,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,  # 二进制无缓冲：下文用 os.read + select 直接读 fd
+        env=env,
+    )
+    try:
+        if register_proc is not None:
+            register_proc(proc)
+        output_lines: list[str] = []
+        timed_out = False
+        try:
+            deadline = time.time() + timeout_s
+            assert proc.stdout is not None
+            out_fd = proc.stdout.fileno()
+            buf = ""
+            while True:
+                if time.time() > deadline:
+                    timed_out = True
+                    break
+                sources = [out_fd] if connection is None else [out_fd, connection]
+                exited = proc.poll() is not None
+                ready, _, _ = _select.select(sources, [], [], 0 if exited else 0.2)
+                if exited and out_fd not in ready:
+                    break
+                if connection in ready:
+                    raise ConnectionError("Hand run connection closed")
+                if out_fd in ready:
+                    chunk = os.read(out_fd, 65536).decode("utf-8", errors="replace")
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        line += "\n"
+                        output_lines.append(line)
+                        if on_line is not None:
+                            on_line(line)
+            if buf:
+                output_lines.append(buf)
+                if on_line is not None:
+                    on_line(buf)
+        except BaseException:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=5)
+            proc.stdout.close()
+            raise
+        if not timed_out:
+            try:
+                proc.wait(timeout=max(0.0, deadline - time.time()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+        if timed_out:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=5)
+        output = "".join(output_lines)
+        try:
+            if proc.stdout is not None:
+                proc.stdout.close()
+        except OSError:
+            pass
+        if log_path is not None:
+            try:
+                _write_log_copy(log_path, cwd, output, task_id)
+            except Exception as error:
+                _log_copy_warning(task_id, error, on_log_warning)
+        return proc.returncode, output, timed_out
+
+    finally:
+        os.close(lease_fd)
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+
+class InternalAgentExecution(Exception):
+    """internal 执行行的调用：须在 App 内走任务引擎，本 Hand 不执行。"""
+
+
+def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
+                    env_extra: dict | None = None,
+                    timeout_s: float = 600.0,
+                    on_line=None, log_path: str | None = None,
+                    register_proc=None, connection=None, on_log_warning=None,
+                    ) -> tuple[int | None, str, bool]:
+    """统一分派：按注册行的 execution 分派执行方式，两条都是一等路径。
+    - cli：子进程跑 CLI（run_cli_agent）。
+    - internal：App 自身（BrainEngine + TaskScheduler +
+      ChatTaskDispatcher + 泵）。Hand（本进程）没有 App 的任务引擎，
+      调它抛 InternalAgentExecution——绝不假装执行成功；App 侧
+      （Kotlin）实现 internal 执行器后，同名分派走 App 内引擎。"""
+    if resolved.get("execution", "cli") == "internal":
+        raise InternalAgentExecution(
+            "该 Agent 在 App 内执行（BrainEngine + TaskScheduler + "
+            "ChatTaskDispatcher），不经过设备 Hand；请在 App 内直接指派。")
+    command = resolved.get("command", []) or []
+    if not command:
+        raise ValueError(f"Agent {resolved.get('id', '?')} 没有可执行命令")
+    return run_cli_agent(command[0], command, prompt, task_id, cwd,
+                         env_extra=env_extra, timeout_s=timeout_s,
+                         on_line=on_line, log_path=log_path,
+                         register_proc=register_proc, connection=connection,
+                         on_log_warning=on_log_warning)
+
+
+
+
+MCP_PROTOCOL_VERSION = "2024-11-05"
+MCP_SERVER_NAME = "wherevercode-hand-mcp"
+MCP_SERVER_VERSION = "1"
+
+
+def mcp_tool_defs() -> list[dict]:
+    return [
+        {"name": "list",
+         "description": "列出项目所在设备上文件夹里的文件和子文件夹。"
+                        "这些操作发生在项目所在设备上，不在本机执行。",
+         "inputSchema": {"type": "object",
+                         "properties": {"folder": {"type": "string"},
+                                        "path": {"type": "string"}},
+                         "required": ["folder"],
+                         "additionalProperties": False}},
+        {"name": "read",
+         "description": "读项目所在设备上一个文本文件的内容。",
+         "inputSchema": {"type": "object",
+                         "properties": {"folder": {"type": "string"},
+                                        "path": {"type": "string"}},
+                         "required": ["folder", "path"],
+                         "additionalProperties": False}},
+        {"name": "write",
+         "description": "在项目所在设备上新建或覆盖一个文本文件。",
+         "inputSchema": {"type": "object",
+                         "properties": {"folder": {"type": "string"},
+                                        "path": {"type": "string"},
+                                        "content": {"type": "string"}},
+                         "required": ["folder", "path", "content"],
+                         "additionalProperties": False}},
+        {"name": "run",
+         "description": "在项目所在设备上经已注册的 Agent 执行一条提示。"
+                        "Agent 由注册表解析，不接受任意 shell 命令。",
+         "inputSchema": {"type": "object",
+                         "properties": {"agent_id": {"type": "string"},
+                                        "folder": {"type": "string"},
+                                        "prompt": {"type": "string"},
+                                        "timeout": {"type": "number"}},
+                         "required": ["agent_id", "folder", "prompt"],
+                         "additionalProperties": False}},
+    ]
+
+
+def _mcp_text(text: str, is_error: bool = False) -> dict:
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+def _mcp_error_text(message: str, code: str) -> dict:
+    return _mcp_text(f"{message}（{code}）", is_error=True)
+
+
+def _servable_folders(hand: "HandServer") -> list[str]:
+    """Hand 能服务的文件夹全集：auth.json 全部 + 注册表声明的全部。"""
+    folders: list[str] = []
+    auth = hand.state.load_json("auth.json", {})
+    if isinstance(auth, dict):
+        for items in auth.values():
+            if isinstance(items, list):
+                folders.extend(items)
+            elif isinstance(items, dict):
+                vals = items.get("folders", [])
+                if isinstance(vals, list):
+                    folders.extend(vals)
+    for agent_id in resolve_adapters(hand.state.dir, hand.device_id):
+        folders.extend(hand.authorized_folders(agent_id))
+    seen: set[str] = set()
+    out: list[str] = []
+    for folder in folders:
+        canon = canonical_folder(folder)
+        if canon not in seen:
+            seen.add(canon)
+            out.append(canon)
+    return out
+
+
+def _mcp_call_tool(hand: "HandServer", name: str, args: dict) -> dict:
+    if name == "list":
+        folder = str(args.get("folder", ""))
+        if canonical_folder(folder) not in _servable_folders(hand):
+            return _mcp_error_text("该文件夹不在授权列表里", "wrong_folder")
+        target = hand._resolve_path(folder, str(args.get("path", "")))
+        if target is None or not os.path.isdir(target):
+            return _mcp_error_text("不允许的路径：该路径不在授权文件夹内。",
+                                   "path_not_allowed")
+        try:
+            entries = sorted(os.listdir(target))
+        except OSError as e:
+            return _mcp_error_text(f"无法列出文件夹：{e.strerror or e}",
+                                   "path_not_allowed")
+        out = [{"name": n, "is_dir": os.path.isdir(os.path.join(target, n))}
+               for n in entries]
+        return _mcp_text(json.dumps(out, ensure_ascii=False))
+    if name == "read":
+        folder = str(args.get("folder", ""))
+        if canonical_folder(folder) not in _servable_folders(hand):
+            return _mcp_error_text("该文件夹不在授权列表里", "wrong_folder")
+        target = hand._resolve_path(folder, str(args.get("path", "")))
+        if target is None or not os.path.isfile(target):
+            return _mcp_error_text("不允许的路径：该路径不在授权文件夹内。",
+                                   "path_not_allowed")
+        try:
+            if os.path.getsize(target) > MAX_TEXT_BYTES:
+                return _mcp_error_text("文件太大，请分段读取。", "path_not_allowed")
+            with open(target, "r", encoding="utf-8", errors="strict") as f:
+                return _mcp_text(f.read())
+        except (OSError, UnicodeDecodeError) as e:
+            return _mcp_error_text(f"无法读取文件：{e}", "path_not_allowed")
+    if name == "write":
+        folder = str(args.get("folder", ""))
+        if canonical_folder(folder) not in _servable_folders(hand):
+            return _mcp_error_text("该文件夹不在授权列表里", "wrong_folder")
+        rel, content = str(args.get("path", "")), str(args.get("content", ""))
+        if not rel:
+            return _mcp_error_text("写入需要指定 path。", "path_not_allowed")
+        if len(content.encode("utf-8")) > MAX_TEXT_BYTES:
+            return _mcp_error_text("内容太大。", "path_not_allowed")
+        target = hand._resolve_path(folder, rel)
+        if target is None:
+            return _mcp_error_text("不允许的路径：该路径不在授权文件夹内。",
+                                   "path_not_allowed")
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(content)
+        except OSError as e:
+            return _mcp_error_text(f"无法写入文件：{e}", "path_not_allowed")
+        return _mcp_text(f"已写入 {rel}")
+    if name == "run":
+        agent_id = str(args.get("agent_id", ""))
+        folder = str(args.get("folder", ""))
+        prompt = str(args.get("prompt", ""))
+        if not agent_id or not prompt:
+            return _mcp_error_text("run 需要 agent_id 与 prompt。", "invalid")
+        cfg = hand.agent_config(agent_id)
+        if cfg is None:
+            return _mcp_error_text(f"该设备上没有这个 Agent（{agent_id}）。",
+                                   "agent_not_found")
+        reg = resolve_adapters(hand.state.dir, hand.device_id).get(agent_id, {})
+        if reg.get("execution", "cli") == "internal":
+            # App 自身：先报“App 内执行”，不要让文件夹门禁抢先报 wrong_folder
+            #（internal 行本来就没有设备文件夹）。
+            return _mcp_error_text(
+                "该 Agent 在 App 内执行（BrainEngine + TaskScheduler + "
+                "ChatTaskDispatcher），不经过设备 Hand；请在 App 内直接指派。",
+                "agent_not_found")
+        if canonical_folder(folder) not in [
+                canonical_folder(f) for f in hand.authorized_folders(agent_id)]:
+            return _mcp_error_text("连接凭证不允许访问该项目文件夹。",
+                                   "wrong_folder")
+        command = cfg.get("command", [])
+        if not command or not os.path.exists(command[0]):
+            return _mcp_error_text(f"Agent 入口不存在（{agent_id}）。",
+                                   "agent_not_found")
+        task_id = f"mcp-{uuid.uuid4().hex[:12]}"
+        timeout_s = args.get("timeout", "") or DEFAULT_TIMEOUT_SECONDS
+        try:
+            timeout_s = float(timeout_s)
+        except (TypeError, ValueError):
+            timeout_s = DEFAULT_TIMEOUT_SECONDS
+        timeout_s = max(1.0, min(timeout_s, 3600.0))
+        log_path = adapter_log_path(reg, hand.device_id, task_id) if reg else None
+        try:
+            entry = dict(reg)
+            entry["command"] = command
+            returncode, output, timed_out = run_agent_entry(
+                entry, prompt, task_id, folder,
+                env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
+                log_path=log_path, on_log_warning=hand.state.audit)
+        except InternalAgentExecution as e:
+            return _mcp_error_text(str(e), "agent_not_found")
+        except OSError as e:
+            return _mcp_error_text(f"无法启动 Agent：{e}", "agent_not_found")
+        if timed_out:
+            return _mcp_error_text(f"Agent 执行超时（{int(timeout_s)} 秒）：已终止。",
+                                   "agent_timeout")
+        if returncode != 0:
+            return _mcp_error_text(
+                f"Agent 执行失败（退出码 {returncode}）：" + output[-2000:],
+                "agent_not_found")
+        return _mcp_text(output[-MAX_OUTPUT_CHARS:])
+    return _mcp_error_text(f"未知工具：{name}", "invalid")
+
+
+def mcp_serve(hand: "HandServer") -> int:
+    """stdio MCP 服务：stdin 读一行一条 JSON-RPC，stdout 回一行一条。
+    方法：initialize / ping / tools/list / tools/call；notifications/* 无回复；
+    未知方法 -32601；解析失败 -32700；非法请求 -32600。"""
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except Exception:
+            sys.stdout.write(json.dumps(
+                {"jsonrpc": "2.0", "id": None,
+                 "error": {"code": -32700, "message": "Parse error"}},
+                ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+            continue
+        if not isinstance(req, dict) or "method" not in req:
+            sys.stdout.write(json.dumps(
+                {"jsonrpc": "2.0", "id": req.get("id") if isinstance(req, dict) else None,
+                 "error": {"code": -32600, "message": "Invalid Request"}},
+                ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+            continue
+        req_id = req.get("id")
+        method = req.get("method", "")
+        if method.startswith("notifications/"):
+            continue
+        if method == "initialize":
+            result = {"protocolVersion": MCP_PROTOCOL_VERSION,
+                      "capabilities": {"tools": {"listChanged": False}},
+                      "serverInfo": {"name": MCP_SERVER_NAME,
+                                     "version": MCP_SERVER_VERSION}}
+        elif method == "ping":
+            result = {}
+        elif method == "tools/list":
+            result = {"tools": mcp_tool_defs()}
+        elif method == "tools/call":
+            params = req.get("params", {}) or {}
+            result = _mcp_call_tool(hand, str(params.get("name", "")),
+                                    params.get("arguments", {}) or {})
+        else:
+            sys.stdout.write(json.dumps(
+                {"jsonrpc": "2.0", "id": req_id,
+                 "error": {"code": -32601, "message": f"Method not found: {method}"}},
+                ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+            continue
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": req_id,
+                                     "result": result}, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+    return 0
 
 
 
