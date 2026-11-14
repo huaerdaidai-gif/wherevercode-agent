@@ -87,13 +87,15 @@ class NativeTaskCreationTest {
         shot(device, output, "launch-state")
         dumpUiTexts(device, output, "launch-ui")
         // Dismiss the first-run onboarding (its skip labels are real
-        // TextViews) or any other transient blocker, until the home
-        // shell (greeting + menu button) is actually present.
+        // TextViews) or any other transient blocker. NOTE: the home
+        // shell exists in the hierarchy UNDER the onboarding overlay,
+        // so "home elements found" is not proof the home is usable --
+        // the only reliable signal is the overlay being GONE.
         val deadline = System.currentTimeMillis() + 90_000
         while (System.currentTimeMillis() < deadline) {
-            val homeReady = device.findObject(By.res(context.packageName, "buttonMenu")) != null &&
+            if (device.findObject(By.text("稍后再看")) == null &&
                 device.findObject(By.text("今天想做什么？")) != null
-            if (homeReady) return
+            ) return
             // The system notification-permission dialog can sit over
             // the app from first launch (seen in the round-4 evidence:
             // "Allow WhereverCode to send you notifications?"). Answer
@@ -116,7 +118,7 @@ class NativeTaskCreationTest {
                 ?: device.findObject(By.text("跳过"))
             if (skip != null) {
                 skip.click()
-                device.wait(Until.hasObject(By.text("今天想做什么？")), 10_000)
+                device.wait(Until.gone(By.text("稍后再看")), 10_000)
             } else {
                 Thread.sleep(1_000)
             }
@@ -126,7 +128,7 @@ class NativeTaskCreationTest {
 
     private fun openTasks(device: UiDevice, context: Context) {
         findId(device, context, "buttonMenu").click()
-        assertTrue(device.wait(Until.hasObject(By.text("团队频道")), 30_000))
+        assertTrue(device.wait(Until.hasObject(By.text("新对话")), 30_000))
         device.findObjects(By.text("任务")).last().click()
         findId(device, context, "buttonCreateTask")
     }
@@ -172,7 +174,7 @@ class NativeTaskCreationTest {
         try {
             val store = RoomTaskStore(db)
             findId(device, context, "buttonMenu").click()
-            assertTrue(device.wait(Until.hasObject(By.text("团队频道")), 30_000))
+            assertTrue(device.wait(Until.hasObject(By.text("新对话")), 30_000))
             shot(device, output, "C02-drawer")
             device.findObjects(By.text("任务")).last().click()
             val goal = "ISSUE8_UI_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
