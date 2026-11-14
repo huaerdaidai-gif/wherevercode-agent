@@ -199,8 +199,8 @@ class DrawerViewTest {
         val content = drawerView.root.getChildAt(0) as LinearLayout
         val rows = (0 until content.childCount).map { content.getChildAt(it) }
             .filter { it.tag is String }
-        // 18 个入口行 + 底部用户行（tag 与工作台行相同，排最后，原样保留不查图标）。
-        assertEquals(19, rows.size)
+        // 19 个入口行 + 底部用户行（tag 与工作台行相同，排最后，原样保留不查图标）。
+        assertEquals(20, rows.size)
         rows.dropLast(1).forEach { row ->
             val first = (row as LinearLayout).getChildAt(0)
             assertTrue("row ${row.tag} first child must be an ImageView", first is ImageView)
@@ -280,7 +280,7 @@ class DrawerViewTest {
         assertTrue(controller.hide(DrawerController.ID_PROJECTS))
         drawerView.refresh()
         assertFalse(drawerView.renderedIds().contains("nav_projects"))
-        assertEquals(18, drawerView.renderedIds().size)
+        assertEquals(19, drawerView.renderedIds().size)
         assertTrue(controller.hide(DrawerController.ID_RESULTS))
         drawerView.refresh()
         assertFalse(drawerView.renderedIds().contains("nav_results"))
@@ -332,7 +332,7 @@ class DrawerViewTest {
         drawerView.setGroupCollapsed("workspace", true)
         assertTrue(drawerView.isGroupCollapsed("workspace"))
         assertEquals(emptyList<String>(), drawerView.renderedGroupIds("workspace"))
-        assertEquals(18, drawerView.renderedIds().size)
+        assertEquals(19, drawerView.renderedIds().size)
         drawerView.setGroupCollapsed("workspace", false)
         assertEquals(1, drawerView.renderedGroupIds("workspace").size)
     }

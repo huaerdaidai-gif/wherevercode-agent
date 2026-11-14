@@ -189,6 +189,11 @@ object EntryRegistry {
         Entry("nav_feature_center", "功能中心", Group.DRAWER_EXTENSIONS,
             Status.TODO, TargetKind.TODO, "",
             "功", null, null, "功能中心待开发（第二步收纳系统：全部功能一键收纳/极简/标准/专家三模式）", null),
+        Entry("nav_flagship_70", "70 屏导航", Group.DRAWER_EXTENSIONS,
+            Status.IMPLEMENTED, TargetKind.ACTION, "open_flagship",
+            "70", null, null, null,
+            "70 屏旗舰导航（双端组装第一轮）：Compose 壳 + 70 路由；未接线页面统一待开发，" +
+            "P0 路由经 AppFlagshipCapabilities 深链回既有真实屏，不替代既有导航。"),
         // ── 非导航功能（从父入口进入）──
         Entry("feature_task_detail", "任务详情", Group.FEATURE,
             Status.IMPLEMENTED, TargetKind.SCREEN, "task_detail",

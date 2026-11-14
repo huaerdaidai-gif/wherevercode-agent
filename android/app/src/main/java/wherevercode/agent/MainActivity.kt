@@ -1052,6 +1052,9 @@ class MainActivity : AppCompatActivity() {
         applyStoredTheme()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
+        // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
+        window.decorView.post { handleFlagshipEntryIntent(intent) }
         // V5 按主流改（maintainer 2026-11-11）：“+”菜单附件选择器与相机权限。
         // 必须在 onCreate 里注册（Activity 结果回调的注册点）。
         registerAttachmentLaunchers()
@@ -4664,6 +4667,20 @@ class MainActivity : AppCompatActivity() {
      * SCREEN 类入口由父入口带参数打开（任务详情带任务 id），不走这里。
      * ACTION 类入口是应用内动作（如 nav_theme → cycleTheme()）。
      */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        window.decorView.post { handleFlagshipEntryIntent(intent) }
+    }
+
+    private fun handleFlagshipEntryIntent(intent: Intent?) {
+        val entryId = intent?.getStringExtra(
+            wherevercode.agent.ui.flagship.EXTRA_FLAGSHIP_ENTRY,
+        ) ?: return
+        intent.removeExtra(wherevercode.agent.ui.flagship.EXTRA_FLAGSHIP_ENTRY)
+        openRegistryEntry(entryId)
+    }
+
     private fun openRegistryEntry(id: String) {
         val entry = EntryRegistry.find(id) ?: return
         if (entry.status == EntryRegistry.Status.TODO) {
@@ -4681,6 +4698,9 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
+                "open_flagship" -> startActivity(
+                    Intent(this, wherevercode.agent.ui.flagship.FlagshipActivity::class.java),
+                )
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")

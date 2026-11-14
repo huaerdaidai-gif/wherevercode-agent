@@ -84,6 +84,13 @@ android {
     buildFeatures {
         // V5 C1：新版 AGP 默认不生成 BuildConfig；打开它才能读 COMMIT_SHA / BUILD_TIME。
         buildConfig = true
+        // 双端组装第一轮：70 屏旗舰导航壳（ui/flagship）用 Jetpack Compose。
+        compose = true
+    }
+
+    composeOptions {
+        // 与 Kotlin 1.9.0 配套的 Compose 编译器版本。
+        kotlinCompilerExtensionVersion = "1.5.3"
     }
 
     // Open-source builds use Android Gradle Plugin's standard local debug signing.
@@ -136,6 +143,12 @@ dependencies {
     // user's browser for the SIWC authorization flow. No other new deps:
     // token storage reuses security-crypto, HTTP reuses HttpsURLConnection.
     implementation("androidx.browser:browser:1.8.0")
+    // 双端组装第一轮：FlagshipApp.kt（Compose 70 路由壳）所需依赖，版本由 BOM 统一。
+    implementation(platform("androidx.compose:compose-bom:2023.10.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.8.2")
     // Stage 2 (Brain Engine + core): coroutines for the engine's Flow-based
     // chat loop, Room for the task store (kapt, see below), security-crypto
     // for Keystore-backed EncryptedSharedPreferences (brain keys).

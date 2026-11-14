@@ -22,8 +22,8 @@ class EntryRegistryTest {
 
     @Test
     fun `registry has exactly the de-duplicated entries`() {
-        assertEquals(36, EntryRegistry.ENTRIES.size)
-        assertEquals(36, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
+        assertEquals(37, EntryRegistry.ENTRIES.size)
+        assertEquals(37, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
     }
 
     @Test
