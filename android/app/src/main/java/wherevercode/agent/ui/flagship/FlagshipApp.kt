@@ -1,19 +1,6 @@
 package wherevercode.agent.ui.flagship
 
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-
-/** Native UI scaffold. All features are planned until a verified app adapter supplies evidence. */
+/** Internal feature index only. Navigation belongs to MainActivity and EntryRegistry. */
 data class FlagshipRoute(val id:String,val title:String,val group:String,val p0:Boolean)
 object FlagshipRoutes {
   val all = listOf(
@@ -101,80 +88,4 @@ interface FlagshipCapabilityProvider {
 class PlannedCapabilities:FlagshipCapabilityProvider {
   override fun status(routeId:String)=FeatureStatus()
   override fun openExistingFeature(routeId:String)=false
-}
-private val Ink=Color(0xFF292825)
-private val Warm=Color(0xFFFAF9F6)
-private val Coral=Color(0xFFC87757)
-private val Groups=listOf("对话","开发","任务","协作","连接","智能","自动化","扩展","系统")
-
-@Composable fun FlagshipApp(provider:FlagshipCapabilityProvider=PlannedCapabilities()){
-  var route by remember { mutableStateOf("chat") }
-  var drawer by remember { mutableStateOf(false) }
-  var search by remember { mutableStateOf("") }
-  val page=FlagshipRoutes.find(route)
-  MaterialTheme(colorScheme=lightColorScheme(primary=Coral,background=Warm,surface=Color.White,onSurface=Ink)){
-    Column(Modifier.fillMaxSize().background(Warm)){
-      Row(Modifier.fillMaxWidth().padding(horizontal=18.dp, vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
-        TextButton(onClick={drawer=!drawer}){Text("☰")}
-        Text(page.title,Modifier.weight(1f),fontWeight=FontWeight.SemiBold)
-        TextButton(onClick={route="dashboard";drawer=false}){Text("控制台")}
-      }
-      if(drawer){
-        OutlinedTextField(search,{search=it},Modifier.fillMaxWidth().padding(horizontal=16.dp),label={Text("查找 70 个页面")})
-        LazyColumn(Modifier.weight(1f).padding(horizontal=12.dp)){
-          Groups.forEach { group ->
-            val found=FlagshipRoutes.all.filter{it.group==group && (search.isBlank()||it.title.contains(search,true)||it.id.contains(search,true))}
-            if(found.isNotEmpty()){
-              item { Text(group,Modifier.padding(12.dp),color=Coral,fontWeight=FontWeight.Bold) }
-              items(found){ p ->
-                TextButton(onClick={route=p.id;drawer=false},modifier=Modifier.fillMaxWidth()){
-                  Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(p.title);Text(if(provider.status(p.id).state==FeatureState.READY_VERIFIED) "已验证" else "待开发",color=Color.Gray)}
-                }
-              }
-            }
-          }
-        }
-      } else {
-        LazyColumn(Modifier.weight(1f).padding(horizontal=20.dp)){
-          item {
-            Spacer(Modifier.height(24.dp))
-            Text(if(route=="chat") "今天想做些什么？" else page.title,style=MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(12.dp))
-            val status=provider.status(route)
-            val verified=status.state==FeatureState.READY_VERIFIED && !status.evidence.isNullOrBlank()
-            Text(if(verified) "已验证" else when(status.state){FeatureState.IMPLEMENTED_UNVERIFIED->"待验收";FeatureState.DISCONNECTED->"未连接";FeatureState.FAILED->"运行失败";FeatureState.UNSUPPORTED->"此平台暂不支持";else->"待开发"},color=Coral)
-            Spacer(Modifier.height(18.dp))
-            Card(colors=CardDefaults.cardColors(containerColor=Color.White),shape=RoundedCornerShape(18.dp)){
-              Column(Modifier.fillMaxWidth().padding(20.dp)){
-                Text("${page.group} · ${page.id}",color=Color.Gray)
-                Spacer(Modifier.height(8.dp))
-                Text(if(verified) "此功能已通过真机验证，可进入现有实现。" else "此页面已预留。接入真实能力并完成真机验证后才能标记可用。")
-                Spacer(Modifier.height(12.dp))
-                Button(enabled=verified,onClick={provider.openExistingFeature(route)}){Text("打开功能")}
-              }
-            }
-            Spacer(Modifier.height(20.dp))
-            when(route){
-              "dashboard" -> DashboardPreview()
-              "chat" -> Text("聊天发送必须接入现有模型会话服务；当前脚手架不伪造回复。",color=Color.Gray)
-              "tasks","taskdetail" -> Text("任务状态、停止与暂停必须来自真实任务执行器。",color=Color.Gray)
-              "editor","files","terminal","diff","git" -> Text("文件、代码、终端和 Git 均需要授权与真实工具适配器。",color=Color.Gray)
-            }
-          }
-        }
-        NavigationBar(containerColor=Color.White){
-          listOf("chat" to "对话","projects" to "项目","tasks" to "任务","dashboard" to "控制台","settings" to "更多").forEach{(id,title)->
-            NavigationBarItem(selected=route==id,onClick={route=id},icon={Text("•")},label={Text(title)})
-          }
-        }
-      }
-    }
-  }
-}
-@Composable private fun DashboardPreview(){
-  Text("运行总览",fontWeight=FontWeight.Bold)
-  listOf("项目" to "未接入", "任务队列" to "未接入", "设备" to "未接入", "模型与 Agent" to "未接入", "审批与审计" to "未接入").forEach{(a,b)->
-    Row(Modifier.fillMaxWidth().padding(vertical=12.dp),horizontalArrangement=Arrangement.SpaceBetween){Text(a);Text(b,color=Color.Gray)}
-    Divider()
-  }
 }

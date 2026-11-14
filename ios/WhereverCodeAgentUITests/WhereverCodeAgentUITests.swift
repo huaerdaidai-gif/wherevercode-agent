@@ -44,7 +44,7 @@ final class WhereverCodeAgentUITests: XCTestCase {
         app.launch()
 
         XCTAssertFalse(app.tabBars.firstMatch.exists)
-        XCTAssertTrue(app.textFields["chat.input"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 15))
         snap(app, "ui-01-chat-home")
         app.buttons["新对话"].tap()
         app.buttons["搜索会话"].tap()
@@ -147,6 +147,8 @@ final class WhereverCodeAgentUITests: XCTestCase {
 
         // --- Task list: same real error surfacing.
         navigate(app, to: "tasks")
+        snap(app, "ui-05a-local-tasks")
+        app.buttons["平台任务"].tap()
         XCTAssertTrue(app.buttons["重试"].waitForExistence(timeout: 60),
                       "Task list must surface the real load error with a retry button")
         snap(app, "ui-05-task-list-error")

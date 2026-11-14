@@ -337,3 +337,59 @@ final class StubURLProtocol: URLProtocol {
 
     override func stopLoading() {}
 }
+
+@MainActor
+final class LocalChatHomeTests: XCTestCase {
+    func testMissingModelKeepsDraftWithoutCreatingConversation() async throws {
+        let state = AppState()
+        let data = try LocalData.inMemory()
+        let model = LocalChatModel(appState: state, data: data)
+        model.selectedBrain = ""
+        model.draft = "保留这条消息"
+        await model.send()
+        XCTAssertEqual(model.draft, "保留这条消息")
+        XCTAssertNotNil(model.error)
+        XCTAssertFalse(model.isSending)
+        XCTAssertTrue(try data.conversations.listConversations().isEmpty)
+    }
+
+    func testHistoryRestoresSameConversationAndNewDoesNotDeleteMessages() throws {
+        let state = AppState()
+        let data = try LocalData.inMemory()
+        let conversation = try data.conversations.createConversation(brainId: "custom-local", title: "已有会话")
+        try data.conversations.addMessage(ConversationMessage(id: "message-1", conversationId: conversation.id,
+            role: "user", content: "已有消息", source: "user", createdAtEpochSeconds: 1))
+        data.chatPrefs.currentSessionId = conversation.id
+        let model = LocalChatModel(appState: state, data: data)
+        XCTAssertEqual(model.conversationID, conversation.id)
+        XCTAssertEqual(model.messages.map(\.content), ["已有消息"])
+        model.newConversation()
+        XCTAssertNil(data.chatPrefs.currentSessionId)
+        XCTAssertTrue(model.messages.isEmpty)
+        XCTAssertEqual(try data.conversations.listMessages(conversationId: conversation.id).count, 1)
+        model.open(conversation)
+        XCTAssertEqual(model.selectedBrain, "custom-local")
+        XCTAssertEqual(model.messages.first?.id, "message-1")
+        XCTAssertEqual(data.chatPrefs.currentSessionId, conversation.id)
+    }
+
+    func testNavigationCannotDiscardRunningTurn() throws {
+        let state = AppState()
+        let model = LocalChatModel(appState: state, data: try LocalData.inMemory())
+        model.draft = "待发送"
+        model.isSending = true
+        model.newConversation()
+        XCTAssertEqual(model.draft, "待发送")
+        XCTAssertNotNil(model.error)
+    }
+
+    func testFeatureIndexRetainsSeventyRoutesWithoutSecondShell() {
+        XCTAssertEqual(FlagshipRoutes.all.count, 70)
+        XCTAssertEqual(Set(FlagshipRoutes.all.map(\.id)).count, 70)
+        var opened: AppTab?
+        let capabilities = AppFlagshipCapabilities { opened = $0 }
+        XCTAssertTrue(capabilities.openExistingFeature("channels"))
+        XCTAssertEqual(opened, .channels)
+        XCTAssertFalse(capabilities.openExistingFeature("editor"))
+    }
+}

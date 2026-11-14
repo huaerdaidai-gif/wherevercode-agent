@@ -298,7 +298,7 @@ struct ChatListView: View {
 enum AgentUI {
     static let background = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.08, green: 0.09, blue: 0.12, alpha: 1)
+            ? UIColor(red: 11/255, green: 14/255, blue: 29/255, alpha: 1)
             : UIColor(red: 250/255, green: 248/255, blue: 245/255, alpha: 1)
     })
 }
@@ -341,6 +341,9 @@ final class LocalChatModel: ObservableObject {
         self.data = data
         selectedBrain = appState.brainConfigStore.currentBrainId() ?? ""
         conversationID = data.chatPrefs.currentSessionId
+        if let id = conversationID, let conversation = try? data.conversations.getConversation(id: id) {
+            selectedBrain = conversation.brainId ?? selectedBrain
+        }
         reload()
     }
 
@@ -393,7 +396,7 @@ final class LocalChatModel: ObservableObject {
                 reload()
             }
         } catch {
-            self.error = error.localizedDescription
+            self.error = SecretRedactor.redact(error.localizedDescription)
             // Restore unsaved text only; persisted user messages are not duplicated.
             if messages.last?.content != text { draft = text }
         }
@@ -404,6 +407,7 @@ struct LocalChatHomeView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject var model: LocalChatModel
     @State private var query = ""
+    @State private var greetingDismissed = false
 
     var body: some View {
         NavigationStack {
@@ -411,12 +415,24 @@ struct LocalChatHomeView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
-                            if model.messages.isEmpty && !model.isSending {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text("今天想做什么？").font(.system(size: 29, weight: .semibold))
-                                    Text("从对话开始，或打开侧边栏进入工作台。")
-                                        .font(.subheadline).foregroundStyle(.secondary)
-                                }.padding(.vertical, 48)
+                            if model.messages.isEmpty && !model.isSending && !greetingDismissed {
+                                VStack(spacing: 12) {
+                                    HStack {
+                                        Spacer()
+                                        Button("✕ 关闭问候") { greetingDismissed = true }
+                                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                                    }
+                                    Text("∞").font(.system(size: 34)).foregroundStyle(Color.purple)
+                                        .padding(.top, 20)
+                                    Text("今天想做什么？").font(.system(size: 28, weight: .semibold))
+                                    Button("项目 · 选择或切换 ›") { appState.selectedTab = .projects }
+                                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(minHeight: 48)
+                                    HStack(spacing: 8) {
+                                        suggestion("检查项目并修复问题")
+                                        suggestion("解释这段代码")
+                                    }
+                                    HStack { suggestion("拆成任务"); Spacer() }
+                                }.padding(.vertical, 12)
                             }
                             ForEach(model.messages, id: \.id) { message in
                                 VStack(alignment: .leading, spacing: 6) {
@@ -443,30 +459,38 @@ struct LocalChatHomeView: View {
                         .accessibilityIdentifier("chat.error")
                 }
                 VStack(spacing: 8) {
-                    HStack {
+                    TextField("输入消息…", text: $model.draft, axis: .vertical)
+                        .lineLimit(1...5).font(.system(size: 14)).padding(12)
+                        .accessibilityIdentifier("chat.input")
+                    HStack(spacing: 8) {
+                        Menu {
+                            Button("项目与文件") { appState.selectedTab = .projects }
+                            Button("Agent") { appState.selectedTab = .agents }
+                            Button("设备") { appState.selectedTab = .devices }
+                            Button("工具与连接") { appState.goToSettings() }
+                        } label: {
+                            Image(systemName: "plus").frame(width: 36, height: 44)
+                        }.accessibilityLabel("更多操作")
                         Picker("模型", selection: $model.selectedBrain) {
                             Text("选择模型").tag("")
                             ForEach(appState.brainConfigStore.listConfigs(), id: \.brainId) { config in
                                 Text(config.label + (config.model.isEmpty ? "" : " · " + config.model)).tag(config.brainId)
                             }
                         }.disabled(model.isSending).accessibilityIdentifier("chat.model")
-                        Spacer()
-                        Button("模型与连接") { appState.goToSettings() }.font(.caption)
-                    }
-                    HStack(alignment: .bottom, spacing: 8) {
-                        TextField("输入消息", text: $model.draft, axis: .vertical)
-                            .lineLimit(1...6).padding(12)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-                            .accessibilityIdentifier("chat.input")
+                        .lineLimit(1)
+                        Spacer(minLength: 0)
                         Button { Task { await model.send() } } label: {
-                            Image(systemName: "arrow.up").frame(width: 44, height: 44)
+                            Image(systemName: "arrow.up").frame(width: 36, height: 36)
                         }.buttonStyle(.borderedProminent).clipShape(Circle())
                             .disabled(model.isSending || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .accessibilityLabel("发送").accessibilityIdentifier("chat.send")
-                    }
-                    Text("模型回复不代表任务已执行；工作区工具尚未接入。")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }.padding(16)
+                    }.padding(.horizontal, 8)
+                }
+                .padding(4)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.2)))
+                .padding(.horizontal, 10).padding(.bottom, 6)
+
             }
             .background(AgentUI.background)
             .toolbar(.hidden, for: .navigationBar)
@@ -485,6 +509,13 @@ struct LocalChatHomeView: View {
             .onAppear { model.reload() }
         }
     }
+    private func suggestion(_ title: String) -> some View {
+        Button { model.draft = title + "：" } label: {
+            Text(title).font(.system(size: 12)).frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.bordered).tint(.secondary)
+    }
+
 }
 
 struct LocalWorkbenchView: View {
