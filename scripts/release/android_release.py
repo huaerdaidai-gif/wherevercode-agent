@@ -88,7 +88,8 @@ def check_apk(apk, apksigner, aapt, expected, counter, source_sha, config, updat
     signers = re.findall(r"Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F]+)",
                          verified.stdout.decode("utf-8", errors="replace"))
     if signers != [expected] and [s.lower() for s in signers] != [expected]:
-        raise ValueError("APK signer set differs from the protected installed certificate")
+        found = ",".join(s.lower() for s in signers) or "<none>"
+        raise ValueError("APK signer set differs from the protected installed certificate: found " + found)
     # aapt may return nonzero for adaptive icons after printing valid badging.
     badging = execute([str(aapt), "dump", "badging", str(apk)])
     metadata = package_metadata(badging.stdout.decode("utf-8", errors="replace"))
