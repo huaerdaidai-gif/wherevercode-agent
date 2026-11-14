@@ -126,6 +126,8 @@ import wherevercode.agent.core.agent.WebhookTestResult
 import wherevercode.agent.core.agent.SharedPreferencesAgentStore
 import wherevercode.agent.core.agent.SharedPreferencesManusTaskIdStore
 import wherevercode.agent.core.agent.SharedPreferencesPlatformReplyCursorStore
+import wherevercode.agent.core.control.ControlAction
+import wherevercode.agent.ui.TaskControlActions
 import wherevercode.agent.core.control.HandRemoteControlSender
 import wherevercode.agent.core.install.AssetReader
 import wherevercode.agent.core.install.DeviceInstallController
@@ -1525,6 +1527,7 @@ class MainActivity : AppCompatActivity() {
             onDeleteServer = { serverId -> deleteMcpServer(serverId) },
             onSaveServer = { form, existingId -> saveMcpServer(form, existingId) },
             onImportServers = { json -> importMcpServers(json) },
+            onManifests = { showExtensionManifests() },
         )
         screenMcpPlugins = mcpPluginController.root
         container.addView(screenMcpPlugins)
@@ -5137,6 +5140,52 @@ class MainActivity : AppCompatActivity() {
      * 后台线程读注册表快照（MCP 服务器 + 插件 + 七类计数）→ 回主线程渲染。
      * 大脑未建好时只显示加载态，不伪造空列表。
      */
+    /** An inert manifest catalogue: importing metadata cannot enable tools or grant permissions. */
+    private fun showExtensionManifests() {
+        val prefs = getSharedPreferences("extension-manifests-v1", MODE_PRIVATE)
+        val rows = prefs.all.values.mapNotNull { raw ->
+            try { wherevercode.agent.core.extension.ExtensionManifest.parse(raw as String) }
+            catch (_: Exception) { null }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("扩展清单 v1（${rows.size}）")
+            .setMessage(rows.joinToString("\n\n") {
+                "${it.name} · ${it.kind} · ${it.version}\n声明权限：${it.permissions.joinToString().ifBlank { "无" }}\n仅元数据，未安装、未授权、未执行"
+            }.ifBlank { "暂无清单。支持 Agent / Model / Harness / MCP / Skills / Automation / Network / Device / UI Extension。" })
+            .setPositiveButton("导入 JSON") { _, _ -> importExtensionManifest() }
+            .setNegativeButton("关闭", null).show()
+    }
+
+    private fun importExtensionManifest() {
+        val input = EditText(this).apply {
+            minLines = 6
+            hint = "{\"schemaVersion\":1,\"id\":\"example\",\"kind\":\"agent\",\"name\":\"示例\",\"version\":\"1.0.0\",\"permissions\":[]}"
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("导入扩展清单")
+            .setMessage("仅保存能力与权限声明；凭据与连接配置请使用现有设置。不会安装或启用扩展。")
+            .setView(input).setPositiveButton("预览", null).setNegativeButton("取消", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val manifest = wherevercode.agent.core.extension.ExtensionManifest.parse(input.text.toString())
+                    AlertDialog.Builder(this).setTitle("保存 ${manifest.name}？")
+                        .setMessage("类型：${manifest.kind}\n版本：${manifest.version}\n声明权限：${manifest.permissions.joinToString().ifBlank { "无" }}\n保存不授予这些权限。")
+                        .setPositiveButton("保存清单") { _, _ ->
+                            val prefs = getSharedPreferences("extension-manifests-v1", MODE_PRIVATE)
+                            val key = "${manifest.kind}:${manifest.id}"
+                            if (prefs.contains(key)) toast("同类型同 id 的清单已存在，未覆盖。")
+                            else {
+                                prefs.edit().putString(key, manifest.toJson().toString()).apply()
+                                toast("清单已保存，扩展尚未启用。")
+                                dialog.dismiss()
+                            }
+                        }.setNegativeButton("取消", null).show()
+                } catch (e: Exception) { input.error = e.message ?: "清单无效" }
+            }
+        }
+        dialog.show()
+    }
+
     private fun refreshMcpPlugins() {
         val components = brainComponents
         if (components == null) {
@@ -6308,6 +6357,16 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 emptyList()
             }
+            val controlStatus = if (task?.sessionId == null) try {
+                when (components.controlPlane?.getControlStatus(taskId)) {
+                    wherevercode.agent.core.control.ControlStatus.PAUSING -> "暂停请求待执行器确认"
+                    wherevercode.agent.core.control.ControlStatus.PAUSED -> "已确认暂停"
+                    wherevercode.agent.core.control.ControlStatus.STOPPING ->
+                        if (task != null && TaskStates.isTerminal(task.state)) "任务已结束" else "停止请求待执行器确认"
+                    wherevercode.agent.core.control.ControlStatus.RUNNING -> "允许调度（执行进度以任务状态为准）"
+                    null -> "控制平面未就绪"
+                }
+            } catch (_: Exception) { "控制状态读取失败，请刷新" } else null
             val artifactPaths = TaskDetailArtifacts.extractPaths(steps)
             val approvals = history.filter { record ->
                 val target = record.target ?: return@filter false
@@ -6342,6 +6401,7 @@ class MainActivity : AppCompatActivity() {
                     pipeline = pipelineView,
                     onPipelineAction = { action -> handlePipelineAction(taskId, action, artifactPaths) },
                     autoDecisions = autoDecisions,
+                    controlStatus = controlStatus,
                 )
             }
         }.start()
@@ -6363,9 +6423,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 阶段 1（U3）：逐任务控制。停止 / 重试真实接线；改目标仅 queued
-     * 任务可改（弹框改描述）；暂停仅当前轮次任务可用（委托
-     * ChatViewModel.pause()，安全检查点语义）；其余情况页脚明标未实现。
+     * 分派任务通过 ControlPlane 控制；聊天镜像沿用原会话安全检查点。
+     * 改目标仅限未认领任务；执行中的任务必须先停止确认。
      */
     private fun taskControls(task: TaskRecord): View {
         val row = UiKit.horizontal(this).apply {
@@ -6373,7 +6432,10 @@ class MainActivity : AppCompatActivity() {
         }
         val terminal = TaskStates.isTerminal(task.state)
         if (!terminal) {
-            if (task.taskId == chatViewModel.currentTurnTaskId() && chatViewModel.isRunning()) {
+            if (task.sessionId == null) {
+                row.addView(taskButton("暂停") { requestTaskControl(task.taskId, ControlAction.PAUSE) })
+                row.addView(taskButton("继续") { requestTaskControl(task.taskId, ControlAction.RESUME) })
+            } else if (task.taskId == chatViewModel.currentTurnTaskId() && chatViewModel.isRunning()) {
                 row.addView(taskButton("暂停") { toast(chatViewModel.pause()); refreshTasks() })
             }
             row.addView(taskButton("停止") {
@@ -6390,7 +6452,7 @@ class MainActivity : AppCompatActivity() {
             // 未启用流水线的任务走 P0 requestRework 原样。
             row.addView(taskButton("打回返工") { showReworkDialog(task) })
         }
-        if (task.state == "queued") {
+        if (task.sessionId == null && TaskStates.isClaimable(task.state)) {
             row.addView(taskButton("改目标") { editTaskGoal(task) })
         }
         // “···”管理单：删除任务（可见入口，不藏长按里；项目/大脑
@@ -6428,36 +6490,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopTask(task: TaskRecord) {
         // 当前轮次任务：走聊天控制（安全检查点停轮）。
-        if (task.taskId == chatViewModel.currentTurnTaskId()) {
+        if (task.sessionId != null && task.taskId == chatViewModel.currentTurnTaskId()) {
             toast(chatViewModel.stop())
             refreshTasks()
             return
         }
+        requestTaskControl(task.taskId, ControlAction.STOP)
+    }
+
+    /** All dispatched-task controls use the same persisted control plane as MCP. */
+    private fun requestTaskControl(taskId: String, action: ControlAction, goal: String? = null) {
         val components = brainComponents ?: return
-        // 正在执行的分派任务：取消执行 job，runner 记为 cancelled。
-        if (components.taskRunner.cancel(task.taskId)) {
-            toast("已请求停止分派任务。")
-            refreshTasks()
+        val plane = components.controlPlane ?: run {
+            toast("控制平面尚未就绪，请稍后重试。")
             return
         }
-        // 未执行的 queued/assigned 任务：直接记 cancelled（合法迁移）。
         Thread {
-            try {
-                val current = components.taskStore.getTask(task.taskId)
-                if (current != null && !TaskStates.isTerminal(current.state)) {
-                    components.taskStore.updateTask(
-                        task.taskId,
-                        mapOf("state" to "cancelled", "result" to "任务被用户停止。"),
-                        current.version,
-                        current.goalVersion,
-                        current.authEpoch,
-                    )
-                }
+            val message = try {
+                val result = TaskControlActions(components.taskStore, plane).request(taskId, action, goal)
+                TaskControlActions.message(result)
             } catch (e: Exception) {
-                runOnUiThread { toast("停止失败：${e.message}") }
-                return@Thread
+                "操作失败：${e.message}"
             }
-            runOnUiThread { refreshTasks() }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                toast(message)
+                refreshTasks()
+                if (taskDetailVisible && taskDetailTaskId == taskId) openTaskDetail(taskId)
+            }
         }.start()
     }
 
@@ -6508,7 +6568,7 @@ class MainActivity : AppCompatActivity() {
         val message = buildString {
             append("删除任务“${task.title.ifBlank { task.taskId }}”？")
             append("只删除任务库里的这条记录，仓库、分支与聊天消息不受影响，无法恢复。")
-            if (running) append("任务正在执行，会先停止再删除。")
+            if (running) append("将先请求停止；只有执行器确认后才能删除。")
         }
         AlertDialog.Builder(this)
             .setTitle("删除任务")
@@ -6522,36 +6582,20 @@ class MainActivity : AppCompatActivity() {
      * 删除任务记录：正在跑的先停再删；删完回任务列表、不留空页，
      * 任务库与成果汇总立刻刷新，不留幽灵行。
      *
-     * 先停：当前轮次任务走聊天控制停轮；分派任务取消 runner job；
-     * 其余非终态任务记 cancelled——与 stopTask 同款语义。任何一
-     * 步失败都不拦删除：行删掉后，后续写回按任务不存在拒绝，不会
-     * 复活；远端成员的迟到回传按 attemptId 围栏拒绝（P0）。
+     * 通过控制平面请求停止。未确认时保留任务和审计；聊天镜像需从
+     * 原会话先停止，终态后才能删除。
      */
     private fun deleteTaskRecord(task: TaskRecord) {
         val components = brainComponents ?: return
-        val isCurrentTurn = task.taskId == chatViewModel.currentTurnTaskId()
-        if (isCurrentTurn && chatViewModel.isRunning()) {
-            chatViewModel.stop()
-        }
         Thread {
             try {
-                val current = components.taskStore.getTask(task.taskId)
-                if (current != null && !TaskStates.isTerminal(current.state) && !isCurrentTurn) {
-                    try {
-                        if (!components.taskRunner.cancel(task.taskId)) {
-                            components.taskStore.updateTask(
-                                task.taskId,
-                                mapOf("state" to "cancelled", "result" to "任务被用户删除。"),
-                                current.version,
-                                current.goalVersion,
-                                current.authEpoch,
-                            )
-                        }
-                    } catch (_: Exception) {
-                        // 停止失败不拦删除：行删掉即终态，后续写回会被拒绝。
-                    }
+                val plane = components.controlPlane ?: throw IllegalStateException("控制平面尚未就绪")
+                val removed = TaskControlActions(components.taskStore, plane)
+                    .deleteAfterConfirmedStop(task.taskId)
+                if (!removed) {
+                    runOnUiThread { toast("停止尚未确认，任务记录已保留。请等待执行器回执后重试删除。") }
+                    return@Thread
                 }
-                val removed = components.taskStore.deleteTask(task.taskId)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (taskDetailVisible && taskDetailTaskId == task.taskId) hideTaskDetail()
@@ -6566,7 +6610,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun editTaskGoal(task: TaskRecord) {
-        val components = brainComponents ?: return
         val input = EditText(this).apply {
             setText(task.description ?: task.title)
             setSingleLine(false)
@@ -6574,7 +6617,7 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("改目标")
-            .setMessage("仅修改 queued 任务的目标描述；执行中的任务改目标未实现。")
+            .setMessage("仅修改尚未认领的目标并更新目标版本；执行中的任务请先停止确认。")
             .setView(input)
             .setPositiveButton("保存") { _, _ ->
                 val goal = input.text.toString().trim()
@@ -6582,28 +6625,7 @@ class MainActivity : AppCompatActivity() {
                     toast("目标不能为空。")
                     return@setPositiveButton
                 }
-                Thread {
-                    try {
-                        val current = components.taskStore.getTask(task.taskId)
-                        if (current == null || current.state != "queued") {
-                            runOnUiThread { toast("任务已不在 queued，改目标未生效。") }
-                            return@Thread
-                        }
-                        components.taskStore.updateTask(
-                            task.taskId,
-                            mapOf(
-                                "description" to SecretRedactor.redact(goal, 4000),
-                                "title" to SecretRedactor.redact(goal.take(40), 100),
-                            ),
-                            current.version,
-                            current.goalVersion,
-                            current.authEpoch,
-                        )
-                        runOnUiThread { refreshTasks() }
-                    } catch (e: Exception) {
-                        runOnUiThread { toast("改目标失败：${e.message}") }
-                    }
-                }.start()
+                requestTaskControl(task.taskId, ControlAction.CHANGE_GOAL, SecretRedactor.redact(goal, 4000))
             }
             .setNegativeButton("取消", null)
             .show()

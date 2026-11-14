@@ -90,6 +90,7 @@ class TaskDetailController(
         onPipelineAction: ((PipelineAction) -> Unit)? = null,
         /** 自主度（2026-11-11）：大脑总管的自动决定（控制审计里 actor = 大脑总管的行）。 */
         autoDecisions: List<ControlAuditEntry> = emptyList(),
+        controlStatus: String? = null,
     ) {
         content.removeAllViews()
 
@@ -108,6 +109,7 @@ class TaskDetailController(
 
         content.addView(section("状态"))
         content.addView(info("状态：${taskStateLabel(task.state)}"))
+        controlStatus?.let { content.addView(info("执行控制：$it")) }
         // V5 跨设备开发（2026-11-12，D4 新口径 (b)）：任务详情“工作
         // 目录”行，从状态轨迹事件反查（不新增 Room 字段/迁移）。
         // 项目检出命中时显示“项目检出”，无检出回落时显示“Agent 文件
