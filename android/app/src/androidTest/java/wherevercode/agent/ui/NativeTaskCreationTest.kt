@@ -124,6 +124,8 @@ class NativeTaskCreationTest {
             }
         }
         dumpUiTexts(device, output, "launch-ui-after")
+        shot(device, output, "launch-blocked")
+        error("Onboarding/system overlay did not disappear within 90 seconds; see launch-ui-after.xml")
     }
 
     private fun openTasks(device: UiDevice, context: Context) {
@@ -148,7 +150,10 @@ class NativeTaskCreationTest {
         // Accessibility ACTION_SET_TEXT avoids typing through an IME; it still edits the real native field.
         field.text = goal
         if (shotName != null) shot(device, output, shotName)
-        device.findObject(By.res("android", "button1")).click()
+        val submit = device.wait(Until.findObject(By.res("android", "button1")), 30_000)
+            ?: error("Native create-task confirmation button missing")
+        assertTrue("Create-task confirmation disabled", submit.isEnabled)
+        submit.click()
         val deadline = System.currentTimeMillis() + 60_000
         while (System.currentTimeMillis() < deadline) {
             val rows = store.listTasks().filter { it.description == goal }
@@ -195,7 +200,9 @@ class NativeTaskCreationTest {
             findText(device, "创建任务").click()
             assertTrue(device.wait(Until.hasObject(By.text(draft)), 30_000))
             shot(device, output, "C04-task-draft-form")
-            device.findObject(By.res("android", "button2")).click()
+            val cancel = device.wait(Until.findObject(By.res("android", "button2")), 30_000)
+                ?: error("Native create-task cancel button missing")
+            cancel.click()
             assertTrue(device.wait(Until.hasObject(By.text(draft)), 30_000))
             assertTrue("Cancelled channel task must not create a row", store.listTasks().none { it.description == draft })
             shot(device, output, "C04-kept-draft")
@@ -277,6 +284,11 @@ class NativeTaskCreationTest {
             val store = RoomTaskStore(db)
             val controlStore = RoomControlStore(db)
             val log = StringBuilder()
+            val evidenceFile = File(output, "control-record.txt")
+            fun record(message: String) {
+                log.append(message).append('\n')
+                evidenceFile.writeText(log.toString())
+            }
             var taskId: String? = null
             var paused = false
             // The local runner may claim and finish a task before the
@@ -294,14 +306,20 @@ class NativeTaskCreationTest {
                 for (blocker in 1..2) {
                     val blockerGoal = "ISSUE8_BLK_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
                     createTaskViaForm(device, context, store, blockerGoal, output, null)
-                    log.append("attempt$attempt blocker$blocker created\n")
+                    record("attempt$attempt blocker$blocker created")
                     device.pressBack()
                     findId(device, context, "buttonCreateTask")
                 }
                 val goal = "ISSUE8_CTL_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
                 val id = createTaskViaForm(device, context, store, goal, output, null)
                 taskId = id
-                log.append("attempt$attempt taskId=$id\n")
+                record("attempt$attempt taskId=$id; prePauseState=${store.getTask(id)?.state}")
+                if (store.getTask(id)?.state != "queued") {
+                    record("attempt$attempt control task already left queued; blocker approach is not deterministic")
+                    device.pressBack()
+                    findId(device, context, "buttonCreateTask")
+                    continue
+                }
                 findText(device, "暂停", 30_000).click()
                 val deadline = System.currentTimeMillis() + 120_000
                 while (System.currentTimeMillis() < deadline) {
@@ -312,7 +330,7 @@ class NativeTaskCreationTest {
                     }
                     val state = store.getTask(id)?.state
                     if (state != null && TaskStates.isTerminal(state)) {
-                        log.append("attempt$attempt ended early: task reached terminal state $state before pause confirmed\n")
+                        record("attempt$attempt ended early: task reached terminal state $state before pause confirmed")
                         break
                     }
                     Thread.sleep(500)
@@ -323,7 +341,7 @@ class NativeTaskCreationTest {
             }
             assertTrue("Pause was not confirmed by the control plane; log=$log", paused)
             val id = taskId!!
-            log.append("pause=PAUSED confirmed for $id\n")
+            record("pause=PAUSED confirmed for $id")
             shot(device, output, "C06-task-detail-paused")
             findText(device, "继续", 30_000).click()
             val resumeDeadline = System.currentTimeMillis() + 60_000
@@ -336,7 +354,7 @@ class NativeTaskCreationTest {
                 Thread.sleep(500)
             }
             assertTrue("Resume was not confirmed by the control plane", resumed)
-            log.append("resume=RUNNING confirmed for $id\n")
+            record("resume=RUNNING confirmed for $id; state=${store.getTask(id)?.state}")
             findText(device, "停止", 30_000).click()
             assertTrue(device.wait(Until.hasObject(By.text("停止任务？")), 30_000))
             val confirm = device.wait(Until.findObject(By.clazz(Button::class.java).text("停止")), 30_000)
@@ -352,15 +370,11 @@ class NativeTaskCreationTest {
                 Thread.sleep(500)
             }
             assertTrue("Stop did not land the task in cancelled; state=${store.getTask(id)?.state}", cancelled)
-            log.append("stop=cancelled confirmed for $id\n")
+            record("stop=cancelled confirmed for $id")
             shot(device, output, "C06-task-detail-stopped")
             device.pressBack()
             shot(device, output, "C05-task-list")
-            File(output, "control-record.txt").writeText(
-                log.toString() +
-                    "Scope: task page controls against the production ControlPlane, receipts read from RoomControlStore; " +
-                    "final task state read from RoomTaskStore.\n",
-            )
+            record("Scope: task page controls against production ControlPlane; final task state from RoomTaskStore")
         } finally {
             db.close()
         }
