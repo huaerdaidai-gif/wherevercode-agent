@@ -859,9 +859,10 @@ class HandServer:
         cross_device_pair_confirm {code} → 码对即 APPROVED，回密封
         cross_device_pair_approved；码不对回密封 cross_device_error
        （code=pair_code_wrong，含中文原因与剩余次数）。
-        不是配对确认帧（旧版 App 直接发的 tool_call 等）→ 回密封
-        cross_device_not_authorized，与此前 live 版 _reject_pending
-        的行为一致；解不开的帧静默关闭，不泄露原因细节。
+        不是配对确认帧（旧版 App 直接发的 tool_call 等）：
+        standalone 保留 A 的直接断连，bundled 保留 B 的密封
+        cross_device_not_authorized 回包；两种策略都不分派工具或执行。
+        解不开的帧静默关闭，不泄露原因细节。
         已撤销（REVOKED）的客户端不接受配对确认，须先在服务端
         pair-approve 解除撤销。只等 15 秒：App 的配对确认紧跟 hello
         发出，超时即关，不占线程。
@@ -879,6 +880,8 @@ class HandServer:
         except Exception:
             return  # 解不开：静默关闭
         if envelope.get("type") != "cross_device_pair_confirm" or envelope.get("version") != VERSION:
+            if self.config_policy == "standalone":
+                return  # A compatibility: close without any response or dispatch.
             # 不是配对确认：按未批准拒绝（与 live 版 _reject_pending 同款，
             # 错误形状与 _dispatch 的 cross_device_error 一致：code 在 args 里）。
             try:
