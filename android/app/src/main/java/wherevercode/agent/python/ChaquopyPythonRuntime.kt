@@ -111,6 +111,7 @@ class ChaquopyPythonRuntime(context: Context) : PythonRuntime {
                     argsJson,
                     request.module ?: "",
                     request.timeoutMillis,
+                    request.control,
                 ).toString()
             }
             parseRunResult(raw)
@@ -147,6 +148,7 @@ class ChaquopyPythonRuntime(context: Context) : PythonRuntime {
                 stdout = json.optString("stdout", ""),
                 stderr = json.optString("stderr", ""),
                 timedOut = json.optBoolean("timed_out", false),
+                interruption = if (json.isNull("control_state")) null else json.optString("control_state").takeIf { it == "paused" || it == "stopped" },
                 failureReason = if (json.isNull("error")) {
                     null
                 } else {

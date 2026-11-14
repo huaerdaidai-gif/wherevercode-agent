@@ -38,14 +38,24 @@ class _DeadlineExceeded(BaseException):
     ``except Exception`` does not swallow the timeout."""
 
 
+class _ControlInterrupted(BaseException):
+    def __init__(self, state):
+        self.state = state
+
+
 def _truncate(text):
     if len(text) > MAX_OUTPUT_CHARS:
         return text[:MAX_OUTPUT_CHARS] + "\n…（输出超过上限，已截断）"
     return text
 
 
-def _deadline_tracer(deadline):
+def _deadline_tracer(deadline, control=None):
     def tracer(frame, event, arg):
+        if control is not None:
+            if control.isStopped():
+                raise _ControlInterrupted("stopped")
+            if control.isPaused():
+                raise _ControlInterrupted("paused")
         if time.monotonic() > deadline:
             raise _DeadlineExceeded("wall-clock deadline exceeded")
         return tracer
@@ -66,7 +76,7 @@ def version():
     )
 
 
-def run(script, cwd, argv_json, module, timeout_ms):
+def run(script, cwd, argv_json, module, timeout_ms, control=None):
     argv = list(json.loads(argv_json)) if argv_json else []
     timeout_s = max(1.0, float(timeout_ms) / 1000.0)
 
@@ -78,6 +88,7 @@ def run(script, cwd, argv_json, module, timeout_ms):
     stderr_buf = io.StringIO()
     exit_code = 0
     timed_out = False
+    control_state = None
     error = None
     deadline = time.monotonic() + timeout_s
 
@@ -96,7 +107,7 @@ def run(script, cwd, argv_json, module, timeout_ms):
             sys.path.insert(0, os.path.dirname(script) or os.getcwd())
             target = ("script", script)
 
-        sys.settrace(_deadline_tracer(deadline))
+        sys.settrace(_deadline_tracer(deadline, control))
         with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
             try:
                 if target[0] == "module":
@@ -114,6 +125,9 @@ def run(script, cwd, argv_json, module, timeout_ms):
                 else:
                     sys.stderr.write("%s\n" % exc.code)
                     exit_code = 1
+            except _ControlInterrupted as exc:
+                control_state = exc.state
+                exit_code = 130
             except _DeadlineExceeded:
                 timed_out = True
                 exit_code = 124
@@ -124,6 +138,9 @@ def run(script, cwd, argv_json, module, timeout_ms):
             except BaseException:
                 exit_code = 1
                 traceback.print_exc()
+    except _ControlInterrupted as exc:
+        control_state = exc.state
+        exit_code = 130
     except _DeadlineExceeded:
         timed_out = True
         exit_code = 124
@@ -147,6 +164,7 @@ def run(script, cwd, argv_json, module, timeout_ms):
             "stdout": _truncate(stdout_buf.getvalue()),
             "stderr": _truncate(stderr_buf.getvalue()),
             "timed_out": timed_out,
+            "control_state": control_state,
             "cwd": cwd,
             "argv": argv,
             "error": error,

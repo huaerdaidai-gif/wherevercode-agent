@@ -1348,7 +1348,19 @@ object BrainBootstrap {
                 task: TaskRecord,
                 onStep: (TaskStepEvent) -> Unit,
             ): TaskExecutionResult {
-                turnController.begin()
+                turnController.begin {
+                    when (controlPlane.getControlStatus(task.taskId)) {
+                        wherevercode.agent.core.control.ControlStatus.PAUSING,
+                        wherevercode.agent.core.control.ControlStatus.PAUSED -> wherevercode.agent.brain.TurnControlState.PAUSED
+                        wherevercode.agent.core.control.ControlStatus.STOPPING -> wherevercode.agent.brain.TurnControlState.STOPPED
+                        else -> {
+                            val current = taskStore.getTask(task.taskId)
+                            if (current == null || wherevercode.agent.core.task.TaskStates.isTerminal(current.state)) {
+                                wherevercode.agent.brain.TurnControlState.STOPPED
+                            } else wherevercode.agent.brain.TurnControlState.RUNNING
+                        }
+                    }
+                }
                 return try {
                     val finalText = StringBuilder()
                     var failure: String? = null
