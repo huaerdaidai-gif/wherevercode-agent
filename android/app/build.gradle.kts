@@ -90,7 +90,7 @@ android {
 
     composeOptions {
         // 与 Kotlin 1.9.0 配套的 Compose 编译器版本。
-        kotlinCompilerExtensionVersion = "1.5.3"
+        kotlinCompilerExtensionVersion = "1.5.0"
     }
 
     // Open-source builds use Android Gradle Plugin's standard local debug signing.
