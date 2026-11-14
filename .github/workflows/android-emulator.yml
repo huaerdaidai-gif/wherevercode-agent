@@ -27,6 +27,12 @@ permissions:
 
 jobs:
   emulator-acceptance:
+    # Cost gate (owner instruction 2026-11-14): a push alone must not
+    # burn a full emulator run. The job only executes for a manual
+    # dispatch or when the head commit message carries the [emu]
+    # marker; any other push finishes in seconds with the job
+    # skipped.
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[emu]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
