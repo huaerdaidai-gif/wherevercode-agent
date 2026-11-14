@@ -15,6 +15,7 @@ on:
   push:
     branches:
       - task/issue-6-p0-native-android
+      - feat/v5-dual-70-assembly-20261114
     paths:
       - "android/**"
       - ".github/workflows/android-emulator.yml"
