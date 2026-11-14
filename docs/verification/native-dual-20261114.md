@@ -56,3 +56,20 @@ remain unverified. No user signing material exists in this workspace.
   full workspace console. Task events use the existing durable store.
 - Shared navigation/home structure is implemented; complete per-workspace
   visual and functional parity has not yet been certified.
+
+## First completed Android run
+
+Run 43601145902, source 1ab79e4: Android CI PASS, 309 JVM suites,
+2730 tests / 0 failures / 0 errors / 1 skipped. Debug and compatibility APKs
+uploaded; debug APK and XML reports downloaded and read locally.
+
+Emulator run 43601145915 failed the existing control test: both test-created
+blocker tasks failed for lack of a configured brain before pause could land.
+The queued target then failed as well. This is retained as a failed run.
+The correction uses an explicitly labelled, session-bound active-work test
+fixture to occupy existing scheduler capacity. The controlled task is still
+created through the real native form; pause/resume/stop are tapped through
+UI and checked against RoomControlStore/RoomTaskStore. Fixture state is not
+inference evidence, no fake success result is written, and the fixture is
+removed in finally. The separate runner test still proves a genuine claim
+and records the real no-model failure. No production scheduler hook added.

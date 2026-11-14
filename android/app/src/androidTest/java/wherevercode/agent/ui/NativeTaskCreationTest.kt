@@ -21,6 +21,7 @@ import wherevercode.agent.core.control.RoomControlStore
 import wherevercode.agent.core.task.RoomTaskStore
 import wherevercode.agent.core.task.TaskDatabase
 import wherevercode.agent.core.task.TaskStates
+import wherevercode.agent.core.task.TaskRecord
 
 /**
  * Real Android UI -> Room -> local runner / control plane. No data
@@ -288,8 +289,19 @@ class NativeTaskCreationTest {
         launch(device, context, output)
         openTasks(device, context)
         val db = TaskDatabase.create(context)
+        val store = RoomTaskStore(db)
+        val blockerId = "ui-control-fixture-${UUID.randomUUID()}"
         try {
-            val store = RoomTaskStore(db)
+            // Explicit test precondition: a session-bound active-work fixture
+            // occupies the production scheduler's single-worker capacity. The
+            // runner cannot claim a session-bound record. This is not execution
+            // evidence and no production delay/test hook is introduced.
+            var blocker = store.createTask(TaskRecord(taskId = blockerId,
+                sessionId = blockerId, title = "UI control queue fixture"))
+            blocker = store.updateTask(blockerId, mapOf("state" to "assigned"),
+                blocker.version, blocker.goalVersion, blocker.authEpoch)!!
+            store.updateTask(blockerId, mapOf("state" to "working"),
+                blocker.version, blocker.goalVersion, blocker.authEpoch)!!
             val controlStore = RoomControlStore(db)
             val log = StringBuilder()
             val evidenceFile = File(output, "control-record.txt")
@@ -297,58 +309,22 @@ class NativeTaskCreationTest {
                 log.append(message).append('\n')
                 evidenceFile.writeText(log.toString())
             }
-            var taskId: String? = null
+            record("test-only active-work fixture=$blockerId; not inference execution evidence")
+            val goal = "ISSUE8_CTL_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
+            val id = createTaskViaForm(device, context, store, goal, output, null)
+            record("taskId=$id; prePauseState=${store.getTask(id)?.state}")
+            assertEquals("Production capacity gate must keep control task queued", "queued", store.getTask(id)?.state)
+            findText(device, "暂停", 30_000).click()
+            val deadline = System.currentTimeMillis() + 120_000
             var paused = false
-            // The local runner may claim and finish a task before the
-            // pause tap lands; one retry with a fresh task keeps the
-            // control assertions deterministic without faking a state.
-            for (attempt in 1..2) {
-                // Deterministic queueing: the scheduler runs one task
-                // at a time, so two blocker tasks ahead of the control
-                // task guarantee it is still QUEUED when the pause tap
-                // lands -- and ControlPlane.pause confirms a queued
-                // task immediately (an in-flight task cannot confirm:
-                // its single brain call errors without a checkpoint,
-                // which is why the naive create-then-pause flow lost
-                // the race in round-4 run bc5d16f8).
-                for (blocker in 1..2) {
-                    val blockerGoal = "ISSUE8_BLK_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
-                    createTaskViaForm(device, context, store, blockerGoal, output, null)
-                    record("attempt$attempt blocker$blocker created")
-                    device.pressBack()
-                    findId(device, context, "buttonCreateTask")
+            while (System.currentTimeMillis() < deadline) {
+                if (controlStore.getControlStatus(id) == ControlStatus.PAUSED) {
+                    paused = true
+                    break
                 }
-                val goal = "ISSUE8_CTL_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
-                val id = createTaskViaForm(device, context, store, goal, output, null)
-                taskId = id
-                record("attempt$attempt taskId=$id; prePauseState=${store.getTask(id)?.state}")
-                if (store.getTask(id)?.state != "queued") {
-                    record("attempt$attempt control task already left queued; blocker approach is not deterministic")
-                    device.pressBack()
-                    findId(device, context, "buttonCreateTask")
-                    continue
-                }
-                findText(device, "暂停", 30_000).click()
-                val deadline = System.currentTimeMillis() + 120_000
-                while (System.currentTimeMillis() < deadline) {
-                    val status = controlStore.getControlStatus(id)
-                    if (status == ControlStatus.PAUSED) {
-                        paused = true
-                        break
-                    }
-                    val state = store.getTask(id)?.state
-                    if (state != null && TaskStates.isTerminal(state)) {
-                        record("attempt$attempt ended early: task reached terminal state $state before pause confirmed")
-                        break
-                    }
-                    Thread.sleep(500)
-                }
-                if (paused) break
-                device.pressBack()
-                findId(device, context, "buttonCreateTask")
+                Thread.sleep(500)
             }
             assertTrue("Pause was not confirmed by the control plane; log=$log", paused)
-            val id = taskId!!
             record("pause=PAUSED confirmed for $id")
             shot(device, output, "C06-task-detail-paused")
             findText(device, "继续", 30_000).click()
@@ -384,6 +360,13 @@ class NativeTaskCreationTest {
             shot(device, output, "C05-task-list")
             record("Scope: task page controls against production ControlPlane; final task state from RoomTaskStore")
         } finally {
+            store.getTask(blockerId)?.let { fixture ->
+                if (!TaskStates.isTerminal(fixture.state)) {
+                    store.updateTask(blockerId, mapOf("state" to "cancelled"),
+                        fixture.version, fixture.goalVersion, fixture.authEpoch)
+                }
+                store.deleteTask(blockerId)
+            }
             db.close()
         }
     }

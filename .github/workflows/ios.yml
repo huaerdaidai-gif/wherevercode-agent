@@ -31,6 +31,7 @@ concurrency:
 jobs:
   build-test-package:
     runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -106,7 +107,22 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: Test navigation on iOS Simulator
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}' \
+            -derivedDataPath .build/derived \
+            -resultBundlePath .build/UIResults.xcresult \
+            -only-testing:WhereverCodeAgentUITests \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY="-"
+
       - name: Test on iOS Simulator
+        if: ${{ !cancelled() }}
         # Ad-hoc signed ("Sign to Run Locally", identity "-"): the
         # simulator Keychain refuses unsigned apps with -34018
         # (errSecMissingEntitlement), which would fail the Keychain
@@ -123,6 +139,7 @@ jobs:
             -destination 'platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}' \
             -derivedDataPath .build/derived \
             -resultBundlePath .build/TestResults.xcresult \
+            -only-testing:WhereverCodeAgentTests \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_IDENTITY="-"
 
@@ -136,24 +153,17 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p .build/screenshots
-          if [ -d .build/TestResults.xcresult ]; then
-            xcrun xcresulttool export attachments \
-              --path .build/TestResults.xcresult \
-              --output-path .build/screenshots || true
-            # Crash/hang diagnostics live outside the attachments:
-            # export them too, so an app death during a test leaves
-            # its stack trace in the same artifact instead of only a
-            # mysterious "Terminate" line in the log.
-            xcrun xcresulttool export diagnostics \
-              --path .build/TestResults.xcresult \
-              --output-path .build/screenshots/diagnostics || true
-            mkdir -p .build/screenshots/diagnostics
-            cp ~/Library/Logs/DiagnosticReports/WhereverCodeAgent*.ips \
-              .build/screenshots/diagnostics/ 2>/dev/null || true
-            find .build/screenshots -type f | sort | head -80 || true
-          else
-            echo "No result bundle found; nothing to export."
-          fi
+          for RESULTS in .build/UIResults.xcresult .build/TestResults.xcresult; do
+            if [ -f "$RESULTS/Info.plist" ]; then
+              OUT=".build/screenshots/$(basename "$RESULTS" .xcresult)"
+              mkdir -p "$OUT"
+              xcrun xcresulttool export attachments --path "$RESULTS" --output-path "$OUT" || true
+              xcrun xcresulttool export diagnostics --path "$RESULTS" --output-path "$OUT/diagnostics" || true
+            fi
+          done
+          mkdir -p .build/screenshots/diagnostics
+          cp ~/Library/Logs/DiagnosticReports/WhereverCodeAgent*.ips .build/screenshots/diagnostics/ 2>/dev/null || true
+          find .build/screenshots -type f | sort | head -80 || true
 
       - name: Upload simulator screenshots
         if: always()
