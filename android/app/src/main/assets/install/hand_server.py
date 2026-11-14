@@ -680,10 +680,12 @@ def spawn_agent(argv, **kwargs):
 
 class HandServer:
     def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT,
-                 config_policy: str = "standalone"):
+                 config_policy: str = "standalone", startup_argv=None):
         if config_policy not in ("standalone", "bundled"):
             raise ValueError("unknown config policy: " + str(config_policy))
         self.config_policy = config_policy
+        self.startup_argv = list(startup_argv) if startup_argv is not None else None
+        self.host = "0.0.0.0"
         self.state = StateStore(state_dir)
         self.device_id = device_id
         self.display_name = display_name
@@ -1697,12 +1699,12 @@ class HandServer:
         state_dir = self.state.dir
         watchdog = os.path.join(state_dir, "update-watchdog.sh")
         log = os.path.join(state_dir, "update-watchdog.log")
-        restart_cmd = " ".join(shlex.quote(a) for a in
-                               [sys.executable, live, "--state-dir", state_dir,
-                                "--device-id", self.device_id,
-                                "--display-name", self.display_name,
-                                "--host", "0.0.0.0", "--port", str(self.port),
-                                "--config-policy", self.config_policy, "serve"])
+        restart_args = self.startup_argv
+        if restart_args is None:
+            restart_args = ["--state-dir", state_dir, "--device-id", self.device_id,
+                            "--display-name", self.display_name, "--host", self.host,
+                            "--port", str(self.port), "--config-policy", self.config_policy, "serve"]
+        restart_cmd = " ".join(shlex.quote(arg) for arg in [sys.executable, live, *restart_args])
         sh = []
         sh.append('#!/bin/sh')
         sh.append('# V5 Hand 自更新看门狗（apply 时生成，检查完自删）。')
@@ -2716,8 +2718,9 @@ def start_mdns_advertiser(hand: "HandServer") -> MdnsAdvertiser | None:
 
 
 def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int,
-          config_policy: str = "standalone") -> None:
-    hand = HandServer(state_dir, device_id, display_name, port, config_policy)
+          config_policy: str = "standalone", startup_argv=None) -> None:
+    hand = HandServer(state_dir, device_id, display_name, port, config_policy, startup_argv)
+    hand.host = host
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
@@ -2798,10 +2801,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp", help="启动 stdio MCP 服务（list/read/write/run）")
 
     args = parser.parse_args(argv)
-    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy)
+    startup_argv = list(sys.argv[1:] if argv is None else argv)
+    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy, startup_argv)
 
     if args.command in (None, "serve"):
-        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy)
+        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy, startup_argv)
         return 0
     if args.command == "fingerprint":
         print(hand.fingerprint())

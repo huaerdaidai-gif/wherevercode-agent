@@ -93,6 +93,9 @@ import stat
 import tempfile
 import threading
 import time
+import ipaddress
+import urllib.error
+import urllib.request
 import uuid
 
 from cryptography.hazmat.primitives import hashes
@@ -636,10 +639,12 @@ def spawn_agent(argv, **kwargs):
 
 class HandServer:
     def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT,
-                 config_policy: str = "standalone"):
+                 config_policy: str = "standalone", startup_argv=None):
         if config_policy not in ("standalone", "bundled"):
             raise ValueError("unknown config policy: " + str(config_policy))
         self.config_policy = config_policy
+        self.startup_argv = list(startup_argv) if startup_argv is not None else None
+        self.host = "0.0.0.0"
         self.state = StateStore(state_dir)
         self.device_id = device_id
         self.display_name = display_name
@@ -969,7 +974,7 @@ class HandServer:
             # 同款定义：文件内容 SHA-256 前 12 位）。旧版 App 不识这
             # 两个字段，直接忽略，hello 兼容不变。
             "hand_version": hand_code_version(),
-            "update_supported": False,  # S3f migration pending.
+            "update_supported": True,
             # 可选字段：注册表摘要（App 由此列出七类扩展与自定义项；
             # 不识该字段的旧版 App 直接忽略，hello 兼容不变）。
             "extensions": registry_summary(self.state.dir, self.device_id),
@@ -1006,7 +1011,70 @@ class HandServer:
                        {"token": token, "expires_in": expires_in},
                        int(envelope.get("seq", 1)) + 1)
             return
+        if envelope.get("type") == "wherevercode_device_admin" \
+                and envelope.get("version") == VERSION:
+            # Hand 自更新（2026-11-12）：设备管理动作。这条分支同样在
+            # APPROVED 检查之后——只有已配对客户端能调；另要求
+            # confirmed（见 _handle_device_admin）。
+            self._handle_device_admin(conn, session_key, client_id, envelope)
+            return
         self._dispatch(conn, session_key, signing_key, client_id, envelope)
+
+    def _reject_pending(self, conn: socket.socket, session_key: bytes,
+                        client_id: str) -> None:
+        """拒绝一个未批准（PENDING）客户端的密封调用。
+
+        只做三件事：排空、回错、关连接。绝不解密执行、绝不泄露
+        原因以外的任何细节。
+        - 排空：客户端 hello 与密封帧常在一次 flush 里发出，密封帧
+          很可能已在接收缓冲里；不读掉就关连接，内核会发 RST，
+          客户端只看到 "Connection reset"。读掉帧只排空缓冲。
+        - 回错：若密封帧能打开（会话密钥对得上），取里面的
+          task_id/seq 回包对齐，让客户端把错误归到这次调用上；
+          打不开就用空 task_id 与 seq=2（客户端首帧 seq 恒为 1，
+          2 是未用过的新序号，防重放守卫不会丢弃）。
+        - 关连接：由外层 handle_connection 的 finally 正常关闭
+          （FIN），客户端能收到错误帧，不再是 reset。
+        只有 hello、没有密封帧的探测连接：读帧会因对方已关闭而
+        立即报 ConnectionError，或短超时后返回，直接 return。
+        """
+        task_id = ""
+        seq = 2
+        try:
+            sealed = read_frame(conn, timeout=10)
+        except Exception:
+            return
+        try:
+            plaintext = open_sealed(session_key, sealed)
+            envelope = json.loads(plaintext.decode("utf-8"))
+            if isinstance(envelope, dict):
+                task_id = str(envelope.get("task_id", "") or "")
+                req_seq = envelope.get("seq", 1)
+                seq = int(req_seq) + 1 if isinstance(req_seq, (int, float)) else 2
+        except Exception:
+            pass
+        try:
+            self._error(
+                conn, session_key,
+                {"task_id": task_id, "agent_id": "",
+                 "source_device_id": client_id,
+                 "target_device_id": self.device_id,
+                 "folder": "", "action": ""},
+                seq, ERR_NOT_AUTHORIZED,
+                "远端设备尚未批准此手机（配对状态 PENDING）：请在远端设备上"
+                "批准此手机后再试（在设备上运行 hand_server.py "
+                "pair-approve " + client_id + "）。",
+            )
+        except Exception:
+            pass
+
+
+    # -- WebSocket 事件流（2026-11-11 控制台 WebSocket） ---------------------
+    # 同端口 18743 复用：handle_connection 先偷看前 4 字节，是 "GET "
+    # 才走 WebSocket，否则走原有密封协议。鉴权复用密封通道：已配对
+    # 客户端经密封信封领一张 120 秒、单次使用的 token，WS 握手只认
+    # 这张票，不另搞一套加密、不记 token 日志。事件只发真实事件，
+    # 绝不造假；没有事件就不发（liveness 靠 WS ping 帧，不靠心跳事件）。
 
     def publish_event(self, client_id: str, event: str, data: dict) -> None:
         """往所有 WS 订阅者发一条事件（定死的事件信封格式）。"""
@@ -1470,6 +1538,263 @@ class HandServer:
         if goal_version < meta.get("goal_version", 1):
             return (ERR_STALE_GOAL_VERSION, "凭证已过期（目标已变更）：任务目标已更新，请重新发起任务")
         return None
+
+    # -- list/read/write --------------------------------------------------------
+
+    def _handle_device_admin(self, conn, session_key, client_id, envelope) -> None:
+        seq = int(envelope.get("seq", 1))
+        action = str(envelope.get("action", ""))
+        if action != "update_hand":
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "不支持的管理操作：只允许 update_hand")
+            return
+        if envelope.get("confirmed") is not True:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "更新 Hand 需要用户确认（confirmed 缺失）：请在 App 里确认后再试")
+            return
+        args = envelope.get("args", {}) or {}
+        if not isinstance(args, dict):
+            args = {}
+        phase = str(args.get("phase", ""))
+        if phase == "stage":
+            self._update_stage(conn, session_key, envelope, seq, args)
+        elif phase == "apply":
+            self._update_apply(conn, session_key, envelope, seq)
+        elif phase == "rollback":
+            self._update_rollback(conn, session_key, envelope, seq)
+        else:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "update_hand 需要 phase=stage|apply|rollback")
+
+    def _live_hand_path(self) -> str:
+        """本 Hand 文件的真实路径（解掉 releases/current 这类符号链接）。"""
+        return os.path.realpath(__file__)
+
+    def _update_stage(self, conn, session_key, envelope, seq, args) -> None:
+        """暂存新版 Hand：写 <live>.new，验 sha256 + py_compile。
+
+        只暂存、不替换、不重启；stage 失败不影响正在跑的版本。
+        回 cross_device_result，output 为 JSON：{"staged": true,
+        "version", "size"}。
+        """
+        content_b64 = str(args.get("content_b64", ""))
+        expect_sha = str(args.get("sha256", "")).lower()
+        version = str(args.get("version", ""))
+        if not content_b64 or not expect_sha or not version:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "stage 参数不完整：需要 content_b64 + sha256 + version")
+            return
+        try:
+            padded = content_b64 + "=" * (-len(content_b64) % 4)
+            content = base64.urlsafe_b64decode(padded)
+        except Exception:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "新 Hand 文件不是合法 base64")
+            return
+        if len(content) > MAX_HAND_UPDATE_BYTES:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        f"新 Hand 文件太大（{len(content)} 字节，上限 {MAX_HAND_UPDATE_BYTES} 字节）")
+            return
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != expect_sha or digest[:12] != version:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "新 Hand 文件 sha256 与声明不一致（传输可能损坏），请重试")
+            return
+        staged = self._live_hand_path() + ".new"
+        try:
+            tmp = staged + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(content)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, staged)
+        except OSError as e:
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        f"暂存新版失败（写不进 {staged}）：{e}")
+            return
+        try:
+            compile(content, staged, "exec")
+        except SyntaxError as e:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        f"新 Hand 文件语法不对（{e}），已丢弃暂存，未动正在跑的版本")
+            return
+        self.state.audit({"event": "hand_update_stage", "client": envelope.get("source_device_id", ""),
+                          "version": version, "size": len(content)})
+        self._send(conn, session_key, envelope, "wherevercode_device_admin_reply",
+                   {"staged": True, "version": version, "size": len(content)}, seq + 1)
+
+    def _write_update_watchdog(self, backup_path: str, new_version: str) -> str:
+        """写自更新看门狗（state dir/update-watchdog.sh，detach 运行）。
+
+        看门狗在 apply 后 25 秒开始检查：新版起来时会在 state dir 写
+        update-health-<新版本>；文件在且是 2 分钟内写的 = 健康，退出。
+        三次都看不到 = 新版没起来：把备份拷回 live，重启服务（先试
+        launchd，再试 systemd，最后 nohup 原命令兜底），并留
+        update-rollback-<新版本> 标记，App poll hello 时能看到回滚。
+        """
+        import shlex
+        live = self._live_hand_path()
+        state_dir = self.state.dir
+        watchdog = os.path.join(state_dir, "update-watchdog.sh")
+        log = os.path.join(state_dir, "update-watchdog.log")
+        restart_args = self.startup_argv
+        if restart_args is None:
+            restart_args = ["--state-dir", state_dir, "--device-id", self.device_id,
+                            "--display-name", self.display_name, "--host", self.host,
+                            "--port", str(self.port), "--config-policy", self.config_policy, "serve"]
+        restart_cmd = " ".join(shlex.quote(arg) for arg in [sys.executable, live, *restart_args])
+        sh = []
+        sh.append('#!/bin/sh')
+        sh.append('# V5 Hand 自更新看门狗（apply 时生成，检查完自删）。')
+        sh.append('LIVE=' + shlex.quote(live))
+        sh.append('BACKUP=' + shlex.quote(backup_path))
+        sh.append('STATE=' + shlex.quote(state_dir))
+        sh.append('PORT=%d' % self.port)
+        sh.append('VERSION=' + shlex.quote(new_version))
+        sh.append('RESTART=' + shlex.quote(restart_cmd))
+        sh.append('sleep 25')
+        sh.append('i=0')
+        sh.append('while [ "$i" -lt 3 ]; do')
+        sh.append('  if [ -f "$STATE/update-health-$VERSION" ] && [ -n "$(find "$STATE/update-health-$VERSION" -mmin -2 2>/dev/null)" ]; then')
+        sh.append('    rm -f "$STATE/update-watchdog.sh"')
+        sh.append('    exit 0')
+        sh.append('  fi')
+        sh.append('  sleep 5; i=$((i + 1))')
+        sh.append('done')
+        sh.append('# 新版没起来：恢复备份并重启。')
+        sh.append('cp "$BACKUP" "$LIVE"')
+        sh.append('rm -f "$STATE/update-health-$VERSION"')
+        sh.append('date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/update-rollback-$VERSION"')
+        sh.append('if python3 -c "import socket; s=socket.socket(); s.settimeout(2); s.connect((\'127.0.0.1\', $PORT)); s.close()" 2>/dev/null; then')
+        sh.append('  rm -f "$STATE/update-watchdog.sh"')
+        sh.append('  exit 0')
+        sh.append('fi')
+        sh.append('for LABEL in com.wherevercode.hand com.wherevercode.v5-hand; do')
+        sh.append('  if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then')
+        sh.append('    launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1')
+        sh.append('    rm -f "$STATE/update-watchdog.sh"')
+        sh.append('    exit 0')
+        sh.append('  fi')
+        sh.append('done')
+        sh.append('if systemctl list-unit-files v5-hand.service >/dev/null 2>&1; then')
+        sh.append('  systemctl restart v5-hand.service >/dev/null 2>&1')
+        sh.append('  rm -f "$STATE/update-watchdog.sh"')
+        sh.append('  exit 0')
+        sh.append('fi')
+        sh.append('if systemctl --user list-unit-files wherevercode-v5-hand.service >/dev/null 2>&1; then')
+        sh.append('  systemctl --user restart wherevercode-v5-hand.service >/dev/null 2>&1')
+        sh.append('  rm -f "$STATE/update-watchdog.sh"')
+        sh.append('  exit 0')
+        sh.append('fi')
+        sh.append('nohup sh -c "$RESTART" >> "$STATE/v5-hand.log" 2>&1 &')
+        sh.append('rm -f "$STATE/update-watchdog.sh"')
+        sh.append('exit 0')
+        script = chr(10).join(sh) + chr(10)
+        with open(watchdog, 'w', encoding='utf-8') as f:
+            f.write(script)
+        os.chmod(watchdog, 0o700)
+        with open(log, 'ab') as lf:
+            subprocess.Popen(['/bin/sh', watchdog], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT)
+        return watchdog
+    def mark_healthy_start(self) -> None:
+        """启动成功后在 state dir 写 update-health-<版本>。
+
+        serve() 在监听起来后调一次；看门狗凭它判断新版是不是真的
+        起来了（只看文件存在不够，还要看 mtime 在 2 分钟内）。
+        """
+        try:
+            path = os.path.join(self.state.dir, "update-health-" + hand_code_version())
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(str(int(time.time())))
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+    def _update_apply(self, conn, session_key, envelope, seq) -> None:
+        """应用已暂存的新版：备份 → 原子替换 → 看门狗 → 回包 → 退出重载。
+
+        退出后由 supervisor（launchd KeepAlive / systemd Restart=always）
+        或看门狗（nohup 设备）拉起新版；新版起不来时看门狗恢复备份。
+        回包先发再退出：App 收到 applied 后去 poll hello 验版本。
+        """
+        live = self._live_hand_path()
+        staged = live + ".new"
+        if not os.path.isfile(staged):
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        "没有已暂存的新版本，请先 stage")
+            return
+        old_version = hand_code_version()
+        backup = live + ".bak-" + (old_version or "unknown")
+        try:
+            shutil.copy2(live, backup)
+            os.chmod(backup, 0o600)
+        except OSError as e:
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        f"备份正在跑的版本失败：{e}")
+            return
+        try:
+            with open(staged, "rb") as f:
+                new_digest = hashlib.sha256(f.read()).hexdigest()
+            new_version = new_digest[:12]
+            os.replace(staged, live)
+        except OSError as e:
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        f"替换 Hand 文件失败：{e}")
+            return
+        # 删掉同版本旧的健康标记，看门狗只认这次更新后新写的。
+        try:
+            os.unlink(os.path.join(self.state.dir, "update-health-" + new_version))
+        except OSError:
+            pass
+        try:
+            self._write_update_watchdog(backup, new_version)
+        except OSError as e:
+            # 看门狗写不进也不拦更新：App poll hello 仍能发现新版没起来，
+            # 再发 rollback；如实记一条审计，不报假成功。
+            self.state.audit({"event": "hand_update_watchdog_failed",
+                              "version": new_version, "error": str(e)})
+        self.state.audit({"event": "hand_update_apply", "client": envelope.get("source_device_id", ""),
+                          "from": old_version, "to": new_version, "backup": backup})
+        self._send(conn, session_key, envelope, "wherevercode_device_admin_reply",
+                   {"applied": True, "version": new_version, "backup": backup}, seq + 1)
+        # 1 秒后退出进程（回包先走完）：supervisor 或看门狗拉起新版。
+        # 注意：这里是连接处理线程，sys.exit 只会退出本线程，必须用
+        # os._exit 才能结束整个进程。
+        threading.Timer(1.0, lambda: os._exit(0)).start()
+
+    def _update_rollback(self, conn, session_key, envelope, seq) -> None:
+        """从备份恢复：<live>.bak-<版本> 拷回 live，退出重载。
+
+        备份不存在 = 没东西可回滚，如实报错，不碰正在跑的版本。
+        """
+        live = self._live_hand_path()
+        args = envelope.get("args", {}) or {}
+        version = str(args.get("version", "")) if isinstance(args, dict) else ""
+        candidates = []
+        if version:
+            candidates.append(live + ".bak-" + version)
+        import glob
+        candidates += sorted(glob.glob(live + ".bak-*"), reverse=True)
+        backup = next((c for c in candidates if os.path.isfile(c)), None)
+        if backup is None:
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        "没有可用的备份（未找到 .bak-* 文件），无法回滚")
+            return
+        try:
+            shutil.copy2(backup, live)
+        except OSError as e:
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                        f"恢复备份失败：{e}")
+            return
+        self.state.audit({"event": "hand_update_rollback", "client": envelope.get("source_device_id", ""),
+                          "backup": backup})
+        self._send(conn, session_key, envelope, "wherevercode_device_admin_reply",
+                   {"rolled_back": True, "backup": backup}, seq + 1)
+        threading.Timer(1.0, lambda: os._exit(0)).start()
 
     # -- list/read/write --------------------------------------------------------
 
@@ -2334,13 +2659,17 @@ def start_mdns_advertiser(hand: "HandServer") -> MdnsAdvertiser | None:
 
 
 def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int,
-          config_policy: str = "standalone") -> None:
-    hand = HandServer(state_dir, device_id, display_name, port, config_policy)
+          config_policy: str = "standalone", startup_argv=None) -> None:
+    hand = HandServer(state_dir, device_id, display_name, port, config_policy, startup_argv)
+    hand.host = host
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
         print(f"pair code: {hand.get_or_create_pair_code()}（App 配对时填入；轮换：hand_server.py pair-code --rotate）", flush=True)
         print(f"state dir: {hand.state.dir}", flush=True)
+        # 自更新看门狗凭它判断新版是不是真的起来了。
+        hand.mark_healthy_start()
+        # 局域网发现：mDNS 广播（best-effort，失败不影响主服务）。
         start_mdns_advertiser(hand)
         try:
             server.serve_forever()
@@ -2403,13 +2732,24 @@ def main(argv: list[str] | None = None) -> int:
     rem.add_argument("--id", required=True)
     sub.add_parser("discover", help="扫描本机已装的 Agent CLI（自动发现）")
 
-    sub.add_parser("mcp", help="启动 stdio MCP 服务")
+    plug = sub.add_parser("plugin", help="运行一个插件")
+    plug_sub = plug.add_subparsers(dest="plugin_action")
+    plug_run = plug_sub.add_parser("run", help="运行插件")
+    plug_run.add_argument("name")
+    wh = sub.add_parser("webhook", help="webhook 唤醒（出站叫醒）")
+    wh_sub = wh.add_subparsers(dest="webhook_action")
+    wh_probe = wh_sub.add_parser("probe", help="发一条 test 唤醒事件探针")
+    wh_probe.add_argument("url")
+    wh_probe.add_argument("--event", default="task.assigned")
+    sub.add_parser("mcp", help="启动 stdio MCP 服务（list/read/write/run）")
+
 
     args = parser.parse_args(argv)
-    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy)
+    startup_argv = list(sys.argv[1:] if argv is None else argv)
+    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy, startup_argv)
 
     if args.command in (None, "serve"):
-        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy)
+        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy, startup_argv)
         return 0
     if args.command == "fingerprint":
         print(hand.fingerprint())
@@ -2551,6 +2891,22 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"agents": out, "brains": brains},
                          ensure_ascii=False, indent=2))
         return 0
+    if args.command == "plugin":
+        if args.plugin_action == "run" and args.name == "healthcheck":
+            print(json.dumps(run_healthcheck(hand), ensure_ascii=False, indent=2))
+            return 0
+        print(f"未知插件：{args.name}", file=sys.stderr)
+        return 1
+    if args.command == "webhook":
+        if args.webhook_action == "probe":
+            secret = os.environ.get("WHSEC", "")
+            result = webhook_deliver(args.url, secret, "test", {},
+                                     "这是一条测试通知，说明通知地址可用。")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["ok"] else 1
+        print("用法：webhook probe <url>（secret 走环境变量 WHSEC）",
+              file=sys.stderr)
+        return 1
     if args.command == "mcp":
         return mcp_serve(hand)
     parser.print_help()
@@ -3293,6 +3649,165 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
 
 
 
+
+# --------------------------------------------------------------------------
+# Webhook 唤醒（wakeup 扩展点的一种实现）
+# --------------------------------------------------------------------------
+# 两段式（老项目 C3 审计 §3.2，只学思路、源码自主写）：webhook 只叫醒，
+# 不带执行载荷、不触发执行；Agent 收到后经 MCP 工具领单执行。
+# 事件只有 task.assigned / review.assigned / channel.message 三种，
+# 不发暂停/停止/取消（控制走 MCP 控制工具）。
+# 发送规则（照抄老项目 outbound_notifier 的安全形状）：只许 https，
+# 每次发送重解析 DNS、只连公网 IP、不跟随重定向、单次超时 10 秒、
+# Standard Webhooks HMAC 签名、重试 (0, 5, 30, 120) 秒最多 4 次、
+# 410 订阅失效、413 不重试；日志只记 host/状态码/错误类型，
+# 不记完整 URL、正文、secret。
+
+WEBHOOK_RETRY_DELAYS = (0, 5, 30, 120)
+WEBHOOK_TIMEOUT_SECONDS = 10
+
+
+def webhook_event_id(event_name: str, data: dict) -> str:
+    task_id = str(data.get("task_id", ""))
+    round_no = data.get("round", "")
+    if task_id and round_no != "":
+        prefix = "rev" if event_name == "review.assigned" else "task"
+        return f"{prefix}_{task_id}_{round_no}"
+    return f"{event_name}_{uuid.uuid4().hex[:12]}"
+
+
+def webhook_deliver(url: str, secret: str, event_name: str, data: dict,
+                    message: str, timeout: float = WEBHOOK_TIMEOUT_SECONDS,
+                    allow_private: bool = False,
+                    max_attempts: int = 4) -> dict:
+    """出站叫醒：POST 一个事件通知。返回 {ok, status, attempts, event_id, error?}。
+    注意：这只是“叫醒”，2xx 不等于执行完成；执行完成以 MCP 侧的认领 +
+    回传为准。allow_private 只给本地测试用，生产路径必须 https + 公网 IP。"""
+    from urllib.parse import urlparse
+
+    event_id = webhook_event_id(event_name, data)
+    body = json.dumps({
+        "eventId": event_id, "name": event_name,
+        "timestamp": int(time.time()), "data": data,
+        "message": message, "cursor": None,
+    }, ensure_ascii=False).encode("utf-8")
+    if len(body) > 256 * 1024:
+        return {"ok": False, "status": None, "attempts": 0,
+                "event_id": event_id, "error": "body_too_large"}
+    parsed = urlparse(url)
+    is_loopback_http = (parsed.scheme == "http" and allow_private
+                        and parsed.hostname in ("localhost", "127.0.0.1", "::1"))
+    if (parsed.scheme != "https" and not is_loopback_http) or not parsed.hostname \
+            or parsed.username:
+        return {"ok": False, "status": None, "attempts": 0,
+                "event_id": event_id, "error": "url_must_be_public_https"}
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443,
+                                   proto=socket.IPPROTO_TCP)
+    except OSError as e:
+        return {"ok": False, "status": None, "attempts": 0,
+                "event_id": event_id, "error": f"dns_failed: {e}"}
+    if not allow_private:
+        for info in infos:
+            try:
+                ip = ipaddress.ip_address(info[4][0])
+            except ValueError:
+                continue
+            if not ip.is_global:
+                return {"ok": False, "status": None, "attempts": 0,
+                        "event_id": event_id, "error": "url_must_be_public_ip"}
+    ts = str(int(time.time()))
+    headers = {
+        "Content-Type": "application/json",
+        "webhook-id": event_id,
+        "webhook-timestamp": ts,
+    }
+    if secret:
+        sig = hmac.new(secret.encode("utf-8"),
+                       f"{event_id}.{ts}.".encode("utf-8") + body,
+                       hashlib.sha256).digest()
+        headers["webhook-signature"] = "v1," + base64.b64encode(sig).decode("ascii")
+    attempts = 0
+    last_status: int | None = None
+    last_error = ""
+    for delay in WEBHOOK_RETRY_DELAYS[:max_attempts]:
+        if delay:
+            time.sleep(delay)
+        attempts += 1
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                last_status = resp.status
+                if 200 <= resp.status < 300:
+                    return {"ok": True, "status": resp.status,
+                            "attempts": attempts, "event_id": event_id}
+                if resp.status in (410, 413):
+                    return {"ok": False, "status": resp.status,
+                            "attempts": attempts, "event_id": event_id,
+                            "error": "no_retry_status"}
+        except urllib.error.HTTPError as e:
+            last_status = e.code
+            last_error = f"http_{e.code}"
+            if e.code in (410, 413):
+                break
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            last_error = str(e)[:200]
+    return {"ok": False, "status": last_status, "attempts": attempts,
+            "event_id": event_id, "error": last_error or "delivery_failed"}
+
+
+# --------------------------------------------------------------------------
+# 健康检查插件（plugin 扩展点的一个例子）
+# --------------------------------------------------------------------------
+
+def run_healthcheck(hand: "HandServer") -> dict:
+    checks: list[dict] = []
+    state_dir = hand.state.dir
+    checks.append({"name": "state_dir_writable",
+                   "ok": os.access(state_dir, os.W_OK),
+                   "detail": state_dir})
+    key_path = os.path.join(state_dir, "server_key.json")
+    checks.append({"name": "server_key_present",
+                   "ok": os.path.isfile(key_path), "detail": key_path})
+    try:
+        probe = socket.create_connection(("127.0.0.1", hand.port), timeout=2)
+        probe.close()
+        checks.append({"name": "port_listening", "ok": True,
+                       "detail": f"127.0.0.1:{hand.port}"})
+    except OSError as e:
+        checks.append({"name": "port_listening", "ok": False, "detail": str(e)})
+    # Agent 行：internal 行（App 自身）没有二进制是设计如此，只核对
+    # 声明；已装的 CLI 核对二进制；未装的已知行不是故障，单列在
+    # not_installed 里，不拉低整体 ok（Hand 健康 ≠ 全量 Agent 在场）。
+    not_installed: list[str] = []
+    for agent_id, reg in resolve_adapters(state_dir, hand.device_id).items():
+        if reg.get("execution", "cli") == "internal":
+            checks.append({"name": f"agent_internal:{agent_id}", "ok": True,
+                           "detail": reg.get("executor", "") or "internal (App)"})
+        elif reg["binary_path"] is not None:
+            checks.append({"name": f"agent_binary:{agent_id}", "ok": True,
+                           "detail": reg["binary_path"]})
+        else:
+            not_installed.append(agent_id)
+    try:
+        free = shutil.disk_usage(state_dir).free
+        checks.append({"name": "disk_free_mb", "ok": free > 100 * 1024 * 1024,
+                       "detail": f"{free // (1024 * 1024)} MB"})
+    except OSError as e:
+        checks.append({"name": "disk_free_mb", "ok": False, "detail": str(e)})
+    return {"ok": all(c["ok"] for c in checks),
+            "device_id": hand.device_id, "checks": checks,
+            "not_installed": not_installed}
+
+
+# --------------------------------------------------------------------------
+# MCP 服务（mcp 扩展点；同时是 protocol/mcp 的一个实现）
+# --------------------------------------------------------------------------
+# 只学老项目 cross_device_mcp.py 的协议思路（stdio JSON-RPC 2.0、
+# protocolVersion 2024-11-05、四工具 list/read/write/run），源码自主写。
+# 工具语义与 Hand 的 list/read/write/run 同款；run 走通用 runner；
+# 文件夹门禁与 Hand 一致（须在授权表里），绝不本地回落、绝不执行
+# 白名单外的命令。
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
 MCP_SERVER_NAME = "wherevercode-hand-mcp"
