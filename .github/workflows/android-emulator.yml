@@ -1,0 +1,74 @@
+name: Android Emulator Acceptance (P0)
+
+# Round-4 replacement for the unstable round-3 cloud emulator
+# (Android 9 full-software image: SurfaceFlinger SIGABRT/ubsan,
+# System UI ANR occluding the UI, goldfish RIL crashes).
+# GitHub-hosted ubuntu runners expose /dev/kvm, so this runs an
+# API 34 google_apis x86_64 image with real hardware acceleration
+# and swiftshader GPU — the standard stable recipe. Manual
+# dispatch only: an acceptance run is always tied to a chosen
+# commit, never fired accidentally by a docs push.
+on:
+  workflow_dispatch:
+    inputs:
+      run_task_creation:
+        description: "Run the opt-in native task-creation instrumentation"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  emulator-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.0"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+      - name: Build app and instrumentation APKs
+        run: gradle -p android :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Run on API 34 emulator (KVM)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: Nexus 6
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -x
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            mkdir -p emulator-evidence
+            adb logcat -c
+            if [ "${{ inputs.run_task_creation }}" = "true" ]; then
+              adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
+              grep -q "OK (" emulator-evidence/instrumentation.txt
+            fi
+            adb shell screencap -p /sdcard/final-screen.png || true
+            adb pull /sdcard/final-screen.png emulator-evidence/ || true
+            adb pull /sdcard/Android/data/wherevercode.agent.ci/files/issue8-native-evidence emulator-evidence/ || true
+            adb logcat -d > emulator-evidence/logcat.txt || true
+            adb shell dumpsys activity processes > emulator-evidence/processes.txt || true
+      - name: Upload emulator evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-evidence-${{ github.sha }}
+          path: emulator-evidence/
+          if-no-files-found: warn
+          retention-days: 14
