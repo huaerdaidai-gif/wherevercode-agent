@@ -1,0 +1,6 @@
+id,result,evidence,remaining
+F01,FIXED,emulator-crash.txt: BigInteger.TWO NoSuchFieldError,a3b03e4修复；12项加密测试通过及修复后页面截图
+F02,OPEN,emulator-input-crash.txt: SurfaceFlinger SIGABRT ubsan,云端系统故障需稳定环境复验
+F03,FAILED,instrumentation-run.txt: buttonMenu不可用 / System UI ANR,测试未走到建任务；执行及控制审批闭环未验证
+F04,PARTIAL,acceptance-18.csv,18屏原稿对齐未全部签收
+F05,MISSING,minimum-implementation.md,自动化规则账本/离线outbox/manifest运行激活仍缺

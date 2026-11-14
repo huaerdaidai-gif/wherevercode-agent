@@ -1,6 +1,6 @@
 # Issue #6：P0 审计与实施门禁
 
-> 第二轮最新事实见 [round2/README.md](round2/README.md)：已找到 Claude 原始 18 屏、旗舰 70 页及规格；下文保留第一轮历史基线。不能继续把「原稿均 MISSING」当作当前状态。准备包 ZIP/原映射表及 K70 连接仍缺。
+> 最新交付见 [round3/README.md](round3/README.md)：Issue #8 原生 UI 增量、模拟器实际失败与接线边界。用户已取消 K70；原稿已找到，ZIP不再阻塞。以下保留历史基线。
 
 审计基线：`origin/main` = `a9206e169b3ed0052a3245e9ca3a895290791bad`。
 工作分支：`task/issue-6-p0-native-android`。仅克隆和操作本独立新仓库。
