@@ -119,8 +119,8 @@ class DrawerViewTest {
     @Test
     fun `default drawer renders ten primary rows and secondary groups`() {
         val drawerView = view()
-        // 一级 10 + 工作空间 2 + 扩展与资源 6（P3 加了团队频道）+ 底部用户行 1。
-        assertEquals(19, drawerView.renderedIds().size)
+        // 一级 12 + 工作空间 1 + 扩展与资源 6（双端组装第一轮加 70 屏导航）+ 底部用户行 1。
+        assertEquals(20, drawerView.renderedIds().size)
     }
 
     @Test
@@ -305,7 +305,7 @@ class DrawerViewTest {
             listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench", "nav_team_channel", "nav_pending_approval"),
             drawerView.renderedGroupIds("top"),
         )
-        assertEquals(19, drawerView.renderedIds().size)
+        assertEquals(20, drawerView.renderedIds().size)
         val ids = drawerView.renderedIds()
         assertEquals("nav_devices", ids[ids.indexOf("nav_team") + 1])
         assertTrue(drawerView.renderedRowIndent("nav_devices") == 1)
@@ -323,7 +323,7 @@ class DrawerViewTest {
             ),
         )
         val drawerView = view(controller)
-        assertEquals(19, drawerView.renderedIds().size)
+        assertEquals(20, drawerView.renderedIds().size)
     }
 
     @Test
