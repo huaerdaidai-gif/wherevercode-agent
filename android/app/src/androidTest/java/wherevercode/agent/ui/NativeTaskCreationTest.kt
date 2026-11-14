@@ -63,13 +63,48 @@ class NativeTaskCreationTest {
         device.wait(Until.findObject(By.res(context.packageName, value)), 120_000)
             ?: error("UI id not available: $value")
 
-    private fun launch(device: UiDevice, context: Context) {
+    /** Records every visible text so a blocked launch is diagnosable from the evidence artifact. */
+    private fun dumpUiTexts(device: UiDevice, output: File, name: String) {
+        val texts = mutableListOf<String>()
+        for (clazz in listOf("android.widget.TextView", "android.widget.Button", "android.widget.EditText")) {
+            for (obj in device.findObjects(By.clazz(clazz))) {
+                val t = obj.text?.trim().orEmpty()
+                if (t.isNotEmpty()) texts += "$clazz: $t"
+            }
+        }
+        File(output, "$name.txt").writeText(texts.joinToString("\n").ifEmpty { "(no visible text)" })
+        runCatching { device.dumpWindowHierarchy(File(output, "$name.xml")) }
+    }
+
+    private fun launch(device: UiDevice, context: Context, output: File) {
         runCatching { device.executeShellCommand("svc power stayon true") }
         context.startActivity(context.packageManager.getLaunchIntentForPackage(context.packageName)!!.apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         })
-        device.wait(Until.hasObject(By.text("今天想做什么？")), 120_000)
-        device.findObject(By.text("稍后再看"))?.click()
+        // Give the first frame a moment, then record what is actually
+        // on screen before trying to dismiss anything.
+        device.wait(Until.hasObject(By.text("今天想做什么？")), 20_000)
+        shot(device, output, "launch-state")
+        dumpUiTexts(device, output, "launch-ui")
+        // Dismiss the first-run onboarding (its skip labels are real
+        // TextViews) or any other transient blocker, until the home
+        // shell (greeting + menu button) is actually present.
+        val deadline = System.currentTimeMillis() + 90_000
+        while (System.currentTimeMillis() < deadline) {
+            val homeReady = device.findObject(By.res(context.packageName, "buttonMenu")) != null &&
+                device.findObject(By.text("今天想做什么？")) != null
+            if (homeReady) return
+            val skip = device.findObject(By.text("稍后再看"))
+                ?: device.findObject(By.text("跳过，先体验基础功能"))
+                ?: device.findObject(By.text("跳过"))
+            if (skip != null) {
+                skip.click()
+                device.wait(Until.hasObject(By.text("今天想做什么？")), 10_000)
+            } else {
+                Thread.sleep(1_000)
+            }
+        }
+        dumpUiTexts(device, output, "launch-ui-after")
     }
 
     private fun openTasks(device: UiDevice, context: Context) {
@@ -114,7 +149,7 @@ class NativeTaskCreationTest {
         assertEquals("Only the isolated debug package may run this test", "wherevercode.agent.ci", context.packageName)
         val device = UiDevice.getInstance(instrumentation)
         val output = outputDir(context)
-        launch(device, context)
+        launch(device, context, output)
         shot(device, output, "C01-home")
         val db = TaskDatabase.create(context)
         try {
@@ -157,7 +192,7 @@ class NativeTaskCreationTest {
         assertEquals("Only the isolated debug package may run this test", "wherevercode.agent.ci", context.packageName)
         val device = UiDevice.getInstance(instrumentation)
         val output = outputDir(context)
-        launch(device, context)
+        launch(device, context, output)
         openTasks(device, context)
         val db = TaskDatabase.create(context)
         try {
@@ -209,7 +244,7 @@ class NativeTaskCreationTest {
         assertEquals("Only the isolated debug package may run this test", "wherevercode.agent.ci", context.packageName)
         val device = UiDevice.getInstance(instrumentation)
         val output = outputDir(context)
-        launch(device, context)
+        launch(device, context, output)
         openTasks(device, context)
         val db = TaskDatabase.create(context)
         try {

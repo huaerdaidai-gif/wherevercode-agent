@@ -66,12 +66,12 @@ jobs:
             mkdir -p emulator-evidence
             adb logcat -c
             adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
-            grep -q "OK (" emulator-evidence/instrumentation.txt
             adb shell screencap -p /sdcard/final-screen.png || true
             adb pull /sdcard/final-screen.png emulator-evidence/ || true
             adb pull /sdcard/Android/data/wherevercode.agent.ci/files/issue8-native-evidence emulator-evidence/ || true
             adb logcat -d > emulator-evidence/logcat.txt || true
             adb shell dumpsys activity processes > emulator-evidence/processes.txt || true
+            grep -q "OK (" emulator-evidence/instrumentation.txt
       - name: Upload emulator evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
