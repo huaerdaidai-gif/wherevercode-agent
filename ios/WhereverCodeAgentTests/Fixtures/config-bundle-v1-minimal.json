@@ -1,0 +1,68 @@
+{
+  "format": "WCA-ConfigBundle",
+  "schemaVersion": 1,
+  "bundleId": "fixture-bundle-0001",
+  "createdAtEpochSeconds": 1794708000,
+  "sourcePlatform": "android",
+  "payload": {
+    "devices": [
+      {
+        "sourceDeviceId": "device-demo-1",
+        "displayName": "示例工作站",
+        "host": "workstation.example.invalid",
+        "port": 8765,
+        "pairingState": "reauthorizationRequired"
+      }
+    ],
+    "agents": [
+      {
+        "agentId": "agent-demo",
+        "displayName": "示例 Agent",
+        "kind": "CLOUD",
+        "access": "CLI",
+        "brainKind": "MODEL_API",
+        "adapterId": "generic-openai",
+        "enabled": true,
+        "capabilities": ["dev", "review"],
+        "authorizedProjectIds": ["demo-project"],
+        "deviceId": "device-demo-1",
+        "credentialState": "reauthorizationRequired"
+      }
+    ],
+    "projects": [
+      {
+        "projectId": "demo-project",
+        "name": "示例项目",
+        "repoUrl": "https://example.invalid/team/demo",
+        "defaultBranch": "main",
+        "homes": [
+          {"homeKind": "DEVICE", "hostId": "device-demo-1", "pathHint": "~/work/demo"}
+        ]
+      }
+    ],
+    "brains": [
+      {
+        "brainId": "brain-demo",
+        "kind": "MODEL_API",
+        "adapterId": "generic-openai",
+        "label": "示例大脑",
+        "model": "demo-model",
+        "baseUrl": "https://api.example.invalid/v1",
+        "fallbackBrainIds": [],
+        "credentialState": "reauthorizationRequired"
+      }
+    ],
+    "currentBrainId": "brain-demo",
+    "appSettings": {
+      "platformBaseUrl": "https://platform.example.invalid",
+      "channelId": "channel-demo",
+      "workModeId": "balanced",
+      "freedomLevel": 3,
+      "hiddenModules": ["example-hidden"],
+      "brainDisplayName": "示例",
+      "drawerOrder": ["chat", "projects"],
+      "drawerHidden": [],
+      "drawerFavorites": ["chat"]
+    }
+  }
+}

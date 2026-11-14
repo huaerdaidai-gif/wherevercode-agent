@@ -163,6 +163,8 @@ android {
             buildConfigField("boolean", "MAINTAINER_SIGNED", signingKeystoreFile.isNotEmpty().toString())
         }
     }
+    // One fixture shared verbatim by the Android and iOS bundle codec tests.
+    sourceSets.getByName("test").resources.srcDir("../../ios/WhereverCodeAgentTests/Fixtures")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

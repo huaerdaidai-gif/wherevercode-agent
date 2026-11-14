@@ -34,6 +34,9 @@
 		1A43B4FB7BCFBC9D8720311E = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
 			623D5A4E16C91488EB97E424,
 		); runOnlyForDeploymentPostprocessing = 0; };
+		D90000000000000000000005 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
+			D90000000000000000000004,
+		); runOnlyForDeploymentPostprocessing = 0; };
 		1D1884016C4723C9F758A1A1 = {isa = XCBuildConfiguration; buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
@@ -71,6 +74,8 @@
 			47FFE0ECCF7C83A806454DF9,
 			00600EE2EA71EC2F6623B155,
 			AF29026DEB46CEBD6478E0B0,
+			D90000000000000000000002,
+			D90000000000000000000003,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
 		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
@@ -78,6 +83,12 @@
 			91067B38E1192DA78C1A0C00,
 		); name = App; path = App; sourceTree = "<group>"; };
 		29351C8E854D96368B36E5CB = {isa = PBXBuildFile; fileRef = A8FBCDEA5E707EC35BAF1DE6; };
+		D90000000000000000000001 = {isa = PBXBuildFile; fileRef = D90000000000000000000006; };
+		D90000000000000000000004 = {isa = PBXBuildFile; fileRef = D90000000000000000000003; };
+		D90000000000000000000007 = {isa = PBXBuildFile; fileRef = D90000000000000000000002; };
+		D90000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigBundleV1Tests.swift; sourceTree = "<group>"; };
+		D90000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = text.json; path = Fixtures/config-bundle-v1-minimal.json; sourceTree = "<group>"; };
+		D90000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigBundleV1.swift; sourceTree = "<group>"; };
 		2A3B9E2C913ADDDB16F1CD99 = {isa = PBXBuildFile; fileRef = 892AEB362C95AAE0B8B13531; };
 		2FAFA8646A910CE4490E1BBD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
 		3AB2292BD206EE84BF0DEB19 = {isa = XCConfigurationList; buildConfigurations = (
@@ -151,6 +162,7 @@
 			DA0000000000000000000005,
 			DA0000000000000000000007,
 			DA0000000000000000000009,
+			D90000000000000000000001,
 			DA000000000000000000000B,
 			DA000000000000000000000D,
 			DA000000000000000000000F,
@@ -246,6 +258,7 @@
 		96D98ED529C3FE45773F4B2D = {isa = PBXNativeTarget; buildConfigurationList = 3AB2292BD206EE84BF0DEB19; buildPhases = (
 			ABD4D6AD9705B560B2E73A9F,
 			0762E029FB342CB47C96D83A,
+			D90000000000000000000005,
 		); buildRules = (); dependencies = (
 			DE7EDA7845E668E233D95004,
 		); name = WhereverCodeAgentTests; productName = WhereverCodeAgentTests; productReference = E14659535277E988EECDDE93; productType = "com.apple.product-type.bundle.unit-test"; };
@@ -268,6 +281,7 @@
 			7F749415C58C7FDDBBA14398,
 			844C8F533FE271C19FE543DF,
 			7667F7CA498D0ED82757FFC2,
+			D90000000000000000000007,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
@@ -413,6 +427,7 @@
 			DA000000000000000000000C,
 			DA000000000000000000000E,
 			DA0000000000000000000010,
+			D90000000000000000000006,
 		); name = Data; path = Data; sourceTree = "<group>"; };
 		DA000000000000000000CACE = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelListCache.swift; sourceTree = "<group>"; };
 		DA000000000000000000CACF = {isa = PBXBuildFile; fileRef = DA000000000000000000CACE; };
@@ -537,4 +552,3 @@
 	};
 	rootObject = 5CD759D4193846E4910FD9BB;
 }
-
