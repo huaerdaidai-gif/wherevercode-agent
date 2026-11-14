@@ -61,6 +61,19 @@ class ReleaseSafetyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.check_build_config(text.replace('true', 'false'), 'fixture-id')
 
+    def test_build_tools_37_signer_format_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / 'fixture.apk'
+            apk.write_bytes(b'fixture')
+            badging = f"package: name='wherevercode.agent' versionCode='183' versionName='0.4.0-native.183+{self.source[:8]}.20261114'"
+            cert_text = f'V3.0 Signer: certificate SHA-256 digest: {self.cert}\n'
+            def execute(args):
+                text = cert_text if args[0] == 'apksigner' else badging
+                return subprocess.CompletedProcess(args, 0 if args[0] == 'apksigner' else 1, text.encode(), b'')
+            config = 'String UPDATE_DRIVE_FILE_ID = ""; boolean MAINTAINER_SIGNED = true;'
+            result = release.check_apk(apk, 'apksigner', 'aapt', self.cert, 183, self.source, config, '', execute)
+            self.assertEqual(result['signerSha256'], self.cert)
+
     def test_signature_failure_cannot_be_hidden_by_successful_badging(self):
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / 'fixture.apk'

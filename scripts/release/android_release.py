@@ -85,10 +85,13 @@ def check_apk(apk, apksigner, aapt, expected, counter, source_sha, config, updat
     verified = execute([str(apksigner), "verify", "--verbose", "--print-certs", str(apk)])
     if verified.returncode:
         raise ValueError("APK cryptographic signature verification failed")
-    signers = re.findall(r"Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F]+)",
+    # apksigner <= build-tools 36 prints "Signer #1 certificate ..."; build-tools 37
+    # prints per-scheme lines such as "V3.0 Signer: certificate ...". Accept both,
+    # and compare the distinct signer set so one cert listed per scheme counts once.
+    signers = re.findall(r"(?:Signer #\d+|V\d+(?:\.\d+)? Signer):? certificate SHA-256 digest:\s*([0-9a-fA-F]+)",
                          verified.stdout.decode("utf-8", errors="replace"))
-    if signers != [expected] and [s.lower() for s in signers] != [expected]:
-        found = ",".join(s.lower() for s in signers) or "<none>"
+    if set(s.lower() for s in signers) != {expected}:
+        found = ",".join(sorted(set(s.lower() for s in signers))) or "<none>"
         raise ValueError("APK signer set differs from the protected installed certificate: found " + found)
     # aapt may return nonzero for adaptive icons after printing valid badging.
     badging = execute([str(aapt), "dump", "badging", str(apk)])
