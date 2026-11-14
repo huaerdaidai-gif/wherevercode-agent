@@ -90,7 +90,8 @@ struct WhereverCodeAgentApp: App {
                             drawerItem("设置", icon: "gearshape", tab: .settings)
                         }
                         .padding(20)
-                        .frame(width: 264, maxHeight: .infinity, alignment: .topLeading)
+                        .frame(width: 264)
+                        .frame(maxHeight: .infinity, alignment: .topLeading)
                         .background(.regularMaterial)
                         Spacer(minLength: 0)
                     }
