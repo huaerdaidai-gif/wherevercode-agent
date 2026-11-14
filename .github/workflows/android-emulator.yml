@@ -9,6 +9,12 @@ name: Android Emulator Acceptance (P0)
 # dispatch only: an acceptance run is always tied to a chosen
 # commit, never fired accidentally by a docs push.
 on:
+  push:
+    branches:
+      - task/issue-6-p0-native-android
+    paths:
+      - "android/**"
+      - ".github/workflows/android-emulator.yml"
   workflow_dispatch:
     inputs:
       run_task_creation:
