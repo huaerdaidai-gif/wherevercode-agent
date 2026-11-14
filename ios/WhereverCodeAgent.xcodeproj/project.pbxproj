@@ -5,14 +5,306 @@
 	};
 	objectVersion = 56;
 	objects = {
-		1A0000010000000000000001 /* Project object */ = {
+
+/* Begin PBXBuildFile section */
+		3C2B89CDCA9AA857E13097D6 /* WhereverCodeAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953BDFD5D7D1B2C17CEE4465 /* WhereverCodeAgentApp.swift */; };
+		E2ABBC5CDF04751E0545AC42 /* AppFlagshipCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B94AFD62BF588DE15224F9 /* AppFlagshipCapabilities.swift */; };
+		A395CC5975776FA5E478A7B1 /* FlagshipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3920BD7AEDA241B878D432C /* FlagshipApp.swift */; };
+		B7DB5263C16FA39F01C3A0D9 /* FlagshipRouteDestinations.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD073686C53E2DB996FAC62 /* FlagshipRouteDestinations.swift */; };
+		81D32A0BFE429B91EE1247C9 /* AgentRegistryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 174973ECA6E4671333755FB0 /* AgentRegistryStore.swift */; };
+		758E5AA8DC65439BC793A6C1 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D18BC14B7B4F168373346D /* ConversationStore.swift */; };
+		DD568C8E678B6E7E0E7729CA /* KeyValueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 433C736FCB6D34B5C98FFF05 /* KeyValueStore.swift */; };
+		868F22783CE0576174524E60 /* LocalData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C2F397D3905625DEE12ABC8 /* LocalData.swift */; };
+		D2E1D1F4CAF6C13E48BF884C /* LocalTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6A4A1CB2D816D650E41EBF /* LocalTaskStore.swift */; };
+		C70C5833BA3715EE318624DD /* ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01E0A659B668FB1D0B8CE269 /* ProjectStore.swift */; };
+		5F20305142B82F4C7C8649CB /* SQLiteDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 099C407F05D31917CC742CBE /* SQLiteDatabase.swift */; };
+		35D46B109FCA49A64A66F528 /* TaskStates.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E37766547D48CAE8BFEE34 /* TaskStates.swift */; };
+		49F672CCA587C6BDE222BBE2 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A9102D7CD689DD80C6D1380 /* AppSettings.swift */; };
+		CAD65447F09D200372088309 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 866493295A88928BB1F042DA /* Models.swift */; };
+		ADDB2FD6138F9C65749EC7CF /* ApprovalGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74DA6CD99F1B004849D8BEDF /* ApprovalGate.swift */; };
+		CE65AF2A9D8F38240197D95E /* ChannelFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF0E8816535FBFC92CA4290E /* ChannelFeed.swift */; };
+		F53F2CC9DA889FAC5D826675 /* ChannelListCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F990DC6D14293FEBD4A875 /* ChannelListCache.swift */; };
+		E6FCDA5E151B4FED3E652E9A /* ChannelTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EFE9B30B2D3A5E5BAC35BB8 /* ChannelTransport.swift */; };
+		77FC8FBCAB38DB6D3229ECB9 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4385422D6D21508BDA6406 /* KeychainStore.swift */; };
+		11CE5614BD7E70754E703D25 /* McpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5BB785FB2A9F3F0DFF7AED /* McpClient.swift */; };
+		458838251568F69C445E87D1 /* SecretRedactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01479D980AD20A014C5A5640 /* SecretRedactor.swift */; };
+		31338DFF33ADB7AC9766D86F /* TaskService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE69A78B2BD213ABFE90631F /* TaskService.swift */; };
+		CEF8CA52649580268EBB4797 /* WebSearchClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550442EB870F0F0CC65C9208 /* WebSearchClient.swift */; };
+		33549100F54C9FCE7EF8EC90 /* BrainSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ED69226BCEEBF22E6CD3406 /* BrainSettingsView.swift */; };
+		1CEA88A3E339EBD8546CA9C6 /* ChannelChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09A3F233BF90FC13E2CC94C1 /* ChannelChatView.swift */; };
+		404D114038340356D861B80B /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBA5F537B2954EB0A8E4448 /* ChatListView.swift */; };
+		9BAC966373A4613AA8EAEEA2 /* DevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB629AE91C4C4EBAB92DD18 /* DevicesView.swift */; };
+		35627C4CC4E7E4AC24871AF5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140FED0D4E8C1AD272030427 /* SettingsView.swift */; };
+		83DD9E52D1140CC81A759782 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 780D61702077CCB5C5F5321B /* TasksView.swift */; };
+		6F62A9B22E37A20247C7A3E2 /* BrainBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA1D5F48C571EBFE8C35A47 /* BrainBootstrap.swift */; };
+		99B7219903336352DB507316 /* BrainConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F68C79DE79A0F21E8787791 /* BrainConfig.swift */; };
+		6F189F6BB6817E85CC9C818A /* BrainDisplayName.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1207689A630022076E7615D6 /* BrainDisplayName.swift */; };
+		3FB209CE98E8C62D5749B74B /* BrainEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E210D1AC86EFDA801CC67AC /* BrainEngine.swift */; };
+		82FCAF5637281E8B10BBB809 /* BrainTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857E2CBC8BCB244DC97FE965 /* BrainTypes.swift */; };
+		824DE2F6EDEEC6C5B85A5D83 /* ContextManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DCAB2E290FD677DCFADFE46 /* ContextManager.swift */; };
+		1C7E727015A3261E08B0C82F /* Failover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18BDDEDCB5B59998DED14C59 /* Failover.swift */; };
+		D07467783AD63F117092D117 /* GenericOpenAiPresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C49EE9F64C27C1BF02047CBA /* GenericOpenAiPresets.swift */; };
+		D5E92A22EE21518EA00F1B87 /* MemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44BF6C63D3E4DF1ADCA68FAC /* MemoryStore.swift */; };
+		02640DA58D7B1826402F79A1 /* Planner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA2615AE39D6F37F14B5563 /* Planner.swift */; };
+		BE1C45EDA7DCF2C11958BDF7 /* SessionLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF3B53C726C6E9B47F740CBD /* SessionLedger.swift */; };
+		E7BE8E21A3367188BF798195 /* SkillStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 557C64FEAFCF9E84517C7BB1 /* SkillStore.swift */; };
+		15FDB7585D5F0C104C99C3DA /* ToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66ED88CB58C96F7F9510E9E5 /* ToolRegistry.swift */; };
+		F8EC07A7B06400B9F2E6C49F /* FlagshipRoutesParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F304FBF41A84DCD0F16C9CB8 /* FlagshipRoutesParityTests.swift */; };
+		BD7B1FA20C8F5F5B43EF7C4D /* SQLiteStoresTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878407E68A5B9D3490EFC29C /* SQLiteStoresTests.swift */; };
+		B67D32DE5E133AB17E601F7B /* TaskStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E1221C9E1917192B39859D6 /* TaskStateMachineTests.swift */; };
+		DABE4E9E905799B44FA37185 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 417811CD5FA00E17E977AFA4 /* libsqlite3.tbd */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		953BDFD5D7D1B2C17CEE4465 /* WhereverCodeAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WhereverCodeAgentApp.swift; path = WhereverCodeAgent/App/WhereverCodeAgentApp.swift; sourceTree = "<group>"; };
+		36B94AFD62BF588DE15224F9 /* AppFlagshipCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppFlagshipCapabilities.swift; path = WhereverCodeAgent/FlagshipUI/AppFlagshipCapabilities.swift; sourceTree = "<group>"; };
+		D3920BD7AEDA241B878D432C /* FlagshipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlagshipApp.swift; path = WhereverCodeAgent/FlagshipUI/FlagshipApp.swift; sourceTree = "<group>"; };
+		CBD073686C53E2DB996FAC62 /* FlagshipRouteDestinations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlagshipRouteDestinations.swift; path = WhereverCodeAgent/FlagshipUI/FlagshipRouteDestinations.swift; sourceTree = "<group>"; };
+		174973ECA6E4671333755FB0 /* AgentRegistryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentRegistryStore.swift; path = WhereverCodeAgent/Data/AgentRegistryStore.swift; sourceTree = "<group>"; };
+		75D18BC14B7B4F168373346D /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ConversationStore.swift; path = WhereverCodeAgent/Data/ConversationStore.swift; sourceTree = "<group>"; };
+		433C736FCB6D34B5C98FFF05 /* KeyValueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KeyValueStore.swift; path = WhereverCodeAgent/Data/KeyValueStore.swift; sourceTree = "<group>"; };
+		1C2F397D3905625DEE12ABC8 /* LocalData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LocalData.swift; path = WhereverCodeAgent/Data/LocalData.swift; sourceTree = "<group>"; };
+		4C6A4A1CB2D816D650E41EBF /* LocalTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LocalTaskStore.swift; path = WhereverCodeAgent/Data/LocalTaskStore.swift; sourceTree = "<group>"; };
+		01E0A659B668FB1D0B8CE269 /* ProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProjectStore.swift; path = WhereverCodeAgent/Data/ProjectStore.swift; sourceTree = "<group>"; };
+		099C407F05D31917CC742CBE /* SQLiteDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SQLiteDatabase.swift; path = WhereverCodeAgent/Data/SQLiteDatabase.swift; sourceTree = "<group>"; };
+		A4E37766547D48CAE8BFEE34 /* TaskStates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskStates.swift; path = WhereverCodeAgent/Data/TaskStates.swift; sourceTree = "<group>"; };
+		2A9102D7CD689DD80C6D1380 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppSettings.swift; path = WhereverCodeAgent/Models/AppSettings.swift; sourceTree = "<group>"; };
+		866493295A88928BB1F042DA /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Models.swift; path = WhereverCodeAgent/Models/Models.swift; sourceTree = "<group>"; };
+		74DA6CD99F1B004849D8BEDF /* ApprovalGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ApprovalGate.swift; path = WhereverCodeAgent/Services/ApprovalGate.swift; sourceTree = "<group>"; };
+		DF0E8816535FBFC92CA4290E /* ChannelFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChannelFeed.swift; path = WhereverCodeAgent/Services/ChannelFeed.swift; sourceTree = "<group>"; };
+		E4F990DC6D14293FEBD4A875 /* ChannelListCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChannelListCache.swift; path = WhereverCodeAgent/Services/ChannelListCache.swift; sourceTree = "<group>"; };
+		0EFE9B30B2D3A5E5BAC35BB8 /* ChannelTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChannelTransport.swift; path = WhereverCodeAgent/Services/ChannelTransport.swift; sourceTree = "<group>"; };
+		FB4385422D6D21508BDA6406 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KeychainStore.swift; path = WhereverCodeAgent/Services/KeychainStore.swift; sourceTree = "<group>"; };
+		3D5BB785FB2A9F3F0DFF7AED /* McpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = McpClient.swift; path = WhereverCodeAgent/Services/McpClient.swift; sourceTree = "<group>"; };
+		01479D980AD20A014C5A5640 /* SecretRedactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SecretRedactor.swift; path = WhereverCodeAgent/Services/SecretRedactor.swift; sourceTree = "<group>"; };
+		AE69A78B2BD213ABFE90631F /* TaskService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskService.swift; path = WhereverCodeAgent/Services/TaskService.swift; sourceTree = "<group>"; };
+		550442EB870F0F0CC65C9208 /* WebSearchClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WebSearchClient.swift; path = WhereverCodeAgent/Services/WebSearchClient.swift; sourceTree = "<group>"; };
+		4ED69226BCEEBF22E6CD3406 /* BrainSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrainSettingsView.swift; path = WhereverCodeAgent/Views/BrainSettingsView.swift; sourceTree = "<group>"; };
+		09A3F233BF90FC13E2CC94C1 /* ChannelChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChannelChatView.swift; path = WhereverCodeAgent/Views/ChannelChatView.swift; sourceTree = "<group>"; };
+		DEBA5F537B2954EB0A8E4448 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChatListView.swift; path = WhereverCodeAgent/Views/ChatListView.swift; sourceTree = "<group>"; };
+		9CB629AE91C4C4EBAB92DD18 /* DevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DevicesView.swift; path = WhereverCodeAgent/Views/DevicesView.swift; sourceTree = "<group>"; };
+		140FED0D4E8C1AD272030427 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = WhereverCodeAgent/Views/SettingsView.swift; sourceTree = "<group>"; };
+		780D61702077CCB5C5F5321B /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TasksView.swift; path = WhereverCodeAgent/Views/TasksView.swift; sourceTree = "<group>"; };
+		CBA1D5F48C571EBFE8C35A47 /* BrainBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrainBootstrap.swift; path = WhereverCodeAgent/Brain/BrainBootstrap.swift; sourceTree = "<group>"; };
+		5F68C79DE79A0F21E8787791 /* BrainConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrainConfig.swift; path = WhereverCodeAgent/Brain/BrainConfig.swift; sourceTree = "<group>"; };
+		1207689A630022076E7615D6 /* BrainDisplayName.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrainDisplayName.swift; path = WhereverCodeAgent/Brain/BrainDisplayName.swift; sourceTree = "<group>"; };
+		0E210D1AC86EFDA801CC67AC /* BrainEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrainEngine.swift; path = WhereverCodeAgent/Brain/BrainEngine.swift; sourceTree = "<group>"; };
+		857E2CBC8BCB244DC97FE965 /* BrainTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrainTypes.swift; path = WhereverCodeAgent/Brain/BrainTypes.swift; sourceTree = "<group>"; };
+		3DCAB2E290FD677DCFADFE46 /* ContextManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ContextManager.swift; path = WhereverCodeAgent/Brain/ContextManager.swift; sourceTree = "<group>"; };
+		18BDDEDCB5B59998DED14C59 /* Failover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Failover.swift; path = WhereverCodeAgent/Brain/Failover.swift; sourceTree = "<group>"; };
+		C49EE9F64C27C1BF02047CBA /* GenericOpenAiPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GenericOpenAiPresets.swift; path = WhereverCodeAgent/Brain/GenericOpenAiPresets.swift; sourceTree = "<group>"; };
+		44BF6C63D3E4DF1ADCA68FAC /* MemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MemoryStore.swift; path = WhereverCodeAgent/Brain/MemoryStore.swift; sourceTree = "<group>"; };
+		4AA2615AE39D6F37F14B5563 /* Planner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Planner.swift; path = WhereverCodeAgent/Brain/Planner.swift; sourceTree = "<group>"; };
+		DF3B53C726C6E9B47F740CBD /* SessionLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionLedger.swift; path = WhereverCodeAgent/Brain/SessionLedger.swift; sourceTree = "<group>"; };
+		557C64FEAFCF9E84517C7BB1 /* SkillStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SkillStore.swift; path = WhereverCodeAgent/Brain/SkillStore.swift; sourceTree = "<group>"; };
+		66ED88CB58C96F7F9510E9E5 /* ToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ToolRegistry.swift; path = WhereverCodeAgent/Brain/ToolRegistry.swift; sourceTree = "<group>"; };
+		F304FBF41A84DCD0F16C9CB8 /* FlagshipRoutesParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlagshipRoutesParityTests.swift; path = WhereverCodeAgentTests/FlagshipRoutesParityTests.swift; sourceTree = "<group>"; };
+		878407E68A5B9D3490EFC29C /* SQLiteStoresTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SQLiteStoresTests.swift; path = WhereverCodeAgentTests/SQLiteStoresTests.swift; sourceTree = "<group>"; };
+		2E1221C9E1917192B39859D6 /* TaskStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskStateMachineTests.swift; path = WhereverCodeAgentTests/TaskStateMachineTests.swift; sourceTree = "<group>"; };
+		417811CD5FA00E17E977AFA4 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+		669DB9455EEFE2A59F280E36 /* WhereverCodeAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhereverCodeAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C4372535F62567359234EDCA /* WhereverCodeAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhereverCodeAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8196D3F93F851060E04AC18A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DABE4E9E905799B44FA37185 /* libsqlite3.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C493C9D3136286C832B67101 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		7CB4F5C86BC1495BE5275A82 = {
+			isa = PBXGroup;
+			children = (
+				1D96629A0982B6166B756C0B /* WhereverCodeAgent */,
+				18B8EF09200068AA832062A0 /* WhereverCodeAgentTests */,
+				F0220EF8F17ECEBD49AC2FAE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1D96629A0982B6166B756C0B /* WhereverCodeAgent */ = {
+			isa = PBXGroup;
+			children = (
+				FD4B53768B1618CC75DD100A /* App */,
+				C815FD609F5AE48CE177F4C0 /* FlagshipUI */,
+				D7D336A5553C66252AEC5EC2 /* Data */,
+				8410F5608A7907BCDA787BE4 /* Models */,
+				7F2B2D979124D3C0ACC3A831 /* Services */,
+				8ED6C0FD8C23B473263C95C6 /* Views */,
+				7577BB06DED0E99768842C45 /* Brain */,
+			);
+			 name = WhereverCodeAgent;
+			sourceTree = "<group>";
+		};
+		18B8EF09200068AA832062A0 /* WhereverCodeAgentTests */ = {
+			isa = PBXGroup;
+			children = (
+				F304FBF41A84DCD0F16C9CB8 /* FlagshipRoutesParityTests.swift */,
+				878407E68A5B9D3490EFC29C /* SQLiteStoresTests.swift */,
+				2E1221C9E1917192B39859D6 /* TaskStateMachineTests.swift */,
+			);
+			name = WhereverCodeAgentTests;
+			sourceTree = "<group>";
+		};
+		F0220EF8F17ECEBD49AC2FAE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				669DB9455EEFE2A59F280E36 /* WhereverCodeAgent.app */,
+				C4372535F62567359234EDCA /* WhereverCodeAgentTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FD4B53768B1618CC75DD100A /* App */ = {
+			isa = PBXGroup;
+			children = (
+				953BDFD5D7D1B2C17CEE4465 /* WhereverCodeAgentApp.swift */,
+			);
+			name = App;
+			sourceTree = "<group>";
+		};
+		C815FD609F5AE48CE177F4C0 /* FlagshipUI */ = {
+			isa = PBXGroup;
+			children = (
+				36B94AFD62BF588DE15224F9 /* AppFlagshipCapabilities.swift */,
+				D3920BD7AEDA241B878D432C /* FlagshipApp.swift */,
+				CBD073686C53E2DB996FAC62 /* FlagshipRouteDestinations.swift */,
+			);
+			name = FlagshipUI;
+			sourceTree = "<group>";
+		};
+		D7D336A5553C66252AEC5EC2 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				174973ECA6E4671333755FB0 /* AgentRegistryStore.swift */,
+				75D18BC14B7B4F168373346D /* ConversationStore.swift */,
+				433C736FCB6D34B5C98FFF05 /* KeyValueStore.swift */,
+				1C2F397D3905625DEE12ABC8 /* LocalData.swift */,
+				4C6A4A1CB2D816D650E41EBF /* LocalTaskStore.swift */,
+				01E0A659B668FB1D0B8CE269 /* ProjectStore.swift */,
+				099C407F05D31917CC742CBE /* SQLiteDatabase.swift */,
+				A4E37766547D48CAE8BFEE34 /* TaskStates.swift */,
+			);
+			name = Data;
+			sourceTree = "<group>";
+		};
+		8410F5608A7907BCDA787BE4 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				2A9102D7CD689DD80C6D1380 /* AppSettings.swift */,
+				866493295A88928BB1F042DA /* Models.swift */,
+			);
+			name = Models;
+			sourceTree = "<group>";
+		};
+		7F2B2D979124D3C0ACC3A831 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				74DA6CD99F1B004849D8BEDF /* ApprovalGate.swift */,
+				DF0E8816535FBFC92CA4290E /* ChannelFeed.swift */,
+				E4F990DC6D14293FEBD4A875 /* ChannelListCache.swift */,
+				0EFE9B30B2D3A5E5BAC35BB8 /* ChannelTransport.swift */,
+				FB4385422D6D21508BDA6406 /* KeychainStore.swift */,
+				3D5BB785FB2A9F3F0DFF7AED /* McpClient.swift */,
+				01479D980AD20A014C5A5640 /* SecretRedactor.swift */,
+				AE69A78B2BD213ABFE90631F /* TaskService.swift */,
+				550442EB870F0F0CC65C9208 /* WebSearchClient.swift */,
+			);
+			name = Services;
+			sourceTree = "<group>";
+		};
+		8ED6C0FD8C23B473263C95C6 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				4ED69226BCEEBF22E6CD3406 /* BrainSettingsView.swift */,
+				09A3F233BF90FC13E2CC94C1 /* ChannelChatView.swift */,
+				DEBA5F537B2954EB0A8E4448 /* ChatListView.swift */,
+				9CB629AE91C4C4EBAB92DD18 /* DevicesView.swift */,
+				140FED0D4E8C1AD272030427 /* SettingsView.swift */,
+				780D61702077CCB5C5F5321B /* TasksView.swift */,
+			);
+			name = Views;
+			sourceTree = "<group>";
+		};
+		7577BB06DED0E99768842C45 /* Brain */ = {
+			isa = PBXGroup;
+			children = (
+				CBA1D5F48C571EBFE8C35A47 /* BrainBootstrap.swift */,
+				5F68C79DE79A0F21E8787791 /* BrainConfig.swift */,
+				1207689A630022076E7615D6 /* BrainDisplayName.swift */,
+				0E210D1AC86EFDA801CC67AC /* BrainEngine.swift */,
+				857E2CBC8BCB244DC97FE965 /* BrainTypes.swift */,
+				3DCAB2E290FD677DCFADFE46 /* ContextManager.swift */,
+				18BDDEDCB5B59998DED14C59 /* Failover.swift */,
+				C49EE9F64C27C1BF02047CBA /* GenericOpenAiPresets.swift */,
+				44BF6C63D3E4DF1ADCA68FAC /* MemoryStore.swift */,
+				4AA2615AE39D6F37F14B5563 /* Planner.swift */,
+				DF3B53C726C6E9B47F740CBD /* SessionLedger.swift */,
+				557C64FEAFCF9E84517C7BB1 /* SkillStore.swift */,
+				66ED88CB58C96F7F9510E9E5 /* ToolRegistry.swift */,
+			);
+			name = Brain;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4F15F104D2E48DE8EDBB6849 /* WhereverCodeAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5505F9AF814A7F0992DE2402 /* Build configuration list for PBXNativeTarget "WhereverCodeAgent" */;
+			buildPhases = (
+				1E4E02189D7B030815F3CED6 /* Sources */,
+				8196D3F93F851060E04AC18A /* Frameworks */,
+				A097B4FA22B3316FFC83E782 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WhereverCodeAgent;
+			productName = WhereverCodeAgent;
+			productReference = 669DB9455EEFE2A59F280E36 /* WhereverCodeAgent.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E501420A3A58DA7C81CE827C /* WhereverCodeAgentTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E5A230C5C352779E4F6499D2 /* Build configuration list for PBXNativeTarget "WhereverCodeAgentTests" */;
+			buildPhases = (
+				D09BB15ACB6CA15F8C89C458 /* Sources */,
+				C493C9D3136286C832B67101 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WhereverCodeAgentTests;
+			productName = WhereverCodeAgentTests;
+			productReference = C4372535F62567359234EDCA /* WhereverCodeAgentTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1AA9853F2BD5022386BA2D3A /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 			};
-			buildConfigurationList = 1A0000020000000000000001 /* Build configuration list for PBXProject "WhereverCodeAgent" */;
+			buildConfigurationList = AD8DC1A475C1871509FE9877 /* Build configuration list for PBXProject "WhereverCodeAgent" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = zh_CN;
 			hasScannedForEncodings = 0;
@@ -21,14 +313,220 @@
 				Base,
 				zh_CN,
 			);
-			mainGroup = 1A0000030000000000000001;
-			productRefGroup = 1A0000040000000000000001 /* Products */;
+			mainGroup = 7CB4F5C86BC1495BE5275A82;
+			productRefGroup = F0220EF8F17ECEBD49AC2FAE /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1A0000050000000000000001 /* WhereverCodeAgent */,
+				4F15F104D2E48DE8EDBB6849 /* WhereverCodeAgent */,
+				E501420A3A58DA7C81CE827C /* WhereverCodeAgentTests */,
 			);
 		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A097B4FA22B3316FFC83E782 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1E4E02189D7B030815F3CED6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3C2B89CDCA9AA857E13097D6 /* WhereverCodeAgentApp.swift in Sources */,
+				E2ABBC5CDF04751E0545AC42 /* AppFlagshipCapabilities.swift in Sources */,
+				A395CC5975776FA5E478A7B1 /* FlagshipApp.swift in Sources */,
+				B7DB5263C16FA39F01C3A0D9 /* FlagshipRouteDestinations.swift in Sources */,
+				81D32A0BFE429B91EE1247C9 /* AgentRegistryStore.swift in Sources */,
+				758E5AA8DC65439BC793A6C1 /* ConversationStore.swift in Sources */,
+				DD568C8E678B6E7E0E7729CA /* KeyValueStore.swift in Sources */,
+				868F22783CE0576174524E60 /* LocalData.swift in Sources */,
+				D2E1D1F4CAF6C13E48BF884C /* LocalTaskStore.swift in Sources */,
+				C70C5833BA3715EE318624DD /* ProjectStore.swift in Sources */,
+				5F20305142B82F4C7C8649CB /* SQLiteDatabase.swift in Sources */,
+				35D46B109FCA49A64A66F528 /* TaskStates.swift in Sources */,
+				49F672CCA587C6BDE222BBE2 /* AppSettings.swift in Sources */,
+				CAD65447F09D200372088309 /* Models.swift in Sources */,
+				ADDB2FD6138F9C65749EC7CF /* ApprovalGate.swift in Sources */,
+				CE65AF2A9D8F38240197D95E /* ChannelFeed.swift in Sources */,
+				F53F2CC9DA889FAC5D826675 /* ChannelListCache.swift in Sources */,
+				E6FCDA5E151B4FED3E652E9A /* ChannelTransport.swift in Sources */,
+				77FC8FBCAB38DB6D3229ECB9 /* KeychainStore.swift in Sources */,
+				11CE5614BD7E70754E703D25 /* McpClient.swift in Sources */,
+				458838251568F69C445E87D1 /* SecretRedactor.swift in Sources */,
+				31338DFF33ADB7AC9766D86F /* TaskService.swift in Sources */,
+				CEF8CA52649580268EBB4797 /* WebSearchClient.swift in Sources */,
+				33549100F54C9FCE7EF8EC90 /* BrainSettingsView.swift in Sources */,
+				1CEA88A3E339EBD8546CA9C6 /* ChannelChatView.swift in Sources */,
+				404D114038340356D861B80B /* ChatListView.swift in Sources */,
+				9BAC966373A4613AA8EAEEA2 /* DevicesView.swift in Sources */,
+				35627C4CC4E7E4AC24871AF5 /* SettingsView.swift in Sources */,
+				83DD9E52D1140CC81A759782 /* TasksView.swift in Sources */,
+				6F62A9B22E37A20247C7A3E2 /* BrainBootstrap.swift in Sources */,
+				99B7219903336352DB507316 /* BrainConfig.swift in Sources */,
+				6F189F6BB6817E85CC9C818A /* BrainDisplayName.swift in Sources */,
+				3FB209CE98E8C62D5749B74B /* BrainEngine.swift in Sources */,
+				82FCAF5637281E8B10BBB809 /* BrainTypes.swift in Sources */,
+				824DE2F6EDEEC6C5B85A5D83 /* ContextManager.swift in Sources */,
+				1C7E727015A3261E08B0C82F /* Failover.swift in Sources */,
+				D07467783AD63F117092D117 /* GenericOpenAiPresets.swift in Sources */,
+				D5E92A22EE21518EA00F1B87 /* MemoryStore.swift in Sources */,
+				02640DA58D7B1826402F79A1 /* Planner.swift in Sources */,
+				BE1C45EDA7DCF2C11958BDF7 /* SessionLedger.swift in Sources */,
+				E7BE8E21A3367188BF798195 /* SkillStore.swift in Sources */,
+				15FDB7585D5F0C104C99C3DA /* ToolRegistry.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D09BB15ACB6CA15F8C89C458 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F8EC07A7B06400B9F2E6C49F /* FlagshipRoutesParityTests.swift in Sources */,
+				BD7B1FA20C8F5F5B43EF7C4D /* SQLiteStoresTests.swift in Sources */,
+				B67D32DE5E133AB17E601F7B /* TaskStateMachineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		06125DCB1954C4F7EEE69894 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AACF5BDB2BC481EB947517D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C0DD1C3E4BFC124D878FE440 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WhereverCodeAgent/WhereverCodeAgent.entitlements;
+				CURRENT_PROJECT_VERSION = 6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WhereverCodeAgent/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.5;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		699FCDBED06EC64C8A6B513F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WhereverCodeAgent/WhereverCodeAgent.entitlements;
+				CURRENT_PROJECT_VERSION = 6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WhereverCodeAgent/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.5;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B1F05F06510EE3683971BC0B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CURRENT_PROJECT_VERSION = 6;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.5;
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhereverCodeAgent.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WhereverCodeAgent";
+			};
+			name = Debug;
+		};
+		D7748B0D11C986601399B73D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CURRENT_PROJECT_VERSION = 6;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.5;
+				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhereverCodeAgent.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WhereverCodeAgent";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AD8DC1A475C1871509FE9877 /* Build configuration list for PBXProject "WhereverCodeAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				06125DCB1954C4F7EEE69894 /* Debug */,
+				AACF5BDB2BC481EB947517D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5505F9AF814A7F0992DE2402 /* Build configuration list for PBXNativeTarget "WhereverCodeAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0DD1C3E4BFC124D878FE440 /* Debug */,
+				699FCDBED06EC64C8A6B513F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E5A230C5C352779E4F6499D2 /* Build configuration list for PBXNativeTarget "WhereverCodeAgentTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1F05F06510EE3683971BC0B /* Debug */,
+				D7748B0D11C986601399B73D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
 	};
-	rootObject = 1A0000010000000000000001 /* Project object */;
+	rootObject = 1AA9853F2BD5022386BA2D3A /* Project object */;
 }

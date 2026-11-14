@@ -3,34 +3,38 @@ import Foundation
 public struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
     public let appState: AppState?
 
-    /// 已完成真实 iOS 本地/SQLite/Keychain/MCP/Brain 接线的路由集合（按诚实门禁标为 .implementedUnverified，待真机端到端验收后升为 .readyVerified）
+    /// 具备真实本地交互、SQLite 持久化、Keychain 存储、沙盒文件读写或 MCP/HTTPS 网络调用的 39 个路由（尚未在真机完成端到端 UI 验收，诚实标记为 IMPLEMENTED_UNVERIFIED）
     public static let implementedRoutes: Set<String> = [
-        // 对话 (5/5)
+        // 对话 (5)
         "chat", "conversation", "history", "search", "voice",
-        // 工作台 - 任务 (8/8)
+        // 工作台 - 任务 (8)
         "compose", "tasks", "taskdetail", "plan", "queue", "approvals", "review", "artifacts",
-        // 工作台 - 开发 (7/10 真实沙盒/SQLite接线)
-        "projects", "projectdetail", "files", "editor", "diff", "git", "testmatrix",
-        // 工作台 - 协作 (6/10)
-        "team", "channels", "channel", "agents", "agentdetail", "delegate",
-        // 工作台 - 连接 (9/11)
-        "devices", "devicedetail", "models", "mcp", "skills", "connections", "connectmodel", "modelroute", "agentimport",
-        // 控制台 - 系统 (9/10)
-        "dashboard", "activity", "settings", "onboarding", "audit", "notifications", "usage", "recovery", "baseline",
-        // 控制台 - 自动化 (2/7)
-        "loopguard", "templates",
-        // 设置 - 智能 (6/6)
-        "memory", "skillsmarket", "skillbuilder", "context", "research", "personas",
-        // 设置 - 扩展 (3/3)
-        "extensions", "extensiondetail", "harness"
+        // 工作台 - 开发 (5)
+        "projects", "projectdetail", "files", "editor", "diff",
+        // 工作台 - 协作 (5)
+        "channels", "channel", "agents", "agentdetail", "delegate",
+        // 工作台 - 连接 (5)
+        "models", "mcp", "skills", "connections", "connectmodel",
+        // 控制台 - 系统 (5)
+        "dashboard", "activity", "settings", "onboarding", "audit",
+        // 设置 - 智能 (6)
+        "memory", "skillsmarket", "skillbuilder", "context", "research", "personas"
     ]
 
-    /// 受 iOS 沙盒平台限制不支持本地任意进程/后台常驻唤醒的路由或需特殊标注的路由
+    /// 已有本地状态/协议定义，但依赖远端 Hand 配对或服务端尚未开放的 MCP 接口（18 个路由，诚实标记为 ADAPTER_PENDING）
+    public static let adapterPendingRoutes: Set<String> = [
+        "git", "team", "agentresume", "handoff",
+        "devices", "devicedetail", "modelroute", "agentimport", "network", "routes",
+        "notifications", "usage", "sync", "recovery", "loopguard", "templates",
+        "extensions", "extensiondetail"
+    ]
+
+    /// 受 iOS App Sandbox 平台限制不支持本机任意 Shell / 外部 CLI 二进制执行的路由（2 个路由，诚实标记为 UNSUPPORTED）
     public static let platformRestrictedRoutes: Set<String> = [
-        "terminal"
+        "terminal", "harness"
     ]
 
-    /// 依赖平台 MCP 在线连接且在未配置平台 Token 时动态返回 .disconnected 的路由
+    /// 依赖平台 MCP 在线连接且在未配置平台 Token 时动态提示未连接的路由
     public static let platformConnectionDependentRoutes: Set<String> = [
         "channels", "channel", "mcp"
     ]
@@ -66,25 +70,31 @@ public struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
         if Self.platformRestrictedRoutes.contains(routeId) {
             return CapabilityStatus(
                 state: .unsupported,
-                evidence: "iOS 沙盒禁止本地 fork/exec 任意 Shell 进程；本页提供真实进程内 EngineEvent 日志流，并支持切换远端 Hand 设备或云端 MCP Agent 执行。"
+                evidence: "UNSUPPORTED：iOS 沙盒禁止本地 fork/exec 任意 Shell 或外部 CLI 进程；提供真实进程内日志流并支持切换远端 Hand 设备或云端 MCP Agent。"
             )
         }
         if Self.platformConnectionDependentRoutes.contains(routeId),
            let appState, !appState.isConfigured {
             return CapabilityStatus(
                 state: .disconnected,
-                evidence: "尚未配置 V5 平台 HTTPS 地址或 Keychain Token；请在「设置 -> 平台连接」中配置。"
+                evidence: "ADAPTER_PENDING / DISCONNECTED：尚未配置 V5 平台 HTTPS 地址或 Keychain Token；请在「设置 -> 平台连接」中配置。"
             )
         }
         if Self.implementedRoutes.contains(routeId) {
             return CapabilityStatus(
                 state: .implementedUnverified,
-                evidence: "已接入 iOS 本地 SQLite / Keychain / BrainEngine / MCP 客户端，待真机端到端验收。"
+                evidence: "IMPLEMENTED_UNVERIFIED：已接入 iOS 本地 SQLite / Keychain / BrainEngine / MCP 客户端，待 macOS Xcode 与真机端到端验收。"
+            )
+        }
+        if Self.adapterPendingRoutes.contains(routeId) {
+            return CapabilityStatus(
+                state: .planned,
+                evidence: "ADAPTER_PENDING：本地模型/状态结构已就绪，待服务端 MCP 扩充接口或远端 Hand 设备配对联调。"
             )
         }
         return CapabilityStatus(
             state: .planned,
-            evidence: "V5 服务端或跨端协议尚未提供对应后端接口（ADAPTER_PENDING / DESIGN_ONLY），保留统一契约视图。"
+            evidence: "DESIGN_ONLY：架构与契约预留页面，未接入后端服务，不伪造完成状态。"
         )
     }
 

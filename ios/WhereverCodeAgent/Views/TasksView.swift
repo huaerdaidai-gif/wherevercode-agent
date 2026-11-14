@@ -99,7 +99,7 @@ public struct TasksView: View {
                 Task { await loadPlatformTasks() }
             }
         }
-        .onChange(of: showPlatform) { isPlat in
+        .onChange(of: showPlatform) { _, isPlat in
             if isPlat {
                 Task { await loadPlatformTasks() }
             } else {

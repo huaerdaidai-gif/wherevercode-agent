@@ -1175,8 +1175,8 @@ private struct ConsoleSystemSubScreen: View {
                     }
                 }
             case "usage":
-                let usageEvents = events.filter { $0.kind == "USAGE" }
                 Section("Token 用量与成本统计 (来自真实流事件)") {
+                    let usageEvents = events.filter { $0.kind == "USAGE" }
                     LabeledContent("已记录模型调用计费事件数", value: "\(usageEvents.count)")
                     ForEach(usageEvents) { u in
                         Text(u.detail).font(.caption)
@@ -1243,7 +1243,6 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
         List {
             switch route.id {
             case "memory":
-                let entries = LocalData.shared.memoryStore.listEntries()
                 Section("新增长期记忆条目 (MemoryStore)") {
                     TextField("记忆键（如代码风格偏好）", text: $newMemKey)
                     TextField("记忆内容（自动经 SecretRedactor 脱敏）", text: $newMemVal)
@@ -1254,7 +1253,8 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
                         newMemVal = ""
                     }
                 }
-                Section("已存记忆 (\(entries.count))") {
+                Section("已存记忆 (\(LocalData.shared.memoryStore.listEntries().count))") {
+                    let entries = LocalData.shared.memoryStore.listEntries()
                     if entries.isEmpty {
                         Text("暂无长期记忆条目").foregroundStyle(.secondary)
                     } else {

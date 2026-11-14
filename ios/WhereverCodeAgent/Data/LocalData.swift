@@ -343,7 +343,7 @@ public struct LocalChatHomeView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
                 }
-                .onChange(of: model.messages.count) { _ in
+                .onChange(of: model.messages.count) { _, _ in
                     if let lastId = model.messages.last?.id {
                         withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
                     }
@@ -395,7 +395,7 @@ public struct LocalChatHomeView: View {
                         Button {
                             onSelectRoute("voice")
                         } label: {
-                            Label("语音与多模态附件 (voice)", systemImage: "Waveform")
+                            Label("语音与多模态附件 (voice)", systemImage: "waveform")
                         }
                         Button {
                             model.newConversation()
@@ -564,16 +564,19 @@ public struct LocalWorkbenchView: View {
         self.section = section
     }
 
+    private var projectsList: [ProjectWithHomes] { (try? data.projects.listProjects()) ?? [] }
+    private var agentsList: [AgentRecord] { (try? data.agents.listAgents()) ?? [] }
+    private var eventsList: [EngineEvent] { data.eventLog.listEvents() }
+
     public var body: some View {
         List {
             switch section {
             case .projects:
-                let list = (try? data.projects.listProjects()) ?? []
-                if list.isEmpty {
+                if projectsList.isEmpty {
                     Text("暂无本地项目")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(list) { item in
+                    ForEach(projectsList) { item in
                         DisclosureGroup(item.project.name) {
                             ForEach(item.homes) { loc in
                                 Text("\(loc.hostId): \(loc.workspacePath) (\(loc.availability))")
@@ -584,12 +587,11 @@ public struct LocalWorkbenchView: View {
                     }
                 }
             case .agents:
-                let list = (try? data.agents.listAgents()) ?? []
-                if list.isEmpty {
+                if agentsList.isEmpty {
                     Text("暂无已登记 Agent")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(list) { agent in
+                    ForEach(agentsList) { agent in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(agent.displayName).font(.headline)
                             Text("\(agent.kind.rawValue) · \(agent.memberConnectionState)").font(.caption).foregroundStyle(.secondary)
@@ -597,12 +599,11 @@ public struct LocalWorkbenchView: View {
                     }
                 }
             case .console:
-                let evs = data.eventLog.listEvents()
-                if evs.isEmpty {
+                if eventsList.isEmpty {
                     Text("当前进程暂无模型事件")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(evs) { ev in
+                    ForEach(eventsList) { ev in
                         VStack(alignment: .leading, spacing: 4) {
                             Text("[#\(ev.seq)] \(ev.kind)").font(.caption.bold())
                             Text(ev.detail).font(.caption2).foregroundStyle(.secondary)

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct GenericOpenAiPreset: Equatable, Identifiable, Sendable {
+public struct GenericOpenAiPreset: Equatable, Hashable, Identifiable, Sendable {
     public var id: String { displayName }
     public let displayName: String
     public let baseUrl: String
@@ -22,3 +22,5 @@ public struct GenericOpenAiPreset: Equatable, Identifiable, Sendable {
         GenericOpenAiPreset(displayName: "LM Studio（本地/局域网）", baseUrl: "http://localhost:1234/v1", note: "手机上的 localhost 是手机自身；电脑上的 LM Studio 请填电脑的局域网地址。")
     ]
 }
+
+public typealias GenericOpenAiPresets = GenericOpenAiPreset

@@ -80,7 +80,7 @@ public final class BrainSettingsModel: ObservableObject {
 public struct BrainSettingsView: View {
     @ObservedObject public var model: BrainSettingsModel
     @State private var newBrainName = ""
-    @State private var selectedPreset: GenericOpenAiPreset = GenericOpenAiPresets.all[0]
+    @State private var selectedPreset: GenericOpenAiPreset = GenericOpenAiPreset.all[0]
 
     public init(model: BrainSettingsModel) {
         self.model = model
@@ -127,9 +127,9 @@ public struct BrainSettingsView: View {
 
             Section("添加通用模型 API（OpenAI 兼容）") {
                 TextField("名称（如 OpenAI / Ollama）", text: $newBrainName)
-                Picker("预设端点", selection: $selectedPreset.id) {
+                Picker("预设端点", selection: $selectedPreset) {
                     ForEach(GenericOpenAiPreset.all) { preset in
-                        Text(preset.displayName).tag(preset.id)
+                        Text(preset.displayName).tag(preset)
                     }
                 }
                 Button("添加通用模型 API") {
