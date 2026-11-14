@@ -178,6 +178,20 @@ final class WhereverCodeAgentUITests: XCTestCase {
         row.tap()
     }
 
+    func testLocalWorkspacesRemainAvailableWithoutPlatform() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 15))
+        for destination in ["projects", "agents", "console", "tasks"] {
+            navigate(app, to: destination)
+            snap(app, "ui-local-\(destination)")
+        }
+        navigate(app, to: "chat")
+        app.buttons["新对话"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["chat.input"].exists)
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+    }
+
     /// Scroll the settings form until `element` is in the hierarchy
     /// (Form rows below the fold do not exist for XCTest until
     /// scrolled near).
