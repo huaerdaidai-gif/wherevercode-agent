@@ -60,6 +60,27 @@ versionName 包含版本、counter、commit 和构建时间，避免不同来源
 不要使用不同 workflow 的 `run_number` 当作统一递增发布序号；每次正式发布要推进
 统一 versionCode。不能把 unsigned / 新密钥签名包称为可覆盖升级，也不要求卸载旧版。
 
+### 受保护的签名候选构建
+
+`.github/workflows/android-signed.yml` 仅 `workflow_dispatch`，由 Muse 执行；
+测试检查通过后才进入 `android-production-signing` 环境。Muse 需为该环境配置
+审批/分支保护、历史密钥 secrets，以及两个公开但受保护的变量：
+
+- `ANDROID_SIGNING_CERT_SHA256`：从已安装正式包核验的完整 64 位证书摘要；
+  不接受 PR #3 旧流程的 8 位前缀代替完整验证。
+- `ANDROID_LAST_PUBLISHED_VERSION_CODE`：已正式发布的最高 counter，首次基线为 182；
+  候选计数必须严格更高，发布后由 Muse 推进记录。
+
+脚本 `scripts/release/android_release.py` 复用旧流程的 wrapped/URL-safe base64
+恢复方式，但不打印材料，临时文件权限 0600；构建前检查密钥证书，构建后必须
+通过 apksigner 并复核正式包名、counter、源码标识和实际 BuildConfig 更新源透传。
+Gradle 本身也检查完整证书和已发布 counter，不能绕过脚本直接换钥签名。
+候选 manifest 明确 `physicalUpgradeVerified=false`。缺密钥/证书/已发布计数会阻塞，
+不会新建生产密钥，不上传 Drive，不自动发布。环境保护是否已正确设置及实机覆盖升级
+由 Muse 确认。
+
+脚本开发自测 8 项通过；Gradle 配置检查通过，传入旧 counter 182 时按预期拒绝。
+
 ## 应用内更新
 
 保留既有 Google Drive 只读 OAuth 与 Keystore；来源仍由

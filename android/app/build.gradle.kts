@@ -1,6 +1,8 @@
 import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.util.Properties
+import java.security.KeyStore
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -58,6 +60,28 @@ require(appVersionCode in minimumUpgradeVersionCode..2_100_000_000) {
 val appVersionName = releaseVersion.getProperty("versionName") + ".$appVersionCode+" +
     commitSha.take(8) + "." + buildTimeUtc.filter { it.isDigit() }.take(14)
 val signingKeystoreFile = providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull?.trim().orEmpty()
+if (signingKeystoreFile.isNotEmpty()) {
+    val published = providers.environmentVariable("ANDROID_LAST_PUBLISHED_VERSION_CODE").orNull?.toIntOrNull()
+    require(published != null && appVersionCode > published) {
+        "Maintainer build requires a counter above ANDROID_LAST_PUBLISHED_VERSION_CODE"
+    }
+    val expectedCertificate = providers.environmentVariable("ANDROID_SIGNING_CERT_SHA256")
+        .orNull?.trim()?.lowercase()?.replace(":", "").orEmpty()
+    require(expectedCertificate.matches(Regex("[0-9a-f]{64}"))) {
+        "Maintainer build requires the full historical ANDROID_SIGNING_CERT_SHA256"
+    }
+    val password = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get().toCharArray()
+    val certificate = try {
+        val keystore = KeyStore.getInstance(file(signingKeystoreFile), password)
+        val alias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+        require(keystore.isKeyEntry(alias)) { "Maintainer signing alias is not a private-key entry" }
+        requireNotNull(keystore.getCertificate(alias)) { "Maintainer certificate is missing" }
+    } finally { password.fill('\u0000') }
+    val actualCertificate = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+        .joinToString("") { "%02x".format(it) }
+    require(actualCertificate == expectedCertificate) { "Maintainer certificate does not match the installed historical certificate" }
+}
+
 
 
 android {

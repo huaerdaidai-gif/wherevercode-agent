@@ -1,0 +1,90 @@
+name: Android maintainer-signed candidate
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'Muse-assigned global counter, above every installed/published release'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: android-production-signing
+  cancel-in-progress: false
+jobs:
+  development-checks:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'huaerdaidai-gif/wherevercode-agent' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --only-binary=:all: 'cryptography>=41,<47'
+      - run: python -m unittest server.test_hand_server scripts.release.test_android_release -v
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.0'
+      - run: gradle -p android :app:testDebugUnitTest --stacktrace
+  signed-candidate:
+    needs: development-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Muse configures required reviewers and the certificate variable here.
+    # No PR/fork/push event receives the production signing material.
+    environment: android-production-signing
+    env:
+      WHEREVERCODE_VERSION_CODE: ${{ inputs.version_code }}
+      ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+      ANDROID_LAST_PUBLISHED_VERSION_CODE: ${{ vars.ANDROID_LAST_PUBLISHED_VERSION_CODE }}
+      WHEREVERCODE_UPDATE_DRIVE_FILE_ID: ${{ secrets.WHEREVERCODE_UPDATE_DRIVE_FILE_ID || vars.WHEREVERCODE_UPDATE_DRIVE_FILE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.0'
+      - name: Restore and verify historical certificate
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python scripts/release/android_release.py prepare --keystore "$RUNNER_TEMP/maintainer.keystore" --version "$WHEREVERCODE_VERSION_CODE"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/maintainer.keystore" >> "$GITHUB_ENV"
+      - name: Build signed production-identity candidate
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle -p android :app:assembleCompat --stacktrace
+      - name: Verify certificate, version, identity and update-source pass-through
+        run: |
+          set -euo pipefail
+          bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          python scripts/release/android_release.py verify --keystore "$RUNNER_TEMP/maintainer.keystore" --version "$WHEREVERCODE_VERSION_CODE" --apk android/app/build/outputs/apk/compat/app-compat.apk --apksigner "$bt/apksigner" --aapt "$bt/aapt2" --build-config android/app/build/generated/source/buildConfig/compat/wherevercode/agent/BuildConfig.java --manifest android-release-candidate.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-agent-maintainer-candidate-${{ github.sha }}
+          path: |
+            android/app/build/outputs/apk/compat/app-compat.apk
+            android-release-candidate.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/maintainer.keystore"
