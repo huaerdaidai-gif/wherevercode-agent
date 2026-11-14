@@ -222,7 +222,7 @@ struct SettingsView: View {
                     LabeledContent("版本", value: Self.versionString)
                     LabeledContent("Bundle ID", value: "wherevercode.agent")
                     LabeledContent("最低系统", value: "iOS 17.0")
-                    Text("可用：团队频道（读 / 发 / 实时推送）、我的任务（领取 / 汇报 / 心跳 / 交活 / 放手）、设置与连接状态、大脑管理（内置大脑种子、通用模型 API、Key 存 Keychain、模型列表实时拉取、设当前大脑）、平台令牌生成（issue_agent_token，与安卓同接口；需服务端已部署该工具且本机凭证为 owner，未部署时点生成会如实报错）。阻塞中：审批、暂停 / 恢复 / 停止、改目标与设备管理——服务端无此接口，入口处有明确标注。大脑对话与单兵对话未实现。")
+                    Text("可用：团队频道（读 / 发 / 实时推送）、我的任务（领取 / 汇报 / 心跳 / 交活 / 放手）、设置与连接状态、大脑管理（内置大脑种子、通用模型 API、Key 存 Keychain、模型列表实时拉取、设当前大脑）、平台令牌生成（issue_agent_token，与安卓同接口；需服务端已部署该工具且本机凭证为 owner，未部署时点生成会如实报错）。阻塞中：审批、暂停 / 恢复 / 停止、改目标与设备管理——服务端无此接口，入口处有明确标注。大脑对话可用（从侧边栏「对话」进入，与当前大脑聊）；单兵对话尚未接入，入口处有明确标注。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
