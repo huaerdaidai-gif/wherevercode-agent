@@ -1,0 +1,47 @@
+name: iOS V5 70-Screen Assembly Build & Test
+
+on:
+  push:
+    branches:
+      - feat/v5-ios-70screen-4drawer-assembly
+      - "feat/v5-*"
+  workflow_dispatch:
+
+jobs:
+  build-and-test-ios:
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify 70-Screen Contract & State Machine
+        run: python3 scripts/verify_ios_v5_assembly.py
+
+      - name: Build & Run Unit Tests (Simulator)
+        working-directory: ios
+        run: |
+          swift test || xcodebuild test \
+            -project WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build Unsigned Release App Bundle (iphoneos)
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ../.build/derived \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R .build/derived/Build/Products/Release-iphoneos/WhereverCodeAgent.app Payload/
+          zip -qry wherevercode-agent-ios-1.5-6-unsigned.ipa Payload
+          shasum -a 256 wherevercode-agent-ios-1.5-6-unsigned.ipa
