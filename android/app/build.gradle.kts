@@ -1,5 +1,6 @@
 import java.io.ByteArrayOutputStream
 import java.time.Instant
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -41,6 +42,24 @@ val pinnedPlatformHost = releaseConfigValue("pinnedPlatformHost", "WHEREVERCODE_
 val pinnedPlatformSha256 = releaseConfigValue("pinnedPlatformSha256", "WHEREVERCODE_PINNED_PLATFORM_SHA256")
 val updateDriveFileId = releaseConfigValue("updateDriveFileId", "WHEREVERCODE_UPDATE_DRIVE_FILE_ID")
 
+// One release counter, independent of workflow-specific run_number values.
+val releaseVersion = Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}
+val minimumUpgradeVersionCode = releaseVersion.getProperty("minimumUpgradeVersionCode").toInt()
+val versionOverride = providers.gradleProperty("appVersionCode")
+    .orElse(providers.environmentVariable("WHEREVERCODE_VERSION_CODE")).orNull?.trim()
+val appVersionCode = versionOverride?.let {
+    it.toIntOrNull() ?: error("appVersionCode / WHEREVERCODE_VERSION_CODE must be an integer")
+} ?: releaseVersion.getProperty("versionCode").toInt()
+require(appVersionCode in minimumUpgradeVersionCode..2_100_000_000) {
+    "versionCode must be at least $minimumUpgradeVersionCode to upgrade installed Build 182"
+}
+val appVersionName = releaseVersion.getProperty("versionName") + ".$appVersionCode+" +
+    commitSha.take(8) + "." + buildTimeUtc.filter { it.isDigit() }.take(14)
+val signingKeystoreFile = providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull?.trim().orEmpty()
+
+
 android {
     namespace = "wherevercode.agent"
     compileSdk = 34
@@ -57,8 +76,8 @@ android {
         // This spike ships as a sideloaded APK, per the task.
         targetSdk = 28
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 7
-        versionName = "0.3.0-p0-r3"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         // V5 C1：真实版本信息（commitSha / buildTimeUtc 见文件顶部）。
         buildConfigField("String", "COMMIT_SHA", "\"$commitSha\"")
@@ -86,22 +105,38 @@ android {
         buildConfig = true
     }
 
-    // Open-source builds use Android Gradle Plugin's standard local debug signing.
-    // No shared private key or signing password is stored in this repository.
-    // APKs signed with a new key cannot update installations signed by the
-    // historical pinned debug key; users may need to uninstall first.
+    // Production builds only use an explicitly supplied historical maintainer
+    // key. Missing key means unsigned, never an automatic debug-key replacement.
+    signingConfigs {
+        if (signingKeystoreFile.isNotEmpty()) {
+            create("maintainer") {
+                storeFile = file(signingKeystoreFile)
+                storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").get()
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // CI/debug installs coexist with the established app and its data.
             applicationIdSuffix = ".ci"
+            buildConfigField("boolean", "MAINTAINER_SIGNED", "false")
         }
         create("compat") {
             initWith(getByName("debug"))
             applicationIdSuffix = ""
             matchingFallbacks += listOf("debug")
+            signingConfig = if (signingKeystoreFile.isNotEmpty()) signingConfigs.getByName("maintainer") else null
+            buildConfigField("boolean", "MAINTAINER_SIGNED", signingKeystoreFile.isNotEmpty().toString())
         }
         release {
             isMinifyEnabled = false
+            signingConfig = if (signingKeystoreFile.isNotEmpty()) signingConfigs.getByName("maintainer") else null
+            buildConfigField("boolean", "MAINTAINER_SIGNED", signingKeystoreFile.isNotEmpty().toString())
         }
     }
 

@@ -266,7 +266,13 @@ class AppUpdateSettings(
             return
         }
         installBlocked = false
-        activity.startActivity(AppUpdateInstaller.installApkIntent(activity, file))
+        try {
+            activity.startActivity(AppUpdateInstaller.installApkIntent(activity, file))
+        } catch (e: AppUpdateError.IncompatiblePackage) {
+            pendingInstallFile = null
+            setStatus(e.message ?: "更新包不兼容，未安装。")
+            refreshButtons()
+        }
     }
 
     /** 连接 Google Drive（Custom Tab 登录）。 */

@@ -52,6 +52,7 @@ class AppUpdateChecker(
                 source.downloadApk(accessToken, out, onProgress)
             }
             verifyDownloaded(outFile, remote)
+            AppUpdateInstaller.requireCompatiblePackage(appContext, outFile)
             return outFile
         } catch (e: Exception) {
             // 任何失败（网络中断 / 校验不符）都不留半截文件给安装器。

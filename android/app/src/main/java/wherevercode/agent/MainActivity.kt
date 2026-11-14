@@ -9144,7 +9144,14 @@ class MainActivity : AppCompatActivity() {
         // V5 C1：保留现有版本行不动，在其后追加短 SHA 与构建时间（VersionInfo）。
         aboutVersion.text = try {
             val info = packageManager.getPackageInfo(packageName, 0)
-            VersionInfo.aboutText("WhereverCode 超级 Agent · ${info.versionName}（${info.versionCode}）")
+            VersionInfo.aboutText("WhereverCode 超级 Agent · ${info.versionName}（${info.versionCode}）") +
+                "\n包名：$packageName · " + if (packageName.endsWith(".ci")) {
+                    "独立 CI 测试包，不覆盖正式数据"
+                } else if (BuildConfig.MAINTAINER_SIGNED) {
+                    "维护者签名构建；覆盖升级仍需与已安装证书一致"
+                } else {
+                    "未配置维护者签名，不声明可覆盖升级"
+                }
         } catch (_: Exception) {
             VersionInfo.aboutText("WhereverCode 超级 Agent")
         }
