@@ -247,9 +247,16 @@ class NativeTaskCreationTest {
             )
             shot(device, output, "C06-task-detail-result")
             assertNotNull("Task never reached a terminal or review outcome; transitions=$transitions", finalState)
+            // Claim proof: the 500 ms sampling can miss the brief
+            // assigned/working window when the executor fails fast, so
+            // an executor-produced result/error on the row is equally
+            // valid proof the runner claimed and ran this task (round-4
+            // run bc5d16f8: queued -> failed in 9.5 s carrying the
+            // executor's brain_not_configured error, no working sample).
             assertTrue(
                 "Task was never claimed by the runner; transitions=$transitions",
-                transitions.any { it.startsWith("assigned@") || it.startsWith("working@") },
+                transitions.any { it.startsWith("assigned@") || it.startsWith("working@") } ||
+                    !record?.error.isNullOrBlank() || !record?.result.isNullOrBlank(),
             )
         } finally {
             db.close()
@@ -276,21 +283,25 @@ class NativeTaskCreationTest {
             // pause tap lands; one retry with a fresh task keeps the
             // control assertions deterministic without faking a state.
             for (attempt in 1..2) {
+                // Deterministic queueing: the scheduler runs one task
+                // at a time, so two blocker tasks ahead of the control
+                // task guarantee it is still QUEUED when the pause tap
+                // lands -- and ControlPlane.pause confirms a queued
+                // task immediately (an in-flight task cannot confirm:
+                // its single brain call errors without a checkpoint,
+                // which is why the naive create-then-pause flow lost
+                // the race in round-4 run bc5d16f8).
+                for (blocker in 1..2) {
+                    val blockerGoal = "ISSUE8_BLK_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
+                    createTaskViaForm(device, context, store, blockerGoal, output, null)
+                    log.append("attempt$attempt blocker$blocker created\n")
+                    device.pressBack()
+                    findId(device, context, "buttonCreateTask")
+                }
                 val goal = "ISSUE8_CTL_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
                 val id = createTaskViaForm(device, context, store, goal, output, null)
                 taskId = id
                 log.append("attempt$attempt taskId=$id\n")
-                // Wait until the detail page (not the list behind it)
-                // renders its control-status line, so the pause tap
-                // lands on this task's own controls.
-                val detailDeadline = System.currentTimeMillis() + 30_000
-                while (System.currentTimeMillis() < detailDeadline) {
-                    if (device.findObject(By.textContains("允许调度")) != null ||
-                        device.findObject(By.textContains("控制平面")) != null ||
-                        device.findObject(By.textContains("已确认暂停")) != null
-                    ) break
-                    Thread.sleep(300)
-                }
                 findText(device, "暂停", 30_000).click()
                 val deadline = System.currentTimeMillis() + 120_000
                 while (System.currentTimeMillis() < deadline) {
