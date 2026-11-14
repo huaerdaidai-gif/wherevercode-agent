@@ -12,7 +12,6 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowToast
 
 /**
  * Launch smoke test for the UI V2 shell. It intentionally does not wait for
@@ -88,12 +87,9 @@ class MainActivitySmokeTest {
         controller.pause().stop().destroy()
     }
 
-    /**
-     * V5 C2-3-R4：铃铛只有图标、没有红点（App 内无真实通知）；点按只
-     * 给“通知中心待开发”提示，绝不编造通知数。
-     */
+    /** Notifications have no inbox yet, so the bell stays hidden. */
     @Test
-    fun `bell shows notification center placeholder toast`() {
+    fun `bell is hidden until a real notification center exists`() {
         val controller = Robolectric.buildActivity(MainActivity::class.java)
             .create()
             .start()
@@ -101,9 +97,7 @@ class MainActivitySmokeTest {
             .visible()
         val activity = controller.get()
 
-        activity.findViewById<View>(R.id.buttonBell).performClick()
-
-        assertEquals("通知中心待开发", ShadowToast.getTextOfLatestToast())
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.buttonBell).visibility)
 
         controller.pause().stop().destroy()
     }
