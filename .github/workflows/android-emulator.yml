@@ -5,9 +5,12 @@ name: Android Emulator Acceptance (P0)
 # System UI ANR occluding the UI, goldfish RIL crashes).
 # GitHub-hosted ubuntu runners expose /dev/kvm, so this runs an
 # API 34 google_apis x86_64 image with real hardware acceleration
-# and swiftshader GPU — the standard stable recipe. Manual
-# dispatch only: an acceptance run is always tied to a chosen
-# commit, never fired accidentally by a docs push.
+# and swiftshader GPU — the standard stable recipe. The job
+# itself is gated (see below): a plain push never burns an
+# emulator run; only a manual dispatch or a head commit whose
+# message carries the [emu] marker executes it. NOTE: the
+# emulator-runner action executes the script line by line, so
+# the script must stay free of multi-line shell constructs.
 on:
   push:
     branches:
@@ -16,11 +19,6 @@ on:
       - "android/**"
       - ".github/workflows/android-emulator.yml"
   workflow_dispatch:
-    inputs:
-      run_task_creation:
-        description: "Run the opt-in native task-creation instrumentation"
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -67,10 +65,8 @@ jobs:
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             mkdir -p emulator-evidence
             adb logcat -c
-            if [ "${{ inputs.run_task_creation }}" = "true" ]; then
-              adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
-              grep -q "OK (" emulator-evidence/instrumentation.txt
-            fi
+            adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
+            grep -q "OK (" emulator-evidence/instrumentation.txt
             adb shell screencap -p /sdcard/final-screen.png || true
             adb pull /sdcard/final-screen.png emulator-evidence/ || true
             adb pull /sdcard/Android/data/wherevercode.agent.ci/files/issue8-native-evidence emulator-evidence/ || true
