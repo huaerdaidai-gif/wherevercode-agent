@@ -64,28 +64,57 @@ struct ConversationHomeContentView: View {
 
     var body: some View {
         List {
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("今天想做什么？")
+                        .font(.system(size: 29, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                    Text("从对话开始，或打开侧边栏进入任务与设备。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 24)
+                .listRowBackground(Color.clear)
+            }
             if !platformConnected {
-                PlatformConnectionCardSection(onGoSettings: onGoSettings)
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "network.slash")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("平台尚未连接").font(.subheadline.weight(.medium))
+                            Text("团队频道与远程任务需要连接；不影响其他本地功能。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Button("连接") { onGoSettings() }
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .padding(.vertical, 5)
+                }
             }
             if platformConnected, let loadError {
-                Section("连接平台失败") {
-                    Text(loadError)
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                    Button("重试") { onRetry() }
+                Section {
+                    HStack {
+                        Text(loadError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        Spacer()
+                        Button("重试") { onRetry() }
+                    }
                 }
             }
             Section("团队频道") {
                 if !platformConnected {
-                    // Android's setupHint for the same state
-                    // (buildTeamChannelSnapshot, configured=false).
-                    Text("团队频道还没法连：先在设置里连接平台——在「平台连接」里填入 App 的平台凭证（由你的平台管理员签发），或先用已有凭证生成。连上后频道会列在这里，点一下即可进入。")
+                    Text("连接平台后在这里查看和进入频道")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else if channels.isEmpty {
                     Text(loadError == nil
-                         ? (isLoading ? "正在加载频道…" : "没有可见的频道。请确认 Token 有权访问频道，或在设置里检查平台地址。")
-                         : "频道加载失败，点上面的「重试」再试一次。")
+                         ? (isLoading ? "正在加载频道…" : "暂无可见频道")
+                         : "频道加载失败")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(channels) { channel in
@@ -97,11 +126,19 @@ struct ConversationHomeContentView: View {
                     }
                 }
             }
-            Section("其他对话") {
-                ReservedFeatureRow(feature: .brainChat)
-                ReservedFeatureRow(feature: .singleAgentChat)
+            Section("本地模型对话") {
+                NavigationLink {
+                    BrainConversationView()
+                } label: {
+                    Label("新建对话", systemImage: "square.and.pencil")
+                }
+                Text("使用设置中已配置的模型；不需要连接 WhereverCode 平台")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .refreshable { onRefresh() }
     }
 }
@@ -258,6 +295,129 @@ struct ChatListView: View {
             errorMessage = nil
         } catch {
             errorMessage = (error as? McpError)?.message ?? "加载频道失败。"
+        }
+    }
+}
+
+
+// A deliberately tool-free registry: model conversation works without platform
+// access; tool requests are refused instead of silently executing writes.
+private struct ChatOnlyToolRegistry: ToolRegistry {
+    let workspaceRoot: String? = nil
+    func toolsForCapabilities(_ capabilities: BrainCapabilities?, authorizedTools: Set<String>) -> [ToolDef] { [] }
+    func gitHostToolsFor(project: Project?, location: ProjectLocation?) -> [ToolDef] { [] }
+    func allToolNames() -> Set<String> { [] }
+    func validateOnly(_ action: BrainAction, _ context: ToolContext) -> ToolOutcome? {
+        ToolOutcome(ok: false, summary: "当前对话未授权执行工具", errorCode: "tool_unavailable")
+    }
+    func execute(_ action: BrainAction, _ context: ToolContext, stopped: @escaping () -> Bool) async throws -> ToolOutcome {
+        ToolOutcome(ok: false, summary: "当前对话未授权执行工具", errorCode: "tool_unavailable")
+    }
+    func isReadOnlyExtensionTool(_ name: String) -> Bool { false }
+}
+
+struct BrainConversationView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var conversationId = UUID().uuidString
+    @State private var draft = ""
+    @State private var messages: [ConversationMessage] = []
+    @State private var isSending = false
+    @State private var streamedText = ""
+    @State private var errorText: String?
+    @State private var currentTurn: Task<Void, Never>?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(messages, id: \.id) { message in
+                        if message.role == "user" || message.role == "assistant" {
+                            VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 5) {
+                                Text(message.role == "user" ? "你" : message.source)
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(message.content)
+                                    .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    if !streamedText.isEmpty {
+                        Text(streamedText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    if let errorText {
+                        Text(errorText).foregroundStyle(.red).font(.caption)
+                    }
+                }
+                .padding(16)
+            }
+            Divider()
+            HStack(alignment: .bottom, spacing: 12) {
+                TextField("发送消息", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("brain_chat_input")
+                if isSending {
+                    Button("停止", systemImage: "stop.fill") {
+                        currentTurn?.cancel()
+                        currentTurn = nil
+                        isSending = false
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityIdentifier("brain_chat_stop")
+                } else {
+                    Button("发送", systemImage: "arrow.up.circle.fill") {
+                        send()
+                    }
+                    .labelStyle(.iconOnly)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("brain_chat_send")
+                }
+            }
+            .padding(12)
+        }
+        .navigationTitle("模型对话")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reload() }
+        .onDisappear { currentTurn?.cancel() }
+    }
+
+    private func reload() {
+        messages = (try? LocalData.shared.conversations.listMessages(conversationId: conversationId)) ?? []
+    }
+
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        draft = ""
+        streamedText = ""
+        errorText = nil
+        isSending = true
+        let id = conversationId
+        let engine = appState.makeBrainEngine(
+            conversations: LocalData.shared.conversations,
+            tools: ChatOnlyToolRegistry(),
+            eventLog: InMemoryEventLog(),
+            approvalGate: DenyApprovalGate()
+        )
+        currentTurn = Task {
+            do {
+                for try await event in engine.chat(conversationId: id, userText: text) {
+                    if Task.isCancelled { break }
+                    switch event {
+                    case .textDelta(let delta): streamedText += delta
+                    case .error(let info): errorText = String(describing: info)
+                    default: break
+                    }
+                }
+            } catch {
+                if !Task.isCancelled { errorText = error.localizedDescription }
+            }
+            reload()
+            streamedText = ""
+            isSending = false
+            currentTurn = nil
         }
     }
 }

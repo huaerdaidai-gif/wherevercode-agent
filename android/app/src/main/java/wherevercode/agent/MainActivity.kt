@@ -4698,9 +4698,6 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
-                "open_flagship" -> startActivity(
-                    Intent(this, wherevercode.agent.ui.flagship.FlagshipActivity::class.java),
-                )
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
