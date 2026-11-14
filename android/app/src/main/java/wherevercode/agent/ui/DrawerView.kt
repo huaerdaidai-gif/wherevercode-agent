@@ -177,6 +177,7 @@ class DrawerView(
         "nav_models_skills" -> R.drawable.ic_cube
         "nav_custom_modules" -> R.drawable.ic_grid
         "nav_feature_center" -> R.drawable.ic_dashboard
+        "nav_flagship_70" -> R.drawable.ic_grid
         else -> null
     }
 

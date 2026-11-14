@@ -101,7 +101,7 @@ class DrawerViewTest {
     fun `extensions group keeps console mcp plugins and three resource placeholders in order`() {
         val drawerView = view()
         assertEquals(
-            listOf("nav_console", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
+            listOf("nav_console", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center", "nav_flagship_70"),
             drawerView.renderedGroupIds("extensions"),
         )
     }
@@ -183,6 +183,7 @@ class DrawerViewTest {
             "nav_models_skills" to R.drawable.ic_cube,
             "nav_custom_modules" to R.drawable.ic_grid,
             "nav_feature_center" to R.drawable.ic_dashboard,
+            "nav_flagship_70" to R.drawable.ic_grid,
         )
         // 底部用户行（头像 + 登录状态 + 齿轮）原样保留，不参与图标映射。
         drawerView.renderedRows().filter { it.group != "bottom" }.forEach { row ->
