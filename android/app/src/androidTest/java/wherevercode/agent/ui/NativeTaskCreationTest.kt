@@ -18,6 +18,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import wherevercode.agent.core.control.ControlStatus
 import wherevercode.agent.core.control.RoomControlStore
+import wherevercode.agent.core.task.KanbanStatus
 import wherevercode.agent.core.task.RoomTaskStore
 import wherevercode.agent.core.task.TaskDatabase
 import wherevercode.agent.core.task.TaskStates
