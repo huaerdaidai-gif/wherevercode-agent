@@ -623,6 +623,13 @@ class FileWorkspaceAdapter(
                 current
             }
         }
+        // 2026-11-13 安全加固：最终目标再走一遍 SafePaths（真实路径 +
+        // 悬空链接 + 不存在的中间目录逐级解析）。上面只解析了“已存在的
+        // 父目录”：叶子是指向根外的悬空链接、或某级不存在目录的祖先是
+        // 根外链接时会漏网，写入会跟随链接落到工作区之外。
+        if (wherevercode.agent.core.security.SafePaths.resolveInside(workspaceRoot, target) == null) {
+            throw WorkspaceException("workspace_outside_workspace", "路径超出工作区：$rawPath")
+        }
         // 2026-11-09 V5 C1 W1 guardWrite 根因修复：rel 必须按目标文件相对
         // 工作区根目录算，不能按原始输入分段拼。绝对路径输入（如
         // /data/.../workspace/sub/a.txt）按输入分段拼会得到

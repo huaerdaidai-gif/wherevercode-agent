@@ -23,6 +23,8 @@ import wherevercode.agent.core.security.AuditEntry
 import wherevercode.agent.core.security.AuditLog
 import wherevercode.agent.core.security.CommandLimits
 import wherevercode.agent.core.security.LimitError
+import wherevercode.agent.core.security.SafePaths
+import wherevercode.agent.core.security.dangerousArgumentReason
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskStore
 import wherevercode.agent.core.workspace.ChangeSet
@@ -200,9 +202,25 @@ class ToolRegistry(
         fun isReadOnlyRun(argv: List<String>?): Boolean {
             if (argv.isNullOrEmpty()) return false
             val name = argv[0].substringAfterLast('/')
-            if (name in READ_ONLY_COMMANDS) return true
+            if (name in READ_ONLY_COMMANDS) {
+                // 2026-11-13 安全加固：只读白名单只看 argv[0] 时，
+                // `find -delete` / `find -exec` / `git push` / `git diff --output=…`
+                // 都会被当成只读、免审批直接跑；`cat /data/data/<包名>/shared_prefs/…`
+                // 能免审批读到工作区外（含本机凭证）的文件。现在：
+                // - 带危险参数的（见 dangerousArgumentReason）不算只读；
+                // - git 只认只读子命令；
+                // - 参数里有绝对路径 / `~` / `..`（可能出工作区）的不算只读——
+                //   回落到正常审批，由用户确认，而不是静默放行。
+                if (dangerousArgumentReason(argv) != null) return false
+                if (name == "git" && (argv.size < 2 || argv[1] !in GIT_READ_ONLY_SUBCOMMANDS)) return false
+                if (SafePaths.hasPathLikeEscapeArgs(argv)) return false
+                return true
+            }
             return isPythonVersionProbe(argv)
         }
+
+        /** 免审批的 git 子命令（与 CommandLimits.GIT_ALLOWED_SUBCOMMANDS 同口径）。 */
+        private val GIT_READ_ONLY_SUBCOMMANDS: Set<String> = setOf("status", "diff", "log", "show")
 
         private fun isPythonVersionProbe(argv: List<String>): Boolean {
             val name = argv[0].substringAfterLast('/')
@@ -596,6 +614,10 @@ class ToolRegistry(
         }
         // Approval may suspend while the user pauses/stops. Recheck every
         // backend here, including plugins which do not implement a stop probe.
+        // 注（安全分支三方合并 2026-11-15）：sec 的 3d 停止门（stopped ->
+        // turn_stopped + audit 后拒绝）与此等价且被此覆盖——denied() 内部
+        // 同样写 audit，且这里还多了 paused -> turn_paused，故保留 PR #10 版，
+        // 不重复加 sec 的手写 outcome 块（否则 stopped 检查写两遍）。
         if (stopped()) return denied(effectiveAction, context, "turn_stopped", "已停止，未执行")
         if (paused()) return denied(effectiveAction, context, "turn_paused", "已暂停，未启动新执行步骤")
         // 4. Execute（扩展工具走来源执行，同样进审计）。
@@ -766,8 +788,21 @@ class ToolRegistry(
         return null
     }
 
-    /** Resolve a workspace-relative path. Returns (relative, absolute) or null when outside the root. */
+    /**
+     * Resolve a workspace-relative path. Returns (relative, absolute) or null when outside the root.
+     *
+     * 2026-11-13 安全加固：词法/规范化解析之后，再用 [SafePaths] 按真实路径
+     * 复核一次——悬空符号链接叶子、不存在中间目录之上的根外链接，都不能
+     * 把读写带出工作区。
+     */
     private fun resolveInWorkspace(rawPath: String): Pair<String, File>? {
+        val root = workspaceRoot ?: return null
+        val resolved = resolveInWorkspaceUnchecked(rawPath) ?: return null
+        if (SafePaths.resolveInside(root, resolved.second) == null) return null
+        return resolved
+    }
+
+    private fun resolveInWorkspaceUnchecked(rawPath: String): Pair<String, File>? {
         val root = workspaceRoot ?: return null
         val cleaned = rawPath.trim().replace('\\', '/')
         if (cleaned.isEmpty() || cleaned == ".") return "" to root

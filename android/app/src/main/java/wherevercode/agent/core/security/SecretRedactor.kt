@@ -68,6 +68,18 @@ object SecretRedactor {
             Regex("(?i)\\bBearer\\s+[A-Za-z0-9._-]{8,}"),
             0,
         ),
+        // 2026-11-13 安全加固（不在老项目 8 条里）：裸令牌没有
+        // “token=”“Bearer”之类的前导词时，此前会原样进日志/聊天。
+        // - 平台 / 云端 Agent 令牌：v5_… / wco_…
+        // - GitHub：ghp_/gho_/ghu_/ghs_/ghr_… 与 github_pat_…
+        PatternRule(
+            Regex("\\b(?:v5|wco)_[A-Za-z0-9_-]{16,}"),
+            0,
+        ),
+        PatternRule(
+            Regex("\\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
+            0,
+        ),
     )
 
     private val OPEN_TAIL_SECRET_NAME = Regex(

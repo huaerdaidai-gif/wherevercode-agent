@@ -23,10 +23,15 @@ class PlatformEndpointPinningTest {
     }
 
     @Test
-    fun `an exact configured certificate pin is accepted`() {
+    fun `an exact pin does not bypass system certificate trust`() {
         val cert = loadCert("unrelated-cert.pem")
         val pin = PlatformEndpointPinning.Pin("192.0.2.10", PlatformEndpointPinning.sha256Hex(cert))
-        PlatformEndpointPinning.pinnedTrustManager(pin).checkServerTrusted(arrayOf(cert), "RSA")
+        try {
+            PlatformEndpointPinning.pinnedTrustManager(pin).checkServerTrusted(arrayOf(cert), "RSA")
+            throw AssertionError("a matching pin must not make a self-signed certificate trusted")
+        } catch (_: CertificateException) {
+            // A matching fingerprint is an extra constraint, not a substitute CA.
+        }
     }
 
     @Test
