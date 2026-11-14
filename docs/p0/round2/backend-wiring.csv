@@ -1,0 +1,18 @@
+id,闭环段,真实接口或事件,权限边界,实现状态,测试线索,限制,验证状态,验证范围
+B01,聊天任务意图→真实任务,ChatTaskDispatcher.dispatch → TaskStore.createTask(sessionId=null),项目scope / 用户意图,IMPLEMENTED,DispatchClaimExecuteTest,不以频道消息替代任务；自然聊天轮次镜像不被认领,VERIFIED,本地隔离测试；非 K70/生产联测
+B02,认领→执行,TaskScheduler → LocalTaskRunner / RemoteTaskPump,attemptId / lease / goalVersion / authEpoch,IMPLEMENTED,DispatchClaimExecuteTest / LocalTaskRunnerAssignTest / TaskClaimControlTransactionTest,JVM 执行器替身；非已安装 CLI,VERIFIED,本地隔离测试；非 K70/生产联测
+B03,远端进度→结果,HandClient / HandEvent → ChatViewModel / TurnTaskRecorder,配对密钥 / 任务凭据,PARTIAL,ChatViewModelRemoteAgentTest / HandServerTest,Hand Python 隔离子进程及聊天注入端口；无 K70→真实远端完整链路,VERIFIED,本地隔离测试；非 K70/生产联测
+B04,任务页暂停/继续/停止/删除,MainActivity → TaskControlActions → ControlPlane,控制权 / 持久操作 / 计数器,IMPLEMENTED,TaskControlActionsTest / TaskClaimControlTransactionTest,回执前保留任务；活动改目标不原地替换,VERIFIED,本地隔离测试；非 K70/生产联测
+B05,远端聊天控制回执,ChatViewModel → RemoteControlSender → callback,taskId / operationId / 当前轮次归属,PARTIAL,ChatViewModelRemoteAgentTest,确认才更新暂停态/终止观察；迟到旧操作丢弃；网络真实联测缺失,VERIFIED,本地隔离测试；非 K70/生产联测
+B06,工具写入审批与执行栅栏,AndroidApprovalGate / ApprovalBroker / ExecutionFence,授权版本 / 动作范围,IMPLEMENTED,ApprovalSafetyTest / ExecutionFenceTest,测试验证门禁；无 K70 用户点按证据,VERIFIED,本地隔离测试；非 K70/生产联测
+B07,结果→机械检查→审查,ResultsAggregation / PipelineOrchestrator,产物路径 / 审查权限,PARTIAL,,UI mechanical verdict 固定 NOT_RUN；不得宣称自动测试通过,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行
+B08,设备授权→Hand 执行,PairingClient / Hand credential / authorized folders,X25519 / HMAC / scope / epoch,IMPLEMENTED,HandServerTest / BundledHandAuthorizationTest,Python loopback 与假 CLI；不是生产凭据/真实手机,VERIFIED,本地隔离测试；非 K70/生产联测
+B09,MCP HTTP 建任务与接单,McpDispatchProtocol / HTTP server → TaskScheduler,MCP scope / roots / credentials,IMPLEMENTED,McpDispatchHttpE2ETest,本机 loopback HTTP 协议测试；非手机端到端,VERIFIED,本地隔离测试；非 K70/生产联测
+B10,已编译插件/MCP 工具,BrainBootstrap → ExtensionToolBridge → PluginRegistry / McpServerManager,写审批 / 工具范围,IMPLEMENTED,ExtensionToolBridgeTest,已知注册工具链；不等于任意清单可执行,VERIFIED,本地隔离测试；非 K70/生产联测
+B11,九类清单元数据,McpPluginScreenController → ExtensionManifest.parse → preferences,权限声明不授予权力,IMPLEMENTED,ExtensionManifestTest,解析/校验测试；导入界面仍无设备验证,VERIFIED,本地隔离测试；非 K70/生产联测
+B12,九类清单→运行时激活,MISSING,运行时绑定 / 权限批准,MISSING,,无 manifest 激活执行器；方案见 minimum-implementation.md,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行
+B13,S16 自动化触发→建任务账本,MISSING,去重 / 次数预算 / 审批,MISSING,,TaskScheduler/ExtensionKind.WAKEUP 不能代替规则服务,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行
+B14,S17 已有本地/LAN/Direct,DirectTransport / LanTransport / sealed Hand,公钥配对；非 TLS,PARTIAL,,源码路径存在；当前轮未运行 DirectTransportTest 或真机网络,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行
+B15,S17 耐久离线发件箱与重放,MISSING,稳定幂等键 / TTL / epoch,MISSING,,断线不是送达；无统一 outbox,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行
+B16,HTTPS 中继与多路由策略页,MISSING,TLS / endpoint allowlist / scope,MISSING,,外部 VPN 仅系统路由；不提供 VPNService 或可靠远程唤醒,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行
+B17,Redmi K70 安装/导航/审批,adb devices -l 无设备,设备连接与用户授权,MISSING,,设备执行 NOT_RUN，截图 MISSING,UNVERIFIED,NOT_RUN：对应本轮完整链路未执行

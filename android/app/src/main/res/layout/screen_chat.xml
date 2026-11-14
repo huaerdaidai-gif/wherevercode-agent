@@ -55,7 +55,7 @@
         <TextView
             android:id="@+id/buttonChatPause"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:background="@drawable/bg_chip_home"
             android:gravity="center"
@@ -66,7 +66,7 @@
         <TextView
             android:id="@+id/buttonChatStop"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_chip_danger_outline"
@@ -78,7 +78,7 @@
         <TextView
             android:id="@+id/buttonChatResume"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_chip_home"
@@ -90,7 +90,7 @@
         <TextView
             android:id="@+id/buttonChatChangeGoal"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_chip_home"
@@ -102,7 +102,7 @@
         <TextView
             android:id="@+id/buttonChatConsole"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_chip_home"

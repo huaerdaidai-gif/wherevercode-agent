@@ -193,12 +193,22 @@ class ChatViewModelRemoteAgentTest {
         }
     }
 
+    private class DeferredControlSender : RemoteControlSender {
+        val callbacks = mutableListOf<(RemoteControlResult) -> Unit>()
+        override fun send(target: RemoteTarget, taskId: String, command: RemoteControlCommand,
+                          onResult: (RemoteControlResult) -> Unit) {
+            callbacks += onResult
+        }
+    }
+
     /**
      * 测试替身：模拟卡在阻塞读里的远端轮次——cancel() 中断不了
      * NonCancellable 里的等待，只有 abortRun 能结束它（对应
      * HandClient 阻塞 socket 读的真实行为）。
      */
-    private class StuckRemotePort : RemoteAgentChatPort {
+    private class StuckRemotePort(
+        private val finishAfterAbort: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
+    ) : RemoteAgentChatPort {
         data class Call(val target: RemoteTarget, val taskId: String, val text: String)
         val calls = mutableListOf<Call>()
         val aborted = mutableListOf<String>()
@@ -214,6 +224,7 @@ class ChatViewModelRemoteAgentTest {
             return flow {
                 withContext(NonCancellable) {
                     while (!aborted.contains(taskId)) delay(50)
+                    finishAfterAbort?.await()
                 }
                 throw CancellationException("远端连接已掐断（测试替身）")
             }
@@ -724,6 +735,122 @@ class ChatViewModelRemoteAgentTest {
         assertTrue("停止后轮次应终态", awaitIdle())
         assertEquals("停止应掐断远端连接", listOf(stuck.calls.single().taskId), stuck.aborted)
         assertTrue("停止后应能开新对话", viewModel.newConversation())
+    }
+
+    private fun awaitCondition(condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertTrue(condition())
+    }
+
+    @Test
+    fun `unconfirmed stop preserves the remote observer until retry is confirmed`() {
+        val stuck = StuckRemotePort()
+        val sender = DeferredControlSender()
+        attachStuckTurn(stuck, sender)
+        try {
+            assertTrue(viewModel.stop().contains("等待远端回执"))
+            assertTrue(viewModel.isRunning())
+            assertTrue(stuck.aborted.isEmpty())
+            sender.callbacks[0](RemoteControlResult(false, "offline"))
+            awaitCondition { viewModel.stateNow().turns.any { t -> t.notes.any { it.contains("offline") } } }
+            assertTrue(viewModel.isRunning())
+            assertTrue(stuck.aborted.isEmpty())
+            viewModel.stop()
+            sender.callbacks[1](RemoteControlResult(true, "stopped"))
+            assertTrue(awaitIdle())
+            assertEquals(1, stuck.aborted.size)
+        } finally { viewModel.forceNewConversation() }
+    }
+
+    @Test
+    fun `late pause receipt cannot override a newer stop or resume the old run`() {
+        val stuck = StuckRemotePort()
+        val sender = DeferredControlSender()
+        attachStuckTurn(stuck, sender)
+        try {
+            viewModel.pause()
+            viewModel.resume()
+            assertEquals("resume must not be sent before pause acknowledgement", 1, sender.callbacks.size)
+            viewModel.changeGoal()
+            assertTrue(viewModel.isRunning())
+            assertTrue(stuck.aborted.isEmpty())
+            sender.callbacks[0](RemoteControlResult(true, "paused"))
+            sender.callbacks[1](RemoteControlResult(true, "stopped"))
+            assertTrue(awaitIdle())
+            assertEquals(1, stuck.aborted.size)
+        } finally { viewModel.forceNewConversation() }
+    }
+
+    @Test
+    fun `pause and resume only change the remote control state after receipts`() {
+        val stuck = StuckRemotePort()
+        val sender = DeferredControlSender()
+        attachStuckTurn(stuck, sender)
+        try {
+            viewModel.pause()
+            sender.callbacks[0](RemoteControlResult(true, "paused"))
+            awaitCondition { viewModel.stateNow().turns.any { t -> t.notes.any { it.contains("远端已确认") } } }
+            viewModel.resume()
+            assertEquals(2, sender.callbacks.size)
+            sender.callbacks[1](RemoteControlResult(false, "resume offline"))
+            awaitCondition { viewModel.stateNow().turns.any { t -> t.notes.any { it.contains("resume offline") } } }
+            viewModel.resume()
+            assertEquals("failed resume must remain retryable", 3, sender.callbacks.size)
+            sender.callbacks[2](RemoteControlResult(true, "resumed"))
+        } finally { viewModel.forceNewConversation() }
+    }
+
+    @Test
+    fun `receipt from abandoned turn does not contaminate a new conversation`() {
+        val stuck = StuckRemotePort()
+        val sender = DeferredControlSender()
+        attachStuckTurn(stuck, sender)
+        viewModel.pause()
+        assertTrue(viewModel.forceNewConversation())
+        sender.callbacks[0](RemoteControlResult(true, "old pause"))
+        // A new turn's completion also gives the asynchronous callback time to run.
+        viewModel.attachRemoteChat(port = remotePort, controlSender = null,
+            targetResolver = { remoteTarget }, isRemoteAgent = { true })
+        assertTrue(viewModel.switchSession("fresh", "Example Agent", grokAgent(), fresh = true))
+        assertTrue(viewModel.send("hello").accepted)
+        assertTrue(awaitIdle())
+        assertTrue(viewModel.stateNow().turns.all { t -> t.notes.none { it.contains("远端已确认") } })
+    }
+
+    @Test
+    fun `old finally cannot clear a newer running remote turn`() {
+        val finishOld = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val oldPort = StuckRemotePort(finishOld)
+        attachStuckTurn(oldPort, null)
+        val oldId = oldPort.calls.single().taskId
+        assertTrue(viewModel.forceNewConversation())
+        val newPort = StuckRemotePort()
+        val sender = RecordingControlSender()
+        attachStuckTurn(newPort, sender)
+        try {
+            finishOld.complete(Unit)
+            awaitCondition { wherevercode.agent.core.task.TaskStates.isTerminal(taskStore.getTask(oldId)!!.state) }
+            assertTrue("old finalizer must not mark new run idle", viewModel.isRunning())
+            viewModel.stop()
+            assertTrue(awaitIdle())
+            assertEquals(listOf(newPort.calls.single().taskId), sender.taskIds)
+            assertEquals(listOf(newPort.calls.single().taskId), newPort.aborted)
+        } finally {
+            finishOld.complete(Unit)
+            viewModel.forceNewConversation()
+        }
+    }
+
+    @Test
+    fun `missing control sender does not pretend to stop remote work`() {
+        val stuck = StuckRemotePort()
+        attachStuckTurn(stuck, null)
+        try {
+            assertTrue(viewModel.stop().contains("未接线"))
+            assertTrue(viewModel.isRunning())
+            assertTrue(stuck.aborted.isEmpty())
+        } finally { viewModel.forceNewConversation() }
     }
 
     @Test
