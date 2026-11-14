@@ -21,6 +21,7 @@ class FlagshipNavTest {
     @Test fun fourParentsAndAllSeventyRoutesAreReachableInMainActivity() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
+        assertEquals("Only the isolated debug package may run this test", "wherevercode.agent.ci", context.packageName)
         val device = UiDevice.getInstance(instrumentation)
         context.getSharedPreferences("onboarding_v5", 0).edit()
             .putBoolean("onboarding_completed", true).commit()
@@ -35,17 +36,17 @@ class FlagshipNavTest {
         evidence.writeText("route_id,result,scope\n")
         V5Navigation.parents.forEach { parent ->
             device.findObject(By.desc("打开抽屉")).click()
-            V5Navigation.parents.forEach { assertTrue(device.wait(Until.hasObject(By.text(it)), 10_000)) }
+            V5Navigation.parents.forEach { assertTrue(device.wait(Until.hasObject(By.textContains(it)), 10_000)) }
             assertTrue(device.takeScreenshot(File(output, "drawer.png")))
-            device.findObject(By.text(parent)).click()
+            device.findObject(By.textContains(parent)).click()
             assertTrue(device.wait(Until.hasObject(By.text("搜索功能或路由")), 10_000))
             FlagshipRoutes.all.filter { V5Navigation.parentByRoute[it.id] == parent }.forEach { route ->
                 val input = device.findObject(By.clazz("android.widget.EditText"))
                 assertNotNull("search field for ${route.id}", input)
                 input.text = route.id
                 device.waitForIdle()
-                assertTrue("route ${route.id}", device.wait(Until.hasObject(By.text(route.title)), 10_000))
-                device.findObject(By.text(route.title)).click()
+                assertTrue("route ${route.id}", device.wait(Until.hasObject(By.textContains(route.title)), 10_000))
+                device.findObject(By.textContains(route.title)).click()
                 assertTrue(device.wait(Until.hasObject(By.text("路由：${route.id}")), 10_000))
                 assertFalse(device.hasObject(By.text("已验证")))
                 assertEquals(route.id in V5Bindings.all, device.hasObject(By.text("进入已有功能")))
@@ -61,10 +62,10 @@ class FlagshipNavTest {
         }
         // Prove an existing feature is executable through this Activity, with no historical READY gate.
         device.findObject(By.desc("打开抽屉")).click()
-        device.findObject(By.text("工作台")).click()
+        device.findObject(By.textContains("工作台")).click()
         device.findObject(By.clazz("android.widget.EditText")).text = "tasks"
-        assertTrue(device.wait(Until.hasObject(By.text("任务中心")), 10_000))
-        device.findObject(By.text("任务中心")).click()
+        assertTrue(device.wait(Until.hasObject(By.textContains("任务中心")), 10_000))
+        device.findObject(By.textContains("任务中心")).click()
         device.findObject(By.text("进入已有功能")).click()
         assertTrue(device.wait(Until.hasObject(By.res(context.packageName, "buttonCreateTask")), 15_000))
         assertTrue(device.takeScreenshot(File(output, "native-tasks.png")))

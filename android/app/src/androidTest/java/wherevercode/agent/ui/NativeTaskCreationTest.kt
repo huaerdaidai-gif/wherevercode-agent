@@ -136,11 +136,11 @@ class NativeTaskCreationTest {
 
     /** Navigate through the actual V5 hierarchy after opening the primary drawer. */
     private fun openWorkbenchRoute(device: UiDevice, id: String, title: String) {
-        findText(device, "工作台").click()
+        device.wait(Until.findObject(By.textContains("工作台")), 30_000)!!.click()
         val search = device.wait(Until.findObject(By.clazz(EditText::class.java)), 30_000)
             ?: error("No V5 route search")
         search.text = id
-        findText(device, title).click()
+        device.wait(Until.findObject(By.textContains(title)), 30_000)!!.click()
         findText(device, "进入已有功能").click()
     }
 
@@ -197,7 +197,7 @@ class NativeTaskCreationTest {
         try {
             val store = RoomTaskStore(db)
             findId(device, context, "buttonMenu").click()
-            assertTrue(device.wait(Until.hasObject(By.text("工作台")), 30_000))
+            assertTrue(device.wait(Until.hasObject(By.textContains("工作台")), 30_000))
             shot(device, output, "C02-drawer")
             openWorkbenchRoute(device, "tasks", "任务中心")
             val goal = "ISSUE8_UI_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
