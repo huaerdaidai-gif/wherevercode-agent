@@ -66,6 +66,11 @@ jobs:
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             mkdir -p emulator-evidence
+            adb shell wm size 1440x3200
+            adb shell wm density 640
+            adb shell wm size > emulator-evidence/display-size.txt
+            adb shell wm density > emulator-evidence/display-density.txt
+            adb shell getprop ro.product.model > emulator-evidence/device-model.txt
             adb logcat -c
             adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
             adb shell screencap -p /sdcard/final-screen.png || true

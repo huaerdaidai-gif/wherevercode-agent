@@ -383,6 +383,32 @@ final class LocalChatHomeTests: XCTestCase {
         XCTAssertNotNil(model.error)
     }
 
+    func testTwoTurnsUseSelectedAdapterAndPersistOneConversationWithoutPlatform() async throws {
+        let state = AppState()
+        let data = try LocalData.inMemory()
+        let adapter = BrainLayerTests.FakeBrainAdapter(adapterId: "ui-test-adapter") { _, turn in
+            [.textDelta("reply-\(turn)"), .done(finishReason: "stop")]
+        }
+        state.brainRegistry.registerAdapter(adapter)
+        state.brainRegistry.registerConfig(BrainConfig(brainId: "ui-test-brain", kind: .modelApi,
+            adapterId: adapter.adapterId, label: "Test", baseUrl: "https://example.invalid", model: "dynamic-model", authRef: nil))
+        let model = LocalChatModel(appState: state, data: data)
+        model.selectedBrain = "ui-test-brain"
+        model.draft = "first"
+        await model.send()
+        let id = try XCTUnwrap(model.conversationID)
+        model.draft = "second"
+        await model.send()
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.conversationID, id)
+        XCTAssertEqual(try data.conversations.listConversations().count, 1)
+        XCTAssertEqual(model.messages.filter { $0.role == "user" }.map(\.content), ["first", "second"])
+        XCTAssertEqual(model.messages.filter { $0.role == "assistant" }.map(\.content), ["reply-1", "reply-2"])
+        XCTAssertEqual(adapter.requests.map(\.model), ["dynamic-model", "dynamic-model"])
+        XCTAssertTrue(adapter.requests.allSatisfy { $0.tools.isEmpty })
+        XCTAssertFalse(model.isSending)
+    }
+
     func testFeatureIndexRetainsSeventyRoutesWithoutSecondShell() {
         XCTAssertEqual(FlagshipRoutes.all.count, 70)
         XCTAssertEqual(Set(FlagshipRoutes.all.map(\.id)).count, 70)

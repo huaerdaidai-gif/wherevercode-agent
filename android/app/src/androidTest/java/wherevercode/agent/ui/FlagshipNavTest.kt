@@ -49,6 +49,10 @@ class FlagshipNavTest {
             device.hasObject(By.text("今天想做些什么？")),
         )
         val output = File(context.getExternalFilesDir(null), "unified-ui-evidence").apply { mkdirs() }
+        File(output, "device.txt").writeText(
+            "Emulator evidence, not Redmi hardware verification\n" +
+                device.executeShellCommand("wm size") + device.executeShellCommand("wm density"),
+        )
         assertTrue(device.takeScreenshot(File(output, "android-unified-home.png")))
         device.findObject(By.res(context.packageName, "buttonMenu")).click()
         device.waitForIdle()
