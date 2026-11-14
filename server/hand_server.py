@@ -80,9 +80,11 @@ import hmac
 import json
 import os
 import shutil
+import secrets
 import signal
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
 import stat
@@ -104,6 +106,27 @@ HKDF_INFO = b"wherevercode-cross-device/v1"
 CREDENTIAL_SIGNING_INFO = b"wherevercode-credential-signing/v1"
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_TEXT_BYTES = 2 * 1024 * 1024
+# Hand 自更新（2026-11-12，App 更新后自动同步已连接设备）：
+# 更新文件大小上限 2MB（live 文件约 160KB，留足余量；过大拒绝，
+# 防止误传/撑爆）。暂存、备份、看门狗文件都以 live 文件路径派生。
+MAX_HAND_UPDATE_BYTES = 2 * 1024 * 1024
+
+
+def hand_code_version() -> str:
+    """Hand 代码版本 = 本文件内容 SHA-256 前 12 位。
+
+    与 App 的 HandInstallBundle.versionOf() 同款定义，两边直接比：
+    文件改了版本就变，不用手动维护版本号。算不到时返回 ""，
+    调用方按“未知版本”处理（不把未知当成最新、也不当成落后）。
+    """
+    try:
+        digest = hashlib.sha256()
+        with open(os.path.realpath(__file__), "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()[:12]
+    except OSError:
+        return ""
 MAX_OUTPUT_CHARS = 20_000
 MAX_ARTIFACT_BYTES = 1024 * 1024
 DEFAULT_PORT = 18743
@@ -124,6 +147,20 @@ ERR_STALE_EPOCH = "stale_epoch"
 ERR_AGENT_NOT_FOUND = "agent_not_found"
 ERR_REMOTE_CONTROLLED_STOP = "remote_controlled_stop"
 ERR_AGENT_TIMEOUT = "agent_timeout"
+ERR_PAIR_CODE_WRONG = "pair_code_wrong"
+
+# 配对码：6 位数字，存 state-dir/pair_code.json（0600），首次启动生成。
+# 5 次码错锁定该设备 1 小时（pair_attempts.json），防暴力破解。
+PAIR_CODE_LENGTH = 6
+PAIR_CODE_MAX_FAILS = 5
+PAIR_CODE_LOCK_SECONDS = 3600
+
+# mDNS 广播：局域网发现用的服务类型（与 App 侧 Discovery.SERVICE_TYPE 同款）。
+MDNS_SERVICE_TYPE = "_wherevercode._tcp.local"
+MDNS_GROUP = "224.0.0.251"
+MDNS_PORT = 5353
+
+
 
 
 # --------------------------------------------------------------------------
@@ -514,6 +551,60 @@ class HandServer:
     def fingerprint(self) -> str:
         return hashlib.sha256(self.public_key).hexdigest()
 
+    def get_or_create_pair_code(self) -> str:
+        """取现成配对码；没有就生成一个（6 位数字，0600 存盘）。"""
+        path = os.path.join(self.state.dir, "pair_code.json")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            code = str(data.get("code", "")).strip()
+            if len(code) == PAIR_CODE_LENGTH and code.isdigit():
+                return code
+        except (FileNotFoundError, KeyError, ValueError, json.JSONDecodeError):
+            pass
+        code = "".join(secrets.choice("0123456789") for _ in range(PAIR_CODE_LENGTH))
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"code": code}, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        return code
+
+    def rotate_pair_code(self) -> str:
+        """轮换配对码（旧码立即失效）；返回新码。"""
+        path = os.path.join(self.state.dir, "pair_code.json")
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        return self.get_or_create_pair_code()
+
+    def check_pair_code(self, code: str, client_id: str) -> tuple[bool, str]:
+        """验配对码。返回 (是否通过, 中文原因)。码错记失败次数，
+        5 次锁定该设备 1 小时；锁定期间一律不通过。"""
+        now = int(time.time())
+        with self.state.lock:
+            attempts = self.state.load_json("pair_attempts.json", {})
+            entry = attempts.get(client_id) or {}
+            locked_until = int(entry.get("locked_until", 0) or 0)
+            if locked_until > now:
+                return False, "配对码尝试次数过多，请 1 小时后再试，或在目标设备上轮换配对码"
+            expected = self.get_or_create_pair_code()
+            if hmac.compare_digest(code.strip(), expected):
+                attempts.pop(client_id, None)
+                self.state.save_json("pair_attempts.json", attempts)
+                return True, ""
+            fails = int(entry.get("fails", 0) or 0) + 1
+            entry = {"fails": fails, "locked_until": 0}
+            if fails >= PAIR_CODE_MAX_FAILS:
+                entry["locked_until"] = now + PAIR_CODE_LOCK_SECONDS
+                attempts[client_id] = entry
+                self.state.save_json("pair_attempts.json", attempts)
+                return False, "配对码连续错 5 次，已锁定 1 小时：请在目标设备上跑 hand_server.py pair-code --rotate 轮换配对码"
+            attempts[client_id] = entry
+            self.state.save_json("pair_attempts.json", attempts)
+            return False, f"配对码不对（已错 {fails} 次，错 5 次锁定 1 小时）：请核对目标设备上的配对码"
+
     def agents(self) -> list[dict]:
         """hello 用的 Agent 列表：注册表（内置 + 自定义行）解析出的
         Agent + agents.json 里独有的遗留条目，合成一张表。
@@ -717,14 +808,35 @@ class HandServer:
             "display_name": self.display_name,
             "public_key_b64": b64e(self.public_key),
             "agents": self.agents(),
+            # V5 修复（2026-11-11，hello 通、run 就 reset）：
+            # 把调用方在本设备上的配对状态也告诉客户端。旧版 hello
+            # 不含这一项，App 只能凭“hello 有回包”就标“远端可用”，
+            # 但 PENDING 的客户端 hello 通、run 调用会被拒——hello 与
+            # run 的结论对不上，用户只看到 reset。App 凭此项在探测
+            # 时就能报“待批准”，不用等到 run 失败才知道。
+            "client_status": status,
+            # Hand 自更新（2026-11-12）：把本 Hand 的代码版本告诉 App，
+            # App 由此判断远端 Hand 落不落后（与 App 内置安装包的版本
+            # 同款定义：文件内容 SHA-256 前 12 位）。旧版 App 不识这
+            # 两个字段，直接忽略，hello 兼容不变。
+            "hand_version": hand_code_version(),
+            "update_supported": False,  # S3f migration pending; never advertise a missing endpoint.
+            # 可选字段：注册表摘要（App 由此列出七类扩展与自定义项；
+            # 不识该字段的旧版 App 直接忽略，hello 兼容不变）。
+            "extensions": registry_summary(self.state.dir, self.device_id),
         }
         write_frame(conn, json.dumps(reply, ensure_ascii=False).encode("utf-8"))
         self.state.audit({"event": "hello", "client": client_id, "status": status})
 
-        # 2. 密封调用：未配对（PENDING）一律拒绝，不读后续帧以外的任何内容。
-        if status != "APPROVED":
-            return
+        # 会话密钥先派生：PENDING 也要靠它回一个密封的拒绝错误。
         session_key = derive_session_key(self.private_key, self.public_key, client_pub)
+        # 2. 密封调用：未批准（PENDING）只接受一帧密封配对确认
+        # （cross_device_pair_confirm，带 6 位配对码）；除此以外
+        # 一律拒绝，不执行。已撤销（REVOKED）的不接受配对确认，
+        # 须先在服务端解除撤销（pair-approve）。
+        if status != "APPROVED":
+            self._handle_pending_pairing(conn, client_id, client_pub, status)
+            return
         signing_key = derive_signing_key(session_key)
         sealed = read_frame(conn, timeout=DEFAULT_TIMEOUT_SECONDS + 60)
         try:
@@ -736,6 +848,77 @@ class HandServer:
         except Exception:
             return
         self._dispatch(conn, session_key, signing_key, client_id, envelope)
+
+    def _handle_pending_pairing(
+        self, conn: socket.socket, client_id: str, client_pub: bytes, status: str
+    ) -> None:
+        """未批准客户端的唯一入口：等一帧密封配对确认，别的不执行。
+
+        流程（App 内配对）：App 发 hello → 本机记 PENDING → 用户在
+        App 里核对指纹、填入 6 位配对码 → App 在同一连接上发密封
+        cross_device_pair_confirm {code} → 码对即 APPROVED，回密封
+        cross_device_pair_approved；码不对回密封 cross_device_error
+       （code=pair_code_wrong，含中文原因与剩余次数）。
+        不是配对确认帧（旧版 App 直接发的 tool_call 等）→ 回密封
+        cross_device_not_authorized，与此前 live 版 _reject_pending
+        的行为一致；解不开的帧静默关闭，不泄露原因细节。
+        已撤销（REVOKED）的客户端不接受配对确认，须先在服务端
+        pair-approve 解除撤销。只等 15 秒：App 的配对确认紧跟 hello
+        发出，超时即关，不占线程。
+        """
+        if status in ("REVOKED", "KEY_MISMATCH"):
+            return
+        try:
+            sealed = read_frame(conn, timeout=15)
+        except Exception:
+            return
+        session_key = derive_session_key(self.private_key, self.public_key, client_pub)
+        try:
+            plaintext = open_sealed(session_key, sealed)
+            envelope = json.loads(plaintext.decode("utf-8"))
+        except Exception:
+            return  # 解不开：静默关闭
+        if envelope.get("type") != "cross_device_pair_confirm" or envelope.get("version") != VERSION:
+            # 不是配对确认：按未批准拒绝（与 live 版 _reject_pending 同款，
+            # 错误形状与 _dispatch 的 cross_device_error 一致：code 在 args 里）。
+            try:
+                self._send(
+                    conn, session_key, envelope, "cross_device_error",
+                    {"code": ERR_NOT_AUTHORIZED,
+                     "message": "远端尚未批准此手机：请先在 App 里完成配对（核对指纹 + 配对码），或在服务端跑 hand_server.py pair-approve 批准"},
+                    1,
+                )
+            except Exception:
+                pass
+            return
+        code = str(envelope.get("code", "")).strip()
+        ok, reason = self.check_pair_code(code, client_id)
+        if ok:
+            with self.state.lock:
+                clients = self.state.load_json("paired_clients.json", {})
+                entry = clients.get(client_id)
+                if not isinstance(entry, dict):
+                    return
+                entry["status"] = "APPROVED"
+                clients[client_id] = entry
+                self.state.save_json("paired_clients.json", clients)
+            self.state.audit({"event": "pair_approved", "client": client_id, "via": "pair_code"})
+            try:
+                self._send(
+                    conn, session_key, envelope, "cross_device_pair_approved",
+                    {"device_id": self.device_id}, 1,
+                )
+            except Exception:
+                pass
+        else:
+            self.state.audit({"event": "pair_code_failed", "client": client_id, "reason": reason})
+            try:
+                self._send(
+                    conn, session_key, envelope, "cross_device_error",
+                    {"code": ERR_PAIR_CODE_WRONG, "message": reason}, 1,
+                )
+            except Exception:
+                pass
 
     # -- 调用分发 ------------------------------------------------------------
 
@@ -1549,13 +1732,230 @@ class HandConnectionHandler(socketserver.BaseRequestHandler):
         self.server.hand_server.handle_connection(self.request, self.client_address)
 
 
+# --------------------------------------------------------------------------
+# mDNS 广播（局域网发现，stdlib-only，无第三方依赖）
+# --------------------------------------------------------------------------
+# Hand 启动后广播 `_wherevercode._tcp`，App 的 NsdManager 发现即列出。
+# 只做最小实现：响应 PTR/SRV/TXT/A 查询 + 启动时与每 120 秒主动宣告。
+# TXT 只含设备 id 与公钥指纹（可公开显示的摘要，不是密钥）与能力；
+# 配对码绝不进 TXT。广播失败（端口被占、无组播等）只记日志，
+# 绝不影响主服务。
+
+
+def _dns_encode_name(name: str) -> bytes:
+    out = b""
+    for label in name.split("."):
+        if not label:
+            continue
+        raw = label.encode("utf-8")
+        out += bytes([len(raw)]) + raw
+    return out + b"\x00"
+
+
+def _dns_decode_name(msg: bytes, off: int) -> tuple[str, int]:
+    labels: list[str] = []
+    jumped = False
+    next_off = off
+    for _ in range(32):
+        if off >= len(msg):
+            break
+        length = msg[off]
+        if length == 0:
+            off += 1
+            if not jumped:
+                next_off = off
+            break
+        if length & 0xC0 == 0xC0:
+            if off + 1 >= len(msg):
+                break
+            pointer = ((length & 0x3F) << 8) | msg[off + 1]
+            if not jumped:
+                next_off = off + 2
+            off = pointer
+            jumped = True
+            continue
+        off += 1
+        if off + length > len(msg):
+            break
+        labels.append(msg[off:off + length].decode("utf-8", "replace"))
+        off += length
+    return ".".join(labels), next_off
+
+
+def _mdns_build_response(
+    instance: str, hostname: str, lan_ip: str | None, port: int,
+    device_id: str, fingerprint: str,
+) -> bytes:
+    """宣告/应答共用的 DNS 报文：PTR + SRV + TXT (+ A)。不用名字压缩。"""
+    service = MDNS_SERVICE_TYPE
+    records: list[bytes] = []
+    # PTR: _wherevercode._tcp.local → <instance>._wherevercode._tcp.local
+    target = _dns_encode_name(instance + "." + service)
+    records.append(
+        _dns_encode_name(service) + struct.pack(">HHIH", 12, 1, 120, len(target)) + target
+    )
+    # SRV: <instance> → 0 0 <port> <hostname>.local
+    srv_target = _dns_encode_name(hostname + ".local")
+    srv_rdata = struct.pack(">HHH", 0, 0, port) + srv_target
+    records.append(
+        _dns_encode_name(instance + "." + service)
+        + struct.pack(">HHIH", 33, 1, 120, len(srv_rdata)) + srv_rdata
+    )
+    # TXT: id / fp / caps（长度字节 + 键值串）。
+    txt_parts = []
+    for kv in (f"id={device_id}", f"fp={fingerprint}", "caps=hand"):
+        raw = kv.encode("utf-8")
+        txt_parts.append(bytes([len(raw)]) + raw)
+    txt_rdata = b"".join(txt_parts)
+    records.append(
+        _dns_encode_name(instance + "." + service)
+        + struct.pack(">HHIH", 16, 1, 120, len(txt_rdata)) + txt_rdata
+    )
+    # A: <hostname>.local → LAN IP（拿不到 IP 时不发 A 记录）。
+    if lan_ip:
+        try:
+            a_rdata = socket.inet_aton(lan_ip)
+            records.append(
+                _dns_encode_name(hostname + ".local")
+                + struct.pack(">HHIH", 1, 1, 120, len(a_rdata)) + a_rdata
+            )
+        except OSError:
+            pass
+    header = struct.pack(">HHHHHH", 0, 0x8400, 0, len(records), 0, 0)
+    return header + b"".join(records)
+
+
+def _mdns_lan_ip() -> str | None:
+    """本机 LAN IP（只建 UDP socket 问路由，不发任何流量）。"""
+    for target in ("192.168.1.1", "10.0.0.1", "8.8.8.8"):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect((target, 80))
+                ip = s.getsockname()[0]
+            finally:
+                s.close()
+            if ip and not ip.startswith("127."):
+                return ip
+        except OSError:
+            continue
+    return None
+
+
+def _mdns_safe_label(value: str) -> str:
+    """DNS label 安全化：只留字母数字与 -/_，其余改 -，空了回落 host。"""
+    out = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in value).strip("-")
+    return out or "hand"
+
+
+class MdnsAdvertiser(threading.Thread):
+    """mDNS 广播线程（daemon，失败自停，不杀主服务）。
+
+    行为：绑定 224.0.0.251:5353，收查询、回 PTR/SRV/TXT/A；
+    启动时宣告一次、之后每 120 秒再宣告一次（被动发现者也能看到）。
+    """
+
+    def __init__(self, hand: "HandServer") -> None:
+        super().__init__(daemon=True, name="mdns-advertiser")
+        self.hand = hand
+        self.instance = _mdns_safe_label(hand.device_id)
+        self.hostname = _mdns_safe_label(socket.gethostname())
+        self.lan_ip = _mdns_lan_ip()
+        self.sock: socket.socket | None = None
+        self.stopped = threading.Event()
+
+    def _announce(self) -> None:
+        if self.sock is None:
+            return
+        try:
+            packet = _mdns_build_response(
+                self.instance, self.hostname, self.lan_ip, self.hand.port,
+                self.hand.device_id, self.hand.fingerprint(),
+            )
+            self.sock.sendto(packet, (MDNS_GROUP, MDNS_PORT))
+        except OSError:
+            pass
+
+    def _answer(self, msg: bytes, addr) -> None:
+        if len(msg) < 12 or (msg[2] & 0x80):
+            return  # 不是查询不回
+        qdcount = struct.unpack(">H", msg[4:6])[0]
+        off = 12
+        asked = False
+        for _ in range(qdcount):
+            name, off = _dns_decode_name(msg, off)
+            if off + 4 > len(msg):
+                return
+            qtype = struct.unpack(">H", msg[off:off + 2])[0]
+            off += 4
+            if qtype in (12, 33, 16, 1, 255) and name in (
+                MDNS_SERVICE_TYPE,
+                self.instance + "." + MDNS_SERVICE_TYPE,
+                self.hostname + ".local",
+            ):
+                asked = True
+        if not asked:
+            return
+        self._announce()
+
+    def run(self) -> None:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("", MDNS_PORT))
+            except OSError:
+                # 5353 已被系统 mDNS 服务占住：广播不了，只记日志、不报错。
+                print("mDNS: 端口 5353 已被占用，局域网广播停用（手动 IP 配对仍可用）", flush=True)
+                return
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+            mreq = socket.inet_aton(MDNS_GROUP) + socket.inet_aton("0.0.0.0")
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            sock.settimeout(5)
+            self.sock = sock
+        except OSError as e:
+            print(f"mDNS: 广播启动失败（{e}），局域网发现停用", flush=True)
+            return
+        self._announce()
+        last_announce = time.monotonic()
+        while not self.stopped.is_set():
+            try:
+                msg, addr = self.sock.recvfrom(2048)
+                self._answer(msg, addr)
+            except socket.timeout:
+                pass
+            except OSError:
+                break
+            if time.monotonic() - last_announce >= 120:
+                self._announce()
+                last_announce = time.monotonic()
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def start_mdns_advertiser(hand: "HandServer") -> MdnsAdvertiser | None:
+    """启动 mDNS 广播（best-effort）：任何异常都只记日志、不抛错。"""
+    try:
+        adv = MdnsAdvertiser(hand)
+        adv.start()
+        return adv
+    except Exception as e:  # noqa: BLE001 - 广播绝不能拖垮主服务
+        print(f"mDNS: 广播启动失败（{e}），局域网发现停用", flush=True)
+        return None
+
+
 def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int,
           config_policy: str = "standalone") -> None:
     hand = HandServer(state_dir, device_id, display_name, port, config_policy)
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
+        print(f"pair code: {hand.get_or_create_pair_code()}（App 配对时填入；轮换：hand_server.py pair-code --rotate）", flush=True)
         print(f"state dir: {hand.state.dir}", flush=True)
+        start_mdns_advertiser(hand)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -1586,6 +1986,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pair-list", help="列出已记录的客户端配对")
     approve = sub.add_parser("pair-approve", help="批准一个待配对的客户端")
     approve.add_argument("device_id")
+    pc = sub.add_parser("pair-code", help="查看本机配对码（App 内配对时填入）")
+    pc.add_argument("--rotate", action="store_true", help="生成新配对码（旧码立即失效）")
     revoke = sub.add_parser("pair-revoke", help="撤销一个客户端的配对")
     revoke.add_argument("device_id")
     grant = sub.add_parser("grant", help="授权某 agent 访问某文件夹")
@@ -1638,6 +2040,12 @@ def main(argv: list[str] | None = None) -> int:
             entry["status"] = "APPROVED"
             hand.state.save_json("paired_clients.json", clients)
         print(f"已批准：{args.device_id}")
+        return 0
+    if args.command == "pair-code":
+        if args.rotate:
+            print(hand.rotate_pair_code())
+        else:
+            print(hand.get_or_create_pair_code())
         return 0
     if args.command == "pair-revoke":
         with hand.state.lock:
