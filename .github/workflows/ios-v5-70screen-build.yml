@@ -87,6 +87,12 @@ jobs:
             wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256
           if-no-files-found: error
 
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          cat ci-logs/*.log 2>/dev/null | grep -E "error:|: error|failed|Failing tests|\*\* .* FAILED \*\*|Testing failed|Test Case .* failed" | grep -v "^warning" | sort -u | head -45 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          tail -n 25 ci-logs/xcodebuild-test.log 2>/dev/null | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
