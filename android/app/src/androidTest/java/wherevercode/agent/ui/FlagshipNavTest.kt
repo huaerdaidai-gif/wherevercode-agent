@@ -166,15 +166,33 @@ class FlagshipNavTest {
             // 抽屉是 LazyColumn：滚动到目标条目再点。条目内含标题与
             // 徽标两个文本（可能被合并进同一无障碍节点），故用
             // textContains 按完整标题匹配（70 个标题互不为子串）。
+            // 抽屉重开时 LazyColumn 会保留上次滚动位置，而 scrollIntoView
+            // 只向下搜：每轮必须先回到顶部再向下找，否则当前位置之上
+            // 的条目永远找不到（首轮实测 56 条 FAIL(item) 即此因）。
             val list = UiScrollable(UiSelector().scrollable(true))
             list.setAsVerticalList()
-            list.setMaxSearchSwipes(40)
+            list.setMaxSearchSwipes(60)
+            try {
+                list.scrollToBeginning(120)
+            } catch (e: Exception) {
+                // 已在顶部时会抛异常，忽略。
+            }
             try {
                 list.scrollIntoView(UiSelector().textContains(route.title))
             } catch (e: Exception) {
                 // 找不到时下面 findObject 为空，按失败记录，不中断遍历。
             }
-            val item = device.findObject(By.textContains(route.title))
+            var item = device.findObject(By.textContains(route.title))
+            if (item == null) {
+                // 兜底再试一轮：回顶部后重新向下搜。
+                try {
+                    list.scrollToBeginning(120)
+                    list.scrollIntoView(UiSelector().textContains(route.title))
+                } catch (e: Exception) {
+                    // 同上，交给下面的空判断记录失败。
+                }
+                item = device.findObject(By.textContains(route.title))
+            }
             if (item == null) {
                 failures += "${route.id}: drawer item not found (${route.title})"
                 lines += "${route.id} ${route.title} expected=$expected result=FAIL(item)"
