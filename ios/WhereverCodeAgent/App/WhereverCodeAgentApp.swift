@@ -134,7 +134,7 @@ struct WhereverCodeAgentApp: App {
                 .padding(.vertical, 12)
                 .foregroundStyle(.primary)
         }
-        .accessibilityIdentifier("drawer_\\(tab)")
+        .accessibilityIdentifier("drawer_\(tab)")
     }
 }
 
