@@ -2,7 +2,6 @@ package wherevercode.agent.ui
 
 import android.content.Context
 import android.content.Intent
-import wherevercode.agent.ui.flagship.EXTRA_V5_ROUTE
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
@@ -108,7 +107,7 @@ class DeviceTapRefreshTest {
 
     /** Device refresh tests use the supported V5 deep link; drawer traversal has a device test. */
     private fun openDevices(controller: ActivityController<MainActivity>) {
-        controller.newIntent(Intent(controller.get(), MainActivity::class.java).putExtra(EXTRA_V5_ROUTE, "devices"))
+        controller.newIntent(Intent(controller.get(), MainActivity::class.java).putExtra("wherevercode.agent.extra.V5_ROUTE", "devices"))
         idleMain()
     }
 
