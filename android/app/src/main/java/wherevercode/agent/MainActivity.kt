@@ -219,6 +219,7 @@ import wherevercode.agent.core.transport.RemoteHello
 import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
 import wherevercode.agent.core.security.SecretRedactor
+import wherevercode.agent.core.team.ChannelSenderPolicy
 import wherevercode.agent.core.session.SessionKind
 import wherevercode.agent.core.task.CapabilityCards
 import wherevercode.agent.core.task.CapabilityRouter
@@ -399,6 +400,15 @@ class MainActivity : AppCompatActivity() {
     private val teamChannelRelayedIds =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val teamChannelRelayOutputIds =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /**
+     * 2026-11-13 频道权限：本机用户经 App 发出的频道消息 id，与由这些消息
+     * （及中转回帖）学到的 App 自身 agent_id。只有它们和登记的平台 Agent
+     * 发的 @ 才会中转到设备 Agent（见 ChannelSenderPolicy）。
+     */
+    private val teamChannelOwnPostIds =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val teamChannelSelfAgentIds =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     /** 本会话已发轮次（发一条消息计一轮；上限见 TeamChatLimits.MAX_ROUNDS）。 */
     private var teamChannelRoundsUsed = 0
@@ -784,7 +794,7 @@ class MainActivity : AppCompatActivity() {
             apiKeyProvider = { agent -> agent.authRef?.let { brainKeyStore.getSecret(it) } },
             taskIdStore = SharedPreferencesManusTaskIdStore(applicationContext),
             // 回复落在非 assistant_message 字段时记一条诊断（不静默丢掉）。
-            onDiagnostic = { android.util.Log.d("ManusChatBridge", it) },
+            onDiagnostic = { android.util.Log.d("ManusChatBridge", SecretRedactor.redact(it)) },
         )
     }
 
@@ -5638,6 +5648,8 @@ class MainActivity : AppCompatActivity() {
             fanoutRuns = fanoutRuns,
             fanoutRunning = teamChannelFanoutRunning,
             notice = teamChannelNotice,
+            trustedAttributionPosterIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
+                synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
         )
     }
 
@@ -5730,6 +5742,15 @@ class MainActivity : AppCompatActivity() {
                     ).clear()
                 }
             }
+            // 2026-11-13 频道权限：从本机发出的消息学 App 自身 agent_id
+            // （安全分支原在 ChannelFeed.onMessages 批量回调里；PR #10 已把
+            // feed 换成 McpChannelEventFeed 的单条回调，这里按单条移植，
+            // 语义不变：learnSelfAgentIds 只挑 id 命中本机发帖集的消息）。
+            teamChannelSelfAgentIds += ChannelSenderPolicy.learnSelfAgentIds(
+                listOf(message),
+                synchronized(teamChannelOwnPostIds) { teamChannelOwnPostIds.toSet() } +
+                    synchronized(teamChannelRelayOutputIds) { teamChannelRelayOutputIds.toSet() },
+            )
             // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
             // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
             maybeRelayChannelMessages(listOf(message))
@@ -5778,6 +5799,14 @@ class MainActivity : AppCompatActivity() {
             isManusConfigured = ::isManusConfigured,
             relayedIds = teamChannelRelayedIds,
             relayOutputIds = teamChannelRelayOutputIds,
+            isTrustedSender = { message ->
+                ChannelSenderPolicy.isTrustedRelaySender(
+                    message,
+                    agents,
+                    ownPostIds = synchronized(teamChannelOwnPostIds) { teamChannelOwnPostIds.toSet() },
+                    selfAgentIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
+                )
+            },
         )
         val todo = messages.filter { message ->
             message.id !in teamChannelRelayedIds &&
@@ -5817,7 +5846,8 @@ class MainActivity : AppCompatActivity() {
                     tokenProvider = { platformCredentialStore.loadPlatformToken() },
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
-                runBlocking { transport.postMessage(channelId, text) }
+                val postedId = runBlocking { transport.postMessage(channelId, text) }
+                if (postedId.isNotBlank()) teamChannelOwnPostIds += postedId
                 teamChannelRoundsUsed++
                 teamChannelNotice = null
             } catch (e: Exception) {
@@ -6013,7 +6043,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 refreshConsole()
             },
-            onLog = { Log.d("ConsoleWs", it) },
+            onLog = { Log.d("ConsoleWs", SecretRedactor.redact(it)) },
         )
         consoleWsFeed = feed
         feed.start(devices)

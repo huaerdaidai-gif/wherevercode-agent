@@ -78,6 +78,12 @@ class ChannelAgentRelay(
     private val timeoutSeconds: Long = TeamChatLimits.RELAY_TIMEOUT_SECONDS,
     /** runAgent/runChat 自身超时之外的兜底余量（秒；与扇出同款 30 秒）。 */
     private val timeoutMarginSeconds: Long = 30,
+    /**
+     * 2026-11-13 频道权限：这条消息的发送者有没有资格触发中转（见
+     * [ChannelSenderPolicy]）。默认放行只为兼容旧调用点/旧测试；生产接线
+     * （MainActivity）传入受信名单判定。不受信的 @ 一律不执行。
+     */
+    private val isTrustedSender: (PlatformChannelMessage) -> Boolean = { true },
 ) {
     /** 两组 id 共用一把锁（调用方传进来的集合本身也要同步访问，见下）。 */
     private val idLock = Any()
@@ -122,6 +128,22 @@ class ChannelAgentRelay(
         if (alreadyHandled) return emptyList()
         val mentions = findMentions(message.text, agents)
         if (mentions.isEmpty()) return emptyList()
+        val trusted = try {
+            isTrustedSender(message)
+        } catch (_: Exception) {
+            false
+        }
+        if (!trusted) {
+            val who = message.agentId.ifBlank { "未知发送者" }.take(64)
+            return mentions.map { agent ->
+                RelayOutcome(
+                    agent.agentId,
+                    agent.displayName,
+                    RelayStatus.FAILED,
+                    "发送者 $who 不在受信名单（不是本机 App，也不是你登记的平台 Agent），未中转。",
+                )
+            }
+        }
         val sender = message.agentName.ifBlank { message.agentId.ifBlank { "频道里有人" } }
         val brief = TeamChatRules.buildRelayBrief(sender, message.text)
         return mentions.map { agent -> relayToAgent(message, agent, brief) }
