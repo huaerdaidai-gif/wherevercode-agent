@@ -54,10 +54,26 @@ class AppFlagshipCapabilities(private val context: Context) : FlagshipCapability
             "artifacts" to "K70 真机在用；成果聚合屏已实现",
         )
 
-        /** 已接线既有真实屏、缺本轮设备验收的 route。 */
+        /**
+         * 已接线既有真实屏、缺本轮设备验收的 route。
+         *
+         * 组装第二轮（assembly-r2）新增三条，证据口径如下（均未标 READY）：
+         * - connectmodel：落点与 models 同屏（设置屏 nav_workbench 内的大脑
+         *   管理/连接行已实现，见 models 的 READY 证据），但连接模型向导
+         *   本身未在本轮旗舰层验收。
+         * - terminal：落点为控制台屏（nav_console，含事件/日志流，控制台
+         *   日志流已实现），契约口径为 terminal 默认展示日志；未在本轮
+         *   旗舰层验收。
+         * - diff：无独立变更对比屏；真实可达的 diff 展示在项目屏
+         *   （nav_projects）编辑保存流程内——保存前确认弹窗展示行级 diff
+         *   预览（增删计数 + 前 10 行 +/- 明细，ProjectScreenController
+         *   saveEdit → WorkspaceEditSession.diff → LineDiff），保存后文件
+         *   元信息行展示上次保存增删行数；未在本轮旗舰层验收。
+         */
         val UNVERIFIED: Set<String> = setOf(
             "approvals", "editor", "team", "agentdetail", "devicedetail",
             "mcp", "connections", "dashboard", "activity", "onboarding",
+            "connectmodel", "terminal", "diff",
         )
 
         /** route → EntryRegistry 入口 id（深链目标）。onboarding 无入口：首次启动覆盖层，不可重开。 */
@@ -74,6 +90,7 @@ class AppFlagshipCapabilities(private val context: Context) : FlagshipCapability
             "projectdetail" to "nav_projects",
             "files" to "nav_projects",
             "editor" to "nav_projects",
+            "diff" to "nav_projects",
             "team" to "nav_team",
             "agents" to "nav_team",
             "agentdetail" to "nav_team",
@@ -82,10 +99,12 @@ class AppFlagshipCapabilities(private val context: Context) : FlagshipCapability
             "devices" to "nav_devices",
             "devicedetail" to "nav_devices",
             "models" to "nav_workbench",
+            "connectmodel" to "nav_workbench",
             "settings" to "nav_workbench",
             "mcp" to "nav_mcp_plugins",
             "connections" to "nav_tools",
             "dashboard" to "nav_console",
+            "terminal" to "nav_console",
             "activity" to "feature_run_logs",
         )
     }
