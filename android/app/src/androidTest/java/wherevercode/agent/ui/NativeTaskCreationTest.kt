@@ -145,10 +145,19 @@ class NativeTaskCreationTest {
         shotName: String?,
     ): String {
         findId(device, context, "buttonCreateTask").click()
-        val field = device.wait(Until.findObject(By.clazz(EditText::class.java)), 30_000)
-            ?: error("No goal field")
+        // Round-4 run fec4f9b4: one create tap was swallowed while the
+        // list refreshed around a background task state change, and the
+        // form never opened. A single re-tap after a short wait is the
+        // honest UI-level recovery (a user would tap again), not a
+        // state fake.
+        var field = device.wait(Until.findObject(By.clazz(EditText::class.java)), 10_000)
+        if (field == null) {
+            findId(device, context, "buttonCreateTask").click()
+            field = device.wait(Until.findObject(By.clazz(EditText::class.java)), 30_000)
+        }
+        val goalField = field ?: error("No goal field")
         // Accessibility ACTION_SET_TEXT avoids typing through an IME; it still edits the real native field.
-        field.text = goal
+        goalField.text = goal
         if (shotName != null) shot(device, output, shotName)
         val submit = device.wait(Until.findObject(By.res("android", "button1")), 30_000)
             ?: error("Native create-task confirmation button missing")
@@ -254,16 +263,15 @@ class NativeTaskCreationTest {
             )
             shot(device, output, "C06-task-detail-result")
             assertNotNull("Task never reached a terminal or review outcome; transitions=$transitions", finalState)
-            // Claim proof: the 500 ms sampling can miss the brief
-            // assigned/working window when the executor fails fast, so
-            // an executor-produced result/error on the row is equally
-            // valid proof the runner claimed and ran this task (round-4
-            // run bc5d16f8: queued -> failed in 9.5 s carrying the
-            // executor's brain_not_configured error, no working sample).
+            // Claim proof (GPT review point 6): the persisted
+            // attemptId is written by the claim itself, so it proves
+            // the runner claimed this task even when the 500 ms
+            // sampling misses the brief assigned/working window. An
+            // error string alone would NOT prove a claim.
             assertTrue(
-                "Task was never claimed by the runner; transitions=$transitions",
+                "Task was never claimed by the runner; transitions=$transitions attemptId=${record?.attemptId}",
                 transitions.any { it.startsWith("assigned@") || it.startsWith("working@") } ||
-                    !record?.error.isNullOrBlank() || !record?.result.isNullOrBlank(),
+                    record?.attemptId != null,
             )
         } finally {
             db.close()
