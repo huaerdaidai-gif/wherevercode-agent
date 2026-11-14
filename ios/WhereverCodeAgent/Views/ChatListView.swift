@@ -126,9 +126,15 @@ struct ConversationHomeContentView: View {
                     }
                 }
             }
-            Section("其他对话") {
-                ReservedFeatureRow(feature: .brainChat)
-                ReservedFeatureRow(feature: .singleAgentChat)
+            Section("本地模型对话") {
+                NavigationLink {
+                    BrainConversationView()
+                } label: {
+                    Label("新建对话", systemImage: "square.and.pencil")
+                }
+                Text("使用设置中已配置的模型；不需要连接 WhereverCode 平台")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .listStyle(.insetGrouped)
@@ -289,6 +295,129 @@ struct ChatListView: View {
             errorMessage = nil
         } catch {
             errorMessage = (error as? McpError)?.message ?? "加载频道失败。"
+        }
+    }
+}
+
+
+// A deliberately tool-free registry: model conversation works without platform
+// access; tool requests are refused instead of silently executing writes.
+private struct ChatOnlyToolRegistry: ToolRegistry {
+    let workspaceRoot: String? = nil
+    func toolsForCapabilities(_ capabilities: BrainCapabilities?, authorizedTools: Set<String>) -> [ToolDef] { [] }
+    func gitHostToolsFor(project: Project?, location: ProjectLocation?) -> [ToolDef] { [] }
+    func allToolNames() -> Set<String> { [] }
+    func validateOnly(_ action: BrainAction, _ context: ToolContext) -> ToolOutcome? {
+        ToolOutcome(ok: false, summary: "当前对话未授权执行工具", errorCode: "tool_unavailable")
+    }
+    func execute(_ action: BrainAction, _ context: ToolContext, stopped: @escaping () -> Bool) async throws -> ToolOutcome {
+        ToolOutcome(ok: false, summary: "当前对话未授权执行工具", errorCode: "tool_unavailable")
+    }
+    func isReadOnlyExtensionTool(_ name: String) -> Bool { false }
+}
+
+struct BrainConversationView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var conversationId = UUID().uuidString
+    @State private var draft = ""
+    @State private var messages: [ConversationMessage] = []
+    @State private var isSending = false
+    @State private var streamedText = ""
+    @State private var errorText: String?
+    @State private var currentTurn: Task<Void, Never>?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(messages, id: \.id) { message in
+                        if message.role == "user" || message.role == "assistant" {
+                            VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 5) {
+                                Text(message.role == "user" ? "你" : message.source)
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(message.content)
+                                    .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    if !streamedText.isEmpty {
+                        Text(streamedText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    if let errorText {
+                        Text(errorText).foregroundStyle(.red).font(.caption)
+                    }
+                }
+                .padding(16)
+            }
+            Divider()
+            HStack(alignment: .bottom, spacing: 12) {
+                TextField("发送消息", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("brain_chat_input")
+                if isSending {
+                    Button("停止", systemImage: "stop.fill") {
+                        currentTurn?.cancel()
+                        currentTurn = nil
+                        isSending = false
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityIdentifier("brain_chat_stop")
+                } else {
+                    Button("发送", systemImage: "arrow.up.circle.fill") {
+                        send()
+                    }
+                    .labelStyle(.iconOnly)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("brain_chat_send")
+                }
+            }
+            .padding(12)
+        }
+        .navigationTitle("模型对话")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reload() }
+        .onDisappear { currentTurn?.cancel() }
+    }
+
+    private func reload() {
+        messages = (try? LocalData.shared.conversations.listMessages(conversationId: conversationId)) ?? []
+    }
+
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        draft = ""
+        streamedText = ""
+        errorText = nil
+        isSending = true
+        let id = conversationId
+        let engine = appState.makeBrainEngine(
+            conversations: LocalData.shared.conversations,
+            tools: ChatOnlyToolRegistry(),
+            eventLog: InMemoryEventLog(),
+            approvalGate: DenyApprovalGate()
+        )
+        currentTurn = Task {
+            do {
+                for try await event in engine.chat(conversationId: id, userText: text) {
+                    if Task.isCancelled { break }
+                    switch event {
+                    case .textDelta(let delta): streamedText += delta
+                    case .error(let info): errorText = String(describing: info)
+                    default: break
+                    }
+                }
+            } catch {
+                if !Task.isCancelled { errorText = error.localizedDescription }
+            }
+            reload()
+            streamedText = ""
+            isSending = false
+            currentTurn = nil
         }
     }
 }
