@@ -6,13 +6,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.UiScrollable
-import androidx.test.uiautomator.UiSelector
 import androidx.test.uiautomator.Until
 import java.io.File
 import org.junit.Assert.assertTrue
+import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
 import wherevercode.agent.ui.flagship.AppFlagshipCapabilities
 import wherevercode.agent.ui.flagship.FeatureState
 import wherevercode.agent.ui.flagship.FeatureStatus
@@ -25,13 +25,16 @@ import wherevercode.agent.ui.flagship.FlagshipRoutes
  * P0 路由（tasks）经「打开功能」深链回既有 MainActivity 真实屏。
  * 不建任务、不清数据、不伪造执行结果。
  *
- * 组装第二轮（assembly-r2）新增 [flagshipAllRoutesReachable]：遍历全部
+ * 组装第二轮（assembly-r2）新增 [zzFlagshipAllRoutesReachable]：遍历全部
  * 70 条路由，逐条从抽屉打开详情页，断言标题与状态徽标（徽标期望值由
  * 与 App 同源的 [AppFlagshipCapabilities] 声明推导，不在测试里另抄
  * 一份状态表）。UNVERIFIED / PLANNED 路由的「打开功能」按钮是禁用的，
- * 遍历中绝不点它，只断言详情页呈现。
+ * 遍历中绝不点它，只断言详情页呈现。方法名以 zz 开头并配合
+ * NAME_ASCENDING 排序，保证既有深链测试先跑、遍历最后跑，
+ * 遍历的长时间操作不污染既有测试。
  */
 @RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class FlagshipNavTest {
 
     private fun outputDir(context: Context): File =
@@ -126,7 +129,7 @@ class FlagshipNavTest {
     }
 
     @Test
-    fun flagshipAllRoutesReachable() {
+    fun zzFlagshipAllRoutesReachable() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val device = UiDevice.getInstance(instrumentation)
@@ -163,36 +166,27 @@ class FlagshipNavTest {
                 lines += "${route.id} ${route.title} expected=$expected result=FAIL(drawer)"
                 continue
             }
-            // 抽屉是 LazyColumn：滚动到目标条目再点。条目内含标题与
-            // 徽标两个文本（可能被合并进同一无障碍节点），故用
+            // 用抽屉自带搜索过滤定位条目，不滚动 LazyColumn：
+            // scrollIntoView 两轮实测均不稳定（只向下搜、抽屉保留
+            // 滚动位置，两轮各 54–56 条 FAIL(item)）。搜索框按
+            // title/id 子串过滤（FlagshipApp 抽屉实现），填入 route.id
+            // 后列表只剩少数匹配项，目标条目必在视口内。条目标题用
             // textContains 按完整标题匹配（70 个标题互不为子串）。
-            // 抽屉重开时 LazyColumn 会保留上次滚动位置，而 scrollIntoView
-            // 只向下搜：每轮必须先回到顶部再向下找，否则当前位置之上
-            // 的条目永远找不到（首轮实测 56 条 FAIL(item) 即此因）。
-            val list = UiScrollable(UiSelector().scrollable(true))
-            list.setAsVerticalList()
-            list.setMaxSearchSwipes(60)
-            try {
-                list.scrollToBeginning(120)
-            } catch (e: Exception) {
-                // 已在顶部时会抛异常，忽略。
+            val searchBox = device.wait(
+                Until.findObject(By.clazz("android.widget.EditText")), 10_000,
+            )
+            if (searchBox == null) {
+                failures += "${route.id}: drawer search box not found"
+                lines += "${route.id} ${route.title} expected=$expected result=FAIL(search)"
+                device.findObject(By.text("☰"))?.click()
+                device.wait(Until.gone(drawerSearch), 5_000)
+                continue
             }
-            try {
-                list.scrollIntoView(UiSelector().textContains(route.title))
-            } catch (e: Exception) {
-                // 找不到时下面 findObject 为空，按失败记录，不中断遍历。
-            }
-            var item = device.findObject(By.textContains(route.title))
-            if (item == null) {
-                // 兜底再试一轮：回顶部后重新向下搜。
-                try {
-                    list.scrollToBeginning(120)
-                    list.scrollIntoView(UiSelector().textContains(route.title))
-                } catch (e: Exception) {
-                    // 同上，交给下面的空判断记录失败。
-                }
-                item = device.findObject(By.textContains(route.title))
-            }
+            searchBox.click()
+            searchBox.setText(route.id)
+            val item = device.wait(
+                Until.findObject(By.textContains(route.title)), 10_000,
+            )
             if (item == null) {
                 failures += "${route.id}: drawer item not found (${route.title})"
                 lines += "${route.id} ${route.title} expected=$expected result=FAIL(item)"
