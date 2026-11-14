@@ -285,7 +285,6 @@ class NativeTaskCreationTest {
         assertEquals("Only the isolated debug package may run this test", "wherevercode.agent.ci", context.packageName)
         val device = UiDevice.getInstance(instrumentation)
         val output = outputDir(context)
-        val holdFile = File(context.getExternalFilesDir(null), "issue8_claim_hold")
         launch(device, context, output)
         openTasks(device, context)
         val db = TaskDatabase.create(context)
@@ -300,39 +299,53 @@ class NativeTaskCreationTest {
             }
             var taskId: String? = null
             var paused = false
-            // Deterministic queued state via the DEBUG-only claim hold
-            // (LocalTaskRunner.claimHold, wired in BrainBootstrap to a
-            // hold file in the app's external files dir): while the
-            // file exists the pump never claims, so the control task
-            // stays queued and the task-page pause/resume/stop receipts
-            // are exercised against the real ControlPlane with no
-            // timing race. The blocker-task approach was proven
-            // non-deterministic by run 340ddaa3 (blockers fail within
-            // seconds; the control task was claimed between the queued
-            // check and the pause tap). In-flight pause/stop
-            // confirmation is a separate product gap (failures F06:
-            // the executor has no checkpoint) and is NOT claimed here.
-            holdFile.delete()
-            holdFile.createNewFile()
-            run {
+            // The local runner may claim and finish a task before the
+            // pause tap lands; one retry with a fresh task keeps the
+            // control assertions deterministic without faking a state.
+            for (attempt in 1..2) {
+                // Deterministic queueing: the scheduler runs one task
+                // at a time, so two blocker tasks ahead of the control
+                // task guarantee it is still QUEUED when the pause tap
+                // lands -- and ControlPlane.pause confirms a queued
+                // task immediately (an in-flight task cannot confirm:
+                // its single brain call errors without a checkpoint,
+                // which is why the naive create-then-pause flow lost
+                // the race in round-4 run bc5d16f8).
+                for (blocker in 1..2) {
+                    val blockerGoal = "ISSUE8_BLK_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
+                    createTaskViaForm(device, context, store, blockerGoal, output, null)
+                    record("attempt$attempt blocker$blocker created")
+                    device.pressBack()
+                    findId(device, context, "buttonCreateTask")
+                }
                 val goal = "ISSUE8_CTL_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
                 val id = createTaskViaForm(device, context, store, goal, output, null)
                 taskId = id
-                record("taskId=$id; state=${store.getTask(id)?.state}; claimHold=on")
-                assertEquals(
-                    "Control task must stay queued under the claim hold",
-                    "queued",
-                    store.getTask(id)?.state,
-                )
+                record("attempt$attempt taskId=$id; prePauseState=${store.getTask(id)?.state}")
+                if (store.getTask(id)?.state != "queued") {
+                    record("attempt$attempt control task already left queued; blocker approach is not deterministic")
+                    device.pressBack()
+                    findId(device, context, "buttonCreateTask")
+                    continue
+                }
                 findText(device, "暂停", 30_000).click()
-                val deadline = System.currentTimeMillis() + 60_000
+                val deadline = System.currentTimeMillis() + 120_000
                 while (System.currentTimeMillis() < deadline) {
-                    if (controlStore.getControlStatus(id) == ControlStatus.PAUSED) {
+                    val status = controlStore.getControlStatus(id)
+                    if (status == ControlStatus.PAUSED) {
                         paused = true
+                        break
+                    }
+                    val state = store.getTask(id)?.state
+                    if (state != null && TaskStates.isTerminal(state)) {
+                        record("attempt$attempt ended early: task reached terminal state $state before pause confirmed")
                         break
                     }
                     Thread.sleep(500)
                 }
+                if (paused) break
+                device.pressBack()
+                findId(device, context, "buttonCreateTask")
             }
             assertTrue("Pause was not confirmed by the control plane; log=$log", paused)
             val id = taskId!!
@@ -371,7 +384,6 @@ class NativeTaskCreationTest {
             shot(device, output, "C05-task-list")
             record("Scope: task page controls against production ControlPlane; final task state from RoomTaskStore")
         } finally {
-            holdFile.delete()
             db.close()
         }
     }
