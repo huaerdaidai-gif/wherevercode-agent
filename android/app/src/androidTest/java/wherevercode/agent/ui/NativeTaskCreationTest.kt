@@ -262,7 +262,7 @@ class NativeTaskCreationTest {
             }
             val record = store.getTask(taskId)
             File(output, "execution-record.txt").writeText(
-                "taskId=$taskId\ntransitions=${transitions.joinToString(",")}\n" +
+                "taskId=$taskId\nattemptId=${record?.attemptId}\ntransitions=${transitions.joinToString(",")}\n" +
                     "finalState=${finalState ?: record?.state}\n" +
                     "result=${record?.result?.replace('\n', ' ')?.take(400)}\n" +
                     "error=${record?.error?.replace('\n', ' ')?.take(400)}\n" +
@@ -270,6 +270,9 @@ class NativeTaskCreationTest {
                     "No brain is configured there, so a failed outcome carrying the real reason is the honest result; " +
                     "approval is not asserted (no brain, no tool call).\n",
             )
+            // The visible detail must catch up with the durable runner result without a manual refresh.
+            val expectedLabel = KanbanStatus.labelOf(requireNotNull(finalState))
+            findText(device, "状态：$expectedLabel", 60_000)
             shot(device, output, "C06-task-detail-result")
             assertNotNull("Task never reached a terminal or review outcome; transitions=$transitions", finalState)
             // Claim proof (GPT review point 6): the persisted

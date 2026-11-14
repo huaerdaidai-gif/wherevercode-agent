@@ -599,6 +599,17 @@ class MainActivity : AppCompatActivity() {
     /** 阶段 3（U3/批 3a）：任务详情浮层（复用设置浮层的宿主模式）。 */
     private var taskDetailVisible = false
     private var taskDetailTaskId: String? = null
+    private val taskDetailHandler = Handler(Looper.getMainLooper())
+    private var taskDetailRequestGeneration = 0
+    private var lastTaskDetailSnapshot: List<Any?>? = null
+    private val taskDetailRefresh = Runnable {
+        val id = taskDetailTaskId
+        if (id != null && taskDetailVisible &&
+            lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            openTaskDetail(id)
+        }
+    }
+
     private var pendingTaskDetailId: String? = null
     /** 2026-11-11（事件密度）：任务屏“运行事件”分组的展开状态（刷新后不丢）。 */
     private val expandedEventGroupKeys = mutableSetOf<String>()
@@ -1208,6 +1219,7 @@ class MainActivity : AppCompatActivity() {
     private fun showV5Hub(parent: String) {
         if (parent !in wherevercode.agent.ui.flagship.V5Navigation.parents) return
         hideV5Hub()
+        hideTaskDetail()
         // Stop background UI polling while its screen is covered; execution keeps running.
         stopConsoleTicker()
         stopTeamChannelFeed()
@@ -6355,11 +6367,15 @@ class MainActivity : AppCompatActivity() {
             toast("大脑还在加载，请稍候再打开详情。")
             return
         }
+        val opening = !taskDetailVisible || taskDetailTaskId != taskId
+        if (opening) lastTaskDetailSnapshot = null
+        val requestGeneration = ++taskDetailRequestGeneration
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
         taskDetailTaskId = taskId
         taskDetailVisible = true
         screenSettings.visibility = View.GONE
         taskDetailController.root.visibility = View.VISIBLE
-        taskDetailController.root.post { taskDetailController.root.fullScroll(View.FOCUS_UP) }
+        if (opening) taskDetailController.root.post { taskDetailController.root.fullScroll(View.FOCUS_UP) }
         Thread {
             val task = try {
                 components.taskStore.getTask(taskId)
@@ -6420,7 +6436,7 @@ class MainActivity : AppCompatActivity() {
                 emptyList()
             }
             runOnUiThread {
-                if (!taskDetailVisible || taskDetailTaskId != taskId || isFinishing || isDestroyed) {
+                if (!taskDetailVisible || taskDetailTaskId != taskId || requestGeneration != taskDetailRequestGeneration || isFinishing || isDestroyed) {
                     return@runOnUiThread
                 }
                 if (task == null) {
@@ -6428,18 +6444,32 @@ class MainActivity : AppCompatActivity() {
                     hideTaskDetail()
                     return@runOnUiThread
                 }
-                taskDetailController.render(
-                    task, steps, events, approvals, history.size, artifactPaths, taskEvents,
-                    pipeline = pipelineView,
-                    onPipelineAction = { action -> handlePipelineAction(taskId, action, artifactPaths) },
-                    autoDecisions = autoDecisions,
-                    controlStatus = controlStatus,
-                )
+                val snapshot = listOf(task, steps, events, approvals, history.size, artifactPaths,
+                    taskEvents, pipelineView, autoDecisions, controlStatus)
+                if (snapshot != lastTaskDetailSnapshot) {
+                    val scrollY = if (opening) 0 else taskDetailController.root.scrollY
+                    taskDetailController.render(
+                        task, steps, events, approvals, history.size, artifactPaths, taskEvents,
+                        pipeline = pipelineView,
+                        onPipelineAction = { action -> handlePipelineAction(taskId, action, artifactPaths) },
+                        autoDecisions = autoDecisions,
+                        controlStatus = controlStatus,
+                    )
+                    lastTaskDetailSnapshot = snapshot
+                    taskDetailController.root.post { taskDetailController.root.scrollTo(0, scrollY) }
+                }
+                // One read at a time; only visible, resumed details keep polling.
+                if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                    taskDetailHandler.postDelayed(taskDetailRefresh, 2000)
+                }
             }
         }.start()
     }
 
     private fun hideTaskDetail() {
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
+        taskDetailRequestGeneration++
+        lastTaskDetailSnapshot = null
         taskDetailVisible = false
         taskDetailTaskId = null
         if (::taskDetailController.isInitialized) {
@@ -11272,11 +11302,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (taskDetailVisible) taskDetailHandler.post(taskDetailRefresh)
         // 阶段 3（U4）：回前台时补一次审批 ticker（审批可能在后台到达）。
         pokeApprovalTicker()
     }
 
+    override fun onPause() {
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
+        taskDetailRequestGeneration++
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
+        taskDetailRequestGeneration++
         // The turn lives in ChatViewModel, not the Activity: detaching the
         // gate must not stop an in-flight turn during a theme/config change.
         // A permanently finishing Activity lets ViewModel.onCleared() stop it.

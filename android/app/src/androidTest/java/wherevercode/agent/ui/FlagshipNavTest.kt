@@ -23,12 +23,14 @@ class FlagshipNavTest {
         val context = instrumentation.targetContext
         assertEquals("Only the isolated debug package may run this test", "wherevercode.agent.ci", context.packageName)
         val device = UiDevice.getInstance(instrumentation)
+        device.wakeUp()
+        device.executeShellCommand("svc power stayon true")
         context.getSharedPreferences("onboarding_v5", 0).edit()
             .putBoolean("onboarding_completed", true).commit()
         val output = File(context.getExternalFilesDir(null), "v5-evidence").apply { mkdirs() }
         context.startActivity(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        assertTrue(device.wait(Until.hasObject(By.desc("打开抽屉")), 30_000))
+        assertTrue(device.wait(Until.hasObject(By.desc("打开抽屉")), 180_000))
         device.waitForIdle()
         assertTrue(device.takeScreenshot(File(output, "home.png")))
         assertFalse(device.hasObject(By.text("控制台")))

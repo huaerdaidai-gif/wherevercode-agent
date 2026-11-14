@@ -30,6 +30,27 @@ class TaskControlViewTest {
         assertFalse(labels.any { it == "执行控制：任务已结束" })
     }
 
+    @Test fun refreshedTaskStatusKeepsExpandedLogsAndClearsOldState() {
+        val app = RuntimeEnvironment.getApplication()
+        val controller = TaskDetailController(app, {}, {}, {}, { View(app) })
+        fun render(task: TaskRecord) = controller.render(task, emptyList(), emptyList(), emptyList(), 0, emptyList())
+        fun views(view: View): List<TextView> = when (view) {
+            is TextView -> listOf(view)
+            is ViewGroup -> (0 until view.childCount).flatMap { views(view.getChildAt(it)) }
+            else -> emptyList()
+        }
+        val queued = TaskRecord(taskId = "changing", state = "queued")
+        render(queued)
+        views(controller.root).first { it.text.startsWith("日志与回执") }.performClick()
+        render(queued.copy(state = "failed", error = "brain_not_configured", version = 2))
+        val labels = views(controller.root).map { it.text.toString() }
+        assertTrue(labels.contains("状态：失败"))
+        assertFalse(labels.contains("状态：待办"))
+        assertTrue(labels.any { it.startsWith("日志与回执") && it.contains("收起") })
+        render(TaskRecord(taskId = "another"))
+        assertTrue(views(controller.root).any { it.text.startsWith("日志与回执") && it.text.contains("展开") })
+    }
+
     @Test fun nativeManifestEntryInvokesItsCallback() {
         val app = RuntimeEnvironment.getApplication()
         var opened = false
