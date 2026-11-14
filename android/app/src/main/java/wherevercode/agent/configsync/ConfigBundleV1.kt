@@ -6,16 +6,20 @@ import org.json.JSONObject
 /** Explicit, allowlisted wire DTO. Never serialize app/store models by reflection. */
 data class ConfigBundleV1(
     val bundleId: String,
+    val bundleNonce: String,
     val createdAtEpochSeconds: Long,
     val sourcePlatform: String,
+    val secretsPolicy: String = SECRETS_POLICY_NON_SECRET_ONLY,
     val payload: BundlePayloadV1,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("format", FORMAT)
         put("schemaVersion", SCHEMA_VERSION)
         put("bundleId", bundleId)
+        put("bundleNonce", bundleNonce)
         put("createdAtEpochSeconds", createdAtEpochSeconds)
         put("sourcePlatform", sourcePlatform)
+        put("secretsPolicy", secretsPolicy)
         put("payload", payload.toJson())
     }
 
@@ -24,6 +28,7 @@ data class ConfigBundleV1(
     companion object {
         const val FORMAT = "WCA-ConfigBundle"
         const val SCHEMA_VERSION = 1
+        const val SECRETS_POLICY_NON_SECRET_ONLY = "nonSecretOnly"
 
         fun fromJsonString(json: String): ConfigBundleV1 = fromJson(JSONObject(json))
 
@@ -33,8 +38,12 @@ data class ConfigBundleV1(
             val payload = json.optJSONObject("payload") ?: error("Missing payload")
             return ConfigBundleV1(
                 bundleId = json.requiredString("bundleId"),
-                createdAtEpochSeconds = json.getLong("createdAtEpochSeconds"),
+                bundleNonce = json.requiredString("bundleNonce"),
+                createdAtEpochSeconds = json.requiredLong("createdAtEpochSeconds"),
                 sourcePlatform = json.requiredString("sourcePlatform"),
+                secretsPolicy = json.requiredString("secretsPolicy").also {
+                    require(it == SECRETS_POLICY_NON_SECRET_ONLY) { "Unsupported secrets policy" }
+                },
                 payload = BundlePayloadV1.fromJson(payload),
             )
         }
@@ -65,7 +74,7 @@ data class BundlePayloadV1(
             projects = json.array("projects") { BundleProjectV1.fromJson(it) },
             brains = json.array("brains") { BundleBrainV1.fromJson(it) },
             currentBrainId = json.optionalString("currentBrainId"),
-            appSettings = BundleAppSettingsV1.fromJson(json.optJSONObject("appSettings") ?: JSONObject()),
+            appSettings = BundleAppSettingsV1.fromJson(json.getJSONObject("appSettings")),
         )
     }
 }
@@ -83,7 +92,7 @@ data class BundleDeviceV1(
     companion object {
         fun fromJson(json: JSONObject) = BundleDeviceV1(
             json.requiredString("sourceDeviceId"), json.requiredString("displayName"),
-            json.requiredString("host"), json.getInt("port"),
+            json.requiredString("host"), json.requiredInt("port"),
         ).also { require(json.requiredString("pairingState") == "reauthorizationRequired") }
     }
 }
@@ -112,7 +121,7 @@ data class BundleAgentV1(
             agentId = json.requiredString("agentId"), displayName = json.requiredString("displayName"),
             kind = json.requiredString("kind"), access = json.requiredString("access"),
             brainKind = json.requiredString("brainKind"), adapterId = json.requiredString("adapterId"),
-            enabled = json.getBoolean("enabled"), capabilities = json.stringArray("capabilities"),
+            enabled = json.requiredBoolean("enabled"), capabilities = json.stringArray("capabilities"),
             authorizedProjectIds = json.stringArray("authorizedProjectIds"), deviceId = json.optionalString("deviceId"),
         ).also { require(json.requiredString("credentialState") == "reauthorizationRequired") }
     }
@@ -136,7 +145,7 @@ data class BundleProjectV1(
     }
     companion object {
         fun fromJson(j: JSONObject) = BundleProjectV1(j.requiredString("projectId"), j.requiredString("name"),
-            j.optionalString("repoUrl"), j.optString("defaultBranch", "main"),
+            j.optionalString("repoUrl"), j.requiredString("defaultBranch"),
             j.array("homes") { BundleProjectHomeV1.fromJson(it) })
     }
 }
@@ -185,7 +194,7 @@ private fun JSONObject.putNullable(key: String, value: String?) { if (value != n
 private fun List<String>.toJsonArray() = JSONArray().also { array -> forEach(array::put) }
 private fun <T> List<T>.toJsonArray(encode: (T) -> JSONObject) = JSONArray().also { array -> forEach { array.put(encode(it)) } }
 private fun JSONObject.stringArray(key: String): List<String> {
-    val array = optJSONArray(key) ?: return emptyList()
+    val array = getJSONArray(key)
     return (0 until array.length()).map { index ->
         val value = array.get(index)
         require(value is String) { "Invalid string array item: $key" }
@@ -193,6 +202,16 @@ private fun JSONObject.stringArray(key: String): List<String> {
     }
 }
 private fun <T> JSONObject.array(key: String, decode: (JSONObject) -> T): List<T> {
-    val array = optJSONArray(key) ?: return emptyList()
+    val array = getJSONArray(key)
     return (0 until array.length()).map { index -> decode(array.getJSONObject(index)) }
+}
+private fun JSONObject.requiredInt(key: String): Int = get(key).let { value ->
+    require(value is Int || value is Long) { "Invalid integer field: $key" }
+    (value as Number).toLong().also { require(it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) { "Integer out of range: $key" } }.toInt()
+}
+private fun JSONObject.requiredLong(key: String): Long = get(key).let { value ->
+    require(value is Int || value is Long) { "Invalid integer field: $key" }; (value as Number).toLong()
+}
+private fun JSONObject.requiredBoolean(key: String): Boolean = get(key).let { value ->
+    require(value is Boolean) { "Invalid boolean field: $key" }; value
 }

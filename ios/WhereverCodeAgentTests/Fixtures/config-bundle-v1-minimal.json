@@ -2,8 +2,10 @@
   "format": "WCA-ConfigBundle",
   "schemaVersion": 1,
   "bundleId": "fixture-bundle-0001",
+  "bundleNonce": "fixture-nonce-0001",
   "createdAtEpochSeconds": 1794708000,
   "sourcePlatform": "android",
+  "secretsPolicy": "nonSecretOnly",
   "payload": {
     "devices": [
       {

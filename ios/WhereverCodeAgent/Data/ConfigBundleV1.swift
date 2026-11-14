@@ -4,20 +4,26 @@ import Foundation
 public struct ConfigBundleV1: Codable, Equatable {
     public static let formatName = "WCA-ConfigBundle"
     public static let currentSchemaVersion = 1
+    public static let nonSecretOnlyPolicy = "nonSecretOnly"
 
     public let format: String
     public let schemaVersion: Int
     public let bundleId: String
+    public let bundleNonce: String
     public let createdAtEpochSeconds: Int64
     public let sourcePlatform: String
+    public let secretsPolicy: String
     public let payload: BundlePayloadV1
 
-    public init(bundleId: String, createdAtEpochSeconds: Int64, sourcePlatform: String, payload: BundlePayloadV1) {
+    public init(bundleId: String, bundleNonce: String, createdAtEpochSeconds: Int64, sourcePlatform: String,
+                secretsPolicy: String = ConfigBundleV1.nonSecretOnlyPolicy, payload: BundlePayloadV1) {
         self.format = Self.formatName
         self.schemaVersion = Self.currentSchemaVersion
         self.bundleId = bundleId
+        self.bundleNonce = bundleNonce
         self.createdAtEpochSeconds = createdAtEpochSeconds
         self.sourcePlatform = sourcePlatform
+        self.secretsPolicy = secretsPolicy
         self.payload = payload
     }
 
@@ -26,6 +32,7 @@ public struct ConfigBundleV1: Codable, Equatable {
         guard value.format == formatName, value.schemaVersion == currentSchemaVersion else {
             throw BundleV1Error.unsupportedFormatOrVersion
         }
+        guard value.secretsPolicy == nonSecretOnlyPolicy else { throw BundleV1Error.unsupportedFormatOrVersion }
         return value
     }
 

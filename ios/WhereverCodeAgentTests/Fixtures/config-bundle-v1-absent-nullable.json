@@ -1,0 +1,17 @@
+{
+  "format": "WCA-ConfigBundle",
+  "schemaVersion": 1,
+  "bundleId": "fixture-absent-nullable",
+  "bundleNonce": "fixture-nonce-absent-1",
+  "createdAtEpochSeconds": 1794708000,
+  "sourcePlatform": "ios",
+  "secretsPolicy": "nonSecretOnly",
+  "payload": {
+    "devices": [],
+    "agents": [],
+    "projects": [{"projectId":"nullable-project","name":"Nullable","repoUrl":null,"defaultBranch":"main","homes":[]}],
+    "brains": [],
+    "currentBrainId": null,
+    "appSettings": {}
+  }
+}

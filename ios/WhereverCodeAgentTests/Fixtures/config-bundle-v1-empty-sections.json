@@ -1,0 +1,17 @@
+{
+  "format": "WCA-ConfigBundle",
+  "schemaVersion": 1,
+  "bundleId": "fixture-empty-sections",
+  "bundleNonce": "fixture-nonce-empty-1",
+  "createdAtEpochSeconds": 1794708000,
+  "sourcePlatform": "android",
+  "secretsPolicy": "nonSecretOnly",
+  "payload": {
+    "devices": [],
+    "agents": [],
+    "projects": [],
+    "brains": [],
+    "currentBrainId": null,
+    "appSettings": {}
+  }
+}

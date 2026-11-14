@@ -13,6 +13,8 @@ class ConfigBundleV1Test {
         val input = ConfigBundleV1.fromJsonString(fixture())
         assertEquals(ConfigBundleV1.FORMAT, input.toJson().getString("format"))
         assertEquals("fixture-bundle-0001", input.bundleId)
+        assertEquals("fixture-nonce-0001", input.bundleNonce)
+        assertEquals(ConfigBundleV1.SECRETS_POLICY_NON_SECRET_ONLY, input.secretsPolicy)
         assertEquals("device-demo-1", input.payload.devices.single().sourceDeviceId)
         assertEquals("agent-demo", input.payload.agents.single().agentId)
         assertEquals("demo-project", input.payload.projects.single().projectId)

@@ -36,6 +36,8 @@
 		); runOnlyForDeploymentPostprocessing = 0; };
 		D90000000000000000000005 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
 			D90000000000000000000004,
+			D91000000000000000000009,
+			D9100000000000000000000A,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		1D1884016C4723C9F758A1A1 = {isa = XCBuildConfiguration; buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -76,6 +78,9 @@
 			AF29026DEB46CEBD6478E0B0,
 			D90000000000000000000002,
 			D90000000000000000000003,
+			D91000000000000000000003,
+			D91000000000000000000007,
+			D91000000000000000000008,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
 		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
@@ -86,6 +91,16 @@
 		D90000000000000000000001 = {isa = PBXBuildFile; fileRef = D90000000000000000000006; };
 		D90000000000000000000004 = {isa = PBXBuildFile; fileRef = D90000000000000000000003; };
 		D90000000000000000000007 = {isa = PBXBuildFile; fileRef = D90000000000000000000002; };
+		D91000000000000000000001 = {isa = PBXBuildFile; fileRef = D91000000000000000000006; };
+		D91000000000000000000002 = {isa = PBXBuildFile; fileRef = D91000000000000000000003; };
+		D91000000000000000000004 = {isa = PBXBuildFile; fileRef = D91000000000000000000007; };
+		D91000000000000000000005 = {isa = PBXBuildFile; fileRef = D91000000000000000000008; };
+		D91000000000000000000009 = {isa = PBXBuildFile; fileRef = D91000000000000000000007; };
+		D9100000000000000000000A = {isa = PBXBuildFile; fileRef = D91000000000000000000008; };
+		D91000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigImportValidatorTests.swift; sourceTree = "<group>"; };
+		D91000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigImportValidator.swift; sourceTree = "<group>"; };
+		D91000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = text.json; path = Fixtures/config-bundle-v1-absent-nullable.json; sourceTree = "<group>"; };
+		D91000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = text.json; path = Fixtures/config-bundle-v1-empty-sections.json; sourceTree = "<group>"; };
 		D90000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigBundleV1Tests.swift; sourceTree = "<group>"; };
 		D90000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = text.json; path = Fixtures/config-bundle-v1-minimal.json; sourceTree = "<group>"; };
 		D90000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigBundleV1.swift; sourceTree = "<group>"; };
@@ -163,6 +178,7 @@
 			DA0000000000000000000007,
 			DA0000000000000000000009,
 			D90000000000000000000001,
+			D91000000000000000000001,
 			DA000000000000000000000B,
 			DA000000000000000000000D,
 			DA000000000000000000000F,
@@ -282,6 +298,7 @@
 			844C8F533FE271C19FE543DF,
 			7667F7CA498D0ED82757FFC2,
 			D90000000000000000000007,
+			D91000000000000000000002,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
@@ -428,6 +445,7 @@
 			DA000000000000000000000E,
 			DA0000000000000000000010,
 			D90000000000000000000006,
+			D91000000000000000000006,
 		); name = Data; path = Data; sourceTree = "<group>"; };
 		DA000000000000000000CACE = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelListCache.swift; sourceTree = "<group>"; };
 		DA000000000000000000CACF = {isa = PBXBuildFile; fileRef = DA000000000000000000CACE; };

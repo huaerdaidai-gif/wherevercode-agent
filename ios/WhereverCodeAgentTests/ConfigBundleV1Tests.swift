@@ -13,6 +13,8 @@ final class ConfigBundleV1Tests: XCTestCase {
         XCTAssertEqual(input.format, ConfigBundleV1.formatName)
         XCTAssertEqual(input.schemaVersion, 1)
         XCTAssertEqual(input.bundleId, "fixture-bundle-0001")
+        XCTAssertEqual(input.bundleNonce, "fixture-nonce-0001")
+        XCTAssertEqual(input.secretsPolicy, ConfigBundleV1.nonSecretOnlyPolicy)
         XCTAssertEqual(input.payload.devices.first?.sourceDeviceId, "device-demo-1")
         XCTAssertEqual(input.payload.agents.first?.agentId, "agent-demo")
         XCTAssertEqual(input.payload.projects.first?.projectId, "demo-project")
