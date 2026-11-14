@@ -1,71 +1,71 @@
 entry_id,screen_id,新设计UI入口,Android组件,真实API或事件,权限,验证用例组,状态,缺口
-U01,S01,打开抽屉,HomeScreenController / DrawerView,EntryRegistry / DrawerRouter,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
-U02,S01,新对话,HomeScreenController / DrawerView,EntryRegistry / DrawerRouter,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
-U03,S01,选择建议,HomeScreenController / DrawerView,EntryRegistry / DrawerRouter,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
-U04,S01,切换主题,HomeScreenController / DrawerView,EntryRegistry / DrawerRouter,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
-U05,S02,发送闲聊,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
-U06,S02,显式创建任务,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
-U07,S02,选择执行者,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
-U08,S02,绑定项目,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
-U09,S02,查看工具流,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
-U10,S02,停止当前轮次,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
-U11,S03,历史列表,SessionListController,ConversationStore / SessionLedger,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
-U12,S03,搜索会话,SessionListController,ConversationStore / SessionLedger,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
-U13,S03,恢复会话,SessionListController,ConversationStore / SessionLedger,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
-U14,S04,项目列表,ProjectScreenController,ProjectStore / GitHostApiClient,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
-U15,S04,导入 Git 仓库,ProjectScreenController,ProjectStore / GitHostApiClient,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
-U16,S04,打开本地目录,ProjectScreenController,ProjectStore / GitHostApiClient,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
-U17,S04,选择项目,ProjectScreenController,ProjectStore / GitHostApiClient,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
-U18,S05,浏览文件,WorkspaceBrowser,WorkspaceGuard / WorkspaceAdapter,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
-U19,S05,读取文件,WorkspaceBrowser,WorkspaceGuard / WorkspaceAdapter,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
-U20,S05,编辑文件,WorkspaceBrowser,WorkspaceGuard / WorkspaceAdapter,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
-U21,S05,查看变更,WorkspaceBrowser,WorkspaceGuard / WorkspaceAdapter,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
-U22,S05,保留或撤销写轮次,WorkspaceBrowser,WorkspaceGuard / WorkspaceAdapter,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
-U23,S06,任务列表,MainActivity / screen_tasks,TaskStore / TaskScheduler,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
-U24,S06,筛选状态,MainActivity / screen_tasks,TaskStore / TaskScheduler,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
-U25,S06,打开任务详情,MainActivity / screen_tasks,TaskStore / TaskScheduler,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
-U26,S06,重试终态任务,MainActivity / screen_tasks,TaskStore / TaskScheduler,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
-U27,S07,暂停任务,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
-U28,S07,继续任务,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
-U29,S07,停止任务,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
-U30,S07,修改目标,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
-U31,S07,删除任务记录,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
-U32,S07,查看状态轨迹,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
-U33,S08,控制台总览,ConsoleScreenController,ConsoleSnapshot / ConsoleWsFeed,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
-U34,S08,实时日志,ConsoleScreenController,ConsoleSnapshot / ConsoleWsFeed,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
-U35,S08,断线状态,ConsoleScreenController,ConsoleSnapshot / ConsoleWsFeed,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
-U36,S08,刷新快照,ConsoleScreenController,ConsoleSnapshot / ConsoleWsFeed,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
-U37,S09,成果列表,ResultsScreenController,ResultsAggregation / PipelineOrchestrator,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
-U38,S09,打开产物,ResultsScreenController,ResultsAggregation / PipelineOrchestrator,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
-U39,S09,机械检查,ResultsScreenController,ResultsAggregation / PipelineOrchestrator,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
-U40,S09,批准审查,ResultsScreenController,ResultsAggregation / PipelineOrchestrator,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
-U41,S09,打回返工,ResultsScreenController,ResultsAggregation / PipelineOrchestrator,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
-U42,S10,待审批,AndroidApprovalGate / ConsoleScreenController,ApprovalBroker / ExecutionFence,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
-U43,S10,批准一次,AndroidApprovalGate / ConsoleScreenController,ApprovalBroker / ExecutionFence,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
-U44,S10,拒绝操作,AndroidApprovalGate / ConsoleScreenController,ApprovalBroker / ExecutionFence,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
-U45,S10,审批历史,AndroidApprovalGate / ConsoleScreenController,ApprovalBroker / ExecutionFence,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
-U46,S11,发现本机 Agent,AgentScreenController,AgentDiscovery / MemberManager / RemoteTaskPump,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
-U47,S11,添加成员,AgentScreenController,AgentDiscovery / MemberManager / RemoteTaskPump,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
-U48,S11,选择成员,AgentScreenController,AgentDiscovery / MemberManager / RemoteTaskPump,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
-U49,S11,查看执行能力,AgentScreenController,AgentDiscovery / MemberManager / RemoteTaskPump,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
-U50,S12,设备列表,AgentScreenController / MainActivity,PairingClient / RemoteDeviceStore / HandClient,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
-U51,S12,发起配对,AgentScreenController / MainActivity,PairingClient / RemoteDeviceStore / HandClient,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
-U52,S12,确认配对,AgentScreenController / MainActivity,PairingClient / RemoteDeviceStore / HandClient,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
-U53,S12,授权项目目录,AgentScreenController / MainActivity,PairingClient / RemoteDeviceStore / HandClient,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
-U54,S13,频道列表,TeamChannelController,TeamChannel / ChannelAgentRelay / WS,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
-U55,S13,发送建议消息,TeamChannelController,TeamChannel / ChannelAgentRelay / WS,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
-U56,S13,查看成员回复,TeamChannelController,TeamChannel / ChannelAgentRelay / WS,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
-U57,S14,添加模型,screen_settings / BrainLoginRows,BrainProviderRegistry / OAuthEngine / GenericOpenAiApiClient,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
-U58,S14,登录账号,screen_settings / BrainLoginRows,BrainProviderRegistry / OAuthEngine / GenericOpenAiApiClient,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
-U59,S14,切换模型,screen_settings / BrainLoginRows,BrainProviderRegistry / OAuthEngine / GenericOpenAiApiClient,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
-U60,S14,注销账号,screen_settings / BrainLoginRows,BrainProviderRegistry / OAuthEngine / GenericOpenAiApiClient,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
-U61,S15,MCP 列表,McpPluginScreenController,ExtensionRegistry / McpServerManager / McpDispatchProtocol,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
-U62,S15,添加 MCP,McpPluginScreenController,ExtensionRegistry / McpServerManager / McpDispatchProtocol,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
-U63,S15,连接 MCP,McpPluginScreenController,ExtensionRegistry / McpServerManager / McpDispatchProtocol,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
-U64,S15,停用 MCP,McpPluginScreenController,ExtensionRegistry / McpServerManager / McpDispatchProtocol,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
-U65,S15,扩展 manifest,McpPluginScreenController,ExtensionRegistry / McpServerManager / McpDispatchProtocol,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
-U66,S16,新建自动化规则,MISSING（新设计）,TaskScheduler / TaskRetry（仅任务能力）,默认关闭；去重/预算/审批,TaskSchedulerTest / TaskRetryTest,MISSING,无统一规则 UI、定时/事件入口和耐久唤醒账本
-U67,S16,启停唤醒,MISSING（新设计）,TaskScheduler / TaskRetry（仅任务能力）,默认关闭；去重/预算/审批,TaskSchedulerTest / TaskRetryTest,MISSING,无统一规则 UI、定时/事件入口和耐久唤醒账本
-U68,S17,网络路由与离线队列,MISSING（统一页）；设备连接表单已有,DirectTransport / LanTransport / HandClient,用户选端点 / TLS / 配对,HandClientTest / DirectTransportTest,MISSING,本地/LAN 基础存在；VPN 依赖外部网络，HTTPS 中继/离线队列未完整实现
-U69,S18,版本与帮助,screen_settings / OnboardingController,AutonomyStore / AppUpdateChecker / VersionInfo,更新安装系统确认,AppUpdateTest / VersionInfoTest,PARTIAL,版本与迁移保留；不改生产配置/签名/发布
-U70,S18,更新安装检查,screen_settings / OnboardingController,AutonomyStore / AppUpdateChecker / VersionInfo,更新安装系统确认,AppUpdateTest / VersionInfoTest,PARTIAL,版本与迁移保留；不改生产配置/签名/发布
+U01,S01,打开抽屉,HomeScreenController / DrawerView,DrawerView / DrawerRouter.route,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
+U02,S01,新对话,HomeScreenController / DrawerView,MainActivity.showEntry(ID_NEW_CONVERSATION),沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
+U03,S01,选择建议,HomeScreenController / DrawerView,EntryRegistry.homeSuggestions → 填输入框（不执行）,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
+U04,S01,切换主题,HomeScreenController / DrawerView,MainActivity.cycleTheme / preferences,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
+U05,S02,发送闲聊,ChatViewModel / ChatTurnView,ChatViewModel.send → BrainEngine.chat / BrainEvent Flow,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+U06,S02,显式创建任务,ChatViewModel / ChatTurnView,ChatTaskDispatcher.dispatch → TaskStore.createTask,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+U07,S02,选择执行者,ChatViewModel / ChatTurnView,AgentStore.getAgent / AgentChatRouter,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+U08,S02,绑定项目,ChatViewModel / ChatTurnView,ChatViewModel.currentProjectId / ProjectStore,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+U09,S02,查看工具流,ChatViewModel / ChatTurnView,BrainEvent.ToolCall / ToolResult → ChatTimeline,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+U10,S02,停止当前轮次,ChatViewModel / ChatTurnView,ChatViewModel.stop / TurnController / remote receipt（部分路径待联测）,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+U11,S03,历史列表,SessionListController,ConversationStore / SessionListController,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
+U12,S03,搜索会话,SessionListController,SessionListFilter / ConversationStore,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
+U13,S03,恢复会话,SessionListController,ChatSessionRestore / SessionLedger,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
+U14,S04,项目列表,ProjectScreenController,ProjectStore.listProjects / ProjectScreenController.showProjectList,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
+U15,S04,导入 Git 仓库,ProjectScreenController,GitHostApiClient / ProjectStore（用户授权）,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
+U16,S04,打开本地目录,ProjectScreenController,ProjectScreenController.openLocalFolder / WorkspaceGuard,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
+U17,S04,选择项目,ProjectScreenController,ProjectStore / ProjectScreenController,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
+U18,S05,浏览文件,WorkspaceBrowser,WorkspaceBrowser / WorkspaceAdapter.list,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
+U19,S05,读取文件,WorkspaceBrowser,ProjectScreenController.openFileAt / WorkspaceAdapter.read,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
+U20,S05,编辑文件,WorkspaceBrowser,ProjectScreenController.saveEdit / WorkspaceAdapter.write,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
+U21,S05,查看变更,WorkspaceBrowser,WorkspaceEdit / LineDiff,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
+U22,S05,保留或撤销写轮次,WorkspaceBrowser,WorkspaceAdapter.keep / undo,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
+U23,S06,任务列表,MainActivity / screen_tasks,TaskStore.listTasks,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
+U24,S06,筛选状态,MainActivity / screen_tasks,TaskLibraryGrouping / KanbanStatus,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
+U25,S06,打开任务详情,MainActivity / screen_tasks,MainActivity.openTaskDetail / TaskStepStore / TaskEventStore,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
+U26,S06,重试终态任务,MainActivity / screen_tasks,TaskRetry.buildRetryCopy → TaskStore.createTask,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
+U27,S07,暂停任务,TaskDetailController,TaskControlActions.request(PAUSE) → ControlPlane.pause,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,SOURCE-CHANGED,本轮新增回归；真实设备回执联测待完成，活动目标不直接替换
+U28,S07,继续任务,TaskDetailController,TaskControlActions.request(RESUME) → ControlPlane.resume,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,SOURCE-CHANGED,本轮新增回归；真实设备回执联测待完成，活动目标不直接替换
+U29,S07,停止任务,TaskDetailController,TaskControlActions.request(STOP) → ControlPlane.stop,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,SOURCE-CHANGED,本轮新增回归；真实设备回执联测待完成，活动目标不直接替换
+U30,S07,修改目标,TaskDetailController,TaskControlActions.request(CHANGE_GOAL) → ControlPlane.retarget（仅未认领）,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,SOURCE-CHANGED,本轮新增回归；真实设备回执联测待完成，活动目标不直接替换
+U31,S07,删除任务记录,TaskDetailController,TaskControlActions.deleteAfterConfirmedStop → TaskStore.deleteTask,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,SOURCE-CHANGED,本轮新增回归；真实设备回执联测待完成，活动目标不直接替换
+U32,S07,查看状态轨迹,TaskDetailController,TaskEventStore.listEvents / ControlPlane.getControlStatus,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,SOURCE-CHANGED,本轮新增回归；真实设备回执联测待完成，活动目标不直接替换
+U33,S08,控制台总览,ConsoleScreenController,ConsoleSnapshot.build,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
+U34,S08,实时日志,ConsoleScreenController,ConsoleWsFeed / ConsoleWsClient,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
+U35,S08,断线状态,ConsoleScreenController,ConsoleWsFeed / last snapshot,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
+U36,S08,刷新快照,ConsoleScreenController,MainActivity.refreshConsole,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
+U37,S09,成果列表,ResultsScreenController,ResultsAggregation / ResultsScreenController,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
+U38,S09,打开产物,ResultsScreenController,MainActivity.openDetailFile / WorkspaceGuard,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
+U39,S09,机械检查,ResultsScreenController,PipelineOrchestrator.runMechanicalChecks（UI test verdict=NOT_RUN）,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
+U40,S09,批准审查,ResultsScreenController,PipelineOrchestrator.recordReview(APPROVE),产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
+U41,S09,打回返工,ResultsScreenController,PipelineOrchestrator / TaskScheduler.requestRework,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
+U42,S10,待审批,AndroidApprovalGate / ConsoleScreenController,AndroidApprovalGate.pendingApproval,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
+U43,S10,批准一次,AndroidApprovalGate / ConsoleScreenController,AndroidApprovalGate / ApprovalBroker（用户确认）,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
+U44,S10,拒绝操作,AndroidApprovalGate / ConsoleScreenController,AndroidApprovalGate.rejectPending,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
+U45,S10,审批历史,AndroidApprovalGate / ConsoleScreenController,AndroidApprovalGate.approvalHistory,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
+U46,S11,发现本机 Agent,AgentScreenController,AgentDiscovery.availableAgents / version probe,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
+U47,S11,添加成员,AgentScreenController,MemberManager / AgentStore,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
+U48,S11,选择成员,AgentScreenController,MemberManager / AgentChatRouter,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
+U49,S11,查看执行能力,AgentScreenController,AgentDiscovery / AgentRecord capabilities,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
+U50,S12,设备列表,AgentScreenController / MainActivity,RemoteDeviceStore / DeviceListFormat,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
+U51,S12,发起配对,AgentScreenController / MainActivity,PairingClient / hello,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
+U52,S12,确认配对,AgentScreenController / MainActivity,PairingStore / PairingState.CONFIRMED,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
+U53,S12,授权项目目录,AgentScreenController / MainActivity,HandClient action=authorize_project_folder / 凭证 scope,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
+U54,S13,频道列表,TeamChannelController,TeamChannel / TeamChannelController,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
+U55,S13,发送建议消息,TeamChannelController,MainActivity.postTeamChannelMessage / ChannelAgentRelay（不建任务）,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
+U56,S13,查看成员回复,TeamChannelController,TeamChannel / WS,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
+U57,S14,添加模型,screen_settings / BrainLoginRows,BrainConfigStore / GenericOpenAiBrainAdapter,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
+U58,S14,登录账号,screen_settings / BrainLoginRows,OAuthEngine / SiwcAuthManager / Keystore,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
+U59,S14,切换模型,screen_settings / BrainLoginRows,BrainProviderRegistry / BrainConfigStore,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
+U60,S14,注销账号,screen_settings / BrainLoginRows,token store clear,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
+U61,S15,MCP 列表,McpPluginScreenController,McpServerManager.servers,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
+U62,S15,添加 MCP,McpPluginScreenController,McpServersConfig / ExtensionRegistry,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
+U63,S15,连接 MCP,McpPluginScreenController,McpServerManager.connect → initialize / tools/list,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
+U64,S15,停用 MCP,McpPluginScreenController,McpServerManager.setEnabled(false) / disconnect,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
+U65,S15,扩展 manifest,McpPluginScreenController,ExtensionManifest.parse / MainActivity.importExtensionManifest / preferences（仅声明）,Bearer scopes / MCP roots / 审批,ExtensionManifestTest / TaskControlViewTest,PARTIAL-CHANGED,仅版本化清单目录，未接扩展执行器
+U66,S16,新建自动化规则,MISSING（新设计）,MISSING：TaskScheduler 不能替代自动化规则服务,默认关闭；去重/预算/审批,TaskSchedulerTest / TaskRetryTest,MISSING,无统一规则 UI、定时/事件入口和耐久唤醒账本
+U67,S16,启停唤醒,MISSING（新设计）,MISSING：ExtensionKind.WAKEUP 仅登记身份,默认关闭；去重/预算/审批,TaskSchedulerTest / TaskRetryTest,MISSING,无统一规则 UI、定时/事件入口和耐久唤醒账本
+U68,S17,网络路由与离线队列,MISSING（统一页）；设备连接表单已有,MISSING：现有 Direct/LanTransport 无耐久离线发件箱,用户选端点 / TLS / 配对,HandClientTest / DirectTransportTest,MISSING,本地/LAN 基础存在；VPN 依赖外部网络，HTTPS 中继/离线队列未完整实现
+U69,S18,版本与帮助,screen_settings / OnboardingController,VersionInfo / BuildConfig.COMMIT_SHA,更新安装系统确认,AppUpdateTest / VersionInfoTest,PARTIAL,版本与迁移保留；不改生产配置/签名/发布
+U70,S18,更新安装检查,screen_settings / OnboardingController,AppUpdateChecker / AppUpdateInstaller（需用户配置源）,更新安装系统确认,AppUpdateTest / VersionInfoTest,PARTIAL,版本与迁移保留；不改生产配置/签名/发布
