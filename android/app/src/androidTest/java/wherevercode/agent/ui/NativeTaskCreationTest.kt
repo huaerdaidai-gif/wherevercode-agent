@@ -130,9 +130,18 @@ class NativeTaskCreationTest {
 
     private fun openTasks(device: UiDevice, context: Context) {
         findId(device, context, "buttonMenu").click()
-        assertTrue(device.wait(Until.hasObject(By.text("新对话")), 30_000))
-        device.findObjects(By.text("任务")).last().click()
+        openWorkbenchRoute(device, "tasks", "任务中心")
         findId(device, context, "buttonCreateTask")
+    }
+
+    /** Navigate through the actual V5 hierarchy after opening the primary drawer. */
+    private fun openWorkbenchRoute(device: UiDevice, id: String, title: String) {
+        findText(device, "工作台").click()
+        val search = device.wait(Until.findObject(By.clazz(EditText::class.java)), 30_000)
+            ?: error("No V5 route search")
+        search.text = id
+        findText(device, title).click()
+        findText(device, "进入已有功能").click()
     }
 
     /** Submits the native form once and returns the created task id. */
@@ -188,9 +197,9 @@ class NativeTaskCreationTest {
         try {
             val store = RoomTaskStore(db)
             findId(device, context, "buttonMenu").click()
-            assertTrue(device.wait(Until.hasObject(By.text("新对话")), 30_000))
+            assertTrue(device.wait(Until.hasObject(By.text("工作台")), 30_000))
             shot(device, output, "C02-drawer")
-            device.findObjects(By.text("任务")).last().click()
+            openWorkbenchRoute(device, "tasks", "任务中心")
             val goal = "ISSUE8_UI_${UUID.randomUUID()}: Only reply received. Do not invoke tools or modify files."
             val taskId = createTaskViaForm(device, context, store, goal, output, "C13-create-task")
             File(output, "task-record.txt").writeText(
@@ -200,7 +209,7 @@ class NativeTaskCreationTest {
             shot(device, output, "C06-created-task")
             device.pressBack()
             findId(device, context, "buttonMenu").click()
-            findText(device, "团队频道").click()
+            openWorkbenchRoute(device, "channels", "团队频道")
             val channelInput = device.wait(Until.findObject(By.clazz(EditText::class.java)), 60_000)
                 ?: error("No channel input")
             val draft = "ISSUE8_UNSUBMITTED_${UUID.randomUUID()}"
