@@ -1,6 +1,6 @@
 # Native Android / iOS UI contract
 
-Scope: `huaerdaidai-gif/wherevercode-agent` only. Baseline: PR #9 head
+Scope: `huaerdaidai-gif/wherevercode-agent` only. Initial UI baseline: PR #9 head
 `e14426aa83cfa1589c21f8e7c25f7e8b6e309759`, which contains assembly
 `73ee623` and main `a9206e1`. No merge or overwrite of either source branch.
 
@@ -30,7 +30,7 @@ Scope: `huaerdaidai-gif/wherevercode-agent` only. Baseline: PR #9 head
 
 Native platform fonts, scalable text; headline 28, header brand 17, body
 14–16, supporting text 12–13 logical units. Cards use 16-unit corners and
-12–16-unit padding. Composer uses 20-unit corners and two rows: multiline
+12–16-unit padding. Composer uses 24-unit corners and two rows: multiline
 input above context/model controls and send. Shared greeting and suggestion
 copy; suggestions fill a draft and never send or execute by themselves.
 
@@ -62,3 +62,7 @@ CI debug APK uses existing isolated `.ci` application ID and ephemeral debug
 signing; it cannot be represented as an in-place update of another signing key.
 No schema version, migration, application ID or signing settings are changed
 by this UI work. Full physical-device upgrade testing remains required.
+
+For the subsequent Build 182 / Build 5 functional reconciliation and upgrade
+policy, see [the Codex → Muse code handoff](compatibility/20261114-code-handoff.md).
+Final CI, binaries, screenshots and device acceptance are Muse responsibilities.

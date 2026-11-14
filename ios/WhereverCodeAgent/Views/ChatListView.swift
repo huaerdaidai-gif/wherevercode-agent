@@ -240,16 +240,26 @@ struct ChatListView: View {
 
     var body: some View {
         NavigationStack {
-            ConversationHomeContentView(
-                platformConnected: appState.isConfigured,
-                channels: channels,
-                loadError: errorMessage,
-                isLoading: isLoading,
-                onRetry: { Task { await loadChannels() } },
-                onRefresh: { Task { await loadChannels() } },
-                onGoSettings: { appState.goToSettings() }
-            )
-            .navigationTitle("对话")
+            Group {
+                if appState.isConfigured {
+                    ChannelListContentView(
+                        channels: channels,
+                        loadError: errorMessage,
+                        onRetry: { Task { await loadChannels() } },
+                        onRefresh: { Task { await loadChannels() } }
+                    )
+                } else {
+                    List {
+                        Section("团队频道") {
+                            Text("平台尚未连接").font(.headline)
+                            Text("频道需要平台连接；本地对话、项目与任务记录仍可从侧边栏使用。")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                            Button("去设置") { appState.goToSettings() }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("团队频道")
             .toolbar {
                 if appState.isConfigured {
                     Button("刷新") { Task { await loadChannels() } }

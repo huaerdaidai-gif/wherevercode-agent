@@ -1,19 +1,13 @@
 // WhereverCode Agent — iOS
 //
-// App entry: a chat-first shell in the Codex/Claude style — a plain
-// conversation list as the home screen, with Tasks, Devices and
-// Settings one tap away. The tab selection lives in AppState (a real
-// binding, not per-tab state), so any screen can switch tabs —
-// e.g. the "去设置" action on an unconfigured list selects the
-// Settings TAB instead of pushing a second Settings screen onto the
-// current tab's navigation stack (the phase-1 navigation bug).
-// No mock data anywhere: every list is either loaded from the
-// platform or labelled as not implemented / blocked.
+// Chat-first native shell. AppState owns the existing workspace selection,
+// settings, model registry and one presentation model over LocalData. The
+// legacy AppTab type/property names remain for source compatibility; there
+// is no TabView or bottom tab bar. Unavailable execution is labelled honestly.
 
 import SwiftUI
 
-/// The four top-level tabs. Selection is owned by AppState so the
-/// selected tab and the visible page can never drift apart.
+/// Existing workspace selection, presented through the single drawer.
 enum AppTab: Hashable {
     case chat
     case tasks
@@ -188,9 +182,7 @@ final class AppState: ObservableObject {
         didSet { SettingsStore.save(settings) }
     }
 
-    /// Currently selected tab. Every "go to tab X" action in the app
-    /// goes through here, so the tab bar highlight and the visible
-    /// page are the same fact, not two states that can disagree.
+    /// Existing selection state, reused by the drawer and all settings links.
     @Published var selectedTab: AppTab = .chat
 
     /// Outcome of the most recent connection check (see
