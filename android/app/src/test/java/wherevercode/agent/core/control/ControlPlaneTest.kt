@@ -179,7 +179,7 @@ class ControlPlaneTest {
         assertTrue(controlStore.isDispatchFrozen("orphan"))
 
         now += 91
-        plane.reconcileExpiredLocalControls()
+        plane.reconcileExpiredControls()
         assertEquals("requeued", taskStore.getTask("orphan")!!.state)
         assertEquals(ControlStatus.PAUSED, plane.getControlStatus("orphan"))
         assertFalse(controlStore.isDispatchFrozen("orphan"))
@@ -207,7 +207,7 @@ class ControlPlaneTest {
         assertEquals(0, controlCalls)
 
         now += 91
-        plane.reconcileExpiredLocalControls()
+        plane.reconcileExpiredControls()
 
         val stopped = taskStore.getTask("orphan-stop")!!
         assertEquals("cancelled", stopped.state)

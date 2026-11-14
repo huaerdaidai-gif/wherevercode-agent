@@ -140,6 +140,13 @@ class LocalTaskRunner(
     companion object {
         /** The agent id a locally executed task is claimed under. */
         const val LOCAL_AGENT_ID: String = "local"
+
+        /**
+         * Pause stops at a safe checkpoint and requeues the task. Resume
+         * re-runs the turn from the start; it does not continue mid-turn.
+         */
+        const val PAUSED_AT_CHECKPOINT_REASON: String =
+            "任务已在安全检查点暂停。恢复后会重新执行本轮（不是从断点续跑），已完成的步骤可能再次执行。"
     }
 
     private val lock = Any()
@@ -434,7 +441,7 @@ class LocalTaskRunner(
             // next safe point. A blocked/non-cooperative tool remains in its
             // real in-flight state until it returns; no false acknowledgement.
             if (controlCode == "paused") {
-                finishAsPaused(taskId, "任务已在安全检查点暂停，可恢复后继续。", attemptId)
+                finishAsPaused(taskId, PAUSED_AT_CHECKPOINT_REASON, attemptId)
             } else {
                 finishAsCancelled(taskId, "任务已在安全检查点停止。", attemptId, startedAtMs)
             }

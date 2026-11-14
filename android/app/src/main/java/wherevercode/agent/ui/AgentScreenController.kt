@@ -3,6 +3,7 @@ package wherevercode.agent.ui
 import wherevercode.agent.R
 
 import android.content.Context
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
@@ -205,18 +206,24 @@ class AgentScreenController(
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
         top.addView(
-            UiKit.text(context, row.stateLabel, 10f, R.color.text_secondary).apply {
+            UiKit.text(
+                context,
+                "配对：${if (row.serverStatus == "PENDING") "等待对方批准" else if (row.paired) "已完成" else "未完成"}",
+                10f,
+                R.color.text_secondary,
+            ).apply {
                 setBackgroundResource(R.drawable.bg_chip)
                 setPadding(dp(9), dp(4), dp(9), dp(4))
             },
         )
         card.addView(top)
-        card.addView(
+        val diagnostics = UiKit.vertical(context).apply { visibility = View.GONE }
+        diagnostics.addView(
             UiKit.text(context, "id：${row.device.deviceId}", 10f, R.color.text_tertiary, mono = true).apply {
                 setPadding(0, dp(5), 0, 0)
             },
         )
-        card.addView(
+        diagnostics.addView(
             // V5 公网直连（2026-11-11）：列表只标走线（公网优先/内网）
             // 与端口，不贴完整 IP；两个地址在“编辑地址”对话框里看改。
             UiKit.text(context, "远程 · ${row.routeLabel} · 端口 ${row.device.port}", 11f, R.color.text_secondary).apply {
@@ -226,12 +233,12 @@ class AgentScreenController(
         card.addView(
             UiKit.text(
                 context,
-                "最后在线：${DeviceListFormat.formatLastSeen(row.lastSeenEpochSeconds, System.currentTimeMillis() / 1000)}",
+                "当前在线：未检测 · 最近连接成功：${DeviceListFormat.formatLastSeen(row.lastSeenEpochSeconds, System.currentTimeMillis() / 1000)}",
                 11f,
                 R.color.text_secondary,
             ).apply { setPadding(0, dp(4), 0, 0) },
         )
-        card.addView(
+        diagnostics.addView(
             UiKit.text(
                 context,
                 if (row.capabilityCount > 0) {
@@ -246,7 +253,7 @@ class AgentScreenController(
         // Hand 自更新（2026-11-12）：版本行常驻（App 更新后旧 Hand
         // 会拒收新东西，版本必须看得见）；落后或未知（旧版）时出
         // “更新 Hand”按钮，最新时不出（没得更新）。
-        card.addView(
+        diagnostics.addView(
             UiKit.text(
                 context,
                 when {
@@ -258,6 +265,11 @@ class AgentScreenController(
                 R.color.text_secondary,
             ).apply { setPadding(0, dp(4), 0, 0) },
         )
+        val diagnosticToggle = actionButton("查看高级诊断") {
+            diagnostics.visibility = if (diagnostics.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        card.addView(diagnosticToggle)
+        card.addView(diagnostics)
         // 服务端批准状态（hello 回包的 client_status）：PENDING 说明手机
         // 侧已发起、对方还没批准——配对没走完，不是“已配对”。
         if (row.serverStatus == "PENDING") {

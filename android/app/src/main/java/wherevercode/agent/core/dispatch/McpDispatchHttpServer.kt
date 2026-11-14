@@ -9,7 +9,6 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
-import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -158,12 +157,9 @@ class McpDispatchHttpServer(
                 mapOf("Content-Type" to "application/json"),
             )
         }
-        val isInitialize = (parsed as? JSONObject)?.optString("method") == "initialize"
         if ((parsed as? JSONObject)?.optString("method") == "tools/call") beforeHandle?.invoke()
         val response = protocol.handle(parsed, principal) ?: return HttpResponse(202)
-        val headers = mutableMapOf("Content-Type" to "application/json")
-        if (isInitialize) headers["Mcp-Session-Id"] = UUID.randomUUID().toString()
-        return HttpResponse(200, response.toString(), headers)
+        return HttpResponse(200, response.toString(), mapOf("Content-Type" to "application/json"))
     }
 
     private fun jsonError(status: Int, message: String) =

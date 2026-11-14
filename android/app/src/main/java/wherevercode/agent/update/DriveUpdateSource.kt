@@ -27,6 +27,8 @@ sealed class AppUpdateError(message: String) : Exception(message) {
     /** Drive 上的分发文件找不到了（被删 / 被移走 / 账号不对）。 */
     class NotFound(message: String) : AppUpdateError(message)
 
+    class IncompatiblePackage(message: String) : AppUpdateError(message)
+
     /** 下载的文件校验和与 Drive 元数据不符：绝不安装，已删掉下载文件。 */
     class ChecksumMismatch(message: String) : AppUpdateError(message)
 }

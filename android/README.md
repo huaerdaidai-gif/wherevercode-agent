@@ -10,10 +10,22 @@
 ./scripts/build-android-p0.sh -PandroidAbis=arm64-v8a,x86_64
 ```
 
-默认 debug 包为 `wherevercode.agent.ci`，版本 `0.3.0-p0` / 6；与原包共存。
-脚本保存 APK、源码 SHA、构建退出码和测试报告到 `artifacts/issue-6`；退出非零时不能声称测试通过。
-构建使用本机 debug 签名，不含历史签名材料。无生产配置的安装包不会自动连接任何私有平台。
-Node CLI 运行时仍需用户按既有流程配置，不因 APK 构建成功就被视为已验证。
+默认 debug 包为 `wherevercode.agent.ci`，与正式包及其数据隔离。
+统一版本配置在 [`version.properties`](version.properties)，当前升级基线 183，
+高于已安装 Build 182 与 Build 5；versionName 还含 counter、commit 与构建时间。
+正式发布每次必须推进 counter，可用 `-PappVersionCode` 或
+`WHEREVERCODE_VERSION_CODE` 提供更高值，不能用不同 workflow 的 run_number 混算。
+
+`compat` / `release` 保留正式包名 `wherevercode.agent`；只有明确提供已有维护者签名
+环境变量才签名，缺少密钥时为 unsigned，绝不自动改用新 debug 密钥冒充覆盖升级。
+应用内安装前校验包名、严格更高版本与当前签名一致。密钥缺失或证书不一致由 Muse
+协调原签名处理，不以卸载旧版解决。配置与验证项见
+[三版本代码交接](../docs/compatibility/20261114-code-handoff.md)。
+
+无更新源配置时更新功能明确禁用；来源通过 `updateDriveFileId` /
+`WHEREVERCODE_UPDATE_DRIVE_FILE_ID` 注入，OAuth 和密钥继续使用已有本机存储。
+脚本的产物与测试记录是开发证据；最终构建、实机覆盖升级、验收和发布由 Muse 组织。
+Node CLI 运行时仍需按既有流程配置，不因代码编译成功就被视为真机可用。
 
 以下是历史可行性记录，含旧版本与曾拟议但本仓库 main 未包含的 CI 描述；当前事实以构建文件与 P0 报告为准。
 

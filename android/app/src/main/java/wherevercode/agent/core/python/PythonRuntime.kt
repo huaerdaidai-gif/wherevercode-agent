@@ -33,6 +33,15 @@ data class PythonProbe(
     val rawOutput: String? = null,
 )
 
+/** Live probes over the existing task/turn controller, not a second state store. */
+class PythonRunControl(
+    private val stopped: () -> Boolean,
+    private val paused: () -> Boolean = { false },
+) {
+    fun isStopped(): Boolean = stopped()
+    fun isPaused(): Boolean = paused()
+}
+
 data class PythonRunRequest(
     /** 要运行的工作区 .py 文件；与 [module] 二选一。 */
     val script: File? = null,
@@ -42,6 +51,7 @@ data class PythonRunRequest(
     val args: List<String> = emptyList(),
     val cwd: File,
     val timeoutMillis: Long = 30_000,
+    val control: PythonRunControl? = null,
 )
 
 data class PythonRunResult(
@@ -52,6 +62,8 @@ data class PythonRunResult(
     val stderr: String = "",
     val timedOut: Boolean = false,
     val failureReason: String? = null,
+    /** Set only after the executing runtime actually quiesced. */
+    val interruption: String? = null,
 )
 
 interface PythonRuntime {
@@ -205,6 +217,13 @@ class ProcessPythonRuntime(
             )
         }
         argv += request.args
+        val initialControl = when {
+            request.control?.isStopped() == true -> "stopped"
+            request.control?.isPaused() == true -> "paused"
+            else -> null
+        }
+        if (initialControl != null) return PythonRunResult(true, probe.label,
+            failureReason = "执行前收到控制，未启动进程", interruption = initialControl)
         return try {
             val process = ProcessBuilder(argv)
                 .directory(request.cwd)
@@ -215,33 +234,35 @@ class ProcessPythonRuntime(
             val errThread = Thread(errDrain, "python-run-stderr").apply { isDaemon = true }
             outThread.start()
             errThread.start()
-            val finished = process.waitFor(request.timeoutMillis, TimeUnit.MILLISECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                process.waitFor(5, TimeUnit.SECONDS)
-                outThread.join(2_000)
-                errThread.join(2_000)
-                PythonRunResult(
-                    available = true,
-                    runtimeLabel = probe.label,
-                    exitCode = -1,
-                    stdout = outDrain.text(),
-                    stderr = errDrain.text(),
-                    timedOut = true,
-                    failureReason = "执行超过 ${request.timeoutMillis}ms，已强制结束",
-                )
-            } else {
-                // 进程已退出，但读线程可能还在排空最后一点输出。
-                outThread.join(5_000)
-                errThread.join(5_000)
-                PythonRunResult(
-                    available = true,
-                    runtimeLabel = probe.label,
-                    exitCode = process.exitValue(),
-                    stdout = outDrain.text(),
-                    stderr = errDrain.text(),
-                )
+            val deadline = System.nanoTime() + request.timeoutMillis * 1_000_000L
+            var timedOut = false
+            var interruption: String? = null
+            while (!process.waitFor(50, TimeUnit.MILLISECONDS)) {
+                interruption = when {
+                    request.control?.isStopped() == true -> "stopped"
+                    request.control?.isPaused() == true -> "paused"
+                    else -> null
+                }
+                timedOut = System.nanoTime() >= deadline
+                if (interruption != null || timedOut) {
+                    process.destroyForcibly()
+                    // Do not report a confirmed control while this process is alive.
+                    process.waitFor()
+                    break
+                }
             }
+            outThread.join(5_000)
+            errThread.join(5_000)
+            PythonRunResult(
+                available = true,
+                runtimeLabel = probe.label,
+                exitCode = process.exitValue(),
+                stdout = outDrain.text(),
+                stderr = errDrain.text(),
+                timedOut = timedOut && interruption == null,
+                failureReason = if (timedOut && interruption == null) "执行超过 ${request.timeoutMillis}ms，已强制结束" else null,
+                interruption = interruption,
+            )
         } catch (e: Exception) {
             PythonRunResult(
                 available = true,

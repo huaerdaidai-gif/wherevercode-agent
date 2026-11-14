@@ -84,6 +84,27 @@ object McpDispatchRuntime {
         }
     }
 
+    fun issueAgentToken(
+        context: Context,
+        principalId: String,
+        capability: DispatchCapability,
+        projectId: String?,
+    ): IssuedDispatchToken {
+        val app = context.applicationContext
+        return synchronized(lock) {
+            check(isEnabled(app)) { "请先启用 MCP 派工服务" }
+            require(!principalId.equals("owner", ignoreCase = true)) { "此名称保留给所有者" }
+            if (projectId != null) {
+                require(wherevercode.agent.core.project.SharedPreferencesProjectStore(app).getProject(projectId) != null) {
+                    "项目不存在"
+                }
+            }
+            ensureHost(app).service.tokens.issue(
+                principalId, DispatchRole.AGENT, setOf(capability), projectIds = setOfNotNull(projectId),
+            )
+        }
+    }
+
     /** Called by the existing foreground AgentService after process restart. */
     fun restore(context: Context) {
         val app = context.applicationContext

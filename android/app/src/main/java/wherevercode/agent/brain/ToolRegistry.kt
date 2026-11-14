@@ -17,6 +17,7 @@ import wherevercode.agent.core.project.Project
 import wherevercode.agent.core.project.ProjectLocation
 import wherevercode.agent.core.python.PythonProbe
 import wherevercode.agent.core.python.PythonRunRequest
+import wherevercode.agent.core.python.PythonRunControl
 import wherevercode.agent.core.python.PythonRuntime
 import wherevercode.agent.core.security.AuditEntry
 import wherevercode.agent.core.security.AuditLog
@@ -492,6 +493,7 @@ class ToolRegistry(
          * 由引擎在每次执行前传入控制态快照。
          */
         stopped: () -> Boolean = { false },
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
         if (stopped()) {
             val outcome = ToolOutcome(
@@ -502,6 +504,7 @@ class ToolRegistry(
             audit(action, context, outcome, null)
             return outcome
         }
+        if (paused()) return denied(action, context, "turn_paused", "已暂停，未启动新执行步骤")
         // 1. Structure（扩展工具由来源自己校验参数形状）。
         val isExtension = extensionTools != null && action.tool !in ALL_TOOLS
         val structureError = if (isExtension) extensionTools!!.validate(action) else checkStructure(action)
@@ -591,12 +594,16 @@ class ToolRegistry(
                 )
             }
         }
+        // Approval may suspend while the user pauses/stops. Recheck every
+        // backend here, including plugins which do not implement a stop probe.
+        if (stopped()) return denied(effectiveAction, context, "turn_stopped", "已停止，未执行")
+        if (paused()) return denied(effectiveAction, context, "turn_paused", "已暂停，未启动新执行步骤")
         // 4. Execute（扩展工具走来源执行，同样进审计）。
         val outcome = try {
             if (isExtension) {
                 extensionTools!!.execute(effectiveAction, context, stopped)
             } else {
-                runHandler(effectiveAction, context, stopped)
+                runHandler(effectiveAction, context, stopped, paused)
             }
         } catch (e: CancellationException) {
             throw e
@@ -826,11 +833,12 @@ class ToolRegistry(
         action: Action,
         context: ToolContext,
         stopped: () -> Boolean,
+        paused: () -> Boolean,
     ): ToolOutcome = when (action.tool) {
         "read_file" -> handleRead(action, context)
         "list_files" -> handleList(action, context)
-        "write_file" -> handleWrite(action, context, stopped)
-        "run_command" -> handleRun(action, context, stopped)
+        "write_file" -> handleWrite(action, context) { stopped() || paused() }
+        "run_command" -> handleRun(action, context, stopped, paused)
         "dispatch_task" -> handleDispatch(action)
         "ask_user" -> handleAskUser(action)
         // git 家（2026-11-11）：读/写/推分支/开 PR 全走该站 API。
@@ -1169,7 +1177,7 @@ class ToolRegistry(
         }
     }
 
-    private fun handleRun(action: Action, context: ToolContext, stopped: () -> Boolean): ToolOutcome {
+    private fun handleRun(action: Action, context: ToolContext, stopped: () -> Boolean, paused: () -> Boolean): ToolOutcome {
         val argv = parseArgv(action.args["argv"])!!
         val cwdArg = action.args["cwd"] as? String ?: ""
         val (_, cwd) = resolveInWorkspace(cwdArg)!!
@@ -1191,6 +1199,7 @@ class ToolRegistry(
         }
         try {
             if (stopped()) return stoppedOutcome()
+            if (paused()) return ToolOutcome(false, "已暂停，未启动命令", errorCode = "turn_paused")
             val python = pythonInvocation(argv)
             if (python is PythonInvocation.Probe) {
                 return handlePythonProbe()
@@ -1208,16 +1217,16 @@ class ToolRegistry(
                 // Python 脚本可能写文件：与其它写命令一样进写轮次保护。
                 return withWriteRound(context.taskId, "run_command:python") {
                     workspaceAdapter.guardCommand(argv.joinToString(" "))
-                    runPython(prepared.request!!, timeout, stopped)
+                    runPython(prepared.request!!, timeout, stopped, paused)
                 }
             }
             if (isReadOnlyRun(argv)) {
                 // 只读命令不建写轮次：不会改动工作区，也不该占用写锁。
-                return executeProcess(argv, cwd, timeout, stopped)
+                return executeProcess(argv, cwd, timeout, stopped, paused)
             }
             return withWriteRound(context.taskId, "run_command") {
                 workspaceAdapter.guardCommand(argv.joinToString(" "))
-                executeProcess(argv, cwd, timeout, stopped)
+                executeProcess(argv, cwd, timeout, stopped, paused)
             }
         } catch (e: WorkspaceException) {
             // 写轮次/工作区错误必须保留机器码，不能被下面的兜底吞成
@@ -1339,7 +1348,7 @@ class ToolRegistry(
         val root = workspaceRoot
         if (root != null && cwd != root && !File(rawPath).isAbsolute) {
             val cwdRelative = try {
-                cwd.relativeTo(root).path.replace('\\', '/')
+                cwd.canonicalFile.relativeTo(root.canonicalFile).path.replace('\\', '/')
             } catch (_: IllegalArgumentException) {
                 ""
             }
@@ -1355,6 +1364,7 @@ class ToolRegistry(
         request: PythonRunRequest,
         timeoutSeconds: Double,
         stopped: () -> Boolean,
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
         val runtime = pythonRuntime ?: return ToolOutcome(
             ok = false,
@@ -1363,13 +1373,18 @@ class ToolRegistry(
         )
         if (stopped()) return stoppedOutcome()
         val result = try {
-            runtime.run(request)
+            runtime.run(request.copy(control = PythonRunControl(stopped, paused)))
         } catch (e: Exception) {
             return ToolOutcome(
                 ok = false,
                 summary = "Python 执行失败：${e.message ?: "未知错误"}（未模拟执行）",
                 errorCode = "python_unavailable",
             )
+        }
+        if (result.interruption == "stopped" || result.interruption == "paused") {
+            return ToolOutcome(false, "Python 已响应运行中控制：${result.interruption}",
+                data = combineOutput(result.stdout, result.stderr),
+                errorCode = if (result.interruption == "paused") "turn_paused" else "turn_stopped")
         }
         if (!result.available) {
             return ToolOutcome(
@@ -1411,7 +1426,10 @@ class ToolRegistry(
         cwd: File,
         timeoutSeconds: Double,
         stopped: () -> Boolean,
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
+        if (stopped()) return stoppedOutcome()
+        if (paused()) return ToolOutcome(false, "已暂停，未启动命令", errorCode = "turn_paused")
         val process = try {
             ProcessBuilder(argv)
                 .directory(cwd)

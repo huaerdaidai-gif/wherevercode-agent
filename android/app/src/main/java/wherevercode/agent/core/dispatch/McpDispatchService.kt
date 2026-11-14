@@ -28,14 +28,14 @@ import wherevercode.agent.core.task.TaskOrigins
  */
 interface DispatchClaimPort {
     fun claim(taskId: String, agentId: String, attemptId: String, nowEpochSeconds: Long): TaskRecord?
-    fun start(taskId: String): TaskRecord?
+    fun start(taskId: String, attemptId: String): TaskRecord?
 }
 
 class SchedulerClaimPort(private val scheduler: TaskScheduler) : DispatchClaimPort {
     override fun claim(taskId: String, agentId: String, attemptId: String, nowEpochSeconds: Long): TaskRecord? =
         scheduler.claimMcpTaskForMember(taskId, agentId, attemptId, nowEpochSeconds)
 
-    override fun start(taskId: String): TaskRecord? = scheduler.startTask(taskId)
+    override fun start(taskId: String, attemptId: String): TaskRecord? = scheduler.startTask(taskId, attemptId)
 }
 
 /**
@@ -104,7 +104,15 @@ class McpDispatchService(
             try {
                 val visible = DispatchTools.visibleTo(principal).any { it.name == tool }
                 if (!visible) throw DispatchException(DispatchErrors.FORBIDDEN, "当前身份无权调用 $tool")
-                val result = withIdempotency(principal, def, args) { dispatch(principal, tool, args) }
+                val result = withIdempotency(principal, def, args) {
+                    // Claim acquires the scheduler lock before the task lock.
+                    // Worker writes only need the task lock, shared with ControlPlane.
+                    when (tool) {
+                        DispatchTools.REPORT_PROGRESS, DispatchTools.SUBMIT_RESULT ->
+                            taskStore.withTaskLock { dispatch(principal, tool, args) }
+                        else -> dispatch(principal, tool, args)
+                    }
+                }
                 result.optJSONObject("task")?.optString("task_id")?.takeIf { it.isNotEmpty() }?.let { taskId = it }
                 writeAudit(principal.auditId, "mcp_dispatch.$tool", taskId, ok = true, errorCode = null,
                     replayed = result.optBoolean("replayed", false))
@@ -154,7 +162,34 @@ class McpDispatchService(
             if (existing.fingerprint != fingerprint) {
                 throw DispatchException(DispatchErrors.IDEMPOTENCY_CONFLICT, "同一 idempotency_key 已用于不同参数的请求")
             }
-            return JSONObject(existing.responseJson).put("replayed", true)
+            val response = JSONObject(existing.responseJson)
+            val savedProject = response.optJSONObject("task")?.let { optText(it, "project_id", 128) }
+            if (!principal.canAccessProject(savedProject)) throw forbiddenTask()
+            if (def.name in CONTROL_TOOLS) return work().put("replayed", true)
+            if (def.name == DispatchTools.CLAIM_TASK || def.name == DispatchTools.REPORT_PROGRESS ||
+                def.name == DispatchTools.SUBMIT_RESULT
+            ) {
+                val task = requireTask(args)
+                requireExecutorScope(principal, task)
+                if (def.name == DispatchTools.CLAIM_TASK) {
+                    executorFence(task)
+                    requireAttempt(response, task)
+                    return claimResponse(principal, task, resumed = true).put("replayed", true)
+                }
+                val recorded = response.getJSONObject("task")
+                if (recorded.optInt("attempt") != task.attempt) {
+                    throw DispatchException(DispatchErrors.STALE_ATTEMPT, "执行轮次已变化")
+                }
+                if (def.name == DispatchTools.REPORT_PROGRESS && !response.has("acknowledged")) {
+                    executorFence(task)
+                    requireAttempt(args, task)
+                    checkGoalVersion(args, task, required = false)
+                    return response.put("task", snapshot(task, principal))
+                        .put("lease_expires_at", task.leaseExpiresAt ?: JSONObject.NULL)
+                        .put("replayed", true)
+                }
+            }
+            return response.put("replayed", true)
         }
         val result = work()
         state.putIdempotency(IdempotencyRecord(scope, fingerprint, result.toString(), nowEpochSeconds()))
@@ -184,8 +219,9 @@ class McpDispatchService(
         val title = requireText(args, "title", 200)
         val goal = requireText(args, "goal", 8000)
         val projectId = optText(args, "project_id", 128)
+        if (!principal.canAccessProject(projectId)) throw forbiddenTask()
         val priority = if (args.has("priority")) args.optInt("priority", 0).coerceIn(-100, 100) else 0
-        val assignee = optText(args, "assignee", 64)?.let { resolveExecutor(it) }
+        val assignee = optText(args, "assignee", 64)?.let { resolveExecutor(it, projectId) }
         val taskId = TaskOrigins.MCP_DISPATCH_PREFIX + newId().take(24)
         val created = taskStore.createTask(
             TaskRecord(
@@ -206,8 +242,15 @@ class McpDispatchService(
     private fun assignTask(principal: DispatchPrincipal, args: JSONObject): JSONObject {
         val task = requireTask(args)
         requireDispatchScope(principal, task)
+        // Only tasks created through MCP can be handed to an MCP executor: an
+        // App-native task (local runner / chat turn / remote member) assigned
+        // here could never be claimed (executors only see mcp- tasks) and
+        // would be stranded away from its own executor.
+        if (!TaskOrigins.isMcpDispatchTask(task.taskId) || task.sessionId != null) {
+            throw DispatchException(DispatchErrors.FORBIDDEN, "App 内任务不能经 MCP 改派，请在 App 内操作")
+        }
         checkExpectedVersion(args, task)
-        val agentId = resolveExecutor(requireText(args, "agent_id", 64))
+        val agentId = resolveExecutor(requireText(args, "agent_id", 64), task.projectId)
         if (TaskStates.isTerminal(task.state)) throw terminal(task)
         if (!TaskStates.isClaimable(task.state)) {
             throw DispatchException(DispatchErrors.TASK_IN_FLIGHT, "任务正在执行（${task.state}），请先停止再改派")
@@ -226,7 +269,11 @@ class McpDispatchService(
         val executorOk = principal.can(DispatchCapability.EXECUTE) && isAssignedTo(principal, task)
         if (!dispatcherOk && !executorOk) throw forbiddenTask()
         val progress = JSONArray()
-        state.progress(task.taskId).forEach { n ->
+        state.progress(task.taskId)
+            // An executor sees only its own notes, not other executors' or
+            // earlier assignees' progress on the same task.
+            .filter { dispatcherOk || it.actor == principal.auditId }
+            .forEach { n ->
             progress.put(JSONObject().apply {
                 put("ts", n.ts); put("actor", n.actor); put("message", n.message)
                 put("percent", n.percent ?: JSONObject.NULL)
@@ -288,29 +335,39 @@ class McpDispatchService(
         requireExecutorScope(principal, task)
         if (revocationStore.isTaskRevoked(task.taskId)) throw revoked()
         if (TaskStates.isTerminal(task.state)) throw terminal(task)
-        // 断线恢复：同一执行方已认领（租约仍归我）时，返回当前 attempt，不再开新 attempt。
-        if ((task.state == "assigned" || task.state == "working") &&
-            task.leaseOwner.equals(principal.id, ignoreCase = true) && task.attemptId != null
-        ) {
-            val current = if (task.state == "assigned") claimPort.start(task.taskId) ?: task else task
-            return claimResponse(principal, current, resumed = true)
-        }
         when (controlPlane.getControlStatus(task.taskId)) {
             ControlStatus.STOPPING -> throw stopped()
             ControlStatus.PAUSING, ControlStatus.PAUSED -> throw paused()
             ControlStatus.RUNNING -> Unit
         }
+        // 断线恢复：同一执行方已认领（租约仍归我）时，返回当前 attempt，不再开新 attempt。
+        if ((task.state == "assigned" || task.state == "working") &&
+            task.leaseOwner.equals(principal.id, ignoreCase = true) && task.attemptId != null &&
+            hasLiveLease(task)
+        ) {
+            val current = if (task.state == "assigned") startClaim(task.taskId, task.attemptId) else task
+            return claimResponse(principal, current, resumed = true)
+        }
         if (!TaskStates.isClaimable(task.state)) {
             throw DispatchException(DispatchErrors.CLAIM_REJECTED, "任务当前不可认领（${task.state}）")
         }
         val attemptId = newId()
-        val claimed = claimPort.claim(task.taskId, principal.id, attemptId, nowEpochSeconds())
+        claimPort.claim(task.taskId, principal.id, attemptId, nowEpochSeconds())
             ?: throw DispatchException(
                 DispatchErrors.CLAIM_REJECTED,
                 "认领被调度器拒绝：你手上已有执行中的任务，或有任务处于冻结（暂停/停止待确认）",
             )
-        val started = claimPort.start(task.taskId) ?: claimed
+        val started = startClaim(task.taskId, attemptId)
+        taskStore.recordTaskEvent(task.taskId, EVENT_MCP_CLAIMED, "${principal.id} 认领（第 ${started.attempt} 轮）", principal.auditId)
         return claimResponse(principal, started, resumed = false)
+    }
+
+    private fun startClaim(taskId: String, attemptId: String): TaskRecord {
+        return claimPort.start(taskId, attemptId) ?: run {
+            val current = taskStore.getTask(taskId) ?: throw notFound(taskId)
+            executorFence(current)
+            throw DispatchException(DispatchErrors.CLAIM_REJECTED, "认领已变化，任务未启动")
+        }
     }
 
     private fun claimResponse(principal: DispatchPrincipal, task: TaskRecord, resumed: Boolean): JSONObject =
@@ -410,6 +467,11 @@ class McpDispatchService(
                 task.version, task.goalVersion, task.authEpoch,
             ) ?: throw notFound(task.taskId)
         }
+        taskStore.recordTaskEvent(
+            task.taskId, EVENT_MCP_DELIVERED,
+            if (status == "completed") "${principal.id} 已交付（completed）" else "${principal.id} 报告失败（failed）",
+            principal.auditId,
+        )
         return JSONObject().put("ok", true).put("task", snapshot(final, principal))
     }
 
@@ -428,9 +490,12 @@ class McpDispatchService(
         }
     }
 
+    private fun hasLiveLease(task: TaskRecord): Boolean =
+        task.leaseExpiresAt?.let { it > nowEpochSeconds() } == true
+
     private fun requireAttempt(args: JSONObject, task: TaskRecord) {
         val attemptId = requireText(args, "attempt_id", 64)
-        if (task.attemptId == null || task.attemptId != attemptId) {
+        if (task.attemptId != attemptId || !hasLiveLease(task)) {
             throw DispatchException(DispatchErrors.STALE_ATTEMPT, "attempt_id 不是该任务当前的认领，写入被拒绝")
         }
     }
@@ -462,6 +527,7 @@ class McpDispatchService(
     }
 
     private fun hasDispatchScope(principal: DispatchPrincipal, task: TaskRecord): Boolean {
+        if (!principal.canAccessProject(task.projectId)) return false
         if (principal.role == DispatchRole.OWNER) return true
         val meta = state.taskMeta(task.taskId) ?: return false
         return meta.createdBy == principal.id && meta.createdByRole == principal.role
@@ -472,18 +538,17 @@ class McpDispatchService(
     }
 
     private fun isAssignedTo(principal: DispatchPrincipal, task: TaskRecord): Boolean =
-        task.assignedAgentId?.equals(principal.id, ignoreCase = true) == true
+        TaskOrigins.isMcpDispatchTask(task.taskId) && principal.canAccessProject(task.projectId) &&
+            task.assignedAgentId?.equals(principal.id, ignoreCase = true) == true
 
     private fun requireExecutorScope(principal: DispatchPrincipal, task: TaskRecord) {
         if (!isAssignedTo(principal, task)) throw forbiddenTask()
     }
 
-    private fun resolveExecutor(agentId: String): String {
+    private fun resolveExecutor(agentId: String, projectId: String?): String {
         if (!DispatchPrincipal.isValidId(agentId)) throw DispatchException(DispatchErrors.INVALID_ARGUMENT, "agent_id 格式不对")
-        if (!tokens.isActiveExecutor(agentId)) {
-            throw DispatchException(DispatchErrors.UNKNOWN_AGENT, "执行方 $agentId 未登记或没有 execute 能力")
-        }
-        return tokens.canonicalExecutorId(agentId) ?: agentId
+        return tokens.canonicalExecutorId(agentId, projectId)
+            ?: throw DispatchException(DispatchErrors.UNKNOWN_AGENT, "执行方未登记或无权执行该项目任务")
     }
 
     private fun requireTask(args: JSONObject): TaskRecord {
@@ -507,6 +572,9 @@ class McpDispatchService(
             put("goal", task.description ?: "")
             put("state", task.state)
             put("assigned_agent_id", task.assignedAgentId ?: JSONObject.NULL)
+            // false when the assignee no longer holds an active execute
+            // credential for this task's project (dispatcher should reassign).
+            put("assignee_active", task.assignedAgentId?.let { tokens.canonicalExecutorId(it, task.projectId) != null } ?: JSONObject.NULL)
             put("project_id", task.projectId ?: JSONObject.NULL)
             put("priority", task.priority)
             put("version", task.version)
@@ -551,9 +619,9 @@ class McpDispatchService(
             audit.record(
                 AuditEntry(
                     ts = Instant.ofEpochSecond(nowEpochSeconds()).toString(),
-                    taskId = taskId.take(128),
+                    taskId = SecretRedactor.redact(taskId, 128),
                     agentId = actor,
-                    action = action.take(64),
+                    action = SecretRedactor.redact(action, 64),
                     ok = ok,
                     errorCode = errorCode,
                     result = if (replayed) mapOf("changed" to false) else null,
@@ -574,9 +642,12 @@ class McpDispatchService(
     private fun terminal(task: TaskRecord) = DispatchException(DispatchErrors.TASK_TERMINAL, "任务已结束（${task.state}）")
 
     companion object {
+        private val CONTROL_TOOLS = setOf(DispatchTools.PAUSE_TASK, DispatchTools.RESUME_TASK, DispatchTools.STOP_TASK)
         const val EVENT_MCP_CREATED = "mcp_created"
         const val EVENT_MCP_ASSIGNED = "mcp_assigned"
         const val EVENT_MCP_PROGRESS = "mcp_progress"
+        const val EVENT_MCP_CLAIMED = "mcp_claimed"
+        const val EVENT_MCP_DELIVERED = "mcp_delivered"
         private val IDEM_KEY_RE = Regex("^[A-Za-z0-9._:-]{8,128}$")
 
         /** 键排序的规范 JSON（用于幂等指纹）。 */

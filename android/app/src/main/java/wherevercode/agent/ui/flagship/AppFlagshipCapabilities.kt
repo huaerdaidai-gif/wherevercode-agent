@@ -19,7 +19,7 @@ import wherevercode.agent.MainActivity
 class AppFlagshipCapabilities(private val context: Context) : FlagshipCapabilityProvider {
 
     override fun status(routeId: String): FeatureStatus {
-        READY[routeId]?.let { return FeatureStatus(FeatureState.READY_VERIFIED, it) }
+        if (routeId in HISTORICAL) return FeatureStatus(FeatureState.IMPLEMENTED_UNVERIFIED)
         if (routeId in UNVERIFIED) return FeatureStatus(FeatureState.IMPLEMENTED_UNVERIFIED)
         return FeatureStatus(FeatureState.PLANNED)
     }
@@ -35,7 +35,7 @@ class AppFlagshipCapabilities(private val context: Context) : FlagshipCapability
 
     private companion object {
         /** route → 证据摘要（仅限已有实测证据的既有真实屏）。 */
-        val READY: Map<String, String> = mapOf(
+        val HISTORICAL: Map<String, String> = mapOf(
             "chat" to "K70 真机历代更新包在用；大脑对话已真机验证",
             "conversation" to "K70 真机在用；执行中会话在对话屏内呈现",
             "history" to "K70 真机在用；会话列表已实现",

@@ -169,7 +169,7 @@ import wherevercode.agent.core.project.remoteFolderPickerListing
 import wherevercode.agent.core.project.isValidLocalWorkspacePath
 import wherevercode.agent.core.project.openFolderEntryOptions
 import wherevercode.agent.core.project.parseFolderListJson
-import wherevercode.agent.core.project.parseProjectFolderAuthorizationAck
+import wherevercode.agent.core.project.verifyAndRecordProjectFolderAuthorization
 import wherevercode.agent.core.project.GitRepoKind
 import wherevercode.agent.core.project.parseGitHostRepoUrl
 import wherevercode.agent.core.project.parseGitRepoUrl
@@ -257,6 +257,7 @@ import wherevercode.agent.ui.SessionListController
 import wherevercode.agent.ui.PipelineAction
 import wherevercode.agent.ui.TaskDetailArtifacts
 import wherevercode.agent.ui.TaskDetailController
+import wherevercode.agent.ui.TurnTaskRecorder
 import wherevercode.agent.ui.taskStateLabel
 import wherevercode.agent.ui.approvalOutcomeLabel
 import wherevercode.agent.ui.buildSessionListItems
@@ -1167,13 +1168,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.buttonSearch).setOnClickListener {
             showEntry(DrawerController.ID_HISTORY_SEARCH)
         }
-        // V5 C2-3-R4 (v4.3-01)：铃铛只有图标、没有红点——App 内没有通知
-        // 功能，红点是伪造状态；点按只给“通知中心待开发”提示，绝不编
-        // 造通知数。大脑 pill 与“新建”已删：大脑状态在设置页大脑分节
-        // （refreshBrainStatus 写 brainStatus），新对话走抽屉“对话”
-        // 入口（onDrawerEntrySelected 的 nav_chat 分支调 newConversationAndShow）。
+        // Historical resource id retained; this is the real new-conversation action.
         findViewById<View>(R.id.buttonBell).setOnClickListener {
-            toast("通知中心待开发")
+            newConversationAndShow()
         }
     }
 
@@ -1551,6 +1548,11 @@ class MainActivity : AppCompatActivity() {
             },
             onStartFanout = { question -> startTeamFanout(question) },
             onRefresh = { refreshTeamChannel() },
+            onReconnect = {
+                stopTeamChannelFeed()
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -1960,6 +1962,10 @@ class MainActivity : AppCompatActivity() {
                 sessions,
                 titleOverrides = titles,
                 summaryOverrides = summaries,
+                memberLabel = { id ->
+                    if (id == TurnTaskRecorder.LOCAL_AGENT_ID) "本机 App"
+                    else runCatching { agentStore.getAgent(id)?.displayName }.getOrNull() ?: id
+                },
                 timeLabel = { epochSeconds -> UiKit.shortTime(epochSeconds) },
             )
             val defaultSubtitle = "当前：${chatViewModel.currentSessionLabel()}"
@@ -3373,13 +3379,12 @@ class MainActivity : AppCompatActivity() {
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
             is HandEvent.Result -> try {
-                val ack = parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
-                handAuthorizationReceipts.record(
+                verifyAndRecordProjectFolderAuthorization(
+                    rawAck = terminal.output,
                     peerFingerprintSha256 = target.peer.fingerprintSha256,
                     agentId = target.agentId,
                     requestedFolder = folder,
-                    rawAck = terminal.output,
-                    ack = ack,
+                    receipts = handAuthorizationReceipts,
                     receivedAtEpochSeconds = System.currentTimeMillis() / 1000,
                 )
                 Result.success(Unit)
@@ -4698,9 +4703,6 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
-                "open_flagship" -> startActivity(
-                    Intent(this, wherevercode.agent.ui.flagship.FlagshipActivity::class.java),
-                )
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
@@ -4716,6 +4718,7 @@ class MainActivity : AppCompatActivity() {
             context = this,
             rootLabel = screenProjects.findViewById(R.id.projectRoot),
             treePane = screenProjects.findViewById(R.id.projectTreePane),
+            breadcrumb = screenProjects.findViewById(R.id.projectBreadcrumb),
             treeList = screenProjects.findViewById(R.id.projectTreeList),
             treeScroll = screenProjects.findViewById(R.id.projectTreeScroll),
             emptyView = screenProjects.findViewById(R.id.projectEmpty),
@@ -7517,22 +7520,34 @@ class MainActivity : AppCompatActivity() {
         cloudSection.addView(canDispatchBox)
         cloudSection.addView(setupSheetButton)
         form.addView(cloudSection)
-        form.addView(label("服务地址"))
+        val baseUrlLabel = label("服务地址")
+        val modelLabel = label("模型")
+        val adapterLabel = label("适配器 id")
+        val binaryLabel = label("CLI 二进制名")
+        val authRefLabel = label("密钥引用名")
+        val secretLabel = label("密钥值")
+        val capabilitiesLabel = label("能力")
+        val limitsLabel = label("已知限制")
+        val dispatchableLabel = label("任务权限")
+        form.addView(label("当前类型配置"))
+        form.addView(baseUrlLabel)
         form.addView(baseUrlField)
-        form.addView(label("模型"))
+        form.addView(modelLabel)
         form.addView(modelField)
-        form.addView(label("适配器 id"))
+        form.addView(adapterLabel)
         form.addView(adapterField)
-        form.addView(label("CLI 二进制名"))
+        form.addView(binaryLabel)
         form.addView(binaryField)
-        form.addView(label("密钥引用名"))
+        form.addView(authRefLabel)
         form.addView(authRefField)
-        form.addView(label("密钥值"))
+        form.addView(secretLabel)
         form.addView(secretField)
-        form.addView(label("能力"))
+        form.addView(label("通用能力与限制"))
+        form.addView(capabilitiesLabel)
         form.addView(capsField)
+        form.addView(dispatchableLabel)
         form.addView(dispatchableBox)
-        form.addView(label("已知限制"))
+        form.addView(limitsLabel)
         form.addView(limitsField)
 
         fun currentKind(): BrainKind = when {
@@ -7551,21 +7566,36 @@ class MainActivity : AppCompatActivity() {
             val kind = currentKind()
             val isManus = kind == BrainKind.MODEL_API && manusBox.isChecked
             manusBox.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            baseUrlLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             baseUrlField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            modelLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             modelField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             modelField.hint = if (isManus) {
                 "档位：standard / lite / max（默认 standard；“Manus 2.0 Lite”填 lite）"
             } else {
                 "模型，如 deepseek-flash"
             }
+            binaryLabel.visibility = if (kind == BrainKind.AGENT_RUNTIME) View.VISIBLE else View.GONE
             binaryField.visibility = if (kind == BrainKind.AGENT_RUNTIME) View.VISIBLE else View.GONE
             binaryField.hint = if (isDeviceAgent()) "设备上的 CLI 二进制名，如 codex" else "CLI 二进制名，如 codebuddy"
+            val adapterVisible = kind in setOf(BrainKind.MODEL_API, BrainKind.SUBSCRIPTION, BrainKind.AGENT_RUNTIME)
+            adapterLabel.visibility = if (adapterVisible) View.VISIBLE else View.GONE
+            adapterField.visibility = adapterLabel.visibility
             deviceSection.visibility = if (isDeviceAgent()) View.VISIBLE else View.GONE
             platformSection.visibility = if (isPlatformAgent()) View.VISIBLE else View.GONE
             cloudSection.visibility = if (isCloudAgent()) View.VISIBLE else View.GONE
             cloudHomeSpinner.visibility = if (isCloudAgent() && cloudHomeDevice.isChecked) View.VISIBLE else View.GONE
+            authRefLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             authRefField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            secretLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             secretField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            val commonVisibility = if (kind == BrainKind.CLOUD_AGENT) View.GONE else View.VISIBLE
+            capabilitiesLabel.visibility = commonVisibility
+            capsField.visibility = commonVisibility
+            limitsLabel.visibility = commonVisibility
+            limitsField.visibility = commonVisibility
+            dispatchableLabel.visibility = commonVisibility
+            dispatchableBox.visibility = commonVisibility
         }
         typeGroup.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
         cloudHomeGroup.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
@@ -8476,6 +8506,30 @@ class MainActivity : AppCompatActivity() {
         bindAutonomySettings()
         // Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接设备的 Hand）。
         bindHandSyncSettings()
+        bindSettingsNavigation()
+    }
+
+    private fun bindSettingsNavigation() {
+        val scroll = screenSettings as? ScrollView ?: return
+        val destinations = mapOf(
+            R.id.settingsJumpModels to { screenSettings.findViewById<View>(R.id.brainListContainer) },
+            R.id.settingsJumpRepos to { screenSettings.findViewById<View>(R.id.githubAuthStatus) },
+            R.id.settingsJumpDevices to { screenSettings.findViewById<View>(R.id.handAutoSyncRow) },
+            R.id.settingsJumpMcp to {
+                screenSettings.findViewWithTag<View>("settings_mcp_dispatch")
+                    ?: screenSettings.findViewById(R.id.buttonBrainAdvanced)
+            },
+            R.id.settingsJumpAbout to { screenSettings.findViewById<View>(R.id.appUpdateStatus) },
+        )
+        destinations.forEach { (buttonId, resolveTarget) ->
+            screenSettings.findViewById<View>(buttonId).setOnClickListener {
+                val target = resolveTarget() ?: return@setOnClickListener
+                val rect = android.graphics.Rect()
+                target.getDrawingRect(rect)
+                scroll.offsetDescendantRectToMyCoords(target, rect)
+                scroll.smoothScrollTo(0, rect.top.coerceAtLeast(0))
+            }
+        }
     }
 
     /**
@@ -8492,6 +8546,7 @@ class MainActivity : AppCompatActivity() {
         val section = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(20), 0, dp(8))
+            tag = "settings_mcp_dispatch"
         }
         val title = TextView(this).apply {
             text = "本机 MCP 派工"
@@ -8535,10 +8590,10 @@ class MainActivity : AppCompatActivity() {
         toggle.setOnCheckedChangeListener { _, enabled ->
             toggleMcpDispatchService(enabled, toggle, tokenButton, status, endpoint)
         }
-        tokenButton.setOnClickListener {
+        fun issueToken(create: () -> wherevercode.agent.core.dispatch.IssuedDispatchToken) {
             tokenButton.isEnabled = false
             Thread {
-                val issued = runCatching { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                val issued = runCatching(create)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     tokenButton.isEnabled = toggle.isChecked
@@ -8565,6 +8620,38 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.start()
+        }
+        tokenButton.setOnClickListener {
+            val capabilities = wherevercode.agent.core.dispatch.DispatchCapability.values()
+            val roles = arrayOf("派工", "执行", "本机所有者")
+            android.app.AlertDialog.Builder(this)
+                .setTitle("令牌权限")
+                .setItems(roles) { _, index ->
+                    if (index == capabilities.size) {
+                        issueToken { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                    } else {
+                        val principal = EditText(this).apply { hint = "Agent ID" }
+                        val project = EditText(this).apply { hint = "项目 ID（可留空）" }
+                        val fields = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(principal)
+                            addView(project)
+                        }
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle(roles[index])
+                            .setView(fields)
+                            .setPositiveButton("生成令牌") { _, _ ->
+                                val id = principal.text.toString().trim()
+                                val projectId = project.text.toString().trim().ifEmpty { null }
+                                issueToken {
+                                    McpDispatchRuntime.issueAgentToken(applicationContext, id, capabilities[index], projectId)
+                                }
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+                .show()
         }
         section.addView(title)
         section.addView(note)
@@ -8862,7 +8949,10 @@ class MainActivity : AppCompatActivity() {
                     targetResolver = ::resolveRemoteTargetForMember,
                     controlSender = remoteControlSender,
                 )
-                components.controlPlane?.let { McpDispatchRuntime.bindControlPlane(it) }
+                components.controlPlane?.let { plane ->
+                    plane.configureTaskTargetResolver { task -> resolveRemoteTargetForMember(task.assignedAgentId, task) }
+                    McpDispatchRuntime.bindControlPlane(plane)
+                }
                 runOnUiThread {
                     brainComponents = components
                     chatViewModel.attach(components, toolApprovalGate)
@@ -8944,6 +9034,7 @@ class MainActivity : AppCompatActivity() {
                             scheduler = components.taskScheduler,
                             stepStore = components.taskStepStore,
                             port = remoteChatPort,
+                            artifactDirectory = java.io.File(filesDir, "task-artifacts"),
                             // P2：远端编码发 plan 批准后的包、完成停 review。
                             pipelineHook = components.pipelineOrchestrator?.let { PipelineRunnerHookImpl(it) },
                         ),
@@ -8990,6 +9081,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                     )
+                    // Remote/MCP tasks whose executor vanished mid-pause/stop
+                    // are reconciled here too, not only between local tasks.
+                    components.controlPlane?.let { plane ->
+                        pump.onControlSweep = { plane.reconcileExpiredControls() }
+                    }
                     remoteTaskPump = pump
                     pump.start()
                     // P2 自动执行（2026-11-11）：规划者自动起草 + 审查者自动
@@ -9048,7 +9144,14 @@ class MainActivity : AppCompatActivity() {
         // V5 C1：保留现有版本行不动，在其后追加短 SHA 与构建时间（VersionInfo）。
         aboutVersion.text = try {
             val info = packageManager.getPackageInfo(packageName, 0)
-            VersionInfo.aboutText("WhereverCode 超级 Agent · ${info.versionName}（${info.versionCode}）")
+            VersionInfo.aboutText("WhereverCode 超级 Agent · ${info.versionName}（${info.versionCode}）") +
+                "\n包名：$packageName · " + if (packageName.endsWith(".ci")) {
+                    "独立 CI 测试包，不覆盖正式数据"
+                } else if (BuildConfig.MAINTAINER_SIGNED) {
+                    "维护者签名构建；覆盖升级仍需与已安装证书一致"
+                } else {
+                    "未配置维护者签名，不声明可覆盖升级"
+                }
         } catch (_: Exception) {
             VersionInfo.aboutText("WhereverCode 超级 Agent")
         }
