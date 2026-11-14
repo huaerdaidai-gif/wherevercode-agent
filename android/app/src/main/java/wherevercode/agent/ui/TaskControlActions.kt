@@ -13,14 +13,14 @@ class TaskControlActions(
     private val tasks: TaskStore,
     private val controls: ControlCommandPort,
 ) {
-    fun request(taskId: String, action: ControlAction, goal: String? = null): ControlResult {
+    fun request(taskId: String, action: ControlAction, goal: String? = null): ControlResult = tasks.withTaskLock {
         val task = tasks.getTask(taskId)
         if (task == null || task.sessionId != null) {
-            return ControlResult(false, false, ControlStatus.RUNNING,
+            return@withTaskLock ControlResult(false, false, ControlStatus.RUNNING,
                 "ui_task_not_dispatchable", "任务不存在或是聊天轮次，请从原会话控制。")
         }
         val operationId = UUID.randomUUID().toString()
-        return when (action) {
+        when (action) {
             ControlAction.PAUSE -> controls.pause(taskId, operationId, "用户在任务页暂停")
             ControlAction.RESUME -> controls.resume(taskId, operationId, "用户在任务页继续")
             ControlAction.STOP -> controls.stop(taskId, operationId, "用户在任务页停止")
