@@ -78,6 +78,8 @@ jobs:
       - name: Install Hand dependency
         run: python3 -m pip install cryptography
       - name: Run all existing and added Hand tests
+        env:
+          T4_EVIDENCE_DIR: hand-evidence
         run: |
           set -o pipefail
           git rev-parse HEAD
@@ -87,5 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hand-tests-${{ github.sha }}
-          path: hand-tests.log
+          path: |
+            hand-tests.log
+            hand-evidence/*.json
           if-no-files-found: warn
