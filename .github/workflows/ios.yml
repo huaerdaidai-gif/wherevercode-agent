@@ -103,6 +103,30 @@ jobs:
           /usr/bin/zip -T WhereverCodeAgent-unsigned.ipa
           ls -lh WhereverCodeAgent-unsigned.ipa
 
+      - name: Verify IPA version matches pbxproj (D5 gate)
+        run: |
+          set -euo pipefail
+          python3 - << 'PYEOF'
+          import plistlib, re, sys, zipfile, tempfile, os
+          pbx = open('ios/WhereverCodeAgent.xcodeproj/project.pbxproj').read()
+          mv = set(re.findall(r'MARKETING_VERSION = ([0-9.]+);', pbx))
+          cv = set(re.findall(r'CURRENT_PROJECT_VERSION = (\d+);', pbx))
+          assert len(mv) == 1 and len(cv) == 1, f'version not unique in pbxproj: {mv} {cv}'
+          exp_v, exp_b = mv.pop(), cv.pop()
+          with tempfile.TemporaryDirectory() as td:
+              with zipfile.ZipFile('WhereverCodeAgent-unsigned.ipa') as z:
+                  name = [n for n in z.namelist() if n.endswith('.app/Info.plist')][0]
+                  plist_path = os.path.join(td, 'Info.plist')
+                  open(plist_path, 'wb').write(z.read(name))
+              d = plistlib.load(open(plist_path, 'rb'))
+          got_v, got_b = d.get('CFBundleShortVersionString'), d.get('CFBundleVersion')
+          print(f'expected {exp_v} ({exp_b}); IPA has {got_v} ({got_b})')
+          if got_v != exp_v or str(got_b) != exp_b:
+              print('VERSION GATE FAILED: IPA version missing, unexpanded, or not equal to pbxproj')
+              sys.exit(1)
+          print('VERSION GATE PASSED')
+          PYEOF
+
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
