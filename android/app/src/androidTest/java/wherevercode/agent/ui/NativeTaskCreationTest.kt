@@ -94,6 +94,23 @@ class NativeTaskCreationTest {
             val homeReady = device.findObject(By.res(context.packageName, "buttonMenu")) != null &&
                 device.findObject(By.text("今天想做什么？")) != null
             if (homeReady) return
+            // The system notification-permission dialog can sit over
+            // the app from first launch (seen in the round-4 evidence:
+            // "Allow WhereverCode to send you notifications?"). Answer
+            // it like a user would: deny, and the app must cope.
+            val permission = device.findObjects(By.clazz(Button::class.java)).firstOrNull { btn ->
+                val t = btn.text?.trim().orEmpty()
+                t.equals("不允许", ignoreCase = true) ||
+                    (t.contains("allow", ignoreCase = true) && t.contains("don", ignoreCase = true)) ||
+                    t.contains("t allow", ignoreCase = true)
+            } ?: device.findObjects(By.clazz(Button::class.java)).firstOrNull { btn ->
+                btn.text?.trim().equals("Allow", ignoreCase = true)
+            }
+            if (permission != null) {
+                permission.click()
+                Thread.sleep(1_000)
+                continue
+            }
             val skip = device.findObject(By.text("稍后再看"))
                 ?: device.findObject(By.text("跳过，先体验基础功能"))
                 ?: device.findObject(By.text("跳过"))
