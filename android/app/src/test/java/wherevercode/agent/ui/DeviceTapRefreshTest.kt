@@ -17,6 +17,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.android.controller.ActivityController
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
@@ -52,7 +53,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        openDevices(activity)
+        openDevices(controller)
 
         val shown = waitForText(activity, "dev-0", timeoutMs = 3000)
         assertTrue("点进设备页 3 秒内应已看到本地添加的设备 dev-0（不等 5 秒 mDNS）", shown)
@@ -70,7 +71,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        openDevices(activity)
+        openDevices(controller)
         assertTrue(waitForText(activity, "dev-7", timeoutMs = 3000))
 
         val scrollView = activity.findViewById<FrameLayout>(R.id.screenContainer)
@@ -106,8 +107,8 @@ class DeviceTapRefreshTest {
     }
 
     /** Device refresh tests use the supported V5 deep link; drawer traversal has a device test. */
-    private fun openDevices(activity: MainActivity) {
-        activity.onNewIntent(Intent(activity, MainActivity::class.java).putExtra(EXTRA_V5_ROUTE, "devices"))
+    private fun openDevices(controller: ActivityController<MainActivity>) {
+        controller.newIntent(Intent(controller.get(), MainActivity::class.java).putExtra(EXTRA_V5_ROUTE, "devices"))
         idleMain()
     }
 
