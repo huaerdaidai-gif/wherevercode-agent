@@ -1,6 +1,5 @@
 package wherevercode.agent.ui
 
-import android.app.Application
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -23,7 +22,7 @@ class TaskControlActionsTest {
     private lateinit var actions: TaskControlActions
 
     @Before fun setup() {
-        db = TaskDatabase.inMemory(RuntimeEnvironment.getApplication<Application>())
+        db = TaskDatabase.inMemory(RuntimeEnvironment.getApplication())
         tasks = RoomTaskStore(db)
         plane = ControlPlane(tasks, InMemoryAuthorizationStore(), InMemoryRevocationStore(),
             controlStore = RoomControlStore(db), auditLog = RoomControlAuditLog(db.controlAuditDao()))

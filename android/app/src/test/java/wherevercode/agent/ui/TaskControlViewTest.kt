@@ -1,6 +1,5 @@
 package wherevercode.agent.ui
 
-import android.app.Application
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -16,7 +15,7 @@ import wherevercode.agent.core.task.TaskRecord
 @Config(sdk = [28])
 class TaskControlViewTest {
     @Test fun pendingStopIsVisibleAlongsideTheUnchangedExecutionState() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val controller = TaskDetailController(app, {}, {}, {}, { View(app) })
         controller.render(TaskRecord(taskId = "remote", title = "Remote work", state = "working",
             createdAt = 1, updatedAt = 1, version = 1), emptyList(), emptyList(), emptyList(), 0,
@@ -32,7 +31,7 @@ class TaskControlViewTest {
     }
 
     @Test fun nativeManifestEntryInvokesItsCallback() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         var opened = false
         val controller = McpPluginScreenController(app, { _, _ -> }, {}, { _, _ -> }, {},
             onManifests = { opened = true })
