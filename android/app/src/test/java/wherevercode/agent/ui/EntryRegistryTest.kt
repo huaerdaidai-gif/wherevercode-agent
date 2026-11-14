@@ -41,7 +41,7 @@ class EntryRegistryTest {
     @Test
     fun `drawer workspace group keeps secondary theme and approval entries`() {
         assertEquals(
-            listOf("nav_theme", "nav_pending_approval"),
+            listOf("nav_theme"),
             EntryRegistry.byGroup(Group.DRAWER_WORKSPACE).map { it.id },
         )
         // 界面与主题（R2）：已实现的动作入口，接 cycleTheme()，不是待开发。
@@ -54,7 +54,7 @@ class EntryRegistryTest {
     @Test
     fun `drawer top follows the ten V5 default entries`() {
         assertEquals(
-            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench"),
+            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench", "nav_team_channel", "nav_pending_approval"),
             EntryRegistry.byGroup(Group.DRAWER_TOP).map { it.id },
         )
         assertEquals(DrawerController.ID_HISTORY_SEARCH, EntryRegistry.find("nav_history")?.target)

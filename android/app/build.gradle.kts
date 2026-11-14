@@ -56,8 +56,8 @@ android {
         // Cost: no Google Play (Play requires targetSdk 35 since 2025-08-31).
         // This spike ships as a sideloaded APK, per the task.
         targetSdk = 28
-        versionCode = 6
-        versionName = "0.3.0-p0"
+        versionCode = 7
+        versionName = "0.3.0-p0-r3"
 
         // V5 C1：真实版本信息（commitSha / buildTimeUtc 见文件顶部）。
         buildConfigField("String", "COMMIT_SHA", "\"$commitSha\"")

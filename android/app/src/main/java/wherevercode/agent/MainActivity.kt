@@ -127,6 +127,8 @@ import wherevercode.agent.core.agent.SharedPreferencesAgentStore
 import wherevercode.agent.core.agent.SharedPreferencesManusTaskIdStore
 import wherevercode.agent.core.agent.SharedPreferencesPlatformReplyCursorStore
 import wherevercode.agent.core.control.ControlAction
+import wherevercode.agent.ui.CreateTaskDialog
+import wherevercode.agent.ui.TaskComposer
 import wherevercode.agent.ui.TaskControlActions
 import wherevercode.agent.core.control.HandRemoteControlSender
 import wherevercode.agent.core.install.AssetReader
@@ -1538,6 +1540,7 @@ class MainActivity : AppCompatActivity() {
                 agentStore.getAgent(agentId)?.let { openAgentSession(it) }
             },
             onPost = { text -> postTeamChannelMessage(text) },
+            onCreateTask = { goal, created -> showCreateTaskDialog(initialGoal = goal, onCreated = created) },
             onMarkRead = { markTeamChannelRead() },
             onNewRound = {
                 teamChannelRoundsUsed = 0
@@ -4565,12 +4568,21 @@ class MainActivity : AppCompatActivity() {
         // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
         // 不显示真人名字（见 HomeScreenController.greeting）。
         val greetingView =
-            UiKit.text(this, HomeScreenController.greeting(), 22f, R.color.home_text, bold = true).apply {
+            UiKit.text(this, HomeScreenController.greeting(), 28f, R.color.home_text, bold = true).apply {
                 gravity = android.view.Gravity.CENTER
             }
+        card.addView(UiKit.text(this, "∞", 34f, R.color.home_gradient_start).apply {
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, dp(20), 0, dp(12))
+        })
         card.addView(greetingView)
+        card.addView(UiKit.text(this, "项目 · 选择或切换 ›", 12f, R.color.home_text_secondary).apply {
+            minHeight = dp(48)
+            gravity = android.view.Gravity.CENTER
+            setOnClickListener { showChatProjectPicker() }
+        })
         card.addView(
-            UiKit.text(this, "有什么想一起解决的？", 14f, R.color.home_text_secondary).apply {
+            UiKit.text(this, "", 14f, R.color.home_text_secondary).apply {
                 gravity = android.view.Gravity.CENTER
                 setPadding(0, dp(4), 0, dp(14))
             },
@@ -4580,7 +4592,7 @@ class MainActivity : AppCompatActivity() {
         // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
         // 连接设备/Agent 团队/任务中心）由抽屉承接（R2）。
         if (homeScreenController.suggestionsVisible()) {
-            EntryRegistry.homeSuggestions().take(2).chunked(2).forEach { rowSuggestions ->
+            EntryRegistry.homeSuggestions().take(3).chunked(2).forEach { rowSuggestions ->
                 val row = UiKit.horizontal(this).apply {
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
@@ -4590,7 +4602,7 @@ class MainActivity : AppCompatActivity() {
                 rowSuggestions.forEachIndexed { index, entry ->
                     row.addView(
                         homeSuggestionPill(entry.iconGlyph, entry.title) { applySuggestion(entry.target) },
-                        LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                        LinearLayout.LayoutParams(0, dp(48), 1f).apply {
                             marginEnd = if (index == 0) dp(8) else 0
                         },
                     )
@@ -4785,6 +4797,7 @@ class MainActivity : AppCompatActivity() {
         }
         screenTasks.findViewById<View>(R.id.buttonEventRefresh).setOnClickListener { refreshEvents() }
         screenTasks.findViewById<View>(R.id.buttonTaskRefresh).setOnClickListener { refreshTasks() }
+        screenTasks.findViewById<View>(R.id.buttonCreateTask).setOnClickListener { showCreateTaskDialog() }
     }
 
     private fun updateTaskStatus(state: ChatUiState) {
@@ -8067,65 +8080,60 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 指派任务给某 Agent：建 queued 任务行并写 assigned_agent_id；本地不代执行。 */
-    private fun assignTaskToAgent(agent: AgentRecord) {
-        if (!agent.dispatchable) {
-            toast("该 Agent 不可派单（dispatchable=false），只对话、不接任务。")
-            return
-        }
+    /** C13: all explicit task entry points share the existing TaskStore/runner pipeline. */
+    private var taskComposerLoading = false
+
+    private fun showCreateTaskDialog(
+        initialGoal: String = "",
+        initialAgentId: String? = null,
+        onCreated: () -> Unit = {},
+    ) {
         val components = brainComponents ?: run {
-            toast("大脑还在加载，请稍候再指派。")
+            toast("任务组件正在加载，请稍后重试。")
             return
         }
-        val input = EditText(this).apply {
-            hint = "任务目标，如：写一个 calculator.py 并跑测试"
-            setSingleLine(false)
-            minLines = 3
-        }
-        AlertDialog.Builder(this)
-            .setTitle("指派任务给 ${agent.displayName}")
-            .setMessage(
-                if (agent.deviceId != null) {
-                    "任务进入 queued，远端泵会发到设备上执行；本地执行器不代执行。"
-                } else {
-                    "任务进入 queued 等 ${agent.displayName} 认领；本地执行器不代执行（跨设备执行待 P2）。"
-                },
-            )
-            .setView(input)
-            .setPositiveButton("指派") { _, _ ->
-                val goal = input.text.toString().trim()
-                if (goal.isBlank()) {
-                    toast("任务目标不能为空。")
-                    return@setPositiveButton
+        if (taskComposerLoading) return
+        taskComposerLoading = true
+        val initialProjectId = currentChatProjectId()
+        Thread {
+            try {
+                val projects = projectStore.listProjects()
+                val agents = agentStore.listAgents()
+                runOnUiThread {
+                    taskComposerLoading = false
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    CreateTaskDialog(this, projects, agents, initialGoal, initialProjectId, initialAgentId) {
+                        goal, agentId, projectId, complete ->
+                        Thread {
+                            try {
+                                val task = TaskComposer.submit(components.taskStore, agentStore, projectStore,
+                                    goal, agentId, projectId, components.configStore.currentBrainId())
+                                runOnUiThread {
+                                    if (isFinishing || isDestroyed) return@runOnUiThread
+                                    complete(null)
+                                    onCreated()
+                                    toast("任务 ${task.taskId.take(8)} 已创建，等待执行器认领。")
+                                    showEntry(DrawerController.ID_TASKS)
+                                    refreshTasks()
+                                    openTaskDetail(task.taskId)
+                                }
+                            } catch (e: Exception) {
+                                runOnUiThread { complete(e.message ?: "创建失败，请重试") }
+                            }
+                        }.start()
+                    }.show()
                 }
-                Thread {
-                    try {
-                        val now = System.currentTimeMillis() / 1000
-                        val record = TaskRecord(
-                            taskId = UUID.randomUUID().toString(),
-                            title = goal.take(40),
-                            description = goal,
-                            state = "queued",
-                            // V5 跨设备开发（2026-11-12，A1）：手动指派
-                            // 同样带当前聊天绑定作 projectId。
-                            projectId = currentChatProjectId(),
-                            assignedAgentId = agent.agentId,
-                            createdAt = now,
-                            updatedAt = now,
-                            version = 1,
-                        )
-                        components.taskStore.createTask(record)
-                        runOnUiThread {
-                            toast("已指派给 ${agent.displayName}，进入 queued 等认领。")
-                            refreshTasks()
-                        }
-                    } catch (e: Exception) {
-                        runOnUiThread { toast("指派失败：${e.message}") }
-                    }
-                }.start()
+            } catch (e: Exception) {
+                runOnUiThread {
+                    taskComposerLoading = false
+                    toast("读取项目或成员失败，请重试。")
+                }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }.start()
+    }
+
+    private fun assignTaskToAgent(agent: AgentRecord) {
+        showCreateTaskDialog(initialAgentId = agent.agentId)
     }
 
     /** 测试某 Agent 的连接（结果写回记录：登录态 + 摘要 + 时间）。 */
@@ -9189,6 +9197,13 @@ class MainActivity : AppCompatActivity() {
     private fun refreshBrainCapsule() {
         if (!::brainCapsule.isInitialized) return
         val agent = if (::chatViewModel.isInitialized) chatViewModel.selectedAgent else null
+        screenChat.findViewById<TextView>(R.id.modelConnectionBanner)?.apply {
+            val components = brainComponents
+            val id = components?.configStore?.currentBrainId()
+            val configured = id != null && components?.isBrainConfigured(id) == true
+            visibility = if (components != null && agent == null && !configured) View.VISIBLE else View.GONE
+            setOnClickListener { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
+        }
         if (agent == null) {
             brainCapsule.text = brainShortLabel()
             brainCapsule.visibility = View.VISIBLE

@@ -95,6 +95,8 @@ class TaskDetailController(
         content.removeAllViews()
 
         val back = UiKit.text(context, "‹ 返回任务列表", 12f, R.color.accent, bold = true).apply {
+            minHeight = dp(48)
+            gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(6), 0, dp(4))
             setOnClickListener { onBack() }
         }
@@ -107,7 +109,9 @@ class TaskDetailController(
         top.addView(stateChip(task.state))
         content.addView(top)
 
-        content.addView(section("状态"))
+        content.addView(info("任务 ${task.taskId.take(8)} · ${task.assignedAgentId ?: "等待分配"}"))
+        content.addView(info("项目：${task.projectId ?: "未绑定项目"}"))
+        content.addView(section("目标与进度"))
         content.addView(info("状态：${taskStateLabel(task.state)}"))
         controlStatus?.let { content.addView(info("执行控制：$it")) }
         // V5 跨设备开发（2026-11-12，D4 新口径 (b)）：任务详情“工作
@@ -137,6 +141,9 @@ class TaskDetailController(
             content.addView(body(it))
         }
 
+        content.addView(section("执行控制"))
+        content.addView(controlsProvider(task))
+        val pipelineStart = content.childCount
         // P2：流水线（规划→编码→审查）——阶段子状态 + plan + 返工轮次
         // + verdict 历史 + 机械检查结果；单 Agent 任务（pipeline 为 null）
         // 只留一行说明，不挡原有内容。
@@ -198,6 +205,7 @@ class TaskDetailController(
                 if (row.childCount > 0) content.addView(row)
             }
         }
+        foldSection(pipelineStart, "计划与审查策略")
         task.error?.takeIf { it.isNotBlank() }?.let {
             content.addView(section("错误"))
             content.addView(
@@ -209,12 +217,13 @@ class TaskDetailController(
 
         content.addView(section("步骤（${steps.size}）"))
         if (steps.isEmpty()) {
-            content.addView(note("暂无步骤：步骤仅保留在本进程内，重启后任务行保留、步骤不再显示。"))
+            content.addView(note("暂无执行步骤。收到执行器事件后显示进度。"))
         } else {
             steps.forEach { step -> content.addView(stepRow(step)) }
-            content.addView(note("步骤仅保留在本进程内，重启后任务行保留、步骤不再显示。"))
+            content.addView(note("步骤来自任务步骤库，显示已收到的执行事件。"))
         }
 
+        val logStart = content.childCount
         content.addView(section("进展记录"))
         if (task.sessionId == null) {
             content.addView(note("此任务暂无进展记录。"))
@@ -235,6 +244,7 @@ class TaskDetailController(
             if (taskEvents.size >= 200) content.addView(note("仅显示最近 200 条。"))
         }
 
+        foldSection(logStart, "日志与回执（${events.size + taskEvents.size}）")
         content.addView(section("产物文件（${artifactPaths.size}）"))
         if (artifactPaths.isEmpty()) {
             content.addView(note("本任务没有写文件步骤，未产生产物文件。"))
@@ -254,6 +264,7 @@ class TaskDetailController(
         // 自动派发 / verdict 自动采纳 / 写操作自动放行），每条带规则与时间；
         // 监督模式下这里是空的——每一道都由用户点了。不同意某条自动决定，
         // 用下面的控制停止、重试或改目标打回。
+        val autoStart = content.childCount
         content.addView(section("自动决定（${autoDecisions.size}）"))
         if (autoDecisions.isEmpty()) {
             content.addView(note("本任务没有大脑总管的自动决定：监督模式下每一道都由你点；全权模式的自动批、自动派、自动采纳会记在这里。"))
@@ -261,8 +272,7 @@ class TaskDetailController(
             autoDecisions.forEach { entry -> content.addView(autoDecisionRow(entry)) }
         }
 
-        content.addView(section("控制"))
-        content.addView(controlsProvider(task))
+        foldSection(autoStart, "自动决定（${autoDecisions.size}）")
         val diagnostics = UiKit.text(context, "查看诊断详情", 11f, R.color.text_tertiary).apply {
             setPadding(0, dp(14), 0, dp(6))
         }
@@ -290,6 +300,27 @@ class TaskDetailController(
             ).apply { topMargin = dp(8) }
         }
         content.addView(refresh)
+    }
+
+    /** Optional details remain available without pushing the progress and controls off screen. */
+    private fun foldSection(start: Int, title: String) {
+        val body = UiKit.vertical(context).apply { visibility = View.GONE }
+        while (content.childCount > start) {
+            val child = content.getChildAt(start)
+            content.removeViewAt(start)
+            body.addView(child)
+        }
+        val heading = UiKit.text(context, "$title　展开 ›", 13f, R.color.text_primary, bold = true).apply {
+            minHeight = dp(48)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        heading.setOnClickListener {
+            val expanded = body.visibility != View.VISIBLE
+            body.visibility = if (expanded) View.VISIBLE else View.GONE
+            heading.text = if (expanded) "$title　收起 ⌃" else "$title　展开 ›"
+        }
+        content.addView(heading)
+        content.addView(body)
     }
 
     private fun pipelineButton(label: String, onClick: () -> Unit): TextView =

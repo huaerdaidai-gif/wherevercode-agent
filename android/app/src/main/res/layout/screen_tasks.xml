@@ -24,6 +24,15 @@
             android:fontFamily="sans-serif-medium" />
 
         <TextView
+            android:id="@+id/buttonCreateTask"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical|end"
+            android:text="＋ 创建任务"
+            android:textSize="14sp"
+            android:textColor="@color/accent" />
+
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="3dp"
@@ -128,7 +137,7 @@
                 <Button
                     android:id="@+id/buttonPause"
                     android:layout_width="0dp"
-                    android:layout_height="42dp"
+                    android:layout_height="48dp"
                     android:layout_weight="1"
                     android:background="@drawable/bg_chip"
                     android:text="暂停"
@@ -139,7 +148,7 @@
                 <Button
                     android:id="@+id/buttonStop"
                     android:layout_width="0dp"
-                    android:layout_height="42dp"
+                    android:layout_height="48dp"
                     android:layout_weight="1"
                     android:layout_marginStart="8dp"
                     android:background="@drawable/bg_chip"
@@ -151,7 +160,7 @@
                 <Button
                     android:id="@+id/buttonChangeGoal"
                     android:layout_width="0dp"
-                    android:layout_height="42dp"
+                    android:layout_height="48dp"
                     android:layout_weight="1"
                     android:layout_marginStart="8dp"
                     android:background="@drawable/bg_chip"
@@ -256,7 +265,7 @@
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_system_note"
             android:padding="12dp"
-            android:text="未实现（明确标注）：逐行暂停仅支持当前轮次任务，分派任务暂停未实现（无恢复语义）；执行中任务改目标未实现；步骤已持久化，重启后仍显示。跨设备执行未实现：需另一设备的任务保持 queued 可见，不会假装执行。任务详情页已实现（点任务卡进入：状态+步骤+日志+产物文件链接+审批+逐任务控制）。"
+            android:text="任务详情支持暂停、继续、停止与回执查看。执行中的目标需先停止确认，再创建新任务。离线投递、自动化规则与扩展执行器尚未实现。"
             android:textColor="@color/text_tertiary"
             android:textSize="10sp" />
 
@@ -283,7 +292,5 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:orientation="vertical" />
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp" />
     </LinearLayout>
 </ScrollView>
