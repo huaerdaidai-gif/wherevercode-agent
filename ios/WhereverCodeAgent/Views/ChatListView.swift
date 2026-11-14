@@ -292,3 +292,254 @@ struct ChatListView: View {
         }
     }
 }
+
+// Shared native tokens: see docs/NATIVE_DUAL_UI.md. Platform connections
+// never gate the local conversation store or the configured brain engine.
+enum AgentUI {
+    static let background = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.08, green: 0.09, blue: 0.12, alpha: 1)
+            : UIColor(red: 250/255, green: 248/255, blue: 245/255, alpha: 1)
+    })
+}
+
+/// Until native workspace tools are wired, advertise none and refuse all
+/// execution. A model response must never be treated as an executed action.
+private struct ChatUnavailableTools: ToolRegistry {
+    var workspaceRoot: String? { nil }
+    func toolsForCapabilities(_ capabilities: BrainCapabilities?, authorizedTools: Set<String>) -> [ToolDef] { [] }
+    func gitHostToolsFor(project: Project?, location: ProjectLocation?) -> [ToolDef] { [] }
+    func allToolNames() -> Set<String> { [] }
+    func validateOnly(_ action: BrainAction, _ context: ToolContext) -> ToolOutcome? {
+        ToolOutcome(ok: false, summary: "iOS 尚未接入工作区执行工具", errorCode: "not_implemented")
+    }
+    func execute(_ action: BrainAction, _ context: ToolContext, stopped: @escaping () -> Bool) async throws -> ToolOutcome {
+        ToolOutcome(ok: false, summary: "iOS 尚未接入工作区执行工具", errorCode: "not_implemented")
+    }
+    func isReadOnlyExtensionTool(_ name: String) -> Bool { false }
+}
+
+/// UI state over the existing app-wide data and engine. No second database,
+/// model registry, or credential store is created by the conversation view.
+@MainActor
+final class LocalChatModel: ObservableObject {
+    @Published var draft = ""
+    @Published var messages: [ConversationMessage] = []
+    @Published var history: [Conversation] = []
+    @Published var selectedBrain = ""
+    @Published var error: String?
+    @Published var streaming = ""
+    @Published var isSending = false
+    @Published var showHistory = false
+    private(set) var conversationID: String?
+    private unowned let appState: AppState
+    let eventLog = InMemoryEventLog()
+    private let data: LocalData
+
+    init(appState: AppState, data: LocalData = .shared) {
+        self.appState = appState
+        self.data = data
+        selectedBrain = appState.brainConfigStore.currentBrainId() ?? ""
+        conversationID = data.chatPrefs.currentSessionId
+        reload()
+    }
+
+    func reload() {
+        do {
+            history = try data.conversations.listConversations()
+            messages = try conversationID.map { try data.conversations.listMessages(conversationId: $0) } ?? []
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func newConversation() {
+        guard !isSending else { error = "请等待当前回复完成后新建对话"; return }
+        conversationID = nil
+        data.chatPrefs.currentSessionId = nil
+        draft = ""; messages = []; streaming = ""; error = nil
+    }
+
+    func open(_ conversation: Conversation) {
+        guard !isSending else { return }
+        conversationID = conversation.id
+        data.chatPrefs.currentSessionId = conversation.id
+        selectedBrain = conversation.brainId ?? appState.brainConfigStore.currentBrainId() ?? ""
+        error = nil; draft = ""; streaming = ""; showHistory = false
+        reload()
+    }
+
+    func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        guard !selectedBrain.isEmpty else { error = "请在模型与连接中配置并选择模型"; return }
+        isSending = true; error = nil; streaming = ""
+        defer { isSending = false; streaming = ""; reload() }
+        do {
+            if conversationID == nil {
+                let conversation = try data.conversations.createConversation(brainId: selectedBrain, title: String(text.prefix(48)))
+                conversationID = conversation.id
+                data.chatPrefs.currentSessionId = conversation.id
+            }
+            guard let id = conversationID else { return }
+            draft = ""
+            let engine = appState.makeBrainEngine(conversations: data.conversations,
+                tools: ChatUnavailableTools(), eventLog: eventLog, approvalGate: DenyApprovalGate())
+            for try await event in engine.chat(conversationId: id, userText: text,
+                brainIdOverride: selectedBrain, allowFailover: false) {
+                switch event {
+                case .textDelta(let text): streaming += text
+                case .error(let info): error = info.message
+                default: break
+                }
+                reload()
+            }
+        } catch {
+            self.error = error.localizedDescription
+            // Restore unsaved text only; persisted user messages are not duplicated.
+            if messages.last?.content != text { draft = text }
+        }
+    }
+}
+
+struct LocalChatHomeView: View {
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject var model: LocalChatModel
+    @State private var query = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if model.messages.isEmpty && !model.isSending {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("今天想做什么？").font(.system(size: 29, weight: .semibold))
+                                    Text("从对话开始，或打开侧边栏进入工作台。")
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                }.padding(.vertical, 48)
+                            }
+                            ForEach(model.messages, id: \.id) { message in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(message.role == "user" ? "你" : message.source)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Text(message.content).textSelection(.enabled)
+                                }
+                                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(message.role == "user" ? Color.accentColor.opacity(0.1) : Color(uiColor: .secondarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                            }
+                            if model.isSending {
+                                Text(model.streaming.isEmpty ? "正在等待模型回复…" : model.streaming)
+                                    .padding(14).accessibilityIdentifier("chat.streaming")
+                            }
+                            Color.clear.frame(height: 1).id("bottom")
+                        }.padding(16)
+                    }
+                    .onChange(of: model.streaming) { _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onChange(of: model.messages.count) { _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                if let error = model.error {
+                    Text(error).font(.caption).foregroundStyle(.red).padding(12)
+                        .accessibilityIdentifier("chat.error")
+                }
+                VStack(spacing: 8) {
+                    HStack {
+                        Picker("模型", selection: $model.selectedBrain) {
+                            Text("选择模型").tag("")
+                            ForEach(appState.brainConfigStore.listConfigs(), id: \.brainId) { config in
+                                Text(config.label + (config.model.isEmpty ? "" : " · " + config.model)).tag(config.brainId)
+                            }
+                        }.disabled(model.isSending).accessibilityIdentifier("chat.model")
+                        Spacer()
+                        Button("模型与连接") { appState.goToSettings() }.font(.caption)
+                    }
+                    HStack(alignment: .bottom, spacing: 8) {
+                        TextField("输入消息", text: $model.draft, axis: .vertical)
+                            .lineLimit(1...6).padding(12)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                            .accessibilityIdentifier("chat.input")
+                        Button { Task { await model.send() } } label: {
+                            Image(systemName: "arrow.up").frame(width: 44, height: 44)
+                        }.buttonStyle(.borderedProminent).clipShape(Circle())
+                            .disabled(model.isSending || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityLabel("发送").accessibilityIdentifier("chat.send")
+                    }
+                    Text("模型回复不代表任务已执行；工作区工具尚未接入。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }.padding(16)
+            }
+            .background(AgentUI.background)
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $model.showHistory) {
+                NavigationStack {
+                    List(model.history.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }, id: \.id) { conversation in
+                        Button(conversation.title.isEmpty ? "未命名对话" : conversation.title) { model.open(conversation) }
+                            .disabled(model.isSending)
+                    }
+                    .overlay { if model.history.isEmpty { Text("暂无会话记录").foregroundStyle(.secondary) } }
+                    .searchable(text: $query, prompt: "搜索会话")
+                    .navigationTitle("会话")
+                    .toolbar { Button("完成") { model.showHistory = false } }
+                }
+            }
+            .onAppear { model.reload() }
+        }
+    }
+}
+
+struct LocalWorkbenchView: View {
+    enum Section { case projects, agents, console }
+    let section: Section
+    @EnvironmentObject private var appState: AppState
+    @State private var projects: [ProjectWithHomes] = []
+    @State private var agents: [AgentRecord] = []
+    @State private var loadError: String?
+    var body: some View {
+        NavigationStack {
+            List {
+                if let loadError { Text(loadError).foregroundStyle(.red) }
+                switch section {
+                case .projects:
+                    if projects.isEmpty { Text("暂无本地项目").foregroundStyle(.secondary) }
+                    ForEach(projects, id: \.project.projectId) { item in
+                        DisclosureGroup(item.project.name) {
+                            ForEach(item.homes, id: \.locationId) { home in
+                                Text(home.workspacePath).textSelection(.enabled)
+                            }
+                            Text("iOS 文件浏览与编辑尚未接入，当前仅展示已保存的项目位置。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                case .agents:
+                    if agents.isEmpty { Text("暂无已登记 Agent").foregroundStyle(.secondary) }
+                    ForEach(agents, id: \.agentId) { agent in
+                        VStack(alignment: .leading) {
+                            Text(agent.displayName)
+                            Text(agent.lastTestSummary ?? "尚未验证连接").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("外部 Agent 直接聊天与设备控制尚未接入；可使用团队频道的真实连接。")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .console:
+                    let events = appState.chat.eventLog.entries()
+                    if events.isEmpty { Text("当前进程暂无模型事件").foregroundStyle(.secondary) }
+                    ForEach(events, id: \.seq) { event in
+                        VStack(alignment: .leading) {
+                            Text(event.kind).font(.headline)
+                            Text(event.detail).font(.caption).textSelection(.enabled)
+                        }
+                    }
+                    Text("此处仅显示当前进程的模型事件。平台审批与交付结果请进入任务详情；未接入的控制不可执行。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(section == .projects ? "项目与文件" : section == .agents ? "Agent" : "控制台")
+            .task {
+                do {
+                    projects = try LocalData.shared.projects.listProjects()
+                    agents = try LocalData.shared.agents.listAgents()
+                } catch { loadError = error.localizedDescription }
+            }
+        }
+    }
+}

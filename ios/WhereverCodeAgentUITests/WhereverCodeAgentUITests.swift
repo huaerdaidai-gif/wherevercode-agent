@@ -43,24 +43,15 @@ final class WhereverCodeAgentUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 15))
-        let chatTab = tabBar.buttons["对话"]
-        let tasksTab = tabBar.buttons["任务"]
-        let devicesTab = tabBar.buttons["设备"]
-        let settingsTab = tabBar.buttons["设置"]
-        XCTAssertTrue(chatTab.exists && tasksTab.exists && devicesTab.exists && settingsTab.exists)
-        XCTAssertTrue(chatTab.isSelected)
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+        XCTAssertTrue(app.textFields["chat.input"].waitForExistence(timeout: 15))
         snap(app, "ui-01-chat-home")
-
-        // --- Navigation regression: 去设置 must select the Settings tab.
-        let goSettings = app.buttons["去设置"]
-        if goSettings.waitForExistence(timeout: 10) {
-            goSettings.tap()
-        } else {
-            settingsTab.tap()
-        }
-        XCTAssertTrue(settingsTab.isSelected, "Settings TAB must be selected after 去设置")
+        app.buttons["新对话"].tap()
+        app.buttons["搜索会话"].tap()
+        XCTAssertTrue(app.navigationBars["会话"].waitForExistence(timeout: 10))
+        snap(app, "ui-01b-history")
+        app.buttons["完成"].tap()
+        navigate(app, to: "settings")
         let urlField = app.textFields["settings.address"]
         XCTAssertTrue(urlField.waitForExistence(timeout: 10))
         snap(app, "ui-02-settings")
@@ -148,23 +139,20 @@ final class WhereverCodeAgentUITests: XCTestCase {
         dismissKeyboard(app)
 
         // --- Channel list: real load error + retry, not a blank page.
-        chatTab.tap()
-        XCTAssertTrue(chatTab.isSelected)
+        navigate(app, to: "channels")
         let retryInChat = app.buttons["重试"]
         XCTAssertTrue(retryInChat.waitForExistence(timeout: 60),
                       "Channel list must surface the real load error with a retry button")
         snap(app, "ui-04-channel-list-error")
 
         // --- Task list: same real error surfacing.
-        tasksTab.tap()
-        XCTAssertTrue(tasksTab.isSelected)
+        navigate(app, to: "tasks")
         XCTAssertTrue(app.buttons["重试"].waitForExistence(timeout: 60),
                       "Task list must surface the real load error with a retry button")
         snap(app, "ui-05-task-list-error")
 
         // --- Devices: honest blocked page.
-        devicesTab.tap()
-        XCTAssertTrue(devicesTab.isSelected)
+        navigate(app, to: "devices")
         let blockedText = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "服务端无此接口")
         ).firstMatch
@@ -172,12 +160,20 @@ final class WhereverCodeAgentUITests: XCTestCase {
         snap(app, "ui-06-devices-blocked")
 
         // --- Selection and content stay in sync on the way back.
-        settingsTab.tap()
-        XCTAssertTrue(settingsTab.isSelected)
+        navigate(app, to: "settings")
         XCTAssertTrue(urlField.exists)
-        chatTab.tap()
-        XCTAssertTrue(chatTab.isSelected)
+        navigate(app, to: "channels")
         XCTAssertTrue(app.buttons["重试"].exists)
+    }
+
+    private func navigate(_ app: XCUIApplication, to destination: String) {
+        let menu = app.buttons["navigation.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        let row = app.buttons["drawer_\(destination)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        if destination == "tasks" { snap(app, "ui-drawer") }
+        row.tap()
     }
 
     /// Scroll the settings form until `element` is in the hierarchy

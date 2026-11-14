@@ -58,6 +58,7 @@ jobs:
           data = json.load(sys.stdin)
           phones = [d for runtimes in data['devices'].values() for d in runtimes
                     if d.get('isAvailable') and 'iPhone' in d.get('name', '')]
+          phones.sort(key=lambda d: ('iPhone 17' not in d['name'], d['name']))
           print(phones[0]['udid'] if phones else '')
           ")"
           if [ -z "$UDID" ]; then

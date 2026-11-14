@@ -19,6 +19,10 @@ enum AppTab: Hashable {
     case tasks
     case devices
     case settings
+    case channels
+    case projects
+    case agents
+    case console
 }
 
 /// Result of the last real platform connection check. Shown in
@@ -45,34 +49,39 @@ struct WhereverCodeAgentApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack(alignment: .topLeading) {
-                TabView(selection: $appState.selectedTab) {
-                ChatListView()
-                    .tabItem { Label("对话", systemImage: "bubble.left.and.bubble.right") }
-                    .tag(AppTab.chat)
-                TasksView()
-                    .tabItem { Label("任务", systemImage: "checklist") }
-                    .tag(AppTab.tasks)
-                DevicesView()
-                    .tabItem { Label("设备", systemImage: "iphone") }
-                    .tag(AppTab.devices)
-                SettingsView()
-                    .tabItem { Label("设置", systemImage: "gearshape") }
-                    .tag(AppTab.settings)
-            }
-                .toolbar(.hidden, for: .tabBar)
-                .environmentObject(appState)
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { isDrawerOpen.toggle() }
-                } label: {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 19, weight: .medium))
-                        .frame(width: 44, height: 44)
-                        .background(.regularMaterial, in: Circle())
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Button { withAnimation { isDrawerOpen.toggle() } } label: {
+                            Image(systemName: "line.3.horizontal").frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("打开导航")
+                        .accessibilityIdentifier("navigation.menu")
+                        Text("∞").foregroundStyle(Color.purple).font(.title2.bold())
+                        Text("WhereverCode").font(.system(size: 17, weight: .semibold))
+                        Spacer()
+                        Button { appState.selectedTab = .chat; appState.chat.showHistory = true } label: {
+                            Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
+                        }.accessibilityLabel("搜索会话")
+                        Button { appState.selectedTab = .chat; appState.chat.newConversation() } label: {
+                            Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
+                        }.accessibilityLabel("新对话")
+                    }
+                    .padding(.horizontal, 8).frame(height: 60)
+                    Group {
+                        switch appState.selectedTab {
+                        case .chat: LocalChatHomeView(model: appState.chat)
+                        case .channels: ChatListView()
+                        case .tasks: TasksView()
+                        case .devices: DevicesView()
+                        case .settings: SettingsView()
+                        case .projects: LocalWorkbenchView(section: .projects)
+                        case .agents: LocalWorkbenchView(section: .agents)
+                        case .console: LocalWorkbenchView(section: .console)
+                        }
+                    }
                 }
-                .accessibilityLabel("打开导航")
-                .padding(.leading, 12)
-                .padding(.top, 4)
+                .background(AgentUI.background)
+                .environmentObject(appState)
 
                 if isDrawerOpen {
                     Color.black.opacity(0.28)
@@ -84,13 +93,17 @@ struct WhereverCodeAgentApp: App {
                                 .font(.title2.bold())
                                 .padding(.bottom, 12)
                             drawerItem("对话", icon: "bubble.left", tab: .chat)
+                            drawerItem("项目与文件", icon: "folder", tab: .projects)
+                            drawerItem("Agent", icon: "person.2", tab: .agents)
+                            drawerItem("团队频道", icon: "bubble.left.and.bubble.right", tab: .channels)
+                            drawerItem("控制台", icon: "terminal", tab: .console)
                             drawerItem("任务", icon: "checklist", tab: .tasks)
                             drawerItem("设备", icon: "iphone", tab: .devices)
                             Spacer()
                             drawerItem("设置", icon: "gearshape", tab: .settings)
                         }
                         .padding(20)
-                        .frame(width: 264)
+                        .frame(width: 280)
                         .frame(maxHeight: .infinity, alignment: .topLeading)
                         .background(.regularMaterial)
                         Spacer(minLength: 0)
@@ -175,6 +188,7 @@ final class AppState: ObservableObject {
     /// tombstone persists) — and rebuilt after every change made
     /// in the brain settings, so the settings UI and the engine
     /// always read the same stack.
+    lazy var chat = LocalChatModel(appState: self)
     let brainConfigStore: BrainConfigStore
     let brainKeyStore: BrainKeyStore
     @Published private(set) var brainRegistry: BrainAdapterRegistry
