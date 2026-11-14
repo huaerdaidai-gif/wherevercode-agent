@@ -4798,6 +4798,12 @@ class MainActivity : AppCompatActivity() {
         screenTasks.findViewById<View>(R.id.buttonEventRefresh).setOnClickListener { refreshEvents() }
         screenTasks.findViewById<View>(R.id.buttonTaskRefresh).setOnClickListener { refreshTasks() }
         screenTasks.findViewById<View>(R.id.buttonCreateTask).setOnClickListener { showCreateTaskDialog() }
+        screenTasks.findViewById<TextView>(R.id.buttonTaskSessionDetails).setOnClickListener { button ->
+            val details = screenTasks.findViewById<View>(R.id.taskSessionDetails)
+            val expanded = details.visibility != View.VISIBLE
+            details.visibility = if (expanded) View.VISIBLE else View.GONE
+            (button as TextView).text = if (expanded) "当前会话与运行事件　收起 ⌃" else "当前会话与运行事件　展开 ›"
+        }
     }
 
     private fun updateTaskStatus(state: ChatUiState) {
