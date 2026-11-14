@@ -24,16 +24,20 @@ struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
     }
 
     /// 已有真实 iOS 页面、未经真机验收的 route。
+    /// taskdetail 的真实页面是 TasksView.swift 里的 TaskDetailView
+    /// （任务列表 NavigationLink 的目的地，含领取 / 汇报 / 心跳 /
+    /// 放手 / 交活），入口在 tasks 页签内，故与 tasks 同列；旗舰层
+    /// 本身未经真机验收，只标 implementedUnverified，不标已验证。
     static let unverified: Set<String> = [
         "chat", "conversation", "history", "channels", "channel",
-        "tasks", "devices", "settings", "models", "connectmodel",
+        "tasks", "taskdetail", "devices", "settings", "models", "connectmodel",
     ]
 
     /// route → 现有页签（仅限已有真实页面的 route）。
     static let routeToTab: [String: AppTab] = [
         "chat": .chat, "conversation": .chat, "history": .chat,
         "channels": .chat, "channel": .chat,
-        "tasks": .tasks,
+        "tasks": .tasks, "taskdetail": .tasks,
         "devices": .devices,
         "settings": .settings, "models": .settings, "connectmodel": .settings,
     ]

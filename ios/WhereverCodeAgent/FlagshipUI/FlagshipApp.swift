@@ -93,9 +93,18 @@ struct PlannedCapabilities: FlagshipCapabilityProvider {
 }
 struct FlagshipApp: View {
     var capabilities: any FlagshipCapabilityProvider = PlannedCapabilities()
-    @State private var current = "chat"
+    @State private var current: String
     @State private var showDrawer = false
     @State private var query = ""
+
+    /// `initialRoute` 只决定首次显示的路由，默认 "chat" 与原先写死的
+    /// `@State private var current = "chat"` 一致：无参构造、以及生产
+    /// `FlagshipTabView` 的 `FlagshipApp(capabilities:)` 构造，行为不变。
+    /// 测试可经此初始化器直接渲染壳本体的任意路由（真壳直渲）。
+    init(capabilities: any FlagshipCapabilityProvider = PlannedCapabilities(), initialRoute: String = "chat") {
+        self.capabilities = capabilities
+        _current = State(initialValue: initialRoute)
+    }
     private let ink = Color(red: 0.16, green: 0.16, blue: 0.15)
     private let accent = Color(red: 0.78, green: 0.47, blue: 0.34)
     private let warm = Color(red: 0.98, green: 0.976, blue: 0.965)
