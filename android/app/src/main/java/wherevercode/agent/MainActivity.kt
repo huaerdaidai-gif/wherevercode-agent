@@ -6375,6 +6375,7 @@ class MainActivity : AppCompatActivity() {
         taskDetailVisible = true
         screenSettings.visibility = View.GONE
         taskDetailController.root.visibility = View.VISIBLE
+        taskDetailController.root.bringToFront()
         if (opening) taskDetailController.root.post { taskDetailController.root.fullScroll(View.FOCUS_UP) }
         Thread {
             val task = try {
