@@ -29,6 +29,7 @@ class DispatchTestFixture(
     stateFile: File? = null,
     auditFile: File? = null,
     tokenSource: DispatchStateStore? = null,
+    nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     val context = RuntimeEnvironment.getApplication()
     val db: TaskDatabase = if (dbName == null) TaskDatabase.inMemory(context)
@@ -43,6 +44,7 @@ class DispatchTestFixture(
         controlStore = controlStore,
         auditLog = RoomControlAuditLog(db.controlAuditDao()),
         actor = "mcp-dispatch",
+        nowEpochSeconds = nowEpochSeconds,
     )
     val state: DispatchStateStore = tokenSource ?: stateFile?.let { FileDispatchStateStore(it) } ?: InMemoryDispatchStateStore()
     val audit: AuditLog = auditFile?.let { FileAuditLog(it) } ?: InMemoryAuditLog()
@@ -57,6 +59,7 @@ class DispatchTestFixture(
         tokens = tokens,
         state = state,
         audit = audit,
+        nowEpochSeconds = nowEpochSeconds,
     )
 
     fun close() = db.close()

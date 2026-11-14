@@ -114,6 +114,31 @@ class RemoteTaskPump(
 ) {
     private var running = false
     private var pumpJob: Job? = null
+
+    /**
+     * Pending-control reconciliation for remote member tasks (production:
+     * `ControlPlane.reconcileExpiredControls`). The local runner's sweep
+     * only runs between local tasks — while a long local task executes, a
+     * remote task whose Hand went offline mid-pause would stay PAUSING /
+     * STOPPING. The remote pump therefore also runs it, throttled to
+     * [controlSweepIntervalMs]. Failures never kill the pump.
+     */
+    var onControlSweep: (() -> Unit)? = null
+    var controlSweepIntervalMs: Long = 10_000
+    private var lastControlSweepAtMs: Long = 0
+
+    /** Run [onControlSweep] when due; returns true when it ran. Test entry. */
+    fun sweepControlsIfDue(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val sweep = onControlSweep ?: return false
+        if (lastControlSweepAtMs != 0L && nowMs - lastControlSweepAtMs < controlSweepIntervalMs) return false
+        lastControlSweepAtMs = nowMs
+        try {
+            sweep()
+        } catch (_: Exception) {
+            // Retried on the next due sweep.
+        }
+        return true
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
@@ -154,6 +179,7 @@ class RemoteTaskPump(
         running = true
         pumpJob = scope.launch {
             while (running) {
+                sweepControlsIfDue()
                 try {
                     pumpOnce()
                 } catch (_: Exception) {

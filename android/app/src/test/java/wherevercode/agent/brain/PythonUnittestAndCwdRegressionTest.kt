@@ -231,9 +231,9 @@ class PythonUnittestAndCwdRegressionTest {
             id = "cwd-relative",
         )
         assertTrue("cwd 相对路径应找到脚本：${fromCwd.summary}", fromCwd.ok)
-        assertEquals(script, recordingRuntime.lastRequest?.script)
+        assertEquals(script.canonicalFile, recordingRuntime.lastRequest?.script)
         assertEquals(
-            File(workspaceRoot, "agent-test/calculator"),
+            File(workspaceRoot, "agent-test/calculator").canonicalFile,
             recordingRuntime.lastRequest?.cwd,
         )
 
@@ -244,7 +244,7 @@ class PythonUnittestAndCwdRegressionTest {
             id = "root-relative",
         )
         assertTrue("原根目录相对路径应保持兼容：${fromRoot.summary}", fromRoot.ok)
-        assertEquals(script, recordingRuntime.lastRequest?.script)
+        assertEquals(script.canonicalFile, recordingRuntime.lastRequest?.script)
     }
 
     @Test

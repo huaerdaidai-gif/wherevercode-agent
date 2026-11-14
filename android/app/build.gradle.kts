@@ -41,6 +41,17 @@ val pinnedPlatformHost = releaseConfigValue("pinnedPlatformHost", "WHEREVERCODE_
 val pinnedPlatformSha256 = releaseConfigValue("pinnedPlatformSha256", "WHEREVERCODE_PINNED_PLATFORM_SHA256")
 val updateDriveFileId = releaseConfigValue("updateDriveFileId", "WHEREVERCODE_UPDATE_DRIVE_FILE_ID")
 
+// Maintainer signing for installable in-place updates (CI only). The keystore
+// file path and credentials come from the environment; nothing is committed.
+// When ANDROID_KEYSTORE_FILE is unset (local/PR/fork builds) the compat build
+// keeps standard local debug signing.
+val signingKeystoreFile: String =
+    providers.environmentVariable("ANDROID_KEYSTORE_FILE").getOrElse("").trim()
+// Monotonic versionCode for installable CI builds (CI passes 100 + run number);
+// local builds keep the checked-in default.
+val ciVersionCode: Int? =
+    providers.environmentVariable("WHEREVERCODE_VERSION_CODE").orNull?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+
 android {
     namespace = "wherevercode.agent"
     compileSdk = 34
@@ -56,7 +67,7 @@ android {
         // Cost: no Google Play (Play requires targetSdk 35 since 2025-08-31).
         // This spike ships as a sideloaded APK, per the task.
         targetSdk = 28
-        versionCode = 5
+        versionCode = ciVersionCode ?: 5
         versionName = "0.2.0-ui4"
 
         // V5 C1：真实版本信息（commitSha / buildTimeUtc 见文件顶部）。
@@ -84,6 +95,19 @@ android {
     // No shared private key or signing password is stored in this repository.
     // APKs signed with a new key cannot update installations signed by the
     // historical pinned debug key; users may need to uninstall first.
+    signingConfigs {
+        if (signingKeystoreFile.isNotEmpty()) {
+            create("maintainer") {
+                storeFile = file(signingKeystoreFile)
+                storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").get()
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // CI/debug installs coexist with the established app and its data.
@@ -93,6 +117,11 @@ android {
             initWith(getByName("debug"))
             applicationIdSuffix = ""
             matchingFallbacks += listOf("debug")
+            // Same applicationId as the installed app: with the maintainer key
+            // this APK updates the existing install in place.
+            if (signingKeystoreFile.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("maintainer")
+            }
         }
         release {
             isMinifyEnabled = false

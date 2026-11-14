@@ -1339,7 +1339,7 @@ class ToolRegistry(
         val root = workspaceRoot
         if (root != null && cwd != root && !File(rawPath).isAbsolute) {
             val cwdRelative = try {
-                cwd.relativeTo(root).path.replace('\\', '/')
+                cwd.canonicalFile.relativeTo(root.canonicalFile).path.replace('\\', '/')
             } catch (_: IllegalArgumentException) {
                 ""
             }

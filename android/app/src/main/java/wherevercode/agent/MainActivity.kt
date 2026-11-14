@@ -165,7 +165,7 @@ import wherevercode.agent.core.project.remoteFolderPickerListing
 import wherevercode.agent.core.project.isValidLocalWorkspacePath
 import wherevercode.agent.core.project.openFolderEntryOptions
 import wherevercode.agent.core.project.parseFolderListJson
-import wherevercode.agent.core.project.parseProjectFolderAuthorizationAck
+import wherevercode.agent.core.project.verifyAndRecordProjectFolderAuthorization
 import wherevercode.agent.core.project.GitRepoKind
 import wherevercode.agent.core.project.parseGitHostRepoUrl
 import wherevercode.agent.core.project.parseGitRepoUrl
@@ -3364,13 +3364,12 @@ class MainActivity : AppCompatActivity() {
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
             is HandEvent.Result -> try {
-                val ack = parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
-                handAuthorizationReceipts.record(
+                verifyAndRecordProjectFolderAuthorization(
+                    rawAck = terminal.output,
                     peerFingerprintSha256 = target.peer.fingerprintSha256,
                     agentId = target.agentId,
                     requestedFolder = folder,
-                    rawAck = terminal.output,
-                    ack = ack,
+                    receipts = handAuthorizationReceipts,
                     receivedAtEpochSeconds = System.currentTimeMillis() / 1000,
                 )
                 Result.success(Unit)
@@ -8479,10 +8478,10 @@ class MainActivity : AppCompatActivity() {
         toggle.setOnCheckedChangeListener { _, enabled ->
             toggleMcpDispatchService(enabled, toggle, tokenButton, status, endpoint)
         }
-        tokenButton.setOnClickListener {
+        fun issueToken(create: () -> wherevercode.agent.core.dispatch.IssuedDispatchToken) {
             tokenButton.isEnabled = false
             Thread {
-                val issued = runCatching { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                val issued = runCatching(create)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     tokenButton.isEnabled = toggle.isChecked
@@ -8509,6 +8508,38 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.start()
+        }
+        tokenButton.setOnClickListener {
+            val capabilities = wherevercode.agent.core.dispatch.DispatchCapability.values()
+            val roles = arrayOf("派工", "执行", "本机所有者")
+            android.app.AlertDialog.Builder(this)
+                .setTitle("令牌权限")
+                .setItems(roles) { _, index ->
+                    if (index == capabilities.size) {
+                        issueToken { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                    } else {
+                        val principal = EditText(this).apply { hint = "Agent ID" }
+                        val project = EditText(this).apply { hint = "项目 ID（可留空）" }
+                        val fields = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(principal)
+                            addView(project)
+                        }
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle(roles[index])
+                            .setView(fields)
+                            .setPositiveButton("生成令牌") { _, _ ->
+                                val id = principal.text.toString().trim()
+                                val projectId = project.text.toString().trim().ifEmpty { null }
+                                issueToken {
+                                    McpDispatchRuntime.issueAgentToken(applicationContext, id, capabilities[index], projectId)
+                                }
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+                .show()
         }
         section.addView(title)
         section.addView(note)
@@ -8806,7 +8837,10 @@ class MainActivity : AppCompatActivity() {
                     targetResolver = ::resolveRemoteTargetForMember,
                     controlSender = remoteControlSender,
                 )
-                components.controlPlane?.let { McpDispatchRuntime.bindControlPlane(it) }
+                components.controlPlane?.let { plane ->
+                    plane.configureTaskTargetResolver { task -> resolveRemoteTargetForMember(task.assignedAgentId, task) }
+                    McpDispatchRuntime.bindControlPlane(plane)
+                }
                 runOnUiThread {
                     brainComponents = components
                     chatViewModel.attach(components, toolApprovalGate)
@@ -8888,6 +8922,7 @@ class MainActivity : AppCompatActivity() {
                             scheduler = components.taskScheduler,
                             stepStore = components.taskStepStore,
                             port = remoteChatPort,
+                            artifactDirectory = java.io.File(filesDir, "task-artifacts"),
                             // P2：远端编码发 plan 批准后的包、完成停 review。
                             pipelineHook = components.pipelineOrchestrator?.let { PipelineRunnerHookImpl(it) },
                         ),
@@ -8934,6 +8969,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                     )
+                    // Remote/MCP tasks whose executor vanished mid-pause/stop
+                    // are reconciled here too, not only between local tasks.
+                    components.controlPlane?.let { plane ->
+                        pump.onControlSweep = { plane.reconcileExpiredControls() }
+                    }
                     remoteTaskPump = pump
                     pump.start()
                     // P2 自动执行（2026-11-11）：规划者自动起草 + 审查者自动

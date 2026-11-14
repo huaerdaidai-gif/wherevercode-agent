@@ -56,12 +56,12 @@ def b64e(data: bytes) -> str:
 
 
 def make_credential(signing_key: bytes, task_id: str, target: str, folder: str,
-                    agent_id: str = "", now: int | None = None) -> str:
-    """按 App 侧 legacy issue 签发一个 v2 凭证（user/attempt/source/agent 为空）。"""
+                    agent_id: str = "", now: int | None = None, source: str = "client") -> str:
+    """Sign a v2 credential using the Android wire format."""
     now = now if now is not None else int(time.time())
     cred = {
         "user_id": "", "task_id": task_id, "attempt": "",
-        "source_device_id": "", "target_device_id": target,
+        "source_device_id": source, "target_device_id": target,
         "agent_id": agent_id, "folder": folder,
         "iat": now, "exp": now + 900, "jti": str(uuid.uuid4()),
         "scope": {"agent_id": agent_id, "folder": folder},
@@ -143,7 +143,7 @@ class Client:
         assert self.signing_key is not None
         args = dict(args)
         args.setdefault("credential", make_credential(
-            self.signing_key, task_id, self.server_device_id, folder, agent_id))
+            self.signing_key, task_id, self.server_device_id, folder, agent_id, source=self.device_id))
         envelope = {
             "type": "cross_device_tool_call", "version": 1, "seq": 1,
             "task_id": task_id, "agent_id": agent_id,
@@ -152,6 +152,326 @@ class Client:
             "folder": folder, "action": action, "args": args,
         }
         return self.call(envelope, timeout=timeout)
+
+
+class HandDeadAttemptCleanupTest(unittest.TestCase):
+    """Leftover processes of a dead attempt are killed, never paused/woken,
+    in both Hand copies (source and bundled), through the real _dispatch."""
+
+    AGENT = (
+        "#!/bin/sh\n"
+        "name=$(printf '%s' \"$1\" | head -n1)\n"
+        "echo $$ > \"$PIDDIR/$name.pid\"\n"
+        "while true; do echo tick >> \"$PIDDIR/$name.ticks\"; sleep 0.1; done\n"
+    )
+
+    def _setup(self, module, temp):
+        base = os.path.join(temp, "agent-home")
+        os.mkdir(base)
+        self.piddir = os.path.join(temp, "pids")
+        os.mkdir(self.piddir)
+        script = os.path.join(temp, "agent.sh")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(self.AGENT)
+        os.chmod(script, 0o755)
+        server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+        server.state.save_json("agents.json", {"agent": {
+            "display_name": "Agent", "kind": "agent", "capabilities": ["dev"],
+            "folder": base, "command": [script, "{prompt}"], "env": {"PIDDIR": self.piddir}}})
+        server.state.save_json("auth.json", {"agent": [base]})
+        self.events = []
+        lock = threading.Lock()
+
+        def record(conn, key, envelope, kind, args, seq):
+            with lock:
+                self.events.append((kind, args))
+        server._send = record
+        self.server, self.base, self.key = server, base, b"r" * 32
+        self.threads, self.socks = [], []
+        return server
+
+    def _env(self, args):
+        task = "task-1"
+        args = dict(args)
+        args["credential"] = make_credential(self.key, task, "device", self.base, "agent")
+        return {"type": "cross_device_tool_call", "version": 1, "seq": 1, "task_id": task,
+                "agent_id": "agent", "source_device_id": "client", "target_device_id": "device",
+                "folder": self.base, "action": "run", "args": args}
+
+    def _start_run(self, name, attempt):
+        server_side, client_side = socket.socketpair()
+        self.socks += [server_side, client_side]
+        args = {"argv": json.dumps(["agent", "agent", name]), "timeout": "60",
+                "control": json.dumps({"goal_version": 1, "epoch": 1})}
+        if attempt is not None:
+            args["attempt"] = attempt
+        env = self._env(args)
+
+        def run():
+            try:
+                self.server._dispatch(server_side, b"k" * 32, self.key, "client", env)
+            except OSError:
+                pass
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        self.threads.append(t)
+        return t, client_side, self._wait_pid(name)
+
+    def _control(self, action, op, attempt=None):
+        snap = {"goal_version": 1, "epoch": 1}
+        if attempt is not None:
+            snap["attempt"] = attempt
+        before = len(self.events)
+        self.server._dispatch(None, b"k" * 32, self.key, "client", self._env({
+            "argv": json.dumps(["__control__", action, op]), "control": json.dumps(snap)}))
+        kind, args = self.events[before]
+        self.assertEqual("cross_device_result", kind)
+        return json.loads(args["output"])
+
+    def _wait_pid(self, name):
+        path = os.path.join(self.piddir, name + ".pid")
+        for _ in range(100):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return int(f.read())
+            except (FileNotFoundError, ValueError):
+                time.sleep(0.05)
+        self.fail(f"agent {name} did not start")
+
+    @staticmethod
+    def _state(pid):
+        import subprocess
+        r = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+        out = r.stdout.strip()
+        return "gone" if r.returncode != 0 or out.startswith("Z") else out
+
+    def _wait_gone(self, pid, seconds=5.0):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if self._state(pid) == "gone":
+                return True
+            time.sleep(0.05)
+        return False
+
+    def _ticks(self, name):
+        try:
+            with open(os.path.join(self.piddir, name + ".ticks"), encoding="utf-8") as f:
+                return len(f.read().splitlines())
+        except FileNotFoundError:
+            return 0
+
+    def _cleanup(self):
+        import signal
+        for path in os.listdir(self.piddir):
+            if path.endswith(".pid"):
+                with open(os.path.join(self.piddir, path), encoding="utf-8") as f:
+                    pid = int(f.read())
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        for t in self.threads:
+            t.join(timeout=10)
+        for sock in self.socks:
+            sock.close()
+
+    def _modules(self):
+        return (hs, load_bundled_hand_server())
+
+    def test_keepalive_is_enabled_on_accepted_connections(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__):
+                a, b = socket.socket(socket.AF_INET, socket.SOCK_STREAM), None
+                try:
+                    module.enable_keepalive(a)
+                    self.assertEqual(1, a.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE))
+                    if hasattr(socket, "TCP_KEEPIDLE"):
+                        self.assertEqual(module.KEEPALIVE_IDLE_SECONDS,
+                                         a.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE))
+                finally:
+                    a.close()
+
+    def test_new_attempt_kills_paused_process_of_dead_attempt(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    old_thread, _, old_pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p", attempt="att-1")["confirmed"])
+                    self.assertTrue(self._state(old_pid).startswith("T"), self._state(old_pid))
+                    # The App released att-1 and claims att-2: the old process
+                    # must die, the new attempt must start (not task_in_flight
+                    # / task_paused).
+                    _, _, new_pid = self._start_run("two", "att-2")
+                    self.assertTrue(self._wait_gone(old_pid), "dead attempt survived a new attempt")
+                    self.assertNotEqual("gone", self._state(new_pid))
+                    old_thread.join(timeout=10)
+                    self.assertFalse(old_thread.is_alive())
+                    codes = [a.get("code") for k, a in self.events if k == "cross_device_error"]
+                    self.assertIn("stale_attempt", codes)
+                    self.assertNotIn("task_in_flight", codes)
+                    self.assertNotIn("task_paused", codes)
+                    # Controls naming the live attempt keep working normally.
+                    self.assertTrue(self._control("pause", "op-p2", attempt="att-2")["confirmed"])
+                    self.assertTrue(self._state(new_pid).startswith("T"))
+                    self.assertTrue(self._control("resume", "op-r2", attempt="att-2")["confirmed"])
+                    self.assertNotEqual("gone", self._state(new_pid))
+                    self.assertFalse(self._state(new_pid).startswith("T"))
+                finally:
+                    self._cleanup()
+
+    def test_resume_without_live_attempt_kills_instead_of_waking(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    thread, _, pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p", attempt="att-1")["confirmed"])
+                    time.sleep(0.3)
+                    ticks = self._ticks("one")
+                    # App released att-1 after lease expiry and resumes: there
+                    # is no live attempt, so the paused leftover is killed.
+                    result = self._control("resume", "op-r", attempt="")
+                    self.assertTrue(result["confirmed"])
+                    self.assertTrue(self._wait_gone(pid))
+                    time.sleep(0.3)
+                    self.assertEqual(ticks, self._ticks("one"), "stale process was woken")
+                    thread.join(timeout=10)
+                    self.assertFalse(thread.is_alive())
+                    self.assertFalse(self.server.task_meta["task-1"].get("paused"))
+                    # The re-dispatched attempt is accepted.
+                    _, _, new_pid = self._start_run("two", "att-2")
+                    self.assertNotEqual("gone", self._state(new_pid))
+                finally:
+                    self._cleanup()
+
+    def test_legacy_controls_without_attempt_keep_pause_resume_semantics(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    _, _, pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p")["confirmed"])
+                    self.assertTrue(self._state(pid).startswith("T"))
+                    self.assertTrue(self._control("resume", "op-r")["confirmed"])
+                    time.sleep(0.4)
+                    before = self._ticks("one")
+                    time.sleep(0.4)
+                    self.assertGreater(self._ticks("one"), before, "legacy resume must continue")
+                    self.assertTrue(self._control("stop", "op-s")["confirmed"])
+                    self.assertTrue(self._wait_gone(pid))
+                finally:
+                    self._cleanup()
+
+    def test_dropped_connection_kills_a_paused_run_without_any_write(self):
+        for module in self._modules():
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                self._setup(module, temp)
+                try:
+                    thread, client_side, pid = self._start_run("one", "att-1")
+                    self.assertTrue(self._control("pause", "op-p", attempt="att-1")["confirmed"])
+                    self.assertTrue(self._state(pid).startswith("T"))
+                    client_side.close()  # App gone; the paused agent writes nothing.
+                    self.assertTrue(self._wait_gone(pid, seconds=5), "paused orphan survived disconnect")
+                    thread.join(timeout=10)
+                    self.assertFalse(thread.is_alive())
+                    self.assertNotIn("task-1", self.server.processes)
+                finally:
+                    self._cleanup()
+
+
+class HandArtifactIntegrityTest(unittest.TestCase):
+    """Delivery records: bounded write/read retry and integrity verification
+    in both Hand copies."""
+
+    def _server(self, module, temp):
+        server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+        server.ARTIFACT_IO_RETRY_DELAYS = (0, 0, 0)
+        self.events = []
+        server._send = lambda conn, key, envelope, kind, args, seq: self.events.append((kind, args))
+        self.envelope = {"agent_id": "agent", "task_id": "task-1", "folder": temp}
+        return server
+
+    def _staging(self, temp, content):
+        staging = os.path.join(temp, "staging")
+        os.makedirs(staging, exist_ok=True)
+        if content is not None:
+            with open(os.path.join(staging, "delivery.bin"), "wb") as f:
+                f.write(content)
+        return staging
+
+    def _get(self, server, attempt="att-1"):
+        server._get_artifact(None, b"", self.envelope, 1, "client", {"attempt": attempt})
+        return self.events[-1]
+
+    def test_saved_record_carries_size_and_verifies_on_read(self):
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                server = self._server(module, temp)
+                record = server._save_artifact(self.envelope, "client", "att-1",
+                                               self._staging(temp, b"payload"), "out")
+                self.assertEqual("7", record["artifact_size"])
+                self.assertEqual(hashlib.sha256(b"payload").hexdigest(), record["artifact_sha256"])
+                kind, args = self._get(server)
+                self.assertEqual("cross_device_result", kind)
+                self.assertEqual(record, args)
+                kind, args = self._get(server, "att-unknown")
+                self.assertEqual("artifact_missing", args["code"])
+
+    def test_corrupt_stored_record_is_never_delivered(self):
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                server = self._server(module, temp)
+                server._save_artifact(self.envelope, "client", "att-1", self._staging(temp, b"payload"), "out")
+                path = server._artifact_path(self.envelope, "client", "att-1")
+                with open(path, encoding="utf-8") as f:
+                    stored = json.load(f)
+                for tamper in (
+                    {"artifact_b64": base64.b64encode(b"paylaod").decode()},   # bytes changed
+                    {"artifact_size": "8"},                                    # size mismatch
+                    {"artifact_b64": "!!not base64!!"},                        # encoding broken
+                    {"artifact_sha256": None},                                 # checksum missing
+                ):
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump({**stored, **tamper}, f)
+                    kind, args = self._get(server)
+                    self.assertEqual("cross_device_error", kind, tamper)
+                    self.assertEqual("artifact_corrupt", args["code"], tamper)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write('{"output": "trunc')
+                kind, args = self._get(server)
+                self.assertEqual("artifact_unavailable", args["code"])
+                # A record without an artifact still verifies.
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"output": "ok", "artifact_present": "false"}, f)
+                self.assertEqual("cross_device_result", self._get(server)[0])
+
+    def test_record_write_is_retried_a_bounded_number_of_times(self):
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                server = self._server(module, temp)
+                real = server._write_artifact_record
+                calls = []
+
+                def flaky(path, record):
+                    calls.append(path)
+                    if len(calls) <= 2:
+                        raise OSError("disk busy")
+                    return real(path, record)
+                server._write_artifact_record = flaky
+                server._save_artifact(self.envelope, "client", "att-1", self._staging(temp, b"x"), "out")
+                self.assertEqual(3, len(calls))
+                self.assertEqual("cross_device_result", self._get(server)[0])
+
+                always = []
+
+                def broken(path, record):
+                    always.append(path)
+                    raise OSError("disk gone")
+                server._write_artifact_record = broken
+                with self.assertRaises(OSError):
+                    server._save_artifact(self.envelope, "client", "att-2", self._staging(temp, b"y"), "out")
+                self.assertEqual(1 + len(server.ARTIFACT_IO_RETRY_DELAYS), len(always))
 
 
 class BundledHandAuthorizationTest(unittest.TestCase):
@@ -196,7 +516,11 @@ class BundledHandAuthorizationTest(unittest.TestCase):
 
                 kind, args = dispatch(task="identity", envelope_agent="unknown-agent")
                 self.assertEqual("cross_device_error", kind)
-                self.assertEqual(module.ERR_WRONG_FOLDER, args["code"])
+                self.assertEqual(module.ERR_WRONG_TASK, args["code"])
+
+                kind, args = dispatch(task="wrong-agent-same-folder", envelope_agent="other")
+                self.assertEqual("cross_device_error", kind)
+                self.assertEqual(module.ERR_WRONG_TASK, args["code"])
 
                 kind, args = dispatch(task="folder", envelope_folder=project,
                                       credential_folder=base, requested=outside)
@@ -206,6 +530,87 @@ class BundledHandAuthorizationTest(unittest.TestCase):
                 kind, args = dispatch(task="rejected", requested=os.path.join(temp, "missing"))
                 self.assertEqual("cross_device_error", kind)
                 self.assertEqual(module.ERR_PATH_NOT_ALLOWED, args["code"])
+
+    def test_authorization_receipts_match_android_kotlin_fixtures(self):
+        """Pin the exact receipt bytes both Hands send to the fixtures in
+        android/.../core/project/ProjectFolderAuthorizationPathTest.kt, so the
+        App-side verification test cannot drift from what Hands really emit."""
+        expected = {
+            "hand_server": (
+                '{"authorized": true, "requested_folder": "/srv/project-link", "agent_id": "agent", "already": false, "folder": "/srv/real-project"}',
+                '{"authorized": true, "requested_folder": "/srv/project-link", "agent_id": "agent", "already": true, "folder": "/srv/real-project"}',
+            ),
+            "bundled_hand_server": (
+                '{"authorized": true, "agent_id": "agent", "requested_folder": "/srv/project-link", "folder": "/srv/real-project", "already": false}',
+                '{"authorized": true, "agent_id": "agent", "requested_folder": "/srv/project-link", "folder": "/srv/real-project", "already": true}',
+            ),
+        }
+        for module in (hs, load_bundled_hand_server()):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
+                base = os.path.join(temp, "agent-home")
+                real = os.path.join(temp, "real-project")
+                link = os.path.join(temp, "project-link")
+                os.mkdir(base)
+                os.mkdir(real)
+                os.symlink(real, link)
+                server = module.HandServer(os.path.join(temp, "state"), "device", "test")
+                server.state.save_json("auth.json", {"agent": [base]})
+                events = []
+                server._send = lambda conn, key, envelope, kind, args, seq: events.append((kind, args))
+                signing_key = b"r" * 32
+                outputs = []
+                for task in ("first", "repeat"):
+                    env = {
+                        "type": "cross_device_tool_call", "version": 1, "seq": 1,
+                        "task_id": task, "agent_id": "agent",
+                        "source_device_id": "client", "target_device_id": "device",
+                        "folder": base, "action": "authorize_project_folder",
+                        "args": {
+                            "credential": make_credential(signing_key, task, "device", base, "agent"),
+                            "folder": link,
+                        },
+                    }
+                    server._dispatch(None, b"k" * 32, signing_key, "client", env)
+                    kind, args = events[-1]
+                    self.assertEqual("cross_device_result", kind)
+                    output = args["output"]
+                    for root in (os.path.realpath(temp), temp):
+                        output = output.replace(root, "/srv")
+                    outputs.append(output)
+                self.assertEqual(expected[module.__name__], tuple(outputs))
+
+    def test_console_http_upgrade_requires_a_live_paired_client_ticket(self):
+        import http.client
+        bundled = load_bundled_hand_server()
+        with tempfile.TemporaryDirectory() as temp:
+            hand = bundled.HandServer(temp, "test-hand", "test")
+            hand.state.save_json("paired_clients.json", {"owner": {"status": "APPROVED"}})
+            with bundled.ThreadedHandServer(("127.0.0.1", 0), bundled.HandConnectionHandler, hand) as tcp:
+                thread = threading.Thread(target=tcp.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    ticket, _ = hand.issue_ws_token("owner")
+                    revoked, _ = hand.issue_ws_token("other")
+                    for token, status in ((revoked, 403), (ticket, 101), (ticket, 403)):
+                        conn = http.client.HTTPConnection(*tcp.server_address, timeout=5)
+                        try:
+                            conn.request("GET", "/events?token=" + token, headers={
+                                "Upgrade": "websocket", "Connection": "Upgrade",
+                                "Sec-WebSocket-Version": "13",
+                                "Sec-WebSocket-Key": b64e(os.urandom(16)),
+                            })
+                            with conn.getresponse() as response:
+                                self.assertEqual(status, response.status)
+                        finally:
+                            conn.close()
+                    owner = hand._ws_subscribe("owner")
+                    other = hand._ws_subscribe("other")
+                    hand.publish_event("owner", "agent.run.progress", {"message": "private"})
+                    self.assertIn(b"private", owner.queue.get_nowait())
+                    self.assertTrue(other.queue.empty())
+                finally:
+                    tcp.shutdown()
+                    thread.join(timeout=5)
 
     def test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized(self):
         bundled = load_bundled_hand_server()
@@ -256,18 +661,15 @@ class BundledHandAuthorizationTest(unittest.TestCase):
 
             server._do_authorize_project_folder(
                 None, b"", {"task_id": "task"}, 1, "task", "agent",
-                {"folder": requested},
+                {"folder": requested}, "client",
             )
 
             result = json.loads(events[-1]["output"])
             self.assertTrue(result["authorized"])
             self.assertEqual(requested, result["requested_folder"])
             self.assertEqual(os.path.realpath(requested), result["folder"])
-            auth = server.state.load_json("auth.json", {})
-            self.assertEqual([os.path.realpath(requested)],
-                             auth["agent"]["authorized_project_folders"])
-            self.assertNotIn(os.path.realpath(base),
-                             auth["agent"]["authorized_project_folders"])
+            grants = server.state.load_json("project_grants.json", {})
+            self.assertEqual({"client": {"agent": [os.path.realpath(requested)]}}, grants)
 
 
 class HandServerTest(unittest.TestCase):
@@ -514,7 +916,7 @@ class HandServerTest(unittest.TestCase):
         self.assertFalse(result["already"])
         self.assertEqual(extra, result["requested_folder"])
         self.assertEqual("fake-agent", result["agent_id"])
-        self.assertIn(os.path.realpath(extra), self.server.authorized_folders("fake-agent"))
+        self.assertIn(os.path.realpath(extra), self.server.authorized_folders("fake-agent", self.client.device_id))
 
         repeated = self.client.tool_call(
             "t-grant-retry", "fake-agent", self.work, "authorize_project_folder",
@@ -527,6 +929,119 @@ class HandServerTest(unittest.TestCase):
         self.assertEqual(relative[-1]["type"], "cross_device_error")
         self.assertEqual(relative[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
 
+    def test_project_grant_is_bound_to_authenticated_device_and_agent(self):
+        self.approve_client()
+        project = os.path.realpath(os.path.join(self.tmp.name, "private-project"))
+        os.mkdir(project)
+        self.client.tool_call("grant", "fake-agent", self.work,
+                              "authorize_project_folder", {"folder": project})
+        original = self.client
+        events = original.tool_call("read", "fake-agent", project, "list", {})
+        self.assertEqual("cross_device_result", events[-1]["type"])
+        events = original.tool_call("read", "slow-agent", project, "list", {})
+        self.assertEqual(hs.ERR_WRONG_FOLDER, events[-1]["args"]["code"])
+
+        self.client = Client("127.0.0.1", self.port, "test-vps")
+        self.approve_client()
+        events = self.client.tool_call("read", "fake-agent", project, "list", {})
+        self.assertEqual(hs.ERR_WRONG_FOLDER, events[-1]["args"]["code"])
+        for source in ("", original.device_id):
+            credential = make_credential(self.client.signing_key, "read", "test-vps",
+                                         self.work, "fake-agent", source=source)
+            events = self.client.tool_call("read", "fake-agent", self.work, "list",
+                                           {"credential": credential})
+            self.assertEqual(hs.ERR_WRONG_TASK, events[-1]["args"]["code"])
+
+    def test_copied_device_id_with_new_key_cannot_use_pairing(self):
+        self.approve_client()
+        intruder = Client("127.0.0.1", self.port, "test-vps")
+        intruder.device_id = self.client.device_id
+        intruder.hello()
+        self.assertEqual([], intruder.tool_call("read", "fake-agent", self.work, "list", {}))
+
+    def test_delivery_retries_return_identical_bytes_without_executing_again(self):
+        self.approve_client()
+        with open(self.fake_agent, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\n"
+                    "echo run >> invocations\n"
+                    "p=${1##*：}\n"
+                    'printf "sample" > "$p"\n'
+                    "echo done\n")
+        run_args = {"argv": json.dumps(["agent", "fake-agent", "deliver"]), "attempt": "attempt-1"}
+        run = self.client.tool_call("deliver", "fake-agent", self.work, "run", run_args)[-1]
+        self.assertEqual("cross_device_result", run["type"], run)
+        record = run["args"]
+        self.assertEqual(b"sample", base64.b64decode(record["artifact_b64"]))
+        self.assertEqual(hashlib.sha256(b"sample").hexdigest(), record["artifact_sha256"])
+        retry = self.client.tool_call("deliver", "fake-agent", self.work, "run", run_args)[-1]
+        self.assertEqual(record, retry["args"])
+        for attempt, expected in [("attempt-1", None), ("../attempt-1", "artifact_missing")]:
+            fetched = self.client.tool_call("deliver", "fake-agent", self.work,
+                                            "get_artifact", {"attempt": attempt})[-1]
+            self.assertEqual(expected, fetched["args"].get("code"))
+            if expected is None:
+                self.assertEqual(record, fetched["args"])
+        with open(os.path.join(self.work, "invocations"), encoding="utf-8") as f:
+            self.assertEqual(["run"], f.read().splitlines())
+
+    def test_hand_crash_kills_suspended_process_group(self):
+        import signal
+        import subprocess
+        marker = os.path.join(self.tmp.name, "watchdog-ready")
+        # Launch a separate Hand worker and suspend its actual agent. A
+        # marker written after resume would expose an orphan surviving SIGKILL.
+        program = """
+import os, signal, sys, time
+from server.hand_server import spawn_agent
+child, lease = spawn_agent([sys.executable, "-c", sys.argv[1], sys.argv[2]])
+child.wait()
+"""
+        agent = """
+import os, signal, sys, time
+with open(sys.argv[1], "w") as f:
+    f.write(str(os.getpid()))
+os.kill(os.getpid(), signal.SIGSTOP)
+time.sleep(30)
+"""
+        parent = subprocess.Popen([sys.executable, "-c", program, agent, marker])
+        try:
+            for _ in range(100):
+                try:
+                    with open(marker, encoding="utf-8") as f:
+                        pid = int(f.read())
+                    break
+                except (FileNotFoundError, ValueError):
+                    time.sleep(0.05)
+            else:
+                self.fail("agent did not start")
+            parent.kill()
+            parent.wait(timeout=5)
+            for _ in range(100):
+                result = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                                        capture_output=True, text=True)
+                if result.returncode != 0 or result.stdout.strip().startswith("Z"):
+                    break
+                time.sleep(0.05)
+            else:
+                os.killpg(pid, signal.SIGKILL)
+                self.fail("agent survived Hand crash")
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait(timeout=5)
+
+    def test_delivery_rejects_symlink_and_never_reads_target(self):
+        self.approve_client()
+        with open(self.fake_agent, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\n"
+                    "p=${1##*：}\n"
+                    'ln -s /etc/hosts "$p"\n'
+                    "echo done\n")
+        run = self.client.tool_call("deliver", "fake-agent", self.work, "run", {
+            "argv": json.dumps(["agent", "fake-agent", "deliver"]), "attempt": "attempt-1",
+        })[-1]
+        self.assertEqual("artifact_invalid", run["args"]["code"], run)
+
     def test_authorize_project_folder_rejects_missing_directory(self):
         self.approve_client()
         missing = os.path.join(self.tmp.name, "missing")
@@ -535,7 +1050,7 @@ class HandServerTest(unittest.TestCase):
             {"folder": missing})
         self.assertEqual(events[-1]["type"], "cross_device_error")
         self.assertEqual(events[-1]["args"]["code"], hs.ERR_PATH_NOT_ALLOWED)
-        self.assertNotIn(missing, self.server.authorized_folders("fake-agent"))
+        self.assertNotIn(missing, self.server.authorized_folders("fake-agent", self.client.device_id))
 
     # -- run / 控制 ----------------------------------------------------------
 
@@ -594,6 +1109,11 @@ class HandServerTest(unittest.TestCase):
              "control": json.dumps({"goal_version": 1, "epoch": 1})},
             timeout=10)
         self.assertTrue(json.loads(ev[-1]["args"]["output"])["confirmed"])
+        # Stop must also work when the process is still suspended.
+        ev = self.client.tool_call(
+            "tslow", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "pause", "op-2b"])})
+        self.assertTrue(json.loads(ev[-1]["args"]["output"])["confirmed"])
         # stop → run 调用以 remote_controlled_stop 终态。
         ev = self.client.tool_call(
             "tslow", "slow-agent", self.work, "run",
@@ -608,6 +1128,18 @@ class HandServerTest(unittest.TestCase):
         self.assertEqual(results[0][-1]["type"], "cross_device_error")
         self.assertEqual(results[0][-1]["args"]["code"],
                          hs.ERR_REMOTE_CONTROLLED_STOP)
+
+        self.assertIsNotNone(proc.poll())
+        retried_stop = self.client.tool_call(
+            "tslow", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["__control__", "stop", "op-3"])})
+        self.assertTrue(json.loads(retried_stop[-1]["args"]["output"])["confirmed"])
+        restarted = hs.HandServer(self.server.state.dir, self.server.device_id, "restarted")
+        self.assertIn("tslow", restarted.revoked_tasks)
+        replay = self.client.tool_call(
+            "tslow", "slow-agent", self.work, "run",
+            {"argv": json.dumps(["agent", "slow-agent", "retry"])})
+        self.assertEqual(hs.ERR_REVOKED_CREDENTIAL, replay[-1]["args"]["code"])
 
     def test_change_goal_bumps_version_and_stale_snapshot_rejected(self):
         self.approve_client()
