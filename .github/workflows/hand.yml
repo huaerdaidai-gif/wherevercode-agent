@@ -4,6 +4,7 @@ on:
     branches: [task/t4-hand-unify, feat/native-dual-ui-delivery-20261114, main]
     paths:
       - 'server/**'
+      - 'android/app/src/main/python/agent_runner.py'
       - 'scripts/*hand*'
       - 'android/app/src/main/assets/install/**'
       - '.github/workflows/hand.yml'
@@ -11,6 +12,7 @@ on:
   pull_request:
     paths:
       - 'server/**'
+      - 'android/app/src/main/python/agent_runner.py'
       - 'scripts/*hand*'
       - 'android/app/src/main/assets/install/**'
       - '.github/workflows/hand.yml'
@@ -55,3 +57,26 @@ jobs:
               check(0, "--write")
               check(0, "--check")
           PY
+  tests:
+    name: Hand functional tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Hand dependency
+        run: python3 -m pip install cryptography
+      - name: Run all existing and added Hand tests
+        run: |
+          set -o pipefail
+          git rev-parse HEAD
+          python3 -m unittest discover -s server -p 'test_*.py' -v 2>&1 | tee hand-tests.log
+      - name: Preserve test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hand-tests-${{ github.sha }}
+          path: hand-tests.log
+          if-no-files-found: warn
