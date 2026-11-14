@@ -1173,7 +1173,7 @@ class MainActivity : AppCompatActivity() {
         // （refreshBrainStatus 写 brainStatus），新对话走抽屉“对话”
         // 入口（onDrawerEntrySelected 的 nav_chat 分支调 newConversationAndShow）。
         findViewById<View>(R.id.buttonBell).setOnClickListener {
-            toast("通知中心待开发")
+            newConversationAndShow()
         }
     }
 

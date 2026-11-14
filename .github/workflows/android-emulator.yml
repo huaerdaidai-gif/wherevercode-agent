@@ -16,6 +16,7 @@ on:
     branches:
       - task/issue-6-p0-native-android
       - feat/v5-dual-70-assembly-20261114
+      - feat/native-dual-ui-delivery-20261114
     paths:
       - "android/**"
       - ".github/workflows/android-emulator.yml"
@@ -70,6 +71,7 @@ jobs:
             adb shell screencap -p /sdcard/final-screen.png || true
             adb pull /sdcard/final-screen.png emulator-evidence/ || true
             adb pull /sdcard/Android/data/wherevercode.agent.ci/files/issue8-native-evidence emulator-evidence/ || true
+            adb pull /sdcard/Android/data/wherevercode.agent.ci/files/unified-ui-evidence emulator-evidence/ || true
             adb logcat -d > emulator-evidence/logcat.txt || true
             adb shell dumpsys activity processes > emulator-evidence/processes.txt || true
             grep -q "OK (" emulator-evidence/instrumentation.txt

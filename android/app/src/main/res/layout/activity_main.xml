@@ -44,8 +44,8 @@
              through the drawer "对话" entry. -->
         <TextView
             android:id="@+id/buttonMenu"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:gravity="center"
             android:text="☰"
             android:textColor="@color/home_text"
@@ -80,7 +80,7 @@
             android:layout_weight="1"
             android:paddingStart="6dp"
             android:paddingTop="4dp"
-            android:text="V5"
+            android:text=""
             android:textColor="@color/text_tertiary"
             android:textSize="11sp" />
 
@@ -90,20 +90,20 @@
              提示（见 MainActivity.bindShell）。 -->
         <ImageView
             android:id="@+id/buttonSearch"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:padding="6dp"
             android:src="@drawable/ic_search"
-            android:contentDescription="会话"
+            android:contentDescription="搜索会话"
             android:background="?attr/selectableItemBackgroundBorderless" />
 
         <ImageView
             android:id="@+id/buttonBell"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:padding="6dp"
-            android:src="@drawable/ic_bell"
-            android:contentDescription="通知中心"
+            android:src="@drawable/ic_new_conversation"
+            android:contentDescription="新对话"
             android:background="?attr/selectableItemBackgroundBorderless" />
     </LinearLayout>
 
