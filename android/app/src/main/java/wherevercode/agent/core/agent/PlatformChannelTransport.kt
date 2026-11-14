@@ -1,12 +1,16 @@
 package wherevercode.agent.core.agent
 
 import java.io.IOException
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
 import java.security.cert.CertificateException
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocketFactory
 import org.json.JSONArray
 import org.json.JSONObject
@@ -110,28 +114,32 @@ class UrlConnectionPlatformHttpClient(
             else "平台返回 HTTP $status"
         }
 
-        /**
-         * TLS 握手失败时的提示：证书链里带的 [CertificateException] 消息
-         * 原样透出（固定逻辑的“指纹不符 / 已过期”都在这里面），不要只
-         * 剩一句笼统的握手失败；链里没有证书异常时再给通用提示。
-         */
-        private fun pinningFailureMessage(url: String, e: SSLHandshakeException): String {
-            var cause: Throwable? = e
+        /** Translate common connection failures without exposing raw URLs or request data. */
+        fun networkFailureMessage(error: IOException): String? {
+            var cause: Throwable? = error
             while (cause != null) {
-                val message = cause.message
-                if (cause is CertificateException && !message.isNullOrBlank()) return message
+                if (cause is CertificateException) {
+                    val detail = cause.message.orEmpty().lowercase()
+                    return when {
+                        cause is java.security.cert.CertificateExpiredException ->
+                            "平台 TLS 证书已过期，请检查服务器证书。"
+                        cause is java.security.cert.CertificateNotYetValidException ->
+                            "平台 TLS 证书尚未生效，请检查服务器时间和证书有效期。"
+                        "pin did not match" in detail || "pin mismatch" in detail ->
+                            "平台 TLS 证书指纹与本地配置不一致，请核对 pin 配置。"
+                        else -> "平台 TLS 证书验证失败；系统证书链校验未通过。"
+                    }
+                }
+                if (cause is SSLPeerUnverifiedException) {
+                    return "平台 TLS 主机名校验失败，请确认平台地址与证书域名一致。"
+                }
+                if (cause is UnknownHostException) return "无法解析平台地址，请检查主机名和网络连接。"
+                if (cause is SocketTimeoutException) return "连接平台超时，请检查网络后重试。"
+                if (cause is ConnectException) return "无法连接平台，请检查地址、端口和服务状态。"
+                if (cause is SSLHandshakeException) return "平台 TLS 握手失败，请检查证书链和服务器 TLS 配置。"
                 cause = cause.cause
             }
-            val host = try {
-                URL(url).host
-            } catch (_: Exception) {
-                null
-            }
-            return if (PlatformEndpointPinning.isPinnedHost(host)) {
-                "与已配置的平台端点建立加密连接失败（TLS 握手失败），请检查端点证书和本地 pin 配置。"
-            } else {
-                "与平台端点建立加密连接失败（TLS 握手失败）：${e.message}"
-            }
+            return null
         }
     }
 
@@ -158,8 +166,9 @@ class UrlConnectionPlatformHttpClient(
                 ?.bufferedReader(Charsets.UTF_8)?.readText().orEmpty()
             if (status !in 200..299) throw IOException(httpErrorMessage(status, body))
             return body
-        } catch (e: SSLHandshakeException) {
-            throw IOException(pinningFailureMessage(url, e), e)
+        } catch (e: IOException) {
+            val message = networkFailureMessage(e) ?: throw e
+            throw IOException(message, e)
         } finally {
             connection.disconnect()
         }
@@ -187,8 +196,9 @@ class UrlConnectionPlatformHttpClient(
                 ?.bufferedReader(Charsets.UTF_8)?.readText().orEmpty()
             if (status !in 200..299) throw IOException("平台返回 HTTP $status")
             return body
-        } catch (e: SSLHandshakeException) {
-            throw IOException(pinningFailureMessage(url, e), e)
+        } catch (e: IOException) {
+            val message = networkFailureMessage(e) ?: throw e
+            throw IOException(message, e)
         } finally {
             connection.disconnect()
         }
