@@ -19,7 +19,10 @@ enum AppTab: Hashable {
     case tasks
     case devices
     case settings
-    case flagship
+    case channels
+    case projects
+    case agents
+    case console
 }
 
 /// Result of the last real platform connection check. Shown in
@@ -41,27 +44,94 @@ enum PlatformConnectionStatus: Equatable {
 @main
 struct WhereverCodeAgentApp: App {
     @StateObject private var appState = AppState()
+    @State private var isDrawerOpen = false
 
     var body: some Scene {
         WindowGroup {
-            TabView(selection: $appState.selectedTab) {
-                ChatListView()
-                    .tabItem { Label("对话", systemImage: "bubble.left.and.bubble.right") }
-                    .tag(AppTab.chat)
-                TasksView()
-                    .tabItem { Label("任务", systemImage: "checklist") }
-                    .tag(AppTab.tasks)
-                DevicesView()
-                    .tabItem { Label("设备", systemImage: "iphone") }
-                    .tag(AppTab.devices)
-                SettingsView()
-                    .tabItem { Label("设置", systemImage: "gearshape") }
-                    .tag(AppTab.settings)
-                FlagshipTabView()
-                    .tabItem { Label("70 屏", systemImage: "square.grid.2x2") }
-                    .tag(AppTab.flagship)
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Button { withAnimation { isDrawerOpen.toggle() } } label: {
+                            Image(systemName: "line.3.horizontal").frame(width: 44, height: 44)
+                        }
+                        .foregroundStyle(AgentUI.ink)
+                        .accessibilityLabel("打开导航")
+                        .accessibilityIdentifier("navigation.menu")
+                        Text("∞").foregroundStyle(AgentUI.accent).font(.title2.bold())
+                        Text("WhereverCode").font(.system(size: 17, weight: .semibold))
+                        Spacer()
+                        Button { appState.selectedTab = .chat; appState.chat.showHistory = true } label: {
+                            Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
+                        }.foregroundStyle(AgentUI.ink).accessibilityLabel("搜索会话")
+                        Button { appState.selectedTab = .chat; appState.chat.newConversation() } label: {
+                            Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
+                        }.foregroundStyle(AgentUI.ink).accessibilityLabel("新对话")
+                    }
+                    .padding(.horizontal, 8).frame(height: 60)
+                    Group {
+                        switch appState.selectedTab {
+                        case .chat: LocalChatHomeView(model: appState.chat)
+                        case .channels: ChatListView()
+                        case .tasks: TasksView()
+                        case .devices: DevicesView()
+                        case .settings: SettingsView()
+                        case .projects: LocalWorkbenchView(section: .projects)
+                        case .agents: LocalWorkbenchView(section: .agents)
+                        case .console: LocalWorkbenchView(section: .console)
+                        }
+                    }
+                }
+                .background(AgentUI.background)
+                .environmentObject(appState)
+                .tint(AgentUI.accent)
+
+                if isDrawerOpen {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .onTapGesture { withAnimation { isDrawerOpen = false } }
+                    HStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 8) {
+                                Text("∞").foregroundStyle(AgentUI.accent)
+                                Text("WhereverCode")
+                            }.font(.system(size: 20, weight: .semibold)).padding(.vertical, 20)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    drawerItem("新对话", icon: "bubble.left", tab: .chat)
+                                    Button {
+                                        appState.selectedTab = .chat
+                                        appState.chat.showHistory = true
+                                        withAnimation { isDrawerOpen = false }
+                                    } label: {
+                                        Label("会话", systemImage: "magnifyingglass")
+                                            .font(.system(size: 15)).foregroundStyle(AgentUI.ink)
+                                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                                    }.accessibilityIdentifier("drawer_history")
+                                    drawerItem("项目", icon: "folder", tab: .projects)
+                                    drawerItem("任务", icon: "clock", tab: .tasks)
+                                    drawerItem("团队（Agent / 成员）", icon: "person.2", tab: .agents)
+                                    drawerItem("设备", icon: "iphone", tab: .devices)
+                                    drawerItem("工具与连接", icon: "wrench.and.screwdriver", tab: .settings, identifier: "connections")
+                                    drawerItem("团队频道", icon: "bubble.left.and.bubble.right", tab: .channels)
+                                    Text("工作台").font(.caption).foregroundStyle(.secondary).padding(.vertical, 12)
+                                    drawerItem("控制台", icon: "terminal", tab: .console)
+                                    drawerItem("模型与连接", icon: "slider.horizontal.3", tab: .settings, identifier: "models")
+                                    unavailableDrawerItem("待审批", icon: "checkmark.shield", reason: "iOS 审批执行接口尚未接入")
+                                    unavailableDrawerItem("成果聚合", icon: "shippingbox", reason: "iOS 本地成果聚合尚未接入；平台交付见任务详情")
+                                }
+                            }
+                            Divider().padding(.vertical, 8)
+                            drawerItem("设置", icon: "gearshape", tab: .settings)
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(width: 280)
+                        .frame(maxHeight: .infinity, alignment: .topLeading)
+                        .background(AgentUI.card)
+                        Spacer(minLength: 0)
+                    }
+                    .transition(.move(edge: .leading))
+                }
             }
-            .environmentObject(appState)
             .task {
                 // Launch check: the connection status must be
                 // truthful from the first second — with a complete
@@ -87,19 +157,26 @@ struct WhereverCodeAgentApp: App {
             #endif
         }
     }
-}
-
-/// 70 屏旗舰导航页签（双端组装第一轮）：承载 FlagshipApp 壳，
-/// 能力状态由 AppFlagshipCapabilities 按现有 iOS 实现如实给出；
-/// 「打开功能」经回调切到既有页签，不复制业务实现。
-struct FlagshipTabView: View {
-    @EnvironmentObject private var appState: AppState
-
-    var body: some View {
-        FlagshipApp(capabilities: AppFlagshipCapabilities(onOpenTab: { tab in
+    private func drawerItem(_ title: String, icon: String, tab: AppTab, identifier: String? = nil) -> some View {
+        Button {
             appState.selectedTab = tab
-        }))
+            if tab == .chat { appState.chat.newConversation() }
+            withAnimation(.easeInOut(duration: 0.2)) { isDrawerOpen = false }
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.system(size: 15))
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .foregroundStyle(.primary)
+        }
+        .accessibilityIdentifier("drawer_\(identifier ?? String(describing: tab))")
     }
+    private func unavailableDrawerItem(_ title: String, icon: String, reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {} label: { Label(title, systemImage: icon) }.disabled(true)
+            Text(reason).font(.caption2).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.vertical, 4)
+    }
+
 }
 
 /// Shared app state: settings + token access + client factories.
@@ -139,6 +216,7 @@ final class AppState: ObservableObject {
     /// tombstone persists) — and rebuilt after every change made
     /// in the brain settings, so the settings UI and the engine
     /// always read the same stack.
+    lazy var chat = LocalChatModel(appState: self)
     let brainConfigStore: BrainConfigStore
     let brainKeyStore: BrainKeyStore
     @Published private(set) var brainRegistry: BrainAdapterRegistry

@@ -16,6 +16,7 @@ on:
     branches:
       - task/issue-6-p0-native-android
       - feat/v5-dual-70-assembly-20261114
+      - feat/native-dual-ui-delivery-20261114
     paths:
       - "android/**"
       - ".github/workflows/android-emulator.yml"
@@ -65,11 +66,17 @@ jobs:
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             mkdir -p emulator-evidence
+            adb shell wm size 1440x3200
+            adb shell wm density 640
+            adb shell wm size > emulator-evidence/display-size.txt
+            adb shell wm density > emulator-evidence/display-density.txt
+            adb shell getprop ro.product.model > emulator-evidence/device-model.txt
             adb logcat -c
             adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
             adb shell screencap -p /sdcard/final-screen.png || true
             adb pull /sdcard/final-screen.png emulator-evidence/ || true
             adb pull /sdcard/Android/data/wherevercode.agent.ci/files/issue8-native-evidence emulator-evidence/ || true
+            adb pull /sdcard/Android/data/wherevercode.agent.ci/files/unified-ui-evidence emulator-evidence/ || true
             adb logcat -d > emulator-evidence/logcat.txt || true
             adb shell dumpsys activity processes > emulator-evidence/processes.txt || true
             grep -q "OK (" emulator-evidence/instrumentation.txt

@@ -93,7 +93,7 @@ class MainActivitySmokeTest {
      * 给“通知中心待开发”提示，绝不编造通知数。
      */
     @Test
-    fun `bell shows notification center placeholder toast`() {
+    fun `top action opens real new conversation`() {
         val controller = Robolectric.buildActivity(MainActivity::class.java)
             .create()
             .start()
@@ -103,7 +103,8 @@ class MainActivitySmokeTest {
 
         activity.findViewById<View>(R.id.buttonBell).performClick()
 
-        assertEquals("通知中心待开发", ShadowToast.getTextOfLatestToast())
+        assertTrue(collectTexts(activity.window.decorView).contains("今天想做什么？"))
+        assertEquals("新对话", activity.findViewById<View>(R.id.buttonBell).contentDescription)
 
         controller.pause().stop().destroy()
     }

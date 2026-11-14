@@ -107,14 +107,39 @@ struct TasksNotConnectedContentView: View {
 
 struct TasksView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var showPlatform = false
+    @State private var localTasks: [LocalTask] = []
+    @State private var localError: String?
     @State private var tasks: [AgentTask] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            Group {
-                if !appState.isConfigured {
+            VStack(spacing: 0) {
+                Picker("任务来源", selection: $showPlatform) {
+                    Text("本地任务").tag(false)
+                    Text("平台任务").tag(true)
+                }.pickerStyle(.segmented).padding(.horizontal, 16)
+                    .accessibilityIdentifier("tasks.scope")
+                if !showPlatform {
+                    List {
+                        if let localError { Text(localError).foregroundStyle(.red) }
+                        if localTasks.isEmpty { Text("暂无本地任务").foregroundStyle(.secondary) }
+                        ForEach(localTasks, id: \.taskId) { task in
+                            NavigationLink {
+                                LocalTaskDetailView(task: task)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(task.title.isEmpty ? task.taskId : task.title)
+                                    Text(task.state).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Text("本地任务执行器尚未接入 iOS；当前可查看已保存的任务与日志，不会伪造执行或控制成功。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if !appState.isConfigured {
                     TasksNotConnectedContentView(
                         onGoSettings: { appState.goToSettings() }
                     )
@@ -137,7 +162,11 @@ struct TasksView: View {
                         .disabled(isLoading)
                 }
             }
-            .task { await loadTasks() }
+            .task {
+                do { localTasks = try LocalData.shared.tasks.listTasks() }
+                catch { localError = error.localizedDescription }
+                await loadTasks()
+            }
             #if compiler(>=6.0)
             .onChange(of: appState.isConfigured) { _, isNowConfigured in
                 if isNowConfigured { Task { await loadTasks() } }
@@ -324,6 +353,46 @@ struct TaskDetailView: View {
             errorMessage = nil
         } catch {
             errorMessage = (error as? McpError)?.message ?? "操作失败。"
+        }
+    }
+}
+
+
+private struct LocalTaskDetailView: View {
+    let task: LocalTask
+    @State private var events: [TaskEvent] = []
+    @State private var loadError: String?
+    var body: some View {
+        List {
+            Section("任务") {
+                LabeledContent("编号", value: task.taskId)
+                LabeledContent("状态", value: task.state)
+                if let description = task.description { Text(description) }
+                if let result = task.result { Text(result).textSelection(.enabled) }
+                if let error = task.error { Text(error).foregroundStyle(.red) }
+            }
+            Section("控制") {
+                ForEach(["暂停", "继续", "停止", "修改目标"], id: \.self) { title in
+                    Button(title) {}.disabled(true)
+                }
+                Text("iOS 尚未接入本地任务执行器，无法确认控制回执；以上操作不可用。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("日志") {
+                if let loadError { Text(loadError).foregroundStyle(.red) }
+                if events.isEmpty { Text("暂无事件") }
+                ForEach(events, id: \.id) { event in
+                    VStack(alignment: .leading) {
+                        Text(event.kind)
+                        if let note = event.note { Text(note).font(.caption) }
+                    }
+                }
+            }
+        }
+        .navigationTitle(task.title.isEmpty ? "任务详情" : task.title)
+        .task {
+            do { events = try LocalData.shared.tasks.listEvents(taskId: task.taskId) }
+            catch { loadError = error.localizedDescription }
         }
     }
 }
