@@ -74,7 +74,7 @@ public struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
             )
         }
         if Self.platformConnectionDependentRoutes.contains(routeId),
-           let appState, !appState.isConfigured {
+           let appState, !MainActor.assumeIsolated({ appState.isConfigured }) {
             return CapabilityStatus(
                 state: .disconnected,
                 evidence: "ADAPTER_PENDING / DISCONNECTED：尚未配置 V5 平台 HTTPS 地址或 Keychain Token；请在「设置 -> 平台连接」中配置。"
