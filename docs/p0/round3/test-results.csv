@@ -1,0 +1,16 @@
+suite,tests,failures,errors,skipped,scope
+wherevercode.agent.ui.TaskControlActionsTest,3,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.DrawerViewTest,21,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.MainLayoutTest,5,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.MainActivitySmokeTest,2,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.NativeApprovalTest,1,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.HomeScreenWiringTest,7,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.core.control.ExecutionFenceTest,12,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.ChatViewModelRemoteAgentTest,22,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.HomeScreenControllerTest,18,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.brain.ApprovalSafetyTest,10,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.EntryRegistryTest,10,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.ui.TaskComposerTest,4,0,0,0,JVM/Robolectric；非运行闭环
+wherevercode.agent.core.security.DeviceKeysTest,6,0,0,0,加密向量/互操作 JVM；Android9已有修复后页面截图，非完整闭环
+wherevercode.agent.core.security.RemoteCryptoInteropTest,6,0,0,0,加密向量/互操作 JVM；Android9已有修复后页面截图，非完整闭环
+NativeTaskCreationTest instrumentation,1,1,0,0,Android9 x86_64；System UI ANR；未到建任务步骤

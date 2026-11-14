@@ -92,7 +92,7 @@ class DrawerView(
     private var badges: DrawerBadges = DrawerBadges()
 
     /** 折叠的分组（内存态，默认全展开；分组头点按切换）。 */
-    private val collapsedGroups: MutableSet<String> = mutableSetOf()
+    private val collapsedGroups: MutableSet<String> = mutableSetOf("extensions")
 
     /** 某分组是否折叠（测试口径）。 */
     fun isGroupCollapsed(group: String): Boolean = group in collapsedGroups
@@ -302,6 +302,7 @@ class DrawerView(
 
     private fun addGroupHeader(title: String, groupKey: String) {
         val row = UiKit.horizontal(context).apply {
+            minimumHeight = dp(48)
             setPadding(dp(8), dp(14), dp(8), dp(4))
             setOnClickListener {
                 setGroupCollapsed(groupKey, !isGroupCollapsed(groupKey))

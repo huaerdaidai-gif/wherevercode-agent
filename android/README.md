@@ -1,4 +1,23 @@
-# 安卓版超级 Agent · 第 0 步：可行性验证
+# WhereverCode Agent Android
+
+当前 P0 设计、源码审计与缺口见 [Issue #6 审计](../docs/p0/README.md)。
+构建要求：JDK 17、Gradle 8.2.1、SDK platform 34（AGP 会使用 build-tools 33.0.1）、Chaquopy 15.0.1 / Python 3.11。
+
+```sh
+# 已安装 JDK/SDK/Gradle，并设置 JAVA_HOME 与 ANDROID_HOME 后：
+./scripts/build-android-p0.sh
+# 需要 x86_64 模拟器时，可显式构建双 ABI：
+./scripts/build-android-p0.sh -PandroidAbis=arm64-v8a,x86_64
+```
+
+默认 debug 包为 `wherevercode.agent.ci`，版本 `0.3.0-p0` / 6；与原包共存。
+脚本保存 APK、源码 SHA、构建退出码和测试报告到 `artifacts/issue-6`；退出非零时不能声称测试通过。
+构建使用本机 debug 签名，不含历史签名材料。无生产配置的安装包不会自动连接任何私有平台。
+Node CLI 运行时仍需用户按既有流程配置，不因 APK 构建成功就被视为已验证。
+
+以下是历史可行性记录，含旧版本与曾拟议但本仓库 main 未包含的 CI 描述；当前事实以构建文件与 P0 报告为准。
+
+# 历史：第 0 步可行性验证
 
 > **2026-11-09 UI V2：** 当前界面已从“测试式聊天 + 控制台”升级为聊天 / 项目 /
 > 任务 / Agent 四入口工作台，见 [`docs/android-ui-v2-20261109.md`](../docs/android-ui-v2-20261109.md)。

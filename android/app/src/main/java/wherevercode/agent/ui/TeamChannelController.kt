@@ -8,6 +8,8 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.RadioGroup
+import android.widget.RadioButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -74,6 +76,7 @@ class TeamChannelController(
     private val onNewRound: () -> Unit,
     private val onStartFanout: (question: String) -> Unit,
     private val onRefresh: () -> Unit,
+    private val onCreateTask: ((String, () -> Unit) -> Unit)? = null,
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -116,6 +119,7 @@ class TeamChannelController(
     }
 
     private var snapshot: TeamChannelSnapshot? = null
+    private var asTask = false
 
     init {
         root.addView(
@@ -126,10 +130,7 @@ class TeamChannelController(
         root.addView(
             UiKit.text(
                 context,
-                "全部 Agent 都在频道里：本机 App + 注册表里的每一位；" +
-                    "设备/云端 Agent 由调度器当中转——@名字 叫它，回复贴回频道。" +
-                    "短消息、3 轮一议、建议-only——群消息绝不直接触发派活；" +
-                    "只读扇出最多问 5 个分支，大家只看不写。",
+                "仅讨论会发送频道消息；作为任务发送会打开创建表单，确认后进入任务列表。",
                 11f,
                 R.color.text_tertiary,
             ).apply { setPadding(dp(16), 0, dp(16), dp(6)) },
@@ -150,6 +151,21 @@ class TeamChannelController(
         val bar = UiKit.vertical(context).apply {
             setPadding(dp(16), dp(8), dp(16), dp(12))
         }
+        val sendLabel = UiKit.text(context, "发送", 12f, R.color.accent, bold = true)
+        if (onCreateTask != null) {
+            val modes = RadioGroup(context).apply { orientation = LinearLayout.HORIZONTAL }
+            val discussion = RadioButton(context).apply { id = View.generateViewId(); text = "仅讨论"; minHeight = dp(48) }
+            val task = RadioButton(context).apply { id = View.generateViewId(); text = "作为任务发送"; minHeight = dp(48) }
+            modes.addView(discussion)
+            modes.addView(task)
+            modes.check(discussion.id)
+            modes.setOnCheckedChangeListener { _, id ->
+                asTask = id == task.id
+                sendLabel.text = if (asTask) "创建任务" else "发送"
+                messageInput.hint = if (asTask) "任务目标与验收要求…" else "发送消息，或 @ 一位成员…"
+            }
+            bar.addView(modes)
+        }
         val sendRow = UiKit.horizontal(context)
         sendRow.addView(
             messageInput.apply {
@@ -157,7 +173,9 @@ class TeamChannelController(
             },
         )
         sendRow.addView(
-            UiKit.text(context, "发送", 12f, R.color.accent, bold = true).apply {
+            sendLabel.apply {
+                minHeight = dp(48)
+                gravity = android.view.Gravity.CENTER
                 setBackgroundResource(R.drawable.bg_chip_accent)
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 setOnClickListener { sendMessage() }
@@ -177,13 +195,38 @@ class TeamChannelController(
                 setOnClickListener { startFanout() }
             },
         )
+        val advanced = UiKit.text(context, "只读协作工具　展开 ›", 12f, R.color.text_secondary).apply {
+            minHeight = dp(48)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        fanoutRow.visibility = View.GONE
+        advanced.setOnClickListener {
+            val expanded = fanoutRow.visibility != View.VISIBLE
+            fanoutRow.visibility = if (expanded) View.VISIBLE else View.GONE
+            advanced.text = if (expanded) "只读协作工具　收起 ⌃" else "只读协作工具　展开 ›"
+        }
+        bar.addView(advanced)
         bar.addView(fanoutRow)
         return bar
     }
 
     private fun sendMessage() {
-        val snap = snapshot ?: return
         val text = messageInput.text.toString().trim()
+        if (asTask) {
+            if (text.isBlank()) {
+                noticeLine.text = "请填写任务目标"
+                return
+            }
+            onCreateTask?.invoke(text) {
+                if (messageInput.text.toString().trim() == text) messageInput.setText("")
+            }
+            return
+        }
+        val snap = snapshot ?: return
+        if (!snap.configured) {
+            noticeLine.text = "频道尚未连接；消息未发送。"
+            return
+        }
         val error = TeamChatRules.validatePost(text, snap.roundsUsed)
         if (error != null) {
             noticeLine.text = error

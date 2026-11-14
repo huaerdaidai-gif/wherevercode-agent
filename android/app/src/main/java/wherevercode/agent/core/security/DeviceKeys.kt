@@ -42,7 +42,9 @@ object DeviceKeys {
 
     data class KeyPair(val publicKey: ByteArray, val privateKey: ByteArray)
 
-    private val P: BigInteger = BigInteger.TWO.pow(255).subtract(BigInteger.valueOf(19))
+    // BigInteger.TWO is absent on older Android releases supported by minSdk 26.
+    private val TWO: BigInteger = BigInteger.valueOf(2)
+    private val P: BigInteger = TWO.pow(255).subtract(BigInteger.valueOf(19))
     private val A24: BigInteger = BigInteger.valueOf(121665)
     private val BASE_POINT: ByteArray = ByteArray(32).also { it[0] = 9 }
     private const val NONCE_BYTES: Int = 12
@@ -149,12 +151,12 @@ object DeviceKeys {
 
     private fun decodeU(data: ByteArray): BigInteger {
         val reversed = data.reversedArray()
-        val mask = BigInteger.TWO.pow(255).subtract(BigInteger.ONE)
+        val mask = TWO.pow(255).subtract(BigInteger.ONE)
         return BigInteger(1, reversed).and(mask)
     }
 
     private fun encodeU(value: BigInteger): ByteArray {
-        val masked = value.and(BigInteger.TWO.pow(255).subtract(BigInteger.ONE))
+        val masked = value.and(TWO.pow(255).subtract(BigInteger.ONE))
         val bigEndian = masked.toByteArray()
         val stripped = if (bigEndian.size > 32) bigEndian.copyOfRange(bigEndian.size - 32, bigEndian.size) else bigEndian
         val padded = ByteArray(32)
@@ -197,6 +199,6 @@ object DeviceKeys {
             val t = x2; x2 = x3; x3 = t
             val t2 = z2; z2 = z3; z3 = t2
         }
-        return encodeU(x2.multiply(z2.modPow(P.subtract(BigInteger.TWO), P)).mod(P))
+        return encodeU(x2.multiply(z2.modPow(P.subtract(TWO), P)).mod(P))
     }
 }

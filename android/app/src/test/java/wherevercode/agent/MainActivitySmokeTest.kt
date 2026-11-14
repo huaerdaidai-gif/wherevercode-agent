@@ -79,11 +79,11 @@ class MainActivitySmokeTest {
         // 只显示“你好”。
         val texts = collectTexts(activity.window.decorView)
         assertTrue(texts.contains("WhereverCode"))
-        assertTrue(texts.contains("你好"))
-        assertTrue(texts.contains("有什么想一起解决的？"))
-        assertTrue(texts.contains("开发一个 App"))
-        assertTrue(texts.contains("导入项目并交付"))
-        assertTrue(texts.none { it == "组织多 Agent 团队" || it == "自动化任务" })
+        assertTrue(texts.contains("今天想做什么？"))
+        assertTrue(texts.contains("项目 · 选择或切换 ›"))
+        assertTrue(texts.contains("检查项目并修复问题"))
+        assertTrue(texts.contains("解释这段代码"))
+        assertTrue(texts.contains("拆成任务"))
 
         controller.pause().stop().destroy()
     }

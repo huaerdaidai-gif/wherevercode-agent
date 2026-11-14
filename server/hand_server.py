@@ -874,8 +874,8 @@ class HandServer:
             buf = ""
             timed_out = False
             while True:
-                if proc.poll() is not None and not buf:
-                    break
+                # An exited child may still have unread bytes in the pipe.
+                # Only EOF (or the deadline) ends draining stdout.
                 if time.time() > deadline:
                     timed_out = True
                     break
@@ -914,6 +914,8 @@ class HandServer:
             self._kill_process(task_id)
             return
         finally:
+            if proc.stdout is not None:
+                proc.stdout.close()
             with self.process_lock:
                 self.processes.pop(task_id, None)
         if proc.returncode is not None and proc.returncode < 0:

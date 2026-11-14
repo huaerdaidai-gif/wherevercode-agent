@@ -25,6 +25,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -268,6 +269,28 @@ class BundledHandAuthorizationTest(unittest.TestCase):
                              auth["agent"]["authorized_project_folders"])
             self.assertNotIn(os.path.realpath(base),
                              auth["agent"]["authorized_project_folders"])
+
+
+class BundledHandOutputTest(unittest.TestCase):
+    def test_bundled_runner_drains_stdout_after_process_exit(self):
+        bundled = load_bundled_hand_server()
+        real_popen = bundled.subprocess.Popen
+
+        def exited_before_read(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            proc.wait(timeout=5)
+            return proc
+
+        lines = []
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(bundled.subprocess, "Popen", side_effect=exited_before_read):
+                code, output, timed_out = bundled.run_cli_agent(
+                    sys.executable, [sys.executable, "-c", "print('step one'); print('RESULT: ok')"],
+                    "", "bundled-exited", folder, on_line=lines.append)
+        self.assertEqual(0, code)
+        self.assertFalse(timed_out)
+        self.assertIn("RESULT: ok", output)
+        self.assertIn("step one\n", lines)
 
 
 class HandServerTest(unittest.TestCase):
@@ -538,6 +561,23 @@ class HandServerTest(unittest.TestCase):
         self.assertNotIn(missing, self.server.authorized_folders("fake-agent"))
 
     # -- run / 控制 ----------------------------------------------------------
+
+    def test_exited_agent_stdout_is_drained(self):
+        self.approve_client()
+        real_popen = hs.subprocess.Popen
+
+        def exited_before_read(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            proc.wait(timeout=5)
+            return proc
+
+        with patch.object(hs.subprocess, "Popen", side_effect=exited_before_read):
+            events = self.client.tool_call(
+                "exited", "fake-agent", self.work, "run",
+                {"argv": json.dumps(["agent", "fake-agent", "hello"]),
+                 "timeout": "30", "control": json.dumps({"goal_version": 1, "epoch": 1})})
+        self.assertTrue(any(e["type"] == "cross_device_progress" for e in events))
+        self.assertIn("RESULT: ok", events[-1]["args"]["output"])
 
     def test_fake_agent_run_streams_progress_and_result(self):
         self.approve_client()
