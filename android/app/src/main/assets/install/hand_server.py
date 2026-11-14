@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Canonical source: server/hand_server.py. Do not hand-edit assets/install copy.
+# Generate: python3 scripts/sync_hand_server.py --write; verify with --check.
 """WhereverCode V5 远程 Hand 服务端（阶段 B，VPS 侧最小实现）。
 
 协议与 App 侧 `core/mcp/HandClient`、`core/mcp/HandProtocol`、
@@ -54,7 +56,8 @@ cross_device_credentials.py 的协议思路，不复用其代码与 bug）。
       即 APPROVED；码错 5 次锁定该设备 1 小时（防暴力破解）。
   (2) 服务端命令行：`hand_server.py pair-approve <device-id>`。
   之后该设备的密封调用才会被受理。未配对设备的密封调用
-  一律以 cross_device_not_authorized 拒绝（配对确认帧除外）。
+  standalone 对未批准工具调用直接断连；bundled 回密封
+  cross_device_not_authorized。合法密封配对确认帧两种策略均接受。
   hello 回包带 client_status（本机在该 Hand 上的批准状态），
   App 由此显示“对方待批准”，不再靠猜。
 
@@ -62,10 +65,10 @@ cross_device_credentials.py 的协议思路，不复用其代码与 bug）。
   `_wherevercode._tcp`（PTR/SRV/TXT/A），App 的 NsdManager
   发现即列出；广播失败不影响主服务（记日志继续跑）。
 
-授权（auth.json）：agent_id → 允许访问的文件夹列表；或字典形
-  {"folders": […], "authorized_project_folders": […]}，后者是
-  逐项授权的项目文件夹（任务/项目定工作目录，见
-  authorize_project_folder 密封动作）。
+授权：auth.json 支持 agent_id → [folder, …] 或 {"folders": […]}。
+  项目追加授权保存在 project_grants.json，按已配对客户端隔离。
+  默认 standalone 仅用显式授权；安装入口显式选择 bundled，另启用
+  配置/注册目录自动授权，每次隐式授权决策记录审计。
   凭证的 folder 必须在该 agent 的授权列表里（词法归一化后比较），
   否则 wrong_folder。run 只允许注册在 agents.json 里的 agent
   命令（argv[0] == "agent"，argv[1] 为 agent_id），或控制命令
@@ -514,6 +517,7 @@ def verify_credential(
     revoked_jtis: set[str],
     revoked_tasks: set[str],
     now: int,
+    config_policy: str = "standalone",
 ) -> str | None:
     """返回 None 表示通过，否则返回错误码。校验顺序与 App 侧一致：
     签名 → 过期 → 撤销 → 绑定（任务/目标/文件夹）→ 授权仍存在。
@@ -535,7 +539,8 @@ def verify_credential(
         return ERR_WRONG_TARGET
     if canonical_folder(cred["folder"]) != canonical_folder(expected_folder):
         return ERR_WRONG_FOLDER
-    if os.path.realpath(expected_folder) not in [os.path.realpath(f) for f in authorized_folders]:
+    folder_key = os.path.realpath if config_policy == "bundled" else canonical_folder
+    if folder_key(expected_folder) not in [folder_key(f) for f in authorized_folders]:
         return ERR_WRONG_FOLDER
     if cred["agent_id"] and cred["agent_id"] != expected_agent_id:
         return ERR_WRONG_TASK
@@ -1492,6 +1497,7 @@ class HandServer:
             revoked_jtis=self.revoked_jtis,
             revoked_tasks=set() if self._is_stop_call(action, args) else self.revoked_tasks,
             now=int(time.time()),
+            config_policy=self.config_policy,
         )
         if err is not None:
             self._error(conn, session_key, envelope, seq + 1, err,
@@ -1564,42 +1570,37 @@ class HandServer:
 
     def _do_authorize_project_folder(self, conn, session_key, envelope, seq,
                                      task_id, agent_id, args, client_id) -> None:
-        """Save a project grant for the authenticated device and Agent."""
+        """One grant store; preserve each deployment policy's legacy receipt bytes."""
         requested = args.get("folder", "") if isinstance(args, dict) else ""
-        if not isinstance(requested, str) or not os.path.isabs(requested):
-            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        "项目文件夹必须是已存在的绝对路径")
+        if not isinstance(requested, str) or not requested or not os.path.isabs(requested):
+            message = ("项目文件夹必须是已存在的绝对路径" if self.config_policy == "bundled"
+                       else "授权目录必须是已存在的绝对路径。")
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED, message)
             return
-        canon = os.path.realpath(canonical_folder(requested))
-        if not canon or canon == "/" or not os.path.isdir(canon):
-            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        f"文件夹不存在或不是目录：{requested}")
+        canonical = os.path.realpath(canonical_folder(requested) if self.config_policy == "bundled" else requested)
+        if canonical == os.path.abspath(os.sep) or not os.path.isdir(canonical):
+            message = (f"文件夹不存在或不是目录：{requested}" if self.config_policy == "bundled"
+                       else "授权目录不存在或不是文件夹。")
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED, message)
             return
         with self.state.lock:
             grants = self.state.load_json("project_grants.json", {})
             folders = grants.setdefault(client_id, {}).setdefault(agent_id, [])
-            already = canon in folders
+            already = canonical in folders
             if not already:
-                folders.append(canon)
+                folders.append(canonical)
                 self.state.save_json("project_grants.json", grants)
-        self.state.audit({"event": "authorize_project_folder", "agent": agent_id,
-                          "folder": canon, "task": task_id, "already": already})
+        self.state.audit({"event": "authorize_project_folder" if self.config_policy == "bundled" else "folder_authorized",
+                          "agent": agent_id, "folder": canonical, "already": already, "task": task_id})
+        if self.config_policy == "bundled":
+            receipt = {"authorized": True, "agent_id": agent_id,
+                       "requested_folder": requested, "folder": canonical, "already": already}
+        else:
+            receipt = {"authorized": True, "requested_folder": requested,
+                       "agent_id": agent_id, "already": already, "folder": canonical}
         self._send(conn, session_key, envelope, "cross_device_result",
-                   {"output": json.dumps(
-                       {"authorized": True, "agent_id": agent_id,
-                        "requested_folder": requested,
-                        "folder": canon, "already": already},
-                       ensure_ascii=False)}, seq + 1)
+                   {"output": json.dumps(receipt, ensure_ascii=False)}, seq + 1)
 
-    # -- Hand 自更新（App 更新后自动同步已连接设备，2026-11-12）--------------
-    #
-    # 管理消息 wherevercode_device_admin（_handle_connection 里与
-    # wherevercode_ws_token 并列的分支，只在 APPROVED 之后）：设备级动作，
-    # 没有 task，不验任务凭证。认证就是密封信封本身（只有配对 App 持有
-    # 会话密钥）+ APPROVED 检查 + confirmed 标志（App 只在用户确认或
-    # 自动同步开关开时才置 true；没它一律拒绝，防误触）。
-    # 三段式：stage（暂存并校验）→ apply（备份→原子替换→重载）→
-    # App poll hello 验版本；失败时 watchdog 自动回滚，App 也可发 rollback。
     def _handle_device_admin(self, conn, session_key, client_id, envelope) -> None:
         seq = int(envelope.get("seq", 1))
         action = str(envelope.get("action", ""))
@@ -2879,9 +2880,11 @@ def main(argv: list[str] | None = None) -> int:
                 "folder": "/workspace/example-project",
                 # 直接调 grok 二进制（stdout 直抓）；旧的 run-grok.sh
                 # wrapper（输出重定向到日志文件）已废弃，见通用 runner。
-                "command": ["/usr/local/bin/grok", "-p", "{prompt}",
-                            "--always-approve", "--sandbox", "workspace",
-                            "--output-format", "plain"],
+                "command": (["/workspace/example-project/run-grok.sh", "{prompt}"]
+                            if args.config_policy == "standalone" else
+                            ["/usr/local/bin/grok", "-p", "{prompt}",
+                             "--always-approve", "--sandbox", "workspace",
+                             "--output-format", "plain"]),
                 "env": {},
             }
         }
