@@ -64,28 +64,57 @@ struct ConversationHomeContentView: View {
 
     var body: some View {
         List {
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("今天想做什么？")
+                        .font(.system(size: 29, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                    Text("从对话开始，或打开侧边栏进入任务与设备。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 24)
+                .listRowBackground(Color.clear)
+            }
             if !platformConnected {
-                PlatformConnectionCardSection(onGoSettings: onGoSettings)
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "network.slash")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("平台尚未连接").font(.subheadline.weight(.medium))
+                            Text("团队频道与远程任务需要连接；不影响其他本地功能。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Button("连接") { onGoSettings() }
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .padding(.vertical, 5)
+                }
             }
             if platformConnected, let loadError {
-                Section("连接平台失败") {
-                    Text(loadError)
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                    Button("重试") { onRetry() }
+                Section {
+                    HStack {
+                        Text(loadError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        Spacer()
+                        Button("重试") { onRetry() }
+                    }
                 }
             }
             Section("团队频道") {
                 if !platformConnected {
-                    // Android's setupHint for the same state
-                    // (buildTeamChannelSnapshot, configured=false).
-                    Text("团队频道还没法连：先在设置里连接平台——在「平台连接」里填入 App 的平台凭证（由你的平台管理员签发），或先用已有凭证生成。连上后频道会列在这里，点一下即可进入。")
+                    Text("连接平台后在这里查看和进入频道")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else if channels.isEmpty {
                     Text(loadError == nil
-                         ? (isLoading ? "正在加载频道…" : "没有可见的频道。请确认 Token 有权访问频道，或在设置里检查平台地址。")
-                         : "频道加载失败，点上面的「重试」再试一次。")
+                         ? (isLoading ? "正在加载频道…" : "暂无可见频道")
+                         : "频道加载失败")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(channels) { channel in
@@ -102,6 +131,8 @@ struct ConversationHomeContentView: View {
                 ReservedFeatureRow(feature: .singleAgentChat)
             }
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .refreshable { onRefresh() }
     }
 }
