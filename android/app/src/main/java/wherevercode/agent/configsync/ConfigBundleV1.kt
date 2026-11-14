@@ -165,29 +165,14 @@ data class BundleBrainV1(
 }
 
 data class BundleAppSettingsV1(
-    val platformBaseUrl: String? = null,
-    val channelId: String? = null,
-    val workModeId: String? = null,
-    val freedomLevel: Int? = null,
-    val hiddenModules: List<String> = emptyList(),
     val brainDisplayName: String? = null,
-    val drawerOrder: List<String> = emptyList(),
-    val drawerHidden: List<String> = emptyList(),
-    val drawerFavorites: List<String> = emptyList(),
 ) {
     fun toJson() = JSONObject().apply {
-        putNullable("platformBaseUrl", platformBaseUrl); putNullable("channelId", channelId)
-        putNullable("workModeId", workModeId); freedomLevel?.let { put("freedomLevel", it) }
-        put("hiddenModules", hiddenModules.toJsonArray()); putNullable("brainDisplayName", brainDisplayName)
-        put("drawerOrder", drawerOrder.toJsonArray()); put("drawerHidden", drawerHidden.toJsonArray())
-        put("drawerFavorites", drawerFavorites.toJsonArray())
+        putNullable("brainDisplayName", brainDisplayName)
     }
     companion object {
         fun fromJson(j: JSONObject) = BundleAppSettingsV1(
-            j.optionalString("platformBaseUrl"), j.optionalString("channelId"), j.optionalString("workModeId"),
-            if (j.has("freedomLevel") && !j.isNull("freedomLevel")) j.getInt("freedomLevel") else null,
-            j.stringArray("hiddenModules"), j.optionalString("brainDisplayName"),
-            j.stringArray("drawerOrder"), j.stringArray("drawerHidden"), j.stringArray("drawerFavorites"),
+            brainDisplayName = j.optionalString("brainDisplayName"),
         )
     }
 }

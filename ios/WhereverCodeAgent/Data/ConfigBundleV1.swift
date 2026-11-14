@@ -160,20 +160,8 @@ public struct BundleBrainV1: Codable, Equatable {
 
 /// Deliberately finite settings allowlist; S2 documents each source preference.
 public struct BundleAppSettingsV1: Codable, Equatable {
-    public var platformBaseUrl: String?
-    public var channelId: String?
-    public var workModeId: String?
-    public var freedomLevel: Int?
-    public var hiddenModules: [String]
     public var brainDisplayName: String?
-    public var drawerOrder: [String]
-    public var drawerHidden: [String]
-    public var drawerFavorites: [String]
-    public init(platformBaseUrl: String? = nil, channelId: String? = nil, workModeId: String? = nil,
-                freedomLevel: Int? = nil, hiddenModules: [String] = [], brainDisplayName: String? = nil,
-                drawerOrder: [String] = [], drawerHidden: [String] = [], drawerFavorites: [String] = []) {
-        self.platformBaseUrl = platformBaseUrl; self.channelId = channelId; self.workModeId = workModeId
-        self.freedomLevel = freedomLevel; self.hiddenModules = hiddenModules; self.brainDisplayName = brainDisplayName
-        self.drawerOrder = drawerOrder; self.drawerHidden = drawerHidden; self.drawerFavorites = drawerFavorites
+    public init(brainDisplayName: String? = nil) {
+        self.brainDisplayName = brainDisplayName
     }
 }

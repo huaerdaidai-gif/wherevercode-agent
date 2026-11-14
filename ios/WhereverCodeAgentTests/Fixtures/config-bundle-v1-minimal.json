@@ -54,15 +54,7 @@
     ],
     "currentBrainId": "brain-demo",
     "appSettings": {
-      "platformBaseUrl": "https://platform.example.invalid",
-      "channelId": "channel-demo",
-      "workModeId": "balanced",
-      "freedomLevel": 3,
-      "hiddenModules": ["example-hidden"],
-      "brainDisplayName": "示例",
-      "drawerOrder": ["chat", "projects"],
-      "drawerHidden": [],
-      "drawerFavorites": ["chat"]
+      "brainDisplayName": "示例"
     }
   }
 }
