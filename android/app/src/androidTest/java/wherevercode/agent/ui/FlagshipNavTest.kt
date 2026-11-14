@@ -37,7 +37,10 @@ class FlagshipNavTest {
                 ?: device.findObject(By.text("跳过，先体验基础功能"))
                 ?: device.findObject(By.text("跳过"))
             if (skip != null) { skip.click(); device.waitForIdle(); continue }
-            if (device.hasObject(By.res(context.packageName, "buttonMenu"))) break
+            device.waitForIdle()
+            if (device.currentPackageName == context.packageName &&
+                device.hasObject(By.res(context.packageName, "buttonMenu")) &&
+                !device.hasObject(By.res("com.android.permissioncontroller", "permission_deny_button"))) break
             Thread.sleep(500)
         }
         assertTrue(

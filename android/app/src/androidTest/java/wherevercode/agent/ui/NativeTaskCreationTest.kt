@@ -94,14 +94,13 @@ class NativeTaskCreationTest {
         // the only reliable signal is the overlay being GONE.
         val deadline = System.currentTimeMillis() + 90_000
         while (System.currentTimeMillis() < deadline) {
-            if (device.findObject(By.text("稍后再看")) == null &&
-                device.findObject(By.text("今天想做什么？")) != null
-            ) return
             // The system notification-permission dialog can sit over
             // the app from first launch (seen in the round-4 evidence:
             // "Allow WhereverCode to send you notifications?"). Answer
             // it like a user would: deny, and the app must cope.
-            val permission = device.findObjects(By.clazz(Button::class.java)).firstOrNull { btn ->
+            val permission = device.findObject(By.res("com.android.permissioncontroller", "permission_deny_button"))
+                ?: device.findObject(By.res("com.android.permissioncontroller", "permission_allow_button"))
+                ?: device.findObjects(By.clazz(Button::class.java)).firstOrNull { btn ->
                 val t = btn.text?.trim().orEmpty()
                 t.equals("不允许", ignoreCase = true) ||
                     (t.contains("allow", ignoreCase = true) && t.contains("don", ignoreCase = true)) ||
@@ -121,7 +120,12 @@ class NativeTaskCreationTest {
                 skip.click()
                 device.wait(Until.gone(By.text("稍后再看")), 10_000)
             } else {
-                Thread.sleep(1_000)
+                device.waitForIdle()
+                if (device.currentPackageName == context.packageName &&
+                    device.findObject(By.text("今天想做什么？")) != null &&
+                    !device.hasObject(By.res("com.android.permissioncontroller", "permission_deny_button"))
+                ) return
+                Thread.sleep(500)
             }
         }
         dumpUiTexts(device, output, "launch-ui-after")

@@ -298,11 +298,23 @@ struct ChatListView: View {
 // Shared native tokens: see docs/NATIVE_DUAL_UI.md. Platform connections
 // never gate the local conversation store or the configured brain engine.
 enum AgentUI {
-    static let background = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 11/255, green: 14/255, blue: 29/255, alpha: 1)
-            : UIColor(red: 250/255, green: 248/255, blue: 245/255, alpha: 1)
-    })
+    private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                green: CGFloat((value >> 8) & 255) / 255,
+                blue: CGFloat(value & 255) / 255, alpha: 1)
+        })
+    }
+    static let background = adaptive(0xFAF8F5, 0x0B0E1D)
+    static let card = adaptive(0xFFFFFF, 0x171B31)
+    static let ink = adaptive(0x15181E, 0xF2F4FF)
+    static let secondary = adaptive(0x5A6270, 0x9AA3C7)
+    static let border = adaptive(0xE6E1D8, 0x2E3560)
+    static let warning = adaptive(0xA86200, 0xF5A524)
+    static let warningBackground = adaptive(0xFFF1D8, 0x3A2C14)
+    static let accent = Color(red: 123/255, green: 92/255, blue: 1)
+    static let userBubble = adaptive(0x2E63E8, 0x2E63E8)
 }
 
 /// Until native workspace tools are wired, advertise none and refuse all
@@ -431,6 +443,23 @@ struct LocalChatHomeView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                Text("模式：大脑对话 · 当前设备：本机")
+                    .font(.system(size: 12)).foregroundStyle(AgentUI.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                    .background(AgentUI.card, in: Capsule())
+                    .overlay(Capsule().stroke(AgentUI.border))
+                    .padding(.horizontal, 14).padding(.top, 4)
+                if model.selectedBrain.isEmpty {
+                    Button { appState.goToSettings() } label: {
+                        Text("还没有连接 AI 模型　连接 ›")
+                            .font(.system(size: 13)).foregroundStyle(AgentUI.warning)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .padding(.horizontal, 12)
+                    }
+                    .background(AgentUI.warningBackground, in: Capsule())
+                    .padding(.horizontal, 14)
+                }
+
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
@@ -441,7 +470,7 @@ struct LocalChatHomeView: View {
                                         Button("✕ 关闭问候") { greetingDismissed = true }
                                             .font(.system(size: 11)).foregroundStyle(.secondary)
                                     }
-                                    Text("∞").font(.system(size: 34)).foregroundStyle(Color.purple)
+                                    Text("∞").font(.system(size: 34)).foregroundStyle(AgentUI.accent)
                                         .padding(.top, 20)
                                     Text("今天想做什么？").font(.system(size: 28, weight: .semibold))
                                     Button("项目 · 选择或切换 ›") { appState.selectedTab = .projects }
@@ -450,7 +479,7 @@ struct LocalChatHomeView: View {
                                         suggestion("检查项目并修复问题")
                                         suggestion("解释这段代码")
                                     }
-                                    HStack { suggestion("拆成任务"); Spacer() }
+                                    suggestion("拆成任务")
                                 }.padding(.vertical, 12)
                             }
                             ForEach(model.messages, id: \.id) { message in
@@ -460,7 +489,8 @@ struct LocalChatHomeView: View {
                                     Text(message.content).textSelection(.enabled)
                                 }
                                 .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(message.role == "user" ? Color.accentColor.opacity(0.1) : Color(uiColor: .secondarySystemGroupedBackground))
+                                .background(message.role == "user" ? AgentUI.userBubble : AgentUI.card)
+                                .foregroundStyle(message.role == "user" ? Color.white : AgentUI.ink)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                             }
                             if model.isSending {
@@ -513,8 +543,8 @@ struct LocalChatHomeView: View {
                     }.padding(.horizontal, 8)
                 }
                 .padding(4)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.2)))
+                .background(AgentUI.card, in: RoundedRectangle(cornerRadius: 24))
+                .overlay(RoundedRectangle(cornerRadius: 24).stroke(AgentUI.border))
                 .padding(.horizontal, 10).padding(.bottom, 6)
 
             }

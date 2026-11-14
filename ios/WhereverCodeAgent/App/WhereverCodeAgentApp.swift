@@ -56,7 +56,7 @@ struct WhereverCodeAgentApp: App {
                         }
                         .accessibilityLabel("打开导航")
                         .accessibilityIdentifier("navigation.menu")
-                        Text("∞").foregroundStyle(Color.purple).font(.title2.bold())
+                        Text("∞").foregroundStyle(AgentUI.accent).font(.title2.bold())
                         Text("WhereverCode").font(.system(size: 17, weight: .semibold))
                         Spacer()
                         Button { appState.selectedTab = .chat; appState.chat.showHistory = true } label: {
@@ -82,30 +82,49 @@ struct WhereverCodeAgentApp: App {
                 }
                 .background(AgentUI.background)
                 .environmentObject(appState)
+                .tint(AgentUI.accent)
 
                 if isDrawerOpen {
                     Color.black.opacity(0.28)
                         .ignoresSafeArea()
                         .onTapGesture { withAnimation { isDrawerOpen = false } }
                     HStack(spacing: 0) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("WhereverCode")
-                                .font(.title2.bold())
-                                .padding(.bottom, 12)
-                            drawerItem("对话", icon: "bubble.left", tab: .chat)
-                            drawerItem("项目与文件", icon: "folder", tab: .projects)
-                            drawerItem("Agent", icon: "person.2", tab: .agents)
-                            drawerItem("团队频道", icon: "bubble.left.and.bubble.right", tab: .channels)
-                            drawerItem("控制台", icon: "terminal", tab: .console)
-                            drawerItem("任务", icon: "checklist", tab: .tasks)
-                            drawerItem("设备", icon: "iphone", tab: .devices)
-                            Spacer()
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 8) {
+                                Text("∞").foregroundStyle(AgentUI.accent)
+                                Text("WhereverCode")
+                            }.font(.system(size: 20, weight: .semibold)).padding(.vertical, 20)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    drawerItem("新对话", icon: "bubble.left", tab: .chat)
+                                    Button {
+                                        appState.selectedTab = .chat
+                                        appState.chat.showHistory = true
+                                        withAnimation { isDrawerOpen = false }
+                                    } label: {
+                                        Label("会话", systemImage: "magnifyingglass")
+                                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                                    }.accessibilityIdentifier("drawer_history")
+                                    drawerItem("项目", icon: "folder", tab: .projects)
+                                    drawerItem("任务", icon: "clock", tab: .tasks)
+                                    drawerItem("团队（Agent / 成员）", icon: "person.2", tab: .agents)
+                                    drawerItem("设备", icon: "iphone", tab: .devices)
+                                    drawerItem("工具与连接", icon: "wrench.and.screwdriver", tab: .settings, identifier: "connections")
+                                    drawerItem("团队频道", icon: "bubble.left.and.bubble.right", tab: .channels)
+                                    Text("工作台").font(.caption).foregroundStyle(.secondary).padding(.vertical, 12)
+                                    drawerItem("控制台", icon: "terminal", tab: .console)
+                                    drawerItem("模型与连接", icon: "slider.horizontal.3", tab: .settings, identifier: "models")
+                                    unavailableDrawerItem("待审批", icon: "checkmark.shield", reason: "iOS 审批执行接口尚未接入")
+                                    unavailableDrawerItem("成果聚合", icon: "shippingbox", reason: "iOS 本地成果聚合尚未接入；平台交付见任务详情")
+                                }
+                            }
+                            Divider().padding(.vertical, 8)
                             drawerItem("设置", icon: "gearshape", tab: .settings)
                         }
-                        .padding(20)
+                        .padding(.horizontal, 16)
                         .frame(width: 280)
                         .frame(maxHeight: .infinity, alignment: .topLeading)
-                        .background(.regularMaterial)
+                        .background(AgentUI.card)
                         Spacer(minLength: 0)
                     }
                     .transition(.move(edge: .leading))
@@ -136,19 +155,26 @@ struct WhereverCodeAgentApp: App {
             #endif
         }
     }
-    private func drawerItem(_ title: String, icon: String, tab: AppTab) -> some View {
+    private func drawerItem(_ title: String, icon: String, tab: AppTab, identifier: String? = nil) -> some View {
         Button {
             appState.selectedTab = tab
+            if tab == .chat { appState.chat.newConversation() }
             withAnimation(.easeInOut(duration: 0.2)) { isDrawerOpen = false }
         } label: {
             Label(title, systemImage: icon)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
+                .font(.system(size: 15))
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .foregroundStyle(.primary)
         }
-        .accessibilityIdentifier("drawer_\(tab)")
+        .accessibilityIdentifier("drawer_\(identifier ?? String(describing: tab))")
     }
+    private func unavailableDrawerItem(_ title: String, icon: String, reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {} label: { Label(title, systemImage: icon) }.disabled(true)
+            Text(reason).font(.caption2).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.vertical, 4)
+    }
+
 }
 
 /// Shared app state: settings + token access + client factories.
