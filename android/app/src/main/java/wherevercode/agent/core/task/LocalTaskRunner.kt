@@ -136,6 +136,16 @@ class LocalTaskRunner(
      * review、不自动 completed（[finishTask] 查它）。
      */
     private val pipelineHook: PipelineRunnerHook? = null,
+    /**
+     * P0 round-4 instrumentation seam: when this returns true the pump
+     * skips claiming entirely. Default false (all existing callers and
+     * production behaviour unchanged). BrainBootstrap wires it to a
+     * DEBUG-only hold file so the .ci instrumentation can hold a task
+     * in `queued` deterministically while it verifies queued-state
+     * control receipts (pause/resume/stop) against the real
+     * ControlPlane; release builds never consult any file.
+     */
+    private val claimHold: () -> Boolean = { false },
 ) {
     companion object {
         /** The agent id a locally executed task is claimed under. */
@@ -257,6 +267,7 @@ class LocalTaskRunner(
         } catch (_: Exception) {
             // Control reconciliation is retried on the next sweep.
         }
+        if (claimHold()) return
         val candidate = pickNext() ?: return
         if (scheduler.activeWorkCount() != 0) return
         val claimed = scheduler.claimTask(candidate.taskId, LOCAL_AGENT_ID) ?: return

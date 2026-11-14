@@ -1432,6 +1432,15 @@ object BrainBootstrap {
             evalRecorder = EvalLogRecorder(evalLogStore, routingDecisionLog),
             // P2：plan 未批准不认领、编码完成停 review（见 LocalTaskRunner）。
             pipelineHook = pipelineHook,
+            // P0 round-4: DEBUG-only instrumentation claim hold (see
+            // LocalTaskRunner.claimHold). Release builds never check.
+            claimHold = {
+                wherevercode.agent.BuildConfig.DEBUG &&
+                    java.io.File(
+                        appContext.getExternalFilesDir(null),
+                        "issue8_claim_hold",
+                    ).exists()
+            },
         )
         controlPlane.configureLocalExecutionControl(
             isExecuting = { taskId -> taskRunner.isExecuting(taskId) },
