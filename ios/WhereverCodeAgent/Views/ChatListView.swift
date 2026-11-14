@@ -473,7 +473,7 @@ struct LocalChatHomeView: View {
                                     Text("∞").font(.system(size: 34)).foregroundStyle(AgentUI.accent)
                                         .padding(.top, 20)
                                     Text("今天想做什么？").font(.system(size: 28, weight: .semibold))
-                                    Button("项目 · 选择或切换 ›") { appState.selectedTab = .projects }
+                                    Button("项目 · 查看已保存位置 ›") { appState.selectedTab = .projects }
                                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(minHeight: 48)
                                     HStack(spacing: 8) {
                                         suggestion("检查项目并修复问题", icon: "</>")
@@ -518,7 +518,7 @@ struct LocalChatHomeView: View {
                             Button("设备") { appState.selectedTab = .devices }
                             Button("工具与连接") { appState.goToSettings() }
                         } label: {
-                            Image(systemName: "plus").frame(width: 36, height: 44)
+                            Image(systemName: "plus").frame(width: 36, height: 44).foregroundStyle(AgentUI.secondary)
                         }.accessibilityLabel("更多操作")
                         Menu {
                             Picker("模型", selection: $model.selectedBrain) {
@@ -545,12 +545,17 @@ struct LocalChatHomeView: View {
                         if model.isSending {
                             Button { model.stopGenerating() } label: {
                                 Image(systemName: "stop.fill").frame(width: 36, height: 36)
-                            }.buttonStyle(.bordered).clipShape(Circle())
+                                    .foregroundStyle(AgentUI.ink)
+                                    .overlay(Circle().stroke(AgentUI.border)).padding(4)
+                            }.buttonStyle(.plain)
                                 .accessibilityLabel("停止回复").accessibilityIdentifier("chat.stop")
                         } else {
                             Button { model.startSending() } label: {
                                 Image(systemName: "arrow.up").frame(width: 36, height: 36)
-                            }.buttonStyle(.borderedProminent).clipShape(Circle())
+                                    .foregroundStyle(Color.white)
+                                    .background(AgentUI.accent, in: Circle()).padding(4)
+                            }.buttonStyle(.plain)
+                                .opacity(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
                                 .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                 .accessibilityLabel("发送").accessibilityIdentifier("chat.send")
                         }
