@@ -19,6 +19,7 @@ enum AppTab: Hashable {
     case tasks
     case devices
     case settings
+    case flagship
 }
 
 /// Result of the last real platform connection check. Shown in
@@ -56,6 +57,9 @@ struct WhereverCodeAgentApp: App {
                 SettingsView()
                     .tabItem { Label("设置", systemImage: "gearshape") }
                     .tag(AppTab.settings)
+                FlagshipTabView()
+                    .tabItem { Label("70 屏", systemImage: "square.grid.2x2") }
+                    .tag(AppTab.flagship)
             }
             .environmentObject(appState)
             .task {
@@ -82,6 +86,19 @@ struct WhereverCodeAgentApp: App {
             }
             #endif
         }
+    }
+}
+
+/// 70 屏旗舰导航页签（双端组装第一轮）：承载 FlagshipApp 壳，
+/// 能力状态由 AppFlagshipCapabilities 按现有 iOS 实现如实给出；
+/// 「打开功能」经回调切到既有页签，不复制业务实现。
+struct FlagshipTabView: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        FlagshipApp(capabilities: AppFlagshipCapabilities(onOpenTab: { tab in
+            appState.selectedTab = tab
+        }))
     }
 }
 

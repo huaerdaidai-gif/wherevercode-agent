@@ -145,6 +145,8 @@
 		623D5A4E16C91488EB97E424 = {isa = PBXBuildFile; fileRef = FAE5B2E37F68D6FF5711A9D2; };
 		624CBBBAADC0F2E4F66F1DBB = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
 			9CCD70432011961B094C8FCE,
+			DA0000000000000000000074,
+			DA0000000000000000000076,
 			DA0000000000000000000003,
 			DA0000000000000000000005,
 			DA0000000000000000000007,
@@ -289,6 +291,7 @@
 			C3E649AE6FBC41A1C5956252,
 			58DA840CC0A312D88F6FA6BF,
 			98E3434F859B0C281501C824,
+			DA0000000000000000000077,
 		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			A8FBCDEA5E707EC35BAF1DE6,
@@ -298,6 +301,10 @@
 			F61BE8AE8EDB3888F3137986,
 			DA000000000000000000006F,
 		); name = Views; path = Views; sourceTree = "<group>"; };
+		DA0000000000000000000077 = {isa = PBXGroup; children = (
+			DA0000000000000000000073,
+			DA0000000000000000000075,
+		); name = FlagshipUI; path = FlagshipUI; sourceTree = "<group>"; };
 		C6036759D6AA8FB498EF9EC9 = {isa = XCConfigurationList; buildConfigurations = (
 			47214D5C5C54BFCD442E61C8,
 			732524DA06571CF0EB4D85BA,
@@ -523,6 +530,10 @@
 		DA0000000000000000000070 = {isa = PBXBuildFile; fileRef = DA000000000000000000006F; };
 		DA0000000000000000000071 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainBootstrapTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000072 = {isa = PBXBuildFile; fileRef = DA0000000000000000000071; };
+		DA0000000000000000000073 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagshipApp.swift; sourceTree = "<group>"; };
+		DA0000000000000000000074 = {isa = PBXBuildFile; fileRef = DA0000000000000000000073; };
+		DA0000000000000000000075 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFlagshipCapabilities.swift; sourceTree = "<group>"; };
+		DA0000000000000000000076 = {isa = PBXBuildFile; fileRef = DA0000000000000000000075; };
 	};
 	rootObject = 5CD759D4193846E4910FD9BB;
 }
