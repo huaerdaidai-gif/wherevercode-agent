@@ -2169,10 +2169,11 @@ class HandServer:
                         f"Agent 执行失败（退出码 {returncode}）："
                         + output[-2000:])
             return
-        _finish_run("ok", "执行完成。")
         if self._was_control_stopped(task_id):
+            _finish_run("stopped", "已按控制指令停止。")
             self._error(conn, session_key, envelope, next_seq, ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
             return
+        _finish_run("ok", "执行完成。")
         self._send(conn, session_key, envelope, "cross_device_result", result, next_seq)
 
     def _artifact_path(self, envelope, client_id, attempt_id):
