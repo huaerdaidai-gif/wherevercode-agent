@@ -45,4 +45,5 @@
     <color name="home_danger">#FF7A7A</color>
     <color name="home_log_bg">#12162A</color>
     <color name="home_log_text">#C9D2F2</color>
+    <color name="home_star">#D17C58</color>
 </resources>

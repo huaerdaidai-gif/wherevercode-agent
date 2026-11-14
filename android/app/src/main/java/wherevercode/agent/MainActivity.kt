@@ -4608,7 +4608,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildWelcomeView(): View = UiKit.vertical(this).apply {
         gravity = android.view.Gravity.CENTER
         setPadding(dp(16), dp(80), dp(16), dp(80))
-        addView(UiKit.text(this@MainActivity, "✳", 56f, R.color.home_warning).apply {
+        addView(UiKit.text(this@MainActivity, "✳", 56f, R.color.home_star).apply {
             gravity = android.view.Gravity.CENTER
             setPadding(0, 0, 0, dp(20))
         })

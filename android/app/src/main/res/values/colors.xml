@@ -38,10 +38,10 @@
          不写死；一套 UI 加开关，不做 5 套 UI）。
          浅色档 = Claude 极简（暖白底、深字、紫渐变按钮）；深色档见
          values-night（原型图深色霓虹）。日志面板两档都用深色（v2-02）。 -->
-    <color name="home_bg">#FAF8F5</color>
+    <color name="home_bg">#FAF9F7</color>
     <color name="home_card">#FFFFFF</color>
     <color name="home_card_border">#E6E1D8</color>
-    <color name="home_text">#15181E</color>
+    <color name="home_text">#292824</color>
     <color name="home_text_secondary">#5A6270</color>
     <color name="home_link">#2E63E8</color>
     <color name="home_gradient_start">#7B5CFF</color>
@@ -51,4 +51,5 @@
     <color name="home_danger">#BE3535</color>
     <color name="home_log_bg">#202531</color>
     <color name="home_log_text">#E8ECF3</color>
+    <color name="home_star">#D17C58</color>
 </resources>
