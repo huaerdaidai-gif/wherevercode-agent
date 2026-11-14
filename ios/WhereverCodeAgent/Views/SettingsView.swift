@@ -78,6 +78,8 @@ struct ChannelPickerContentView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
+    private enum FocusField: Hashable { case address, token }
+    @FocusState private var focusedField: FocusField?
     @State private var baseURLText = ""
     @State private var channelIDText = ""
     @State private var tokenText = ""
@@ -110,6 +112,9 @@ struct SettingsView: View {
                 Section("平台连接") {
                     TextField("平台地址（https://…）", text: $baseURLText)
                         .accessibilityIdentifier("settings.address")
+                        .focused($focusedField, equals: .address)
+                        .submitLabel(.done)
+                        .onSubmit { focusedField = nil }
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Text("已预填平台公开地址，可改；填主机名或完整端点都可以。只接受 https；不信任自签证书，不关闭 ATS。")
@@ -140,6 +145,9 @@ struct SettingsView: View {
                     // this connection item, not an app gate.
                     SecureField("粘贴平台凭证（v5_ 开头）", text: $tokenText)
                         .accessibilityIdentifier("settings.tokenField")
+                        .focused($focusedField, equals: .token)
+                        .submitLabel(.done)
+                        .onSubmit { focusedField = nil }
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Text("App 的平台凭证：在平台服务器终端签发后填入（与安卓平台 Agent 表单同一栏）。只存本机 Keychain（仅本设备可读，不同步 iCloud），不会显示在界面其他地方，也不会写进日志。")
@@ -167,10 +175,6 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Button("保存地址与频道") {
-                        saveSettings()
-                    }
-                    .accessibilityIdentifier("settings.saveAddressChannel")
                 }
                 Section("平台令牌") {
                     Text(tokenSectionStatus)
@@ -231,6 +235,22 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") { saveSettings(); focusedField = nil }
+                        .accessibilityIdentifier("settings.saveAddressChannel")
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if focusedField == .token {
+                        Button("保存凭证") { saveToken(); focusedField = nil }
+                            .accessibilityIdentifier("settings.saveTokenKeyboard")
+                            .disabled(tokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Spacer()
+                    Button("收起键盘") { focusedField = nil }
+                        .accessibilityIdentifier("settings.dismissKeyboard")
+                }
+            }
             .onAppear {
                 baseURLText = appState.settings.platformBaseURLString
                 channelIDText = appState.settings.channelID

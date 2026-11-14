@@ -103,6 +103,7 @@ struct WhereverCodeAgentApp: App {
                                         withAnimation { isDrawerOpen = false }
                                     } label: {
                                         Label("会话", systemImage: "magnifyingglass")
+                                            .font(.system(size: 15)).foregroundStyle(AgentUI.ink)
                                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                                     }.accessibilityIdentifier("drawer_history")
                                     drawerItem("项目", icon: "folder", tab: .projects)

@@ -103,7 +103,14 @@ final class WhereverCodeAgentUITests: XCTestCase {
         XCTAssertTrue(tokenField.waitForExistence(timeout: 15))
         tokenField.tap()
         tokenField.typeText("uitest-dummy-token")
-        app.buttons["settings.saveToken"].tap()
+        let keyboardSave = app.buttons["settings.saveTokenKeyboard"]
+        if keyboardSave.waitForExistence(timeout: 3) {
+            keyboardSave.tap()
+        } else {
+            let saveToken = app.buttons["settings.saveToken"]
+            reveal(saveToken, in: app)
+            saveToken.tap()
+        }
 
         // Settings must report the connection failure with real text.
         let failedLabel = app.staticTexts.matching(
