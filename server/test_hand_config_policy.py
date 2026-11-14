@@ -30,7 +30,8 @@ class HandConfigPolicyTests(unittest.TestCase):
             with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as temp:
                 folder = str(Path(temp) / "discovered")
                 os.mkdir(folder)
-                hand = module.HandServer(str(Path(temp) / "state"), "test-device", "test")
+                hand = module.HandServer(str(Path(temp) / "state"), "test-device", "test",
+                                         config_policy="standalone")
                 self.register(module, hand, folder)
                 self.assertTrue(module.resolve_adapters(hand.state.dir, hand.device_id)["policy-test"]["discovered"])
                 self.assertIn("policy-test", [row["agent_id"] for row in hand.agents()])
