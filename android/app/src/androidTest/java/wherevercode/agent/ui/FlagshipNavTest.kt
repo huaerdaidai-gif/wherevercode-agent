@@ -94,6 +94,23 @@ class FlagshipNavTest {
         if (!reached) {
             // 首次启动可能有系统通知权限弹窗挡路，关掉后重试等待。
             (device.findObject(By.text("Don’t allow")) ?: device.findObject(By.text("Don't allow")))?.click()
+            // Trae 修复的选择性移植：首页标题存在于首次启动引导遮罩之下，
+            // 只等标题会假绿/假红——先点掉引导，并要求遮罩标记全部消失
+            // 才认定真正到达首页（原版修复针对旧文件形态，此处按现文件适配）。
+            val onboardingMarkers = listOf(
+                "开始使用 →", "稍后再看", "跳过，先体验基础功能", "跳过",
+                "选择你的使用方向", "解锁手机执行能力", "准备完成",
+            )
+            val dismissDeadline = System.currentTimeMillis() + 30_000
+            while (System.currentTimeMillis() < dismissDeadline) {
+                val start = device.findObject(By.text("开始使用 →"))
+                if (start != null) { start.click(); device.waitForIdle(); continue }
+                val skip = device.findObject(By.text("跳过，先体验基础功能"))
+                    ?: device.findObject(By.text("跳过"))
+                if (skip != null) { skip.click(); device.waitForIdle(); continue }
+                if (onboardingMarkers.none { device.hasObject(By.text(it)) }) break
+                Thread.sleep(500)
+            }
             assertTrue(
                 "deep link reaches existing MainActivity home",
                 device.wait(Until.hasObject(By.text("今天想做什么？")), 30_000),
