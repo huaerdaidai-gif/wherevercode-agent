@@ -64,11 +64,17 @@ class FlagshipNavTest {
         }
         // Prove an existing feature is executable through this Activity, with no historical READY gate.
         device.findObject(By.desc("打开抽屉")).click()
-        device.findObject(By.textContains("工作台")).click()
-        device.findObject(By.clazz("android.widget.EditText")).text = "tasks"
+        val workbench = device.wait(Until.findObject(By.textContains("工作台")), 15_000)
+            ?: error("Primary workbench entry did not appear")
+        workbench.click()
+        val search = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 15_000)
+            ?: error("Workbench search did not appear")
+        search.text = "tasks"
         assertTrue(device.wait(Until.hasObject(By.textContains("任务中心")), 10_000))
         device.findObject(By.textContains("任务中心")).click()
-        device.findObject(By.text("进入已有功能")).click()
+        val open = device.wait(Until.findObject(By.text("进入已有功能")), 15_000)
+            ?: error("Bound task action did not appear")
+        open.click()
         assertTrue(device.wait(Until.hasObject(By.res(context.packageName, "buttonCreateTask")), 15_000))
         assertTrue(device.takeScreenshot(File(output, "native-tasks.png")))
     }
