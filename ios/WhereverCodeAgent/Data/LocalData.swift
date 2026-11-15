@@ -1114,11 +1114,80 @@ public struct CustomProjectSource: ProjectSourceProvider {
     }
 }
 
+public struct ProjectSourceDescriptor: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let available: Bool
+    public let note: String
+
+    public init(id: String, title: String, available: Bool, note: String) {
+        self.id = id
+        self.title = title
+        self.available = available
+        self.note = note
+    }
+}
+
 @MainActor
 public final class ProjectSourceRegistry {
     public static let shared = ProjectSourceRegistry()
     private var builtIns: [ProjectSourceProvider] = []
     private let customKey = "chat.customProjectSources"
+
+    /// 双端共用项目来源类型注册表（与 Android ProjectSourceRegistry 6 项 ID 严格对齐，支持动态扩展）
+    public private(set) var sharedSources: [ProjectSourceDescriptor] = [
+        ProjectSourceDescriptor(
+            id: "local_folder",
+            title: "本机文件夹",
+            available: true,
+            note: "本机或同步/挂载到本机的文件夹都是文件夹"
+        ),
+        ProjectSourceDescriptor(
+            id: "device_folder",
+            title: "远程设备上的文件夹",
+            available: true,
+            note: "已配对设备上经 Hand 授权的文件夹"
+        ),
+        ProjectSourceDescriptor(
+            id: "git_host",
+            title: "git 仓库地址",
+            available: true,
+            note: "登记地址、经该站 API 读；厂商可扩展，不写死 GitHub/GitLab/Gitee 名单"
+        ),
+        ProjectSourceDescriptor(
+            id: "drive_sync",
+            title: "网盘同步文件夹",
+            available: true,
+            note: "同步到本机/设备后按文件夹处理，不单列入口"
+        ),
+        ProjectSourceDescriptor(
+            id: "nas_mount",
+            title: "NAS 挂载文件夹",
+            available: true,
+            note: "挂在某台设备上按设备文件夹处理，不单列入口"
+        ),
+        ProjectSourceDescriptor(
+            id: "custom",
+            title: "自定义来源",
+            available: false,
+            note: "自定义来源待开发（注册表预留扩展位，新增来源只加注册项、不改流程）"
+        )
+    ]
+
+    public func sources() -> [ProjectSourceDescriptor] {
+        sharedSources
+    }
+
+    @discardableResult
+    public func registerSource(_ source: ProjectSourceDescriptor) -> Bool {
+        if sharedSources.contains(where: { $0.id == source.id }) { return false }
+        sharedSources.append(source)
+        return true
+    }
+
+    public func findSource(_ id: String) -> ProjectSourceDescriptor? {
+        sharedSources.first { $0.id == id }
+    }
 
     public init() {
         builtIns = [
@@ -1161,7 +1230,14 @@ public final class ProjectSourceRegistry {
     }
 
     public func provider(id: String, data: LocalData) -> ProjectSourceProvider? {
-        all(data: data).first { $0.id == id }
+        let mappedId: String
+        switch id {
+        case "local_folder", "drive_sync": mappedId = "local"
+        case "device_folder", "nas_mount": mappedId = "lan"
+        case "git_host": mappedId = "github"
+        default: mappedId = id
+        }
+        return all(data: data).first { $0.id == mappedId }
     }
 }
 

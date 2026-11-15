@@ -445,3 +445,20 @@ final class P0DeviceAcceptanceTests: XCTestCase {
         XCTAssertNil(reg.get(BrainBootstrap.siwcBrainId))
     }
 }
+
+final class EntryRegistryTests: XCTestCase {
+    func testEntryRegistryValidatesWithNoErrors() {
+        XCTAssertEqual(EntryRegistry.validate(), [])
+        XCTAssertEqual(EntryRegistry.ENTRIES.count, 83)
+        let uniqueIds = Set(EntryRegistry.ENTRIES.map { $0.id })
+        XCTAssertEqual(uniqueIds.count, 83)
+    }
+
+    func testProjectSourceRegistryMatchesAndroid() {
+        let sources = ProjectSourceRegistry.shared.sources()
+        XCTAssertEqual(sources.count, 6)
+        XCTAssertEqual(sources.map { $0.id }, ["local_folder", "device_folder", "git_host", "drive_sync", "nas_mount", "custom"])
+        XCTAssertTrue(sources[0].available)
+        XCTAssertFalse(sources[5].available)
+    }
+}

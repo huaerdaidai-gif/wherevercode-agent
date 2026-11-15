@@ -159,6 +159,7 @@
 			DA000000000000000000000D,
 			DA000000000000000000000F,
 			DA0000000000000000000011,
+				DA000000000000000000009B,
 			8AE3EE43D06F281BFB338F66,
 			D2F8A62EC32897E7406C54CD,
 			E8F9160690D9CF2B9C55B44F,
@@ -414,6 +415,8 @@
 		DA000000000000000000000F = {isa = PBXBuildFile; fileRef = DA000000000000000000000E; };
 		DA0000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalData.swift; sourceTree = "<group>"; };
 		DA0000000000000000000011 = {isa = PBXBuildFile; fileRef = DA0000000000000000000010; };
+		DA000000000000000000009A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryRegistry.swift; sourceTree = "<group>"; };
+		DA000000000000000000009B = {isa = PBXBuildFile; fileRef = DA000000000000000000009A; };
 		DA0000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataLayerTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000013 = {isa = PBXBuildFile; fileRef = DA0000000000000000000012; };
 		DA0000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
@@ -427,6 +430,7 @@
 			DA000000000000000000000C,
 			DA000000000000000000000E,
 			DA0000000000000000000010,
+				DA000000000000000000009A,
 		); name = Data; path = Data; sourceTree = "<group>"; };
 		DA000000000000000000CACE = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelListCache.swift; sourceTree = "<group>"; };
 		DA000000000000000000CACF = {isa = PBXBuildFile; fileRef = DA000000000000000000CACE; };

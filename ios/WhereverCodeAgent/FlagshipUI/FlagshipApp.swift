@@ -215,6 +215,7 @@ public struct FlagshipDrawerView: View {
     public var onSelectConversation: (Conversation) -> Void
     public var onOpenSettings: () -> Void
     public var onNewChat: () -> Void
+    public var onOpenFeatureCenter: () -> Void
 
     @State private var recentConversations: [Conversation] = []
     @State private var searchChatQuery = ""
@@ -224,13 +225,15 @@ public struct FlagshipDrawerView: View {
         selectedMenu: Binding<FlagshipDrawerMenu>,
         onSelectConversation: @escaping (Conversation) -> Void,
         onOpenSettings: @escaping () -> Void,
-        onNewChat: @escaping () -> Void
+        onNewChat: @escaping () -> Void,
+        onOpenFeatureCenter: @escaping () -> Void = {}
     ) {
         self._isOpen = isOpen
         self._selectedMenu = selectedMenu
         self.onSelectConversation = onSelectConversation
         self.onOpenSettings = onOpenSettings
         self.onNewChat = onNewChat
+        self.onOpenFeatureCenter = onOpenFeatureCenter
     }
 
     private var filteredConversations: [Conversation] {
@@ -438,7 +441,34 @@ public struct FlagshipDrawerView: View {
                 .accessibilityIdentifier("drawer.route.chat")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+            .background(Color(red: 0.94, green: 0.94, blue: 0.92))
+
+            // 抽屉最底部：全部功能（nav_feature_center）集中呈现 83 条全功能目录
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { isOpen = false }
+                onOpenFeatureCenter()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("全部功能（83 项全表）")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .accessibilityIdentifier("drawer.featureCenter")
+            .accessibilityIdentifier("drawer.route.feature_center")
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
             .background(Color(red: 0.94, green: 0.94, blue: 0.92))
         }
         .frame(maxWidth: 320, maxHeight: .infinity)
@@ -462,6 +492,7 @@ public struct FlagshipShellView: View {
     @State private var selectedMenu: FlagshipDrawerMenu = .chat
     @State private var activeRoute: FlagshipRoute? = nil
     @State private var isSettingsOpen = false
+    @State private var isFeatureCenterOpen = false
     @AppStorage("app.darkMode") private var darkMode = false
 
     public init(appState: AppState, chatModel: LocalChatModel) {
@@ -563,6 +594,21 @@ public struct FlagshipShellView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $isFeatureCenterOpen) {
+                NavigationStack {
+                    FeatureCenterSheet(
+                        onNavigateRoute: { routeId in
+                            isFeatureCenterOpen = false
+                            navigateTo(routeId)
+                        },
+                        onDismiss: {
+                            isFeatureCenterOpen = false
+                        }
+                    )
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
             .preferredColorScheme(darkMode ? .dark : nil)
             .onAppear {
                 appState.onSelectRoute = { nextId in
@@ -593,6 +639,9 @@ public struct FlagshipShellView: View {
                         chatModel.newConversation()
                         selectedMenu = .chat
                         activeRoute = nil
+                    },
+                    onOpenFeatureCenter: {
+                        isFeatureCenterOpen = true
                     }
                 )
                 .transition(.move(edge: .leading))
@@ -620,8 +669,125 @@ public struct FlagshipShellView: View {
             isSettingsOpen = false
         } else if resolved == "settings" {
             isSettingsOpen = true
+        } else if resolved == "feature_center" {
+            isFeatureCenterOpen = true
         } else if let target = FlagshipRoutes.route(for: resolved) {
             activeRoute = target
+        }
+    }
+}
+
+/// 功能中心抽屉：集中呈现双端对齐的 83 项入口注册表全表
+public struct FeatureCenterSheet: View {
+    public var onNavigateRoute: (String) -> Void
+    public var onDismiss: () -> Void
+    @State private var selectedGroup: EntryRegistry.Group? = nil
+    @State private var toastMessage: String? = nil
+
+    public init(onNavigateRoute: @escaping (String) -> Void, onDismiss: @escaping () -> Void) {
+        self.onNavigateRoute = onNavigateRoute
+        self.onDismiss = onDismiss
+    }
+
+    private var filteredEntries: [EntryRegistry.Entry] {
+        if let g = selectedGroup {
+            return EntryRegistry.byGroup(g)
+        }
+        return EntryRegistry.ENTRIES
+    }
+
+    public var body: some View {
+        List {
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Button {
+                            selectedGroup = nil
+                        } label: {
+                            Text("全部 (\(EntryRegistry.ENTRIES.count))")
+                                .font(.caption.weight(selectedGroup == nil ? .bold : .regular))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(selectedGroup == nil ? Color.accentColor.opacity(0.15) : Color.clear, in: Capsule())
+                        }
+                        ForEach(EntryRegistry.Group.allCases, id: \.self) { g in
+                            let count = EntryRegistry.byGroup(g).count
+                            Button {
+                                selectedGroup = g
+                            } label: {
+                                Text("\(g.rawValue) (\(count))")
+                                    .font(.caption.weight(selectedGroup == g ? .bold : .regular))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(selectedGroup == g ? Color.accentColor.opacity(0.15) : Color.clear, in: Capsule())
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("分组筛选")
+            } footer: {
+                if let msg = toastMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("双端对齐入口注册表：已实现 \(EntryRegistry.ENTRIES.filter { $0.status == .implemented }.count) 项，待开发 \(EntryRegistry.ENTRIES.filter { $0.status == .todo }.count) 项。点按已实现项直接跳转，待开发项展示诚实说明。")
+                }
+            }
+
+            Section("注册表入口列表 (\(filteredEntries.count))") {
+                ForEach(filteredEntries) { entry in
+                    Button {
+                        if entry.status == .implemented {
+                            onDismiss()
+                            onNavigateRoute(entry.routeId)
+                        } else {
+                            toastMessage = entry.todoMessage ?? "【待开发】该功能尚未开发"
+                        }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(entry.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(entry.id)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                HStack(spacing: 6) {
+                                    Text(entry.group.rawValue)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    if let p = entry.parentId {
+                                        Text("父级: \(p)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            Spacer()
+                            Text(entry.status.rawValue)
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    entry.status == .implemented ? Color.green.opacity(0.15) : Color.orange.opacity(0.15),
+                                    in: Capsule()
+                                )
+                                .foregroundStyle(entry.status == .implemented ? .green : .orange)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("全部功能 (83 项)")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("关闭") { onDismiss() }
+            }
         }
     }
 }
