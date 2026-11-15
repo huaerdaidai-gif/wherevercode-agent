@@ -47,16 +47,21 @@ public final class InteractiveApprovalStore: ObservableObject, @unchecked Sendab
 
     @Published public private(set) var items: [PendingItem] = []
     @Published public private(set) var auditTrail: [String] = []
+    private let lock = NSLock()
 
     public init() {}
 
     public func enqueue(_ action: BrainAction) {
+        lock.lock()
+        defer { lock.unlock() }
         let item = PendingItem(action: action, createdAtEpochSeconds: Int64(Date().timeIntervalSince1970), decision: nil)
         items.insert(item, at: 0)
         auditTrail.insert("[\(item.createdAtEpochSeconds)] 待审批动作：\(action.tool) (\(action.idempotencyKey))", at: 0)
     }
 
     public func decide(actionId: String, approve: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
         guard let idx = items.firstIndex(where: { $0.id == actionId }) else { return }
         items[idx].decision = approve
         let label = approve ? "已批准" : "已拒绝"

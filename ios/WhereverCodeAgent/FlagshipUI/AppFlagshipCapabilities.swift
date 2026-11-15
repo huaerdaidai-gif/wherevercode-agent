@@ -74,7 +74,7 @@ public struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
             )
         }
         if Self.platformConnectionDependentRoutes.contains(routeId),
-           let appState, !MainActor.assumeIsolated({ appState.isConfigured }) {
+           let appState, !Self.resolveIsConfigured(appState) {
             return CapabilityStatus(
                 state: .disconnected,
                 evidence: "ADAPTER_PENDING / DISCONNECTED：尚未配置 V5 平台 HTTPS 地址或 Keychain Token；请在「设置 -> 平台连接」中配置。"
@@ -100,5 +100,18 @@ public struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
 
     public func openExistingFeature(_ routeId: String) -> Bool {
         Self.implementedRoutes.contains(routeId)
+    }
+
+    private static func resolveIsConfigured(_ appState: AppState) -> Bool {
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated { appState.isConfigured }
+        }
+        let persistedSettings = AppSettings.load()
+        guard persistedSettings.mcpEndpoint != nil,
+              let token = try? appState.keychain.loadToken(),
+              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        return true
     }
 }

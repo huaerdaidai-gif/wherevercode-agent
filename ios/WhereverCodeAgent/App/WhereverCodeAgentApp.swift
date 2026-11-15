@@ -44,7 +44,7 @@ public final class AppState: ObservableObject {
     @Published public var channelListError: String? = nil
     @Published public var isLoadingChannels: Bool = false
 
-    public let keychain: KeychainStore
+    public nonisolated let keychain: KeychainStore
     public let brainConfigStore: BrainConfigStore
     public let brainKeyStore: BrainKeyStore
     @Published public private(set) var brainRegistry: BrainAdapterRegistry
