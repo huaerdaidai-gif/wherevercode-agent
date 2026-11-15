@@ -19,8 +19,8 @@ package wherevercode.agent.core.task
  * 带 state 的写仍交给底层 store（转移表本来就会拒绝）。
  *
  * 实现为 [TaskStore] 装饰器，不改 [RoomTaskStore] 本体（那是单兵/任务
- * 核心逻辑）。检查与写入之间的竞态由底层乐观锁兜底：并发的取消会让
- * version 变化，底层写抛 StaleTaskUpdate。
+ * 核心逻辑）。检查与写入使用底层同一任务锁；外层 claim/control 事务也必须
+ * 透传该锁。版本检查继续由底层 store 执行。
  */
 class TerminalTaskWriteRejected(val taskId: String, val state: String, val fields: Set<String>) :
     IllegalStateException("任务 $taskId 已是终态 $state，拒绝写入 ${fields.sorted().joinToString(",")}")
@@ -56,6 +56,8 @@ class TerminalWriteGuardTaskStore(
     private val delegate: TaskStore,
 ) : TaskStore, TaskControlCounterStore {
 
+    override fun <T> withTaskLock(block: () -> T): T = delegate.withTaskLock(block)
+
     override fun createTask(record: TaskRecord): TaskRecord = delegate.createTask(record)
 
     override fun listTasks(projectId: String?, sessionId: String?): List<TaskRecord> =
@@ -69,7 +71,7 @@ class TerminalWriteGuardTaskStore(
         expectedVersion: Long,
         expectedGoalVersion: Long,
         expectedAuthEpoch: Long,
-    ): TaskRecord? {
+    ): TaskRecord? = delegate.withTaskLock {
         val current = delegate.getTask(taskId)
         if (current != null) {
             val rejected = TerminalWritePolicy.rejectedFields(current, changes)
@@ -77,7 +79,7 @@ class TerminalWriteGuardTaskStore(
                 throw TerminalTaskWriteRejected(taskId, current.state, rejected)
             }
         }
-        return delegate.updateTask(taskId, changes, expectedVersion, expectedGoalVersion, expectedAuthEpoch)
+        delegate.updateTask(taskId, changes, expectedVersion, expectedGoalVersion, expectedAuthEpoch)
     }
 
     override fun expireLeases(nowEpochSeconds: Long): List<String> = delegate.expireLeases(nowEpochSeconds)

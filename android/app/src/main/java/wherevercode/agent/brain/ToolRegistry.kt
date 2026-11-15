@@ -500,8 +500,12 @@ class ToolRegistry(
         return WorkspaceState.OK
     }
 
+    /** Compatibility boundary: existing trailing lambdas still mean stopped, never paused. */
+    suspend fun execute(action: Action, context: ToolContext, stopped: () -> Boolean = { false }): ToolOutcome =
+        executeControlled(action, context, stopped = stopped)
+
     /** Full validation pipeline + execution. Denied actions are never executed. */
-    suspend fun execute(
+    suspend fun executeControlled(
         action: Action,
         context: ToolContext,
         /**
@@ -510,6 +514,7 @@ class ToolRegistry(
          * 由引擎在每次执行前传入控制态快照。
          */
         stopped: () -> Boolean = { false },
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
         if (stopped()) {
             val outcome = ToolOutcome(
@@ -611,6 +616,7 @@ class ToolRegistry(
         }
         // Approval may suspend; a stop during approval must be checked again before any backend.
         if (stopped()) return denied(effectiveAction, context, "turn_stopped", "已停止，未执行")
+        if (paused()) return denied(effectiveAction, context, "turn_paused", "已暂停，未启动新执行步骤")
         // 4. Execute（扩展工具走来源执行，同样进审计）。
         val outcome = try {
             if (isExtension) {

@@ -1031,9 +1031,10 @@ class BrainEngine(
                 )
                 // P1 §5.4：注册表层第二道停止门（纵深，不依赖引擎）。
                 val outcome = try {
-                    tools.execute(
+                    tools.executeControlled(
                         action,
                         toolContext,
+                        paused = { controlState() == TurnControlState.PAUSED },
                         stopped = {
                             val s = controlState()
                             s == TurnControlState.STOPPED || s == TurnControlState.GOAL_CHANGED
