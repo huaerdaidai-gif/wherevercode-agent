@@ -36,9 +36,10 @@ struct AppFlagshipCapabilities: FlagshipCapabilityProvider {
     /// route → 现有页签（仅限已有真实页面的 route）。
     static let routeToTab: [String: AppTab] = [
         "chat": .chat, "conversation": .chat, "history": .chat,
-        "channels": .chat, "channel": .chat,
+        "channels": .channels, "channel": .channels,
         "tasks": .tasks, "taskdetail": .tasks,
         "devices": .devices,
         "settings": .settings, "models": .settings, "connectmodel": .settings,
     ]
 }
+
