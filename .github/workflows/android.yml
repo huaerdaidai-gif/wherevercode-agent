@@ -63,3 +63,41 @@ jobs:
           path: android/app/build/outputs/apk/compat/*.apk
           if-no-files-found: warn
           retention-days: 14
+
+  v5-runtime:
+    if: github.ref == 'refs/heads/feature/v5-android-cloud'
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.5"
+      - name: Build emulator verification APKs
+        run: gradle -p android :app:assembleDebug :app:assembleDebugAndroidTest -Pv5RuntimeVerification=true --stacktrace
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Android UI on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: bash android/tools/v5-runtime-smoke.sh
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-v5-runtime-${{ github.sha }}
+          path: v5-runtime-evidence/
+          if-no-files-found: warn
+          retention-days: 14

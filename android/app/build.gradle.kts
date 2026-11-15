@@ -56,6 +56,7 @@ android {
         // Cost: no Google Play (Play requires targetSdk 35 since 2025-08-31).
         // This spike ships as a sideloaded APK, per the task.
         targetSdk = 28
+        testInstrumentationRunner = "wherevercode.agent.V5RuntimeInstrumentation"
         versionCode = 5
         versionName = "0.2.0-ui4"
 
@@ -72,6 +73,10 @@ android {
         ndk {
             // K70 is arm64; one ABI keeps the APK small and the spike focused.
             abiFilters += "arm64-v8a"
+            // Opt-in ABI for a real x86_64 CI emulator; normal APKs stay arm64.
+            if (providers.gradleProperty("v5RuntimeVerification").orNull == "true") {
+                abiFilters += "x86_64"
+            }
         }
     }
 
