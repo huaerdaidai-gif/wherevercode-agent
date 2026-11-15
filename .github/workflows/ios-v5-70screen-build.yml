@@ -7,6 +7,7 @@ on:
       - feat/v5-ios-1.5-build6-import-20261115
       - feat/v5-ios-1.5-build6-assembly-20261115
       - feat/v5-ios-ui-navigation-overhaul-20261115
+      - fix/v5-ios-p0-device-acceptance-20261115
   workflow_dispatch:
 
 jobs:
