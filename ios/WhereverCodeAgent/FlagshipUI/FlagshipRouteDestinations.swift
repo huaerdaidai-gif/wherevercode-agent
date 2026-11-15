@@ -1459,160 +1459,177 @@ public struct ControlHomeView: View {
 
     public var body: some View {
         let tasks = (try? LocalData.shared.tasks.listTasks()) ?? []
-        let workingTasks = tasks.filter { $0.state == "working" }
-        let queuedTasks = tasks.filter { $0.state == "queued" || $0.state == "assigned" }
-        let attentionTasks = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" }
+        let workingCount = tasks.filter { $0.state == "working" }.count
+        let queuedCount = tasks.filter { $0.state == "queued" || $0.state == "assigned" }.count
+        let attentionCount = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" }.count
         let agentsCount = ((try? LocalData.shared.agents.listAgents()) ?? []).count
-        let events = LocalData.shared.eventLog.listEvents()
         let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
 
         VStack(spacing: 0) {
-            // 顶部导航栏
-            HStack(spacing: 12) {
-                Button(action: onOpenDrawer) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                        .frame(width: 40, height: 40)
-                        .background(Color.white, in: Circle())
-                        .overlay(Circle().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
-                }
-                .accessibilityIdentifier("navigation.menu")
-                .accessibilityLabel("打开导航抽屉")
-
-                Text("控制")
-                    .font(.system(size: 20, weight: .semibold, design: .serif))
-                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 8, height: 8)
-                    Text("平台就绪")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white, in: Capsule())
-                .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
+            topNavBar
 
             ScrollView {
                 VStack(spacing: 16) {
-                    // 平台状态顶通卡片
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("平台连接与运行状态")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(appState.settings.platformAddress.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformAddress)
-                                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                            }
-                            Spacer()
-                            Text("本地优先")
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.green.opacity(0.12), in: Capsule())
-                                .foregroundStyle(.green)
-                        }
-
-                        Divider()
-                            .padding(.vertical, 2)
-
-                        HStack(spacing: 20) {
-                            statusStatItem("活跃 Agent", value: "\(max(1, agentsCount))")
-                            statusStatItem("执行中任务", value: "\(workingTasks.count)")
-                            statusStatItem("排队/待决", value: "\(queuedTasks.count + attentionTasks.count)")
-                            statusStatItem("待决审批", value: "\(pendingApprovals)")
-                        }
-                    }
-                    .padding(16)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
+                    statusOverviewCard(
+                        workingCount: workingCount,
+                        queuedCount: queuedCount,
+                        attentionCount: attentionCount,
+                        pendingApprovals: pendingApprovals,
+                        agentsCount: agentsCount
                     )
 
-                    // 八大核心管理模块
-                    VStack(spacing: 12) {
-                        controlCard(
-                            title: "设备与 Hand 节点管理",
-                            subtitle: "本机 iPhone 本地沙盒 · 远端 Hand 节点互联互通",
-                            icon: "iphone.gen3",
-                            badge: "1 在线",
-                            routeId: "devices"
-                        )
-
-                        controlCard(
-                            title: "Agent 协作与编排",
-                            subtitle: "BrainEngine 智能调度 · 多 Agent 对比与协作编排",
-                            icon: "person.2.badge.gearshape",
-                            badge: "\(max(1, agentsCount)) 实例",
-                            routeId: "agents"
-                        )
-
-                        controlCard(
-                            title: "模型提供方与智能路由",
-                            subtitle: "Claude, DeepSeek, OpenAI, Grok, Cloudflare 统一调度",
-                            icon: "cpu",
-                            badge: appState.brainSettingsModel.currentBrainId ?? "就绪",
-                            routeId: "models"
-                        )
-
-                        controlCard(
-                            title: "连接器与 MCP 工具池",
-                            subtitle: "23 个生产 MCP 工具 · 终端写入白名单与执行护栏",
-                            icon: "cable.connector.horizontal",
-                            badge: "23 工具可用",
-                            routeId: "mcp"
-                        )
-
-                        controlCard(
-                            title: "调度与任务队列",
-                            subtitle: "10 状态机合法流转 · 独立 isPaused 暂停/恢复",
-                            icon: "list.bullet.rectangle.portrait",
-                            badge: "\(tasks.count) 任务记录",
-                            routeId: "queue"
-                        )
-
-                        controlCard(
-                            title: "实时事件与消息中心",
-                            subtitle: "进程实时事件日志 · 异常捕获与调度回执",
-                            icon: "bell.badge",
-                            badge: "\(events.count) 事件",
-                            routeId: "activity"
-                        )
-
-                        controlCard(
-                            title: "运行监控与用量",
-                            subtitle: "Token 消耗、响应延迟、SQLite 存储与性能监控",
-                            icon: "chart.xyaxis.line",
-                            badge: "健康度 100%",
-                            routeId: "dashboard"
-                        )
-
-                        controlCard(
-                            title: "安全审计与合规权限",
-                            subtitle: "Keychain 隔离 · ATS 强制 HTTPS · 敏感凭据自动脱敏",
-                            icon: "shield.lefthalf.filled",
-                            badge: "0 违规",
-                            routeId: "audit"
-                        )
-                    }
+                    controlModulesList
                 }
                 .padding(16)
             }
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
+    }
+
+    @ViewBuilder
+    private var topNavBar: some View {
+        HStack(spacing: 12) {
+            Button(action: onOpenDrawer) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .frame(width: 40, height: 40)
+                    .background(Color.white, in: Circle())
+                    .overlay(Circle().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+            }
+            .accessibilityIdentifier("navigation.menu")
+            .accessibilityLabel("打开导航抽屉")
+
+            Text("控制")
+                .font(.system(size: 20, weight: .semibold, design: .serif))
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 8, height: 8)
+                Text("平台就绪")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.white, in: Capsule())
+            .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private func statusOverviewCard(workingCount: Int, queuedCount: Int, attentionCount: Int, pendingApprovals: Int, agentsCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("平台连接与运行状态")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(appState.settings.platformAddress.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformAddress)
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                }
+                Spacer()
+                Text("本地优先")
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.12), in: Capsule())
+                    .foregroundStyle(.green)
+            }
+
+            Divider()
+                .padding(.vertical, 2)
+
+            HStack(spacing: 20) {
+                statusStatItem("活跃 Agent", value: "\(max(1, agentsCount))")
+                statusStatItem("执行中任务", value: "\(workingCount)")
+                statusStatItem("排队/待决", value: "\(queuedCount + attentionCount)")
+                statusStatItem("待决审批", value: "\(pendingApprovals)")
+            }
+        }
+        .padding(16)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var controlModulesList: some View {
+        VStack(spacing: 12) {
+            controlCard(
+                title: "设备与 Hand 节点管理",
+                subtitle: "本机 iPhone 本地沙盒 · 远端 Hand 节点互联互通",
+                icon: "iphone.gen3",
+                badge: "1 在线",
+                routeId: "devices"
+            )
+
+            controlCard(
+                title: "Agent 协作与编排",
+                subtitle: "BrainEngine 智能调度 · 多 Agent 对比与协作编排",
+                icon: "person.2.badge.gearshape",
+                badge: "活跃",
+                routeId: "agents"
+            )
+
+            controlCard(
+                title: "模型提供方与智能路由",
+                subtitle: "Claude, DeepSeek, OpenAI, Grok, Cloudflare 统一调度",
+                icon: "cpu",
+                badge: appState.brainSettingsModel.currentBrainId ?? "就绪",
+                routeId: "models"
+            )
+
+            controlCard(
+                title: "连接器与 MCP 工具池",
+                subtitle: "23 个生产 MCP 工具 · 终端写入白名单与执行护栏",
+                icon: "cable.connector.horizontal",
+                badge: "23 工具",
+                routeId: "mcp"
+            )
+
+            controlCard(
+                title: "调度与任务队列",
+                subtitle: "10 状态机合法流转 · 独立 isPaused 暂停/恢复",
+                icon: "list.bullet.rectangle.portrait",
+                badge: "队列",
+                routeId: "queue"
+            )
+
+            controlCard(
+                title: "实时事件与消息中心",
+                subtitle: "进程实时事件日志 · 异常捕获与调度回执",
+                icon: "bell.badge",
+                badge: "事件流",
+                routeId: "activity"
+            )
+
+            controlCard(
+                title: "运行监控与用量",
+                subtitle: "Token 消耗、响应延迟、SQLite 存储与性能监控",
+                icon: "chart.xyaxis.line",
+                badge: "健康",
+                routeId: "dashboard"
+            )
+
+            controlCard(
+                title: "安全审计与合规权限",
+                subtitle: "Keychain 隔离 · ATS 强制 HTTPS · 敏感凭据自动脱敏",
+                icon: "shield.lefthalf.filled",
+                badge: "合规",
+                routeId: "audit"
+            )
+        }
     }
 
     @ViewBuilder

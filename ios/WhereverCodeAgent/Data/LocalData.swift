@@ -401,10 +401,12 @@ public final class LocalChatModel: ObservableObject {
             if isTaskIntent {
                 let taskTitle = String(text.prefix(32))
                 if let task = try? data.tasks.createTask(
-                    title: taskTitle,
-                    description: text,
-                    priority: 0,
-                    brainId: selectedBrain
+                    LocalTask(
+                        title: taskTitle,
+                        description: text,
+                        priority: 0,
+                        brainId: selectedBrain
+                    )
                 ) {
                     activeTaskId = task.taskId
                     _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "自然语言发起 Agent 任务")

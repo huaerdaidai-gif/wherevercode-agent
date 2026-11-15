@@ -347,6 +347,32 @@ public final class LocalTaskStore {
         }
     }
 
+    /// 切换任务的独立 isPaused 暂停标记，并记录审计事件
+    @discardableResult
+    public func setPaused(taskId: String, isPaused: Bool) throws -> LocalTask {
+        try db.transaction {
+            guard var task = try getTask(taskId: taskId) else {
+                throw LocalTaskStoreError.unknownTask(taskId)
+            }
+            let timestamp = now()
+            task.isPaused = isPaused
+            task.updatedAt = timestamp
+            try db.execute(
+                "UPDATE tasks SET isPaused = ?, updatedAt = ?, version = version + 1 WHERE taskId = ?",
+                [.int(isPaused ? 1 : 0), .int(timestamp), .text(taskId)]
+            )
+            try appendEventLocked(TaskEvent(
+                taskId: taskId,
+                kind: isPaused ? "TASK_PAUSED" : "TASK_RESUMED",
+                fromState: task.state,
+                toState: task.state,
+                note: isPaused ? "isPaused = true" : "isPaused = false",
+                createdAtEpochSeconds: timestamp
+            ))
+            return task
+        }
+    }
+
     public func listEvents(taskId: String) throws -> [TaskEvent] {
         try db.query(
             """
