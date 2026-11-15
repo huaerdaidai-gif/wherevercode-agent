@@ -276,7 +276,7 @@ object EntryRegistry {
             "文", null, "nav_channels", "频道文件待开发（附件上传、项目文件、网盘引用、预览和下载暂不可用；当前没有可验证的频道文件记录）", null),
         Entry("feature_direct_message", "私聊服务", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
-            "私", null, "nav_channels", "私聊服务待开发（服务端尚未接入；规则：用户与用户、用户与 Agent 可在授权下私聊，Agent 与 Agent 不允许私聊绕过频道及任务审计）", null),
+            "私", null, "nav_channels", "私聊服务待开发（用户与 Agent 的一对一对话入口已有；用户间私聊与私聊服务尚未接入；规则：Agent 与 Agent 不允许私聊绕过频道及任务审计）", null),
         // ── 父级：Agent 与团队 ──
         Entry("feature_team_space", "团队空间", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
@@ -331,7 +331,7 @@ object EntryRegistry {
             "运", null, "nav_mcp_plugins", "Harness 运行时待开发（尚未开发）", "原型页 69。"),
         Entry("feature_extension_manifest", "扩展 Manifest 导入", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
-            "单", null, "nav_mcp_plugins", "扩展 Manifest 待开发（声明导入已可用：可导入版本化清单；扩展执行器未接通，不算已完成）", null),
+            "单", null, "nav_mcp_plugins", "扩展 Manifest 待开发（清单导入与扩展执行器均未接通；现有的 MCP 服务器配置导入是 mcpServers JSON，属 MCP/插件，不是 Manifest 导入）", null),
         // ── 父级：模型与技能 ──
         Entry("feature_skills_automation", "技能与自动化", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",

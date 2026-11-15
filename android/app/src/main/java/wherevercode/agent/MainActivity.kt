@@ -4626,8 +4626,11 @@ class MainActivity : AppCompatActivity() {
         // （唯一事实来源）；点按把意图填进输入框，等用户补齐细节再
         // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
         // 连接设备/Agent 团队/任务中心）由抽屉承接（R2）。
+        // 2026-11-15 F1 修复：渲染全部 4 条建议，不得截断——此前 take(2)
+        // 只渲染前两条，后两条（组织多 Agent 团队/自动化任务）注册为
+        // 已实现却无任何到达路径（双端主清单 v1.0 第五节门禁）。
         if (homeScreenController.suggestionsVisible()) {
-            EntryRegistry.homeSuggestions().take(2).chunked(2).forEach { rowSuggestions ->
+            EntryRegistry.homeSuggestions().chunked(2).forEach { rowSuggestions ->
                 val row = UiKit.horizontal(this).apply {
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
@@ -4696,7 +4699,9 @@ class MainActivity : AppCompatActivity() {
     /**
      * V5 C2-3-R1d：按入口注册表打开入口（首页与抽屉的唯一事实来源）。
      * 已实现 → 按目标打开；待开发 → 只给提示，绝不伪装已实现。
-     * SCREEN 类入口由父入口带参数打开（任务详情带任务 id），不走这里。
+     * SCREEN 类入口在父入口内带参数打开（任务详情带任务 id）；从
+     * 「全部功能」等无上下文处点开时，落到能力所在的父级页面真跳转
+     * （2026-11-15 F3 修复），不得误报待开发。
      * ACTION 类入口是应用内动作（如 nav_theme → cycleTheme()）。
      */
     private fun openRegistryEntry(id: String) {
@@ -4714,6 +4719,15 @@ class MainActivity : AppCompatActivity() {
         when (entry.targetKind) {
             EntryRegistry.TargetKind.DRAWER -> showEntry(entry.target)
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
+            EntryRegistry.TargetKind.SCREEN -> when (entry.target) {
+                // 任务详情浮层须带具体任务 id 才能打开；功能中心无上下文，
+                // 落到任务列表页，详情从列表点具体任务进入（父级页面）。
+                "task_detail" -> showEntry(DrawerController.ID_TASKS)
+                // 项目文件与代码就在项目页内（文件树 + 代码查看/编辑），
+                // 落到项目页即达能力所在页。
+                "project_files" -> showEntry(DrawerController.ID_PROJECTS)
+                else -> toast("${entry.title}待开发")
+            }
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
                 "open_feature_center" -> showFeatureCenterDialog()

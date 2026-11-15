@@ -68,7 +68,8 @@ class MainActivitySmokeTest {
             assertEquals("secondary screen $index starts hidden", View.GONE, container.getChildAt(index).visibility)
         }
 
-        // V5-UI：首屏保持轻量问候 + 两个建议 pill（点按填输入框）。用户名不写死：无登录用户名时
+        // V5-UI：首屏保持轻量问候 + 四个建议 pill（点按填输入框；2026-11-15
+        // F1 修复后全部渲染，不再截断为两个）。用户名不写死：无登录用户名时
         // 只显示“你好”。
         val texts = collectTexts(activity.window.decorView)
         assertTrue(texts.contains("WhereverCode"))
@@ -76,7 +77,8 @@ class MainActivitySmokeTest {
         assertTrue(texts.contains("有什么想一起解决的？"))
         assertTrue(texts.contains("开发一个 App"))
         assertTrue(texts.contains("导入项目并交付"))
-        assertTrue(texts.none { it == "组织多 Agent 团队" || it == "自动化任务" })
+        assertTrue(texts.contains("组织多 Agent 团队"))
+        assertTrue(texts.contains("自动化任务"))
 
         controller.pause().stop().destroy()
     }
