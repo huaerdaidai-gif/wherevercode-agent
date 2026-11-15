@@ -5173,7 +5173,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 consoleRefreshRunning = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                if (currentEntry != DrawerController.ID_CONSOLE) return@runOnUiThread
+                if (DrawerRouter.screenFor(currentEntry) != EntryScreen.CONSOLE) return@runOnUiThread
                 if (snapshot == null) {
                     consoleController.renderError()
                     return@runOnUiThread
@@ -6055,7 +6055,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun tickConsole() {
-        if (currentEntry != DrawerController.ID_CONSOLE) {
+        if (DrawerRouter.screenFor(currentEntry) != EntryScreen.CONSOLE) {
             consoleTickerActive = false
             return
         }

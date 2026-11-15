@@ -48,6 +48,15 @@ class V5RuntimeInstrumentation : Instrumentation() {
             clickTag("channel_tab_files")
             capture("05-channel-files-unconfigured")
             open("nav_control")
+            val consoleDeadline = SystemClock.elapsedRealtime() + 10_000
+            while (find { it is TextView && it.text.toString() == "全局一眼看全" } == null &&
+                SystemClock.elapsedRealtime() < consoleDeadline) {
+                SystemClock.sleep(100)
+                waitForIdleSync()
+            }
+            check(find { it is TextView && it.text.toString() == "全局一眼看全" } != null) {
+                "Primary control route did not render the real snapshot"
+            }
             capture("06-control")
             open("nav_workbench")
             capture("07-account-settings")

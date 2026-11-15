@@ -1,5 +1,6 @@
 package wherevercode.agent
 
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -11,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 
@@ -78,6 +80,24 @@ class MainActivitySmokeTest {
         assertTrue(texts.contains("导入项目并交付"))
         assertTrue(texts.none { it == "组织多 Agent 团队" || it == "自动化任务" })
 
+        controller.pause().stop().destroy()
+    }
+
+    @Test
+    fun `primary control route renders the real console snapshot`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+            .create().start().resume().visible()
+        val activity = controller.get()
+        activity.findViewById<View>(R.id.buttonMenu).performClick()
+        activity.window.decorView.findViewWithTag<View>("nav_control").performClick()
+        val deadline = System.currentTimeMillis() + 8000
+        while (System.currentTimeMillis() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle()
+            if (collectTexts(activity.window.decorView).contains("全局一眼看全")) break
+            Thread.sleep(50)
+        }
+        assertTrue("control must render data, not just its static header",
+            collectTexts(activity.window.decorView).contains("全局一眼看全"))
         controller.pause().stop().destroy()
     }
 
