@@ -247,7 +247,7 @@ public final class LocalChatModel: ObservableObject {
         get { (try? data.kv.get("chat.defaultBrainId")) ?? nil ?? appState.brainConfigStore.currentBrainId() ?? "" }
         set {
             try? data.kv.set("chat.defaultBrainId", newValue.isEmpty ? nil : newValue)
-            appState.brainConfigStore.setCurrent(brainId: newValue)
+            appState.brainConfigStore.setCurrentBrainId(newValue.isEmpty ? nil : newValue)
         }
     }
 
@@ -273,9 +273,9 @@ public final class LocalChatModel: ObservableObject {
             selectedBrain = defaultBrainId
         }
         if let aid = cfg?.agentId, !aid.isEmpty {
-            selectedAgent = (try? data.agents.getAgent(id: aid))
+            selectedAgent = (try? data.agents.getAgent(agentId: aid))
         } else if let defAid = defaultAgentId, !defAid.isEmpty {
-            selectedAgent = (try? data.agents.getAgent(id: defAid))
+            selectedAgent = (try? data.agents.getAgent(agentId: defAid))
         } else {
             selectedAgent = nil
         }
@@ -385,7 +385,7 @@ public final class LocalChatModel: ObservableObject {
             selectedBrain = defaultBrainId
         }
         if let defAid = defaultAgentId, !defAid.isEmpty {
-            selectedAgent = (try? data.agents.getAgent(id: defAid))
+            selectedAgent = (try? data.agents.getAgent(agentId: defAid))
         } else {
             selectedAgent = nil
         }
@@ -446,7 +446,7 @@ public final class LocalChatModel: ObservableObject {
             draft = ""
             selectedBrain = defaultBrainId
             if let defAid = defaultAgentId, !defAid.isEmpty {
-                selectedAgent = (try? data.agents.getAgent(id: defAid))
+                selectedAgent = (try? data.agents.getAgent(agentId: defAid))
             } else {
                 selectedAgent = nil
             }

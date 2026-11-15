@@ -1675,7 +1675,7 @@ private struct McpToolsInspectorScreen: View {
             // 能力四态标识看板
             Section("MCP 能力与状态边界（严格区分四态）") {
                 HStack(spacing: 8) {
-                    stateBadge(title: "已连接", isOk: appState.settings.platformBaseURL != nil, note: "通道畅通")
+                    stateBadge(title: "已连接", isOk: appState.settings.validatedBaseURL != nil, note: "通道畅通")
                     stateBadge(title: "已授权", isOk: appState.hasToken, note: "持有 Token")
                     stateBadge(title: "可调用", isOk: !toolNames.isEmpty, note: "\(toolNames.count) 项工具")
                     stateBadge(title: "已实际执行", isOk: toolCallSuccess == true, note: toolCallSuccess == true ? "真实回执" : "未执行")
@@ -3591,7 +3591,11 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     private func channelTaskCard(_ t: LocalTask) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let assigneeName: String = members.first(where: { $0.id == t.assignedAgentId || $0.agentRecordId == t.assignedAgentId })?.name ?? "未指派"
+        let shortId: String = String(t.id.prefix(8))
+        let descText: String = (t.description?.isEmpty ?? true) ? "无详细任务描述" : (t.description ?? "")
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(t.title)
                     .font(.system(size: 14, weight: .semibold))
@@ -3600,14 +3604,13 @@ public struct ChannelDetailWorkspaceView: View {
                 taskStateBadge(t.state)
             }
 
-            Text((t.description?.isEmpty ?? true) ? "无详细任务描述" : (t.description ?? ""))
+            Text(descText)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
             HStack {
-                let assigneeName = members.first(where: { $0.id == t.assignedAgentId || $0.agentRecordId == t.assignedAgentId })?.name ?? "未指派"
-                Text("负责人: \(assigneeName) · P\(t.priority) · ID: \(String(t.id.prefix(8)))")
+                Text("负责人: \(assigneeName) · P\(t.priority) · ID: \(shortId)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
