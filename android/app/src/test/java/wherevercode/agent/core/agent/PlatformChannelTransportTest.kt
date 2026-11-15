@@ -256,4 +256,27 @@ class PlatformChannelTransportTest {
             body.optJSONObject("params")?.optJSONObject("arguments")?.optString("agent_id"),
         )
     }
+    @Test
+    fun `reply passes the original message id as reply_to without changing text`() = runBlocking {
+        val http = ScriptedHttp(mapOf("agent_channel_post" to envelope("""{"id":"reply-1"}""")))
+        assertEquals("reply-1", transport(http).postReply("chan-1", "answer", "original-9"))
+        val args = JSONObject(http.calls.single().bodyJson).getJSONObject("params").getJSONObject("arguments")
+        assertEquals("original-9", args.getString("reply_to"))
+        assertEquals("answer", args.getString("text"))
+        assertTrue(!args.has("sender_id"))
+    }
+
+    @Test
+    fun `history search uses before_id and q and never marks messages read`() = runBlocking {
+        val http = ScriptedHttp(mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")))
+        assertTrue(transport(http).queryMessages("chan-1", "m20", "needle", 40).isEmpty())
+        val args = JSONObject(http.calls.single().bodyJson).getJSONObject("params").getJSONObject("arguments")
+        assertEquals("m20", args.getString("before_id"))
+        assertEquals("needle", args.getString("q"))
+        assertEquals(40, args.getInt("limit"))
+        assertTrue(!args.has("after_id"))
+        assertTrue(!args.has("mark_read"))
+        assertTrue(!args.has("only_unread"))
+    }
+
 }

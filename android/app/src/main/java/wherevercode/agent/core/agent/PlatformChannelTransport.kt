@@ -218,12 +218,21 @@ class PlatformChannelMcpTransport(
     private val endpoint: String = PlatformAgent.mcpEndpoint(null),
 ) : PlatformChannelTransport {
 
-    override suspend fun postMessage(channelId: String, text: String): String {
+    override suspend fun postMessage(channelId: String, text: String): String =
+        post(channelId, text, null)
+
+    suspend fun postReply(channelId: String, text: String, replyTo: String): String {
+        require(replyTo.isNotBlank()) { "回复消息编号不能为空。" }
+        return post(channelId, text, replyTo)
+    }
+
+    private fun post(channelId: String, text: String, replyTo: String?): String {
         val result = toolsCall(
             "agent_channel_post",
             JSONObject().apply {
                 put("channel_id", channelId)
                 put("text", text)
+                if (replyTo != null) put("reply_to", replyTo)
             },
         )
         return result.optString("id", "").ifBlank {
@@ -246,6 +255,26 @@ class PlatformChannelMcpTransport(
             if (markRead) put("mark_read", true)
         }
         val result = toolsCall("agent_channel_messages", args)
+        return parseMessages(result)
+    }
+
+    /** V5 tools schema: before_id paginates older messages; q searches server history. */
+    suspend fun queryMessages(
+        channelId: String,
+        beforeId: String? = null,
+        query: String? = null,
+        limit: Int = 20,
+    ): List<PlatformChannelMessage> {
+        require(limit in 1..100) { "消息分页大小无效。" }
+        return parseMessages(toolsCall("agent_channel_messages", JSONObject().apply {
+            put("channel_id", channelId)
+            put("limit", limit)
+            if (!beforeId.isNullOrBlank()) put("before_id", beforeId)
+            if (!query.isNullOrBlank()) put("q", query)
+        }))
+    }
+
+    private fun parseMessages(result: JSONObject): List<PlatformChannelMessage> {
         val out = mutableListOf<PlatformChannelMessage>()
         val messages: JSONArray = result.optJSONArray("messages") ?: return out
         for (i in 0 until messages.length()) {

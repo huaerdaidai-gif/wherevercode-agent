@@ -36,7 +36,7 @@ class ChannelNavigationTest {
         val sent = mutableListOf<String>()
         val controller = TeamChannelController(context, {}, { sent += it }, {}, {}, {}, {})
         controller.render(snapshot())
-        val input = children(controller.root).filterIsInstance<EditText>().first()
+        val input = children(controller.root).filterIsInstance<EditText>().first { it.hint.toString().startsWith("给频道") }
         input.setText("hello")
         click(controller.root, "发送")
         click(controller.root, "发送")
@@ -57,7 +57,7 @@ class ChannelNavigationTest {
         val chip = children(controller.root).filterIsInstance<TextView>().first { it.text.toString() == "Alpha" }
         assertTrue(chip.performLongClick())
         assertFalse(opened)
-        assertEquals("@Alpha ", children(controller.root).filterIsInstance<EditText>().first().text.toString())
+        assertEquals("@Alpha ", children(controller.root).filterIsInstance<EditText>().first { it.hint.toString().startsWith("给频道") }.text.toString())
     }
 
     @Test
@@ -65,7 +65,7 @@ class ChannelNavigationTest {
         var sent = false
         val controller = TeamChannelController(context, {}, { sent = true }, {}, {}, {}, {})
         controller.render(snapshot(false))
-        children(controller.root).filterIsInstance<EditText>().first().setText("hello")
+        children(controller.root).filterIsInstance<EditText>().first { it.hint.toString().startsWith("给频道") }.setText("hello")
         click(controller.root, "发送")
         assertFalse(sent)
         children(controller.root).first { it.tag == "channel_tab_files" }.performClick()

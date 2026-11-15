@@ -78,6 +78,8 @@ class TeamChannelController(
     private val onStartFanout: (question: String) -> Unit,
     private val onRefresh: () -> Unit,
     private val onOpenTasks: () -> Unit = {},
+    private val onReplyPost: ((String, String) -> Unit)? = null,
+    private val onLoadHistory: ((String?, String?, (Result<List<PlatformChannelMessage>>) -> Unit) -> Unit)? = null,
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -122,6 +124,22 @@ class TeamChannelController(
     private var snapshot: TeamChannelSnapshot? = null
     private var section = "messages"
     private var pendingText: String? = null
+    private var replyTo: String? = null
+    private var historyMessages: List<PlatformChannelMessage>? = null
+    private var historyQuery: String? = null
+    private var historyBusy = false
+    private val replyLine = UiKit.text(context, "", 12f, R.color.accent).apply {
+        visibility = View.GONE
+        setPadding(dp(16), dp(8), dp(16), dp(8))
+        setOnClickListener {
+            if (pendingText == null) { replyTo = null; visibility = View.GONE }
+        }
+    }
+    private val historyInput = EditText(context).apply {
+        hint = "搜索频道历史"
+        setSingleLine(true)
+    }
+    private lateinit var historyBar: LinearLayout
     private lateinit var inputBar: LinearLayout
 
     /** Clear only the successfully sent draft; failures retain text for an explicit retry. */
@@ -129,7 +147,11 @@ class TeamChannelController(
         if (pendingText != text) return
         pendingText = null
         messageInput.isEnabled = true
-        if (success && messageInput.text.toString().trim() == text) messageInput.setText("")
+        if (success && messageInput.text.toString().trim() == text) {
+            messageInput.setText("")
+            replyTo = null
+            replyLine.visibility = View.GONE
+        }
     }
 
 
@@ -168,6 +190,29 @@ class TeamChannelController(
             })
         }
         root.addView(tabs)
+        root.addView(replyLine)
+        historyBar = UiKit.horizontal(context)
+        historyBar.addView(historyInput.apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
+        listOf("搜索", "更早", "最新").forEach { label ->
+            historyBar.addView(UiKit.text(context, label, 12f, R.color.accent).apply {
+                setPadding(dp(10), dp(12), dp(10), dp(12))
+                setOnClickListener {
+                    when (label) {
+                        "搜索" -> loadHistory(false)
+                        "更早" -> loadHistory(true)
+                        else -> {
+                            if (!historyBusy) {
+                                historyMessages = null
+                                historyQuery = null
+                                historyInput.setText("")
+                                snapshot?.let { render(it) }
+                            }
+                        }
+                    }
+                }
+            })
+        }
+        root.addView(historyBar)
         scrollView.addView(content)
         content.addView(bodyContainer)
         root.addView(scrollView)
@@ -226,7 +271,9 @@ class TeamChannelController(
         noticeLine.text = ""
         pendingText = text
         messageInput.isEnabled = false
-        onPost(text)
+        val reply = replyTo
+        if (reply != null && onReplyPost != null) onReplyPost.invoke(text, reply)
+        else onPost(text)
     }
 
     private fun startFanout() {
@@ -258,6 +305,8 @@ class TeamChannelController(
         noticeLine.text = snapshot.notice.orEmpty()
         bodyContainer.removeAllViews()
         inputBar.visibility = if (section == "messages") View.VISIBLE else View.GONE
+        historyBar.visibility = if (section == "messages") View.VISIBLE else View.GONE
+        replyLine.visibility = if (section == "messages" && replyTo != null) View.VISIBLE else View.GONE
         if (section == "files") {
             bodyContainer.addView(note("频道文件"))
             bodyContainer.addView(note("附件上传、项目文件、网盘引用、预览和下载暂不可用。"))
@@ -280,14 +329,15 @@ class TeamChannelController(
         if (snapshot.unreadCount > 0) {
             bodyContainer.addView(unreadRow(snapshot))
         }
-        if (snapshot.messages.isEmpty()) {
+        val displayedMessages = historyMessages ?: snapshot.messages
+        if (displayedMessages.isEmpty()) {
             bodyContainer.addView(note("频道里暂无消息。发一条“在吗”，看看谁回。"))
         } else {
             // 2026-11-12 团队对话分串：消息按任务成组/成串，一个任务
             // 的讨论不混进另一个任务里；每条带发送者 + 任务归属。
             // 归属头从正文解析（App 贴回的中转回复带的头），无头
             // 的消息进“综合讨论”串。
-            val threads = groupTeamMessages(snapshot.messages.map { teamMessageFromChannel(it) })
+            val threads = groupTeamMessages(displayedMessages.map { teamMessageFromChannel(it) })
             threads.forEach { thread ->
                 bodyContainer.addView(threadHeaderRow(thread))
                 thread.messages.forEach { bodyContainer.addView(messageRow(it)) }
@@ -376,12 +426,19 @@ class TeamChannelController(
                 val canMention = snapshot?.members.orEmpty().any {
                     !it.isLocalApp && it.displayName == message.senderName
                 }
-                val actions = if (canMention) arrayOf("复制", "@${message.senderName}", "发送时间")
-                    else arrayOf("复制", "发送时间")
-                AlertDialog.Builder(context).setItems(actions) { _, index ->
+                val actions = mutableListOf("复制", "发送时间")
+                if (canMention) actions.add("@${message.senderName}")
+                if (onReplyPost != null && message.messageId.isNotBlank()) actions.add("回复")
+                AlertDialog.Builder(context).setItems(actions.toTypedArray()) { _, index ->
                     when (actions[index]) {
                         "复制" -> (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                             .setPrimaryClip(ClipData.newPlainText("频道消息", message.text))
+                        "回复" -> if (pendingText == null) {
+                            replyTo = message.messageId
+                            replyLine.text = "回复 ${message.senderName} · 点击取消"
+                            replyLine.visibility = View.VISIBLE
+                            messageInput.requestFocus()
+                        }
                         "发送时间" -> AlertDialog.Builder(context).setMessage(formatTime(message.createdAtSeconds))
                             .setPositiveButton("关闭", null).show()
                         else -> mention(message.senderName)
@@ -478,6 +535,37 @@ class TeamChannelController(
         UiKit.text(context, text, 12f, R.color.text_tertiary).apply {
             setPadding(0, dp(4), 0, dp(4))
         }
+
+    private fun loadHistory(older: Boolean) {
+        if (historyBusy) return
+        val snap = snapshot ?: return
+        val loader = onLoadHistory
+        if (!snap.configured || loader == null) {
+            noticeLine.text = "历史记录暂不可用。"
+            return
+        }
+        val query = if (older) historyQuery else historyInput.text.toString().trim().ifEmpty { null }
+        val current = historyMessages ?: snap.messages
+        val before = if (older) current.minByOrNull { it.createdAtSeconds }?.id else null
+        if (older && before.isNullOrBlank()) {
+            noticeLine.text = "没有可继续加载的消息。"
+            return
+        }
+        historyBusy = true
+        noticeLine.text = "正在读取历史消息…"
+        loader(before, query) { result ->
+            historyBusy = false
+            result.onSuccess { incoming ->
+                historyQuery = query
+                historyMessages = (incoming + if (older) current else emptyList())
+                    .distinctBy { it.id }.sortedBy { it.createdAtSeconds }
+                snapshot?.let { render(it) }
+                noticeLine.text = if (incoming.isEmpty()) "没有更多匹配消息。" else "已读取 ${incoming.size} 条历史消息。"
+            }.onFailure {
+                noticeLine.text = "读取历史消息失败，请重试。"
+            }
+        }
+    }
 
     private fun mention(name: String) {
         if (pendingText != null) return

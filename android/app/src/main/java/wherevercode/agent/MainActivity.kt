@@ -1511,6 +1511,22 @@ class MainActivity : AppCompatActivity() {
             this,
             onOpenFile = { path -> openDetailFile(path) },
             onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
+            onReplyPost = { text, replyId -> postTeamChannelMessage(text, replyId) },
+            onLoadHistory = { before, query, complete ->
+                Thread {
+                    val result = runCatching {
+                        val (host, channelId) = teamChannelEndpoint() ?: error("频道未配置。")
+                        val transport = PlatformChannelMcpTransport(
+                            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                            endpoint = PlatformAgent.mcpEndpoint(host),
+                        )
+                        runBlocking { transport.queryMessages(channelId, before, query) }
+                    }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) complete(result)
+                    }
+                }.start()
+            },
         )
         screenResults = resultsController.root
         container.addView(screenResults)
@@ -5754,7 +5770,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 往频道发一条消息（后台线程；成功计一轮，失败把原因写进提示）。 */
-    private fun postTeamChannelMessage(text: String) {
+    private fun postTeamChannelMessage(text: String, replyTo: String? = null) {
         val (host, channelId) = teamChannelEndpoint() ?: run {
             teamChannelController.postResult(text, false)
             teamChannelNotice = "频道还没配好，发不出去。"
@@ -5768,7 +5784,10 @@ class MainActivity : AppCompatActivity() {
                     tokenProvider = { platformCredentialStore.loadPlatformToken() },
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
-                runBlocking { transport.postMessage(channelId, text) }
+                runBlocking {
+                    if (replyTo == null) transport.postMessage(channelId, text)
+                    else transport.postReply(channelId, text, replyTo)
+                }
                 teamChannelRoundsUsed++
                 teamChannelNotice = null
                 success = true
