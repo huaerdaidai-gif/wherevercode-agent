@@ -341,6 +341,8 @@ private struct AddDeviceSheet: View {
     @State private var probeHello: RemoteHello? = nil
     @State private var errorMessage: String? = nil
     @State private var isPairing = false
+    @State private var isRefreshingCode = false
+    @State private var refreshNotice: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -357,12 +359,12 @@ private struct AddDeviceSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
-                if probeHello != nil {
+                if let hello = probeHello {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("确认配对") {
+                        Button(hello.clientStatus == "APPROVED" ? "确认添加" : "确认配对") {
                             executePairConfirm()
                         }
-                        .disabled(pairCode.trimmingCharacters(in: .whitespacesAndNewlines).count != 6 || isPairing)
+                        .disabled(isPairing || (hello.clientStatus != "APPROVED" && pairCode.trimmingCharacters(in: .whitespacesAndNewlines).count != 6))
                     }
                 }
             }
@@ -468,6 +470,15 @@ private struct AddDeviceSheet: View {
             if !hello.agents.isEmpty {
                 LabeledContent("已发现 Agent", value: hello.agents.map(\.displayName).joined(separator: "、"))
             }
+            if hello.clientStatus == "APPROVED" {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    Text("当前设备已在目标机被批准（已授权）")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.green)
+                }
+            }
         }
 
         Section("核对服务端指纹（SHA-256）") {
@@ -486,13 +497,53 @@ private struct AddDeviceSheet: View {
             .padding(.vertical, 4)
         }
 
-        Section("输入 6 位配对码") {
-            TextField("目标机安装时输出的 6 位数字", text: $pairCode)
-                .keyboardType(.numberPad)
-                .font(.title3.weight(.semibold))
-            Text("配对码可在目标设备上运行 `hand_server.py pair-code` 随时查看。")
+        if hello.clientStatus == "APPROVED" {
+            Section("设备接入授权") {
+                Text("此 iPhone 已在目标机完成配对授权，无需重复输入配对码，点击右上角「确认添加」即可直接接入。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Section {
+                TextField("目标机生成的 6 位一次性数字", text: $pairCode)
+                    .keyboardType(.numberPad)
+                    .font(.title3.weight(.semibold))
+
+                if isLocallyAuthorizedPeer {
+                    Button(isRefreshingCode ? "正在请求授权刷新…" : "向目标机请求刷新配对码") {
+                        executeRemoteRefresh()
+                    }
+                    .font(.footnote)
+                    .disabled(isRefreshingCode)
+                }
+
+                if let refreshNotice {
+                    Text(refreshNotice)
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            } header: {
+                Text("输入 6 位配对码")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("• 配对码为密码学安全随机生成的 6 位数字，默认 5 分钟有效；")
+                    Text("• 成功配对后立即作废（一次性安全配对码）；")
+                    Text("• 若已过期或作废，请在目标机运行 wherevercode-hand pair-code --rotate 获取新码。")
+                }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            }
+
+            Section("如何获取配对码？") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("1. 在目标机（Mac / Linux / VPS）打开终端；")
+                    Text("2. 运行 `wherevercode-hand pair-code` 查看当前有效码；")
+                    Text("3. 或运行 `wherevercode-hand pair-code --rotate` 生成新码；")
+                    Text("4. 目标机日志 `~/Library/Application Support/WhereverCode/V5Hand/v5-hand.log` 中亦会自动打印启动新码。")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
 
         if let errorMessage {
@@ -588,16 +639,57 @@ private struct AddDeviceSheet: View {
 
                         onSaved(rec)
                         dismiss()
-                    case .rejected(let reason):
-                        self.errorMessage = "配对被拒绝：\(reason)"
+                    case .codeExpired(let reason):
+                        self.errorMessage = "配对码已过期：\(reason)"
+                    case .codeConsumed(let reason):
+                        self.errorMessage = "配对码已作废：\(reason)"
+                    case .codeWrong(let reason):
+                        self.errorMessage = "配对码错误：\(reason)"
+                    case .clientLocked(let reason):
+                        self.errorMessage = "尝试次数超限：\(reason)"
+                    case .revoked(let reason):
+                        self.errorMessage = "授权已被撤销：\(reason)"
+                    case .rejected(let code, let reason):
+                        self.errorMessage = "远端拒绝（\(code)）：\(reason)"
                     case .failed(let reason):
-                        self.errorMessage = "配对失败：\(reason)"
+                        self.errorMessage = "连接失败：\(reason)"
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.isPairing = false
                     self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private var isLocallyAuthorizedPeer: Bool {
+        guard let hello = probeHello else { return false }
+        return HandIdentityManager.getPeerPublicKey(deviceId: hello.deviceId) != nil
+    }
+
+    private func executeRemoteRefresh() {
+        guard let hello = probeHello else { return }
+        let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = Int(portStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 18743
+
+        isRefreshingCode = true
+        errorMessage = nil
+        refreshNotice = nil
+
+        Task {
+            do {
+                let (newCode, ttl) = try await HandClient.shared.remoteRotatePairCode(host: cleanHost, port: port, targetDeviceId: hello.deviceId)
+                await MainActor.run {
+                    self.isRefreshingCode = false
+                    self.pairCode = newCode
+                    self.refreshNotice = "已由已认证设备授权刷新新配对码：\(newCode)（\(ttl) 秒有效）"
+                }
+            } catch {
+                await MainActor.run {
+                    self.isRefreshingCode = false
+                    self.errorMessage = "远程刷新失败：\(error.localizedDescription)"
                 }
             }
         }

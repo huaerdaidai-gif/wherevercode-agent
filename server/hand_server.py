@@ -336,7 +336,7 @@ class StateStore:
     def __init__(self, state_dir: str):
         self.dir = os.path.expanduser(state_dir)
         os.makedirs(self.dir, exist_ok=True)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def _path(self, name: str) -> str:
         return os.path.join(self.dir, name)
@@ -630,7 +630,12 @@ class HandServer:
             return
         session_key = derive_session_key(self.private_key, self.public_key, client_pub)
         signing_key = derive_signing_key(session_key)
-        sealed = read_frame(conn, timeout=DEFAULT_TIMEOUT_SECONDS + 60)
+        try:
+            sealed = read_frame(conn, timeout=DEFAULT_TIMEOUT_SECONDS + 60)
+        except (ConnectionError, OSError):
+            return
+        except Exception:
+            return
         try:
             plaintext = open_sealed(session_key, sealed)
         except Exception:
@@ -638,6 +643,14 @@ class HandServer:
         try:
             envelope = json.loads(plaintext.decode("utf-8"))
         except Exception:
+            return
+        if envelope.get("type") == "cross_device_pair_confirm" \
+                and envelope.get("version") == VERSION:
+            self.state.audit({"event": "pair_approved", "client": client_id, "via": "already_approved"})
+            self._send(
+                conn, session_key, envelope, "cross_device_pair_approved",
+                {"device_id": self.device_id}, 1,
+            )
             return
         self._dispatch(conn, session_key, signing_key, client_id, envelope)
 

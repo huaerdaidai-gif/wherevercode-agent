@@ -178,6 +178,6 @@ $Fingerprint = (& $Python $CurrentPy --state-dir $HostDir fingerprint 2>$null) -
 if (-not $Fingerprint -or $Fingerprint.Length -ne 64) {
     Write-Error "读不到 Hand 指纹；请看 $HostDir\v5-hand.log。"; exit 1
 }
-$PairCode = (& $Python $CurrentPy --state-dir $HostDir pair-code 2>$null) -join "" -replace '\s',''
+$PairCode = (& $Python $CurrentPy --state-dir $HostDir pair-code --raw 2>$null) -join "" -replace '\s',''
 Write-Host "V5_HAND_INSTALLED device_id=$DeviceId fingerprint=$Fingerprint pair_code=$PairCode port=$Port version=$Version state_dir=$HostDir python=$Python service=$Service"
-Write-Host "V5 Hand 已安装并启动（$Service）。App 里核对指纹一致、填入配对码 $PairCode 后确认配对。"
+Write-Host "V5 Hand 已安装并启动（$Service）。App 里核对指纹一致、填入配对码 $PairCode（5 分钟有效，一次性）后确认配对。"

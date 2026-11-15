@@ -98,7 +98,12 @@ public struct RemoteFileEntry: Codable, Equatable, Identifiable, Sendable {
 
 public enum PairConfirmResult: Equatable, Sendable {
     case approved
-    case rejected(reason: String)
+    case codeExpired(reason: String)
+    case codeConsumed(reason: String)
+    case codeWrong(reason: String)
+    case clientLocked(reason: String)
+    case revoked(reason: String)
+    case rejected(code: String, reason: String)
     case failed(reason: String)
 }
 
@@ -554,8 +559,10 @@ public actor HandClient {
         code: String
     ) async throws -> PairConfirmResult {
         let cleanCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleanCode.count == 6, cleanCode.allSatisfy({ $0.isNumber }) else {
-            return .failed(reason: "配对码必须是 6 位数字。")
+        if hello.clientStatus != "APPROVED" {
+            guard cleanCode.count == 6, cleanCode.allSatisfy({ $0.isNumber }) else {
+                return .failed(reason: "配对码必须是 6 位数字。")
+            }
         }
 
         return try await Task.detached {
@@ -583,6 +590,13 @@ public actor HandClient {
                 return .failed(reason: "目标设备公钥与已核对的指纹不匹配，可能存在中间人或密钥已被重置。")
             }
 
+            // 幂等直通：若目标机在 Hello 中已将当前设备标记为 APPROVED
+            // 直接保存公钥并返回成功，免去多余的配对确认，彻底避免连接被远端过早关闭
+            if let clientStatus = serverHelloJson["client_status"] as? String, clientStatus == "APPROVED" {
+                try HandIdentityManager.savePeerPublicKey(deviceId: hello.deviceId, publicKey: sPubKey)
+                return .approved
+            }
+
             // 2. 派生会话密钥并封装密封帧
             let peerCurvePub = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: sPubKey)
             let sessionKey = try HandCrypto.deriveSessionKey(ownPrivate: ownPriv, peerPublic: peerCurvePub)
@@ -597,7 +611,20 @@ public actor HandClient {
             try sock.writeFrame(sealed)
 
             // 3. 读取密封回执
-            let replySealed = try sock.readFrame()
+            let replySealed: Data
+            do {
+                replySealed = try sock.readFrame()
+            } catch let error as HandClientError {
+                switch error {
+                case .connectionFailed(let msg):
+                    return .failed(reason: "远端过早关闭连接：\(msg)（请核对目标机配对服务状态）")
+                default:
+                    return .failed(reason: error.localizedDescription)
+                }
+            } catch {
+                return .failed(reason: "读取回执失败：\(error.localizedDescription)")
+            }
+
             let replyPlain = try HandCrypto.open(sessionKey: sessionKey, sealedData: replySealed)
             guard let replyJson = try? JSONSerialization.jsonObject(with: replyPlain) as? [String: Any] else {
                 return .failed(reason: "回执信封无法解析为 JSON。")
@@ -610,11 +637,84 @@ public actor HandClient {
                 return .approved
             } else if type == "cross_device_error" {
                 let args = replyJson["args"] as? [String: Any]
-                let message = args?["message"] as? String ?? "配对被拒绝。"
-                return .rejected(reason: message)
+                let code = args?["code"] as? String ?? ""
+                let message = args?["message"] as? String ?? "配对被远端拒绝。"
+                switch code {
+                case "pair_code_expired":
+                    return .codeExpired(reason: message)
+                case "pair_code_consumed":
+                    return .codeConsumed(reason: message)
+                case "pair_code_wrong":
+                    return .codeWrong(reason: message)
+                case "pair_code_locked":
+                    return .clientLocked(reason: message)
+                case "device_revoked":
+                    return .revoked(reason: message)
+                default:
+                    return .rejected(code: code, reason: message)
+                }
             } else {
                 return .failed(reason: "未知回执类型：\(type)")
             }
+        }.value
+    }
+
+    /// 请求已认证设备远程刷新配对码（必须持有已配对设备的私钥及对端公钥）
+    public func remoteRotatePairCode(
+        host: String,
+        port: Int = 18743,
+        targetDeviceId: String
+    ) async throws -> (code: String, expiresIn: Int) {
+        return try await Task.detached {
+            let (ownId, ownPriv) = try HandIdentityManager.getOrCreateDeviceIdentity()
+            guard let peerPubData = HandIdentityManager.getPeerPublicKey(deviceId: targetDeviceId) else {
+                throw HandClientError.credentialError("本地未持有设备「\(targetDeviceId)」的配对公钥，无法发起授权刷新，请在目标机上直接运行 pair-code 命令。")
+            }
+            let peerCurvePub = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerPubData)
+
+            let sock = PosixTcpSocket()
+            try sock.connect(host: host, port: port, timeoutSeconds: 6.0)
+            defer { sock.close() }
+
+            // 1. Hello
+            let helloObj: [String: Any] = [
+                "type": "wherevercode_hello",
+                "version": 1,
+                "device_id": ownId,
+                "public_key_b64": ownPriv.publicKey.rawRepresentation.base64EncodedString()
+            ]
+            try sock.writeFrame(try JSONSerialization.data(withJSONObject: helloObj))
+            let hData = try sock.readFrame()
+            guard let hJson = try? JSONSerialization.jsonObject(with: hData) as? [String: Any],
+                  let status = hJson["client_status"] as? String, status == "APPROVED" else {
+                throw HandClientError.serverRejected(code: "not_approved", message: "本设备尚未在目标机获得配对授权，无法远程刷新。")
+            }
+
+            // 2. 派生会话密钥
+            let sessionKey = try HandCrypto.deriveSessionKey(ownPrivate: ownPriv, peerPublic: peerCurvePub)
+
+            // 3. 发送管理动作
+            let adminEnv: [String: Any] = [
+                "type": "wherevercode_device_admin",
+                "version": 1,
+                "seq": 1,
+                "action": "rotate_pair_code",
+                "confirmed": true
+            ]
+            let sealed = try HandCrypto.seal(sessionKey: sessionKey, plaintext: try JSONSerialization.data(withJSONObject: adminEnv))
+            try sock.writeFrame(sealed)
+
+            // 4. 读取应答
+            let replySealed = try sock.readFrame()
+            let replyPlain = try HandCrypto.open(sessionKey: sessionKey, sealedData: replySealed)
+            guard let replyJson = try? JSONSerialization.jsonObject(with: replyPlain) as? [String: Any],
+                  let type = replyJson["type"] as? String, type == "wherevercode_device_admin_reply",
+                  let args = replyJson["args"] as? [String: Any],
+                  let newCode = args["pair_code"] as? String else {
+                throw HandClientError.serverRejected(code: "rotate_failed", message: "远程刷新配对码应答无效。")
+            }
+            let ttl = args["expires_in"] as? Int ?? 300
+            return (newCode, ttl)
         }.value
     }
 

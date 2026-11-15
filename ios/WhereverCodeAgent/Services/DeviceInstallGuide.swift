@@ -48,10 +48,10 @@ public struct DeviceInstallGuide: Sendable {
     public static let trustedBaseUrl = "https://raw.githubusercontent.com/huaerdaidai-gif/wherevercode-agent/main/android/app/src/main/assets/install"
 
     public static let scriptSha256: [String: String] = [
-        "v5-install-hand.sh": "608fb252694e761bc9c7083a695900b83bbe57bb55a8262f55fe29f6090b4a6e",
-        "v5-install-hand.ps1": "4038b57b83e1bdd5fccb6c78ad511ba334c97a5ae6af6a844f937a72d8536c24",
+        "v5-install-hand.sh": "3072654f1c35094666a9fc7a3bd1a09f7a2cfaedbd08d94715abdd7d7dc15caa",
+        "v5-install-hand.ps1": "9c04cca0744a0804e882c7279a1873254fb642018a86e071d6b2563cf3a15909",
         "v5-uninstall-hand.sh": "652a08d9ff7f334bce2dcd91a8ac0f24ad1e9f59a165d0ad0fd9a0fb8cd8dc03",
-        "hand_server.py": "8d2217aca1d8e49bd0d60ccf94f16be22ec6f523a16410c558d2b821bf9a9783"
+        "hand_server.py": "031d44a4302d8a72e8aa4e9952e09fad8fd9518f9c7071c352beb61afdd4ce7e"
     ]
 
     /// 生成一键安装命令

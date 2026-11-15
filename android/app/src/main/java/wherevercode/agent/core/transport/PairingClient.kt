@@ -94,6 +94,9 @@ object PairingClient {
                     "远端公钥与核对的指纹不符：请重新核对指纹（可能遭遇中间人，或设备密钥已更换）",
                 )
             }
+            if (hello.clientStatus == "APPROVED") {
+                return@withContext PairConfirmResult.Approved
+            }
             val sessionKey = try {
                 DeviceKeys.deriveSessionKey(ownPrivateKey, serverPublicKey)
             } catch (e: Exception) {

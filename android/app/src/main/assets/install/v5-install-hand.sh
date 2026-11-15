@@ -140,8 +140,7 @@ if [ -z "$HAND_SERVER_SRC" ]; then
     "$HOME/wherevercode-agent/android/app/src/main/assets/install/hand_server.py" \
     "$HOME/wherevercode-agent/server/hand_server.py" \
     "$HOME/Projects/wherevercode-agent/android/app/src/main/assets/install/hand_server.py" \
-    "$HOME/Projects/wherevercode-agent/server/hand_server.py" \
-    "$HOME/v5-hand-server.py"; do
+    "$HOME/Projects/wherevercode-agent/server/hand_server.py"; do
     if [ -f "$candidate" ]; then
       HAND_SERVER_SRC="$candidate"
       break
@@ -341,6 +340,7 @@ done
 [ "$OK" = 1 ] || { echo "Hand 服务未在 20 秒内监听端口 $PORT；请看 $HOST_DIR/v5-hand.log。" >&2; exit 1; }
 FINGERPRINT=$("$HAND_PYTHON" "$HOST_DIR/current/hand_server.py" --state-dir "$HOST_DIR" fingerprint 2>/dev/null | tr -d ' \n\r' | tail -c 64)
 [ -n "$FINGERPRINT" ] || { echo "读不到 Hand 指纹；请看 $HOST_DIR/v5-hand.log。" >&2; exit 1; }
-PAIR_CODE=$("$HAND_PYTHON" "$HOST_DIR/current/hand_server.py" --state-dir "$HOST_DIR" pair-code 2>/dev/null | tr -d ' \n\r')
+PAIR_CODE=$("$HAND_PYTHON" "$HOST_DIR/current/hand_server.py" --state-dir "$HOST_DIR" pair-code --raw 2>/dev/null | tr -d ' \n\r')
 echo "V5_HAND_INSTALLED device_id=${DEVICE_ID} fingerprint=${FINGERPRINT} pair_code=${PAIR_CODE} port=${PORT} version=${VERSION} state_dir=${HOST_DIR} python=${HAND_PYTHON} service=${SERVICE}"
-echo "V5 Hand 已安装并启动（${SERVICE}）。App 里核对指纹一致、填入配对码 ${PAIR_CODE} 后确认配对。"
+echo "V5 Hand 已安装并启动（${SERVICE}）。App 里核对指纹一致、填入配对码 ${PAIR_CODE}（5 分钟有效，一次性）后确认配对。"
+echo "管理命令：运行 wherevercode-hand pair-code 查看状态，或 --rotate 刷新新码。"

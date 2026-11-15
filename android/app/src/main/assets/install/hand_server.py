@@ -196,12 +196,21 @@ ERR_AGENT_NOT_FOUND = "agent_not_found"
 ERR_REMOTE_CONTROLLED_STOP = "remote_controlled_stop"
 ERR_AGENT_TIMEOUT = "agent_timeout"
 ERR_PAIR_CODE_WRONG = "pair_code_wrong"
+ERR_PAIR_CODE_EXPIRED = "pair_code_expired"
+ERR_PAIR_CODE_CONSUMED = "pair_code_consumed"
+ERR_PAIR_CODE_LOCKED = "pair_code_locked"
+ERR_PAIR_REVOKED = "device_revoked"
 
-# 配对码：6 位数字，存 state-dir/pair_code.json（0600），首次启动生成。
-# 5 次码错锁定该设备 1 小时（pair_attempts.json），防暴力破解。
+# 配对码安全规范（2026-11-15 整改）：
+# 1. 密码学安全随机生成的 6 位数字短码（secrets.randbelow）；
+# 2. 默认 5 分钟有效，成功使用后立即作废（一次性）；刷新新码时旧码失效；
+# 3. 连续输错 5 次临时锁定该设备 15 分钟（pair_attempts.json）；
+# 4. 全部操作（生成/轮换/撤销/消费/失败/锁定）写入审计日志；
+# 5. 设备身份使用持久化公钥指纹，不因刷新配对码而改变。
 PAIR_CODE_LENGTH = 6
+PAIR_CODE_TTL_SECONDS = 300
 PAIR_CODE_MAX_FAILS = 5
-PAIR_CODE_LOCK_SECONDS = 3600
+PAIR_CODE_LOCK_SECONDS = 900
 
 # mDNS 广播：局域网发现用的服务类型（与 App 侧 Discovery.SERVICE_TYPE 同款）。
 MDNS_SERVICE_TYPE = "_wherevercode._tcp.local"
@@ -551,7 +560,7 @@ class StateStore:
     def __init__(self, state_dir: str):
         self.dir = os.path.expanduser(state_dir)
         os.makedirs(self.dir, exist_ok=True)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def _path(self, name: str) -> str:
         return os.path.join(self.dir, name)
@@ -705,65 +714,226 @@ class HandServer:
 
     # -- 配对码 ------------------------------------------------------------
     # 6 位数字短码：App 内配对的第二道验证（第一道是指纹核对）。
-    # 码只存在服务端 state-dir（0600），安装时打印、pair-code 命令可查、
-    # --rotate 可轮换；配对请求须在密封帧里带对码，否则不批准。
-    # 机制照主流短码配对（KDE Connect 双屏同码 / Syncthing 互认）改到
-    # 无屏服务端：码在服务端，用户把它抄到手机上，抄码这个动作本身
-    # 就是“对方已确认”的证据。
+    # 2026-11-15 整改安全规范：
+    # 1. 密码学安全随机生成（secrets.randbelow）；
+    # 2. 默认 5 分钟有效，成功使用后立即作废（一次性）；刷新新码时旧码失效；
+    # 3. 兼容升级：旧版长期静态配对码（缺少 expires_at）强制安全失效；
+    # 4. 输错 5 次临时锁定该设备 15 分钟，所有尝试记录审计日志。
 
-    def get_or_create_pair_code(self) -> str:
-        """取现成配对码；没有就生成一个（6 位数字，0600 存盘）。"""
+    def _load_pair_code_data(self) -> dict:
         path = os.path.join(self.state.dir, "pair_code.json")
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            code = str(data.get("code", "")).strip()
-            if len(code) == PAIR_CODE_LENGTH and code.isdigit():
-                return code
-        except (FileNotFoundError, KeyError, ValueError, json.JSONDecodeError):
-            pass
-        code = "".join(secrets.choice("0123456789") for _ in range(PAIR_CODE_LENGTH))
+            if not isinstance(data, dict):
+                return {}
+            # 兼容与安全检查：若缺少 expires_at 或 created_at（旧版长期配对码），一律视为已失效
+            if "expires_at" not in data or "created_at" not in data:
+                return {}
+            return data
+        except Exception:
+            return {}
+
+    def _save_pair_code_data(self, data: dict) -> None:
+        path = os.path.join(self.state.dir, "pair_code.json")
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"code": code}, f)
+            json.dump(data, f, ensure_ascii=False, indent=2)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
-        return code
 
     def rotate_pair_code(self) -> str:
-        """轮换配对码（旧码立即失效）；返回新码。"""
-        path = os.path.join(self.state.dir, "pair_code.json")
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            pass
-        return self.get_or_create_pair_code()
+        """密码学安全生成新一次性配对码（5 分钟有效），旧码立即作废。
+        返回 6 位数字配对码。
+        """
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        now = int(time.time())
+        expires_at = now + PAIR_CODE_TTL_SECONDS
+        data = {
+            "code": code,
+            "created_at": now,
+            "expires_at": expires_at,
+            "consumed": False,
+            "consumed_at": None,
+            "consumed_by": None,
+            "revoked": False,
+            "revoked_at": None,
+        }
+        with self.state.lock:
+            self._save_pair_code_data(data)
+        self.state.audit({
+            "event": "pair_code_rotated",
+            "code_suffix": code[-2:],
+            "expires_at": expires_at,
+            "ttl": PAIR_CODE_TTL_SECONDS,
+        })
+        return code
 
-    def check_pair_code(self, code: str, client_id: str) -> tuple[bool, str]:
-        """验配对码。返回 (是否通过, 中文原因)。码错记失败次数，
-        5 次锁定该设备 1 小时；锁定期间一律不通过。"""
+    def revoke_pair_code(self) -> None:
+        """撤销当前配对码（立即作废）。"""
         now = int(time.time())
         with self.state.lock:
+            data = self._load_pair_code_data()
+            if data:
+                data["revoked"] = True
+                data["revoked_at"] = now
+                self._save_pair_code_data(data)
+            else:
+                self._save_pair_code_data({
+                    "code": "",
+                    "created_at": now,
+                    "expires_at": 0,
+                    "consumed": False,
+                    "consumed_at": None,
+                    "consumed_by": None,
+                    "revoked": True,
+                    "revoked_at": now,
+                })
+        self.state.audit({"event": "pair_code_revoked"})
+
+    def get_pair_code_info(self) -> dict:
+        """获取当前配对码状态详情：
+        status: ACTIVE | EXPIRED | CONSUMED | REVOKED | NONE
+        """
+        now = int(time.time())
+        with self.state.lock:
+            data = self._load_pair_code_data()
+        if not data:
+            return {"status": "NONE", "code": "", "remaining_seconds": 0}
+        code = str(data.get("code", "")).strip()
+        if data.get("revoked"):
+            return {"status": "REVOKED", "code": code, "remaining_seconds": 0}
+        if data.get("consumed"):
+            return {
+                "status": "CONSUMED",
+                "code": code,
+                "consumed_by": data.get("consumed_by", ""),
+                "consumed_at": data.get("consumed_at", 0),
+                "remaining_seconds": 0,
+            }
+        expires_at = int(data.get("expires_at", 0) or 0)
+        remaining = expires_at - now
+        if remaining <= 0:
+            return {"status": "EXPIRED", "code": code, "remaining_seconds": 0}
+        return {
+            "status": "ACTIVE",
+            "code": code,
+            "created_at": data.get("created_at", 0),
+            "expires_at": expires_at,
+            "remaining_seconds": remaining,
+        }
+
+    def get_or_create_pair_code(self) -> str:
+        """取当前有效配对码；若无有效码（过期/已使用/撤销/旧版升级），自动生成新码。"""
+        info = self.get_pair_code_info()
+        if info["status"] == "ACTIVE":
+            return info["code"]
+        return self.rotate_pair_code()
+
+    def check_pair_code(self, code: str, client_id: str) -> tuple[bool, str, str]:
+        """校验配对码。返回 (是否通过, 错误码, 中文原因)。
+        - 限流：错误 5 次锁定 15 分钟；
+        - 时效：5 分钟有效，过期报 pair_code_expired；
+        - 一次性：使用后立即作废，重复使用报 pair_code_consumed；
+        - 审计：全部尝试记录审计日志。
+        """
+        now = int(time.time())
+        clean_code = code.strip()
+
+        with self.state.lock:
+            # 1. 限流与锁定检查
             attempts = self.state.load_json("pair_attempts.json", {})
             entry = attempts.get(client_id) or {}
             locked_until = int(entry.get("locked_until", 0) or 0)
             if locked_until > now:
-                return False, "配对码尝试次数过多，请 1 小时后再试，或在目标设备上轮换配对码"
-            expected = self.get_or_create_pair_code()
-            if hmac.compare_digest(code.strip(), expected):
+                remaining_lock = locked_until - now
+                self.state.audit({
+                    "event": "pair_code_locked_attempt",
+                    "client": client_id,
+                    "remaining_lock": remaining_lock,
+                })
+                return (
+                    False,
+                    ERR_PAIR_CODE_LOCKED,
+                    f"配对尝试次数过多，设备已被临时锁定（剩余锁定时间 {remaining_lock} 秒）；如需立即解锁，请在目标机运行 wherevercode-hand pair-code --rotate",
+                )
+
+            # 2. 读取配对码数据
+            data = self._load_pair_code_data()
+            if not data or not data.get("code"):
+                self.state.audit({"event": "pair_code_not_found", "client": client_id})
+                return False, ERR_PAIR_CODE_EXPIRED, "目标机当前无有效配对码，请在目标机终端运行 wherevercode-hand pair-code --rotate 获取新码"
+
+            expected_code = str(data.get("code", "")).strip()
+
+            if data.get("revoked"):
+                self.state.audit({"event": "pair_code_rejected_revoked", "client": client_id})
+                return False, ERR_PAIR_CODE_EXPIRED, "配对码已被手动撤销作废，请在目标机运行 wherevercode-hand pair-code --rotate 重新生成"
+
+            if data.get("consumed"):
+                self.state.audit({"event": "pair_code_rejected_consumed", "client": client_id})
+                return False, ERR_PAIR_CODE_CONSUMED, "该配对码已被其他设备配对使用并作废（一次性安全配对码），请在目标机运行 wherevercode-hand pair-code --rotate 重新生成"
+
+            expires_at = int(data.get("expires_at", 0) or 0)
+            if now > expires_at:
+                self.state.audit({
+                    "event": "pair_code_rejected_expired",
+                    "client": client_id,
+                    "expired_at": expires_at,
+                    "now": now,
+                })
+                return False, ERR_PAIR_CODE_EXPIRED, "配对码已过期（超过 5 分钟有效时间），请在目标机运行 wherevercode-hand pair-code --rotate 获取新码"
+
+            # 3. 校验码
+            if hmac.compare_digest(clean_code, expected_code):
+                # 成功：一次性配对码立即作废！
+                data["consumed"] = True
+                data["consumed_at"] = now
+                data["consumed_by"] = client_id
+                self._save_pair_code_data(data)
                 attempts.pop(client_id, None)
                 self.state.save_json("pair_attempts.json", attempts)
-                return True, ""
+                self.state.audit({
+                    "event": "pair_code_consumed_success",
+                    "client": client_id,
+                    "code_suffix": clean_code[-2:],
+                })
+                return True, "", ""
+
+            # 4. 码错：记录失败次数
             fails = int(entry.get("fails", 0) or 0) + 1
-            entry = {"fails": fails, "locked_until": 0}
+            entry = {"fails": fails, "last_failed_at": now, "locked_until": 0}
             if fails >= PAIR_CODE_MAX_FAILS:
-                entry["locked_until"] = now + PAIR_CODE_LOCK_SECONDS
+                locked_until = now + PAIR_CODE_LOCK_SECONDS
+                entry["locked_until"] = locked_until
                 attempts[client_id] = entry
                 self.state.save_json("pair_attempts.json", attempts)
-                return False, "配对码连续错 5 次，已锁定 1 小时：请在目标设备上跑 hand_server.py pair-code --rotate 轮换配对码"
+                self.state.audit({
+                    "event": "pair_code_locked",
+                    "client": client_id,
+                    "fails": fails,
+                    "locked_until": locked_until,
+                })
+                return (
+                    False,
+                    ERR_PAIR_CODE_LOCKED,
+                    f"配对码连续输错 {fails} 次，已锁定 15 分钟；请在目标机运行 wherevercode-hand pair-code --rotate 解锁并生成新码",
+                )
+
             attempts[client_id] = entry
             self.state.save_json("pair_attempts.json", attempts)
-            return False, f"配对码不对（已错 {fails} 次，错 5 次锁定 1 小时）：请核对目标设备上的配对码"
+            remaining_attempts = PAIR_CODE_MAX_FAILS - fails
+            self.state.audit({
+                "event": "pair_code_failed",
+                "client": client_id,
+                "fails": fails,
+                "remaining": remaining_attempts,
+            })
+            return (
+                False,
+                ERR_PAIR_CODE_WRONG,
+                f"配对码不对（已错误 {fails} 次，剩余尝试次数：{remaining_attempts} 次）：请核对目标机终端输出的 6 位数字",
+            )
 
     def agents(self) -> list[dict]:
         """hello 用的 Agent 列表：注册表（内置 + 自定义行）解析出的
@@ -993,7 +1163,12 @@ class HandServer:
             self._handle_pending_pairing(conn, client_id, client_pub, status)
             return
         signing_key = derive_signing_key(session_key)
-        sealed = read_frame(conn, timeout=DEFAULT_TIMEOUT_SECONDS + 60)
+        try:
+            sealed = read_frame(conn, timeout=DEFAULT_TIMEOUT_SECONDS + 60)
+        except (ConnectionError, OSError):
+            return
+        except Exception:
+            return
         try:
             plaintext = open_sealed(session_key, sealed)
         except Exception:
@@ -1001,6 +1176,25 @@ class HandServer:
         try:
             envelope = json.loads(plaintext.decode("utf-8"))
         except Exception:
+            return
+        # 2026-11-15 幂等配对确认：已批准（APPROVED）客户端再次发送配对确认时，
+        # 直接回 cross_device_pair_approved，防止连接过早关闭导致「远端过早关闭连接」
+        if envelope.get("type") == "cross_device_pair_confirm" \
+                and envelope.get("version") == VERSION:
+            code = str(envelope.get("code", "")).strip()
+            if code:
+                ok, err_code, reason = self.check_pair_code(code, client_id)
+                if not ok and err_code == ERR_PAIR_CODE_LOCKED:
+                    self._send(
+                        conn, session_key, envelope, "cross_device_error",
+                        {"code": err_code, "message": reason}, 1,
+                    )
+                    return
+            self.state.audit({"event": "pair_approved", "client": client_id, "via": "already_approved"})
+            self._send(
+                conn, session_key, envelope, "cross_device_pair_approved",
+                {"device_id": self.device_id}, 1,
+            )
             return
         if envelope.get("type") == "wherevercode_ws_token" \
                 and envelope.get("version") == VERSION:
@@ -1316,40 +1510,56 @@ class HandServer:
         pair-approve 解除撤销。只等 15 秒：App 的配对确认紧跟 hello
         发出，超时即关，不占线程。
         """
-        if status in ("REVOKED", "KEY_MISMATCH"):
+        session_key = derive_session_key(self.private_key, self.public_key, client_pub)
+        if status == "KEY_MISMATCH":
+            try:
+                self._send(
+                    conn, session_key, {"task_id": ""}, "cross_device_error",
+                    {"code": "key_mismatch", "message": "设备身份公钥与已记录公钥不一致，请在目标机运行 wherevercode-hand pair-revoke 撤销旧记录后再试。"}, 1
+                )
+            except Exception:
+                pass
             return
+
         try:
             sealed = read_frame(conn, timeout=15)
         except Exception:
             return
-        session_key = derive_session_key(self.private_key, self.public_key, client_pub)
+
         try:
             plaintext = open_sealed(session_key, sealed)
             envelope = json.loads(plaintext.decode("utf-8"))
         except Exception:
             return  # 解不开：静默关闭
+
         if envelope.get("type") != "cross_device_pair_confirm" or envelope.get("version") != VERSION:
-            # 不是配对确认：按未批准拒绝（与 live 版 _reject_pending 同款，
-            # 错误形状与 _dispatch 的 cross_device_error 一致：code 在 args 里）。
+            if status == "REVOKED":
+                err_code = ERR_PAIR_REVOKED
+                err_msg = "本设备在目标机上的访问权限已被撤销；如需重新使用，请在 App 中输入新的 5 分钟配对码完成重新配对。"
+            else:
+                err_code = ERR_NOT_AUTHORIZED
+                err_msg = "远端尚未批准此手机：请先在 App 里完成配对（核对指纹 + 输入 5 分钟配对码），或在服务端运行 wherevercode-hand pair-approve 批准。"
             try:
                 self._send(
                     conn, session_key, envelope, "cross_device_error",
-                    {"code": ERR_NOT_AUTHORIZED,
-                     "message": "远端尚未批准此手机：请先在 App 里完成配对（核对指纹 + 配对码），或在服务端跑 hand_server.py pair-approve 批准"},
-                    1,
+                    {"code": err_code, "message": err_msg}, 1,
                 )
             except Exception:
                 pass
             return
+
         code = str(envelope.get("code", "")).strip()
-        ok, reason = self.check_pair_code(code, client_id)
+        ok, err_code, reason = self.check_pair_code(code, client_id)
         if ok:
+            now = int(time.time())
             with self.state.lock:
                 clients = self.state.load_json("paired_clients.json", {})
                 entry = clients.get(client_id)
                 if not isinstance(entry, dict):
-                    return
-                entry["status"] = "APPROVED"
+                    entry = {"public_key_b64": b64e(client_pub), "status": "APPROVED", "added_at": now, "approved_at": now}
+                else:
+                    entry["status"] = "APPROVED"
+                    entry["approved_at"] = now
                 clients[client_id] = entry
                 self.state.save_json("paired_clients.json", clients)
             self.state.audit({"event": "pair_approved", "client": client_id, "via": "pair_code"})
@@ -1361,11 +1571,11 @@ class HandServer:
             except Exception:
                 pass
         else:
-            self.state.audit({"event": "pair_code_failed", "client": client_id, "reason": reason})
+            self.state.audit({"event": "pair_code_failed", "client": client_id, "code": err_code, "reason": reason})
             try:
                 self._send(
                     conn, session_key, envelope, "cross_device_error",
-                    {"code": ERR_PAIR_CODE_WRONG, "message": reason}, 1,
+                    {"code": err_code, "message": reason}, 1,
                 )
             except Exception:
                 pass
@@ -1401,6 +1611,8 @@ class HandServer:
         if not isinstance(args, dict):
             args = {}
         if envelope.get("type") != "cross_device_tool_call" or envelope.get("version") != VERSION:
+            self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                        f"不支持的信封类型：{envelope.get('type')}")
             return
         if action not in ("list", "read", "write", "run", "authorize_project_folder", "get_artifact"):
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
@@ -1552,9 +1764,19 @@ class HandServer:
     def _handle_device_admin(self, conn, session_key, client_id, envelope) -> None:
         seq = int(envelope.get("seq", 1))
         action = str(envelope.get("action", ""))
+        if action == "rotate_pair_code":
+            if envelope.get("confirmed") is not True:
+                self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                            "远程刷新配对码需要用户确认（confirmed 缺失）：请在已认证 App 里确认后再试")
+                return
+            new_code = self.rotate_pair_code()
+            self.state.audit({"event": "pair_code_rotated_remote", "by_client": client_id})
+            self._send(conn, session_key, envelope, "wherevercode_device_admin_reply",
+                       {"rotated": True, "pair_code": new_code, "expires_in": PAIR_CODE_TTL_SECONDS}, seq + 1)
+            return
         if action != "update_hand":
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
-                        "不支持的管理操作：只允许 update_hand")
+                        "不支持的管理操作：只允许 update_hand / rotate_pair_code")
             return
         if envelope.get("confirmed") is not True:
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
@@ -2669,7 +2891,8 @@ def serve(state_dir: str, device_id: str, display_name: str, host: str, port: in
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
-        print(f"pair code: {hand.get_or_create_pair_code()}（App 配对时填入；轮换：hand_server.py pair-code --rotate）", flush=True)
+        code = hand.rotate_pair_code()
+        print(f"pair code: {code}（5 分钟一次性有效，成功配对后立即作废；刷新：wherevercode-hand pair-code --rotate）", flush=True)
         print(f"state dir: {hand.state.dir}", flush=True)
         # 自更新看门狗凭它判断新版是不是真的起来了。
         hand.mark_healthy_start()
@@ -2700,11 +2923,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("serve", help="启动 Hand 服务")
     sub.add_parser("fingerprint", help="打印服务端公钥指纹（SHA-256）")
-    sub.add_parser("pair-list", help="列出已记录的客户端配对")
+    sub.add_parser("pair-list", help="列出已记录的客户端配对状态")
     approve = sub.add_parser("pair-approve", help="批准一个待配对的客户端")
     approve.add_argument("device_id")
-    pc = sub.add_parser("pair-code", help="查看本机配对码（App 内配对时填入）")
-    pc.add_argument("--rotate", action="store_true", help="生成新配对码（旧码立即失效）")
+    pc = sub.add_parser("pair-code", help="查看、轮换或撤销 5 分钟一次性配对码")
+    pc.add_argument("--rotate", "--new", action="store_true", dest="rotate", help="生成新一次性配对码（5 分钟有效，旧码立即失效）")
+    pc.add_argument("--revoke", action="store_true", help="撤销当前配对码（立即失效）")
+    pc.add_argument("--raw", action="store_true", help="只输出 6 位数字配对码")
     revoke = sub.add_parser("pair-revoke", help="撤销一个客户端的配对")
     revoke.add_argument("device_id")
     grant = sub.add_parser("grant", help="授权某 agent 访问某文件夹")
@@ -2754,7 +2979,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "pair-list":
         clients = hand.state.load_json("paired_clients.json", {})
-        print(json.dumps(clients, ensure_ascii=False, indent=2))
+        if not clients:
+            print("暂无已记录的客户端。")
+            return 0
+        print(f"{'DEVICE ID':<25} {'STATUS':<12} {'ADDED AT':<20} {'APPROVED AT'}")
+        print("-" * 75)
+        for cid, entry in clients.items():
+            st = entry.get("status", "UNKNOWN")
+            added = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(entry.get('added_at', 0))) if entry.get('added_at') else '-'
+            appr = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(entry.get('approved_at', 0))) if entry.get('approved_at') else '-'
+            print(f"{cid:<25} {st:<12} {added:<20} {appr}")
         return 0
     if args.command == "pair-approve":
         with hand.state.lock:
@@ -2763,15 +2997,67 @@ def main(argv: list[str] | None = None) -> int:
             if entry is None:
                 print(f"未知设备：{args.device_id}（先让 App 发一次 hello）", file=sys.stderr)
                 return 1
+            now = int(time.time())
             entry["status"] = "APPROVED"
+            entry["approved_at"] = now
+            clients[args.device_id] = entry
             hand.state.save_json("paired_clients.json", clients)
-        print(f"已批准：{args.device_id}")
+            hand.state.audit({"event": "pair_approved", "client": args.device_id, "via": "cli_approve"})
+        print(f"已批准设备配对：{args.device_id}")
         return 0
     if args.command == "pair-code":
+        if args.revoke:
+            hand.revoke_pair_code()
+            print("当前配对码已撤销作废。")
+            return 0
         if args.rotate:
-            print(hand.rotate_pair_code())
+            code = hand.rotate_pair_code()
+            if args.raw:
+                print(code)
+            else:
+                print(code)
+                print(f"状态：新配对码已生成（{PAIR_CODE_TTL_SECONDS} 秒 / 5 分钟有效，成功使用即作废）")
+                print("提示：刷新新码运行 wherevercode-hand pair-code --rotate")
+                print("      撤销配对码运行 wherevercode-hand pair-code --revoke")
+            return 0
+        info = hand.get_pair_code_info()
+        st = info["status"]
+        if st == "ACTIVE":
+            if args.raw:
+                print(info["code"])
+            else:
+                print(info["code"])
+                print(f"状态：有效（剩余 {info['remaining_seconds']} 秒，5 分钟一次性）")
+                print("提示：刷新新码运行 wherevercode-hand pair-code --rotate")
+                print("      撤销配对码运行 wherevercode-hand pair-code --revoke")
+        elif st == "EXPIRED":
+            if args.raw:
+                print("EXPIRED")
+            else:
+                print("EXPIRED")
+                print("配对码已过期（超过 5 分钟有效时间）。")
+                print("请运行 wherevercode-hand pair-code --rotate 生成新配对码。")
+        elif st == "CONSUMED":
+            if args.raw:
+                print("CONSUMED")
+            else:
+                print("CONSUMED")
+                print(f"配对码已使用并作废（已被 {info.get('consumed_by', '客户端')} 配对成功）。")
+                print("请运行 wherevercode-hand pair-code --rotate 生成新配对码。")
+        elif st == "REVOKED":
+            if args.raw:
+                print("REVOKED")
+            else:
+                print("REVOKED")
+                print("配对码已被手动撤销作废。")
+                print("请运行 wherevercode-hand pair-code --rotate 生成新配对码。")
         else:
-            print(hand.get_or_create_pair_code())
+            code = hand.rotate_pair_code()
+            if args.raw:
+                print(code)
+            else:
+                print(code)
+                print(f"状态：新配对码已生成（{PAIR_CODE_TTL_SECONDS} 秒 / 5 分钟有效，成功使用即作废）")
         return 0
     if args.command == "pair-revoke":
         with hand.state.lock:
@@ -2780,9 +3066,13 @@ def main(argv: list[str] | None = None) -> int:
             if entry is None:
                 print(f"未知设备：{args.device_id}", file=sys.stderr)
                 return 1
+            now = int(time.time())
             entry["status"] = "REVOKED"
+            entry["revoked_at"] = now
+            clients[args.device_id] = entry
             hand.state.save_json("paired_clients.json", clients)
-        print(f"已撤销：{args.device_id}")
+            hand.state.audit({"event": "pair_revoked", "client": args.device_id})
+        print(f"已撤销设备配对：{args.device_id}")
         return 0
     if args.command == "grant":
         with hand.state.lock:
