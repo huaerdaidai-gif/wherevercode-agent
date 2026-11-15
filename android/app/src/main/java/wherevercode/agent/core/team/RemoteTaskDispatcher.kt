@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import wherevercode.agent.core.mcp.HandClient
 import wherevercode.agent.core.mcp.HandEvent
 import wherevercode.agent.core.mcp.RemoteAgentChatPort
+import wherevercode.agent.core.mcp.RemoteResultProtocol
 import wherevercode.agent.core.mcp.RemoteTarget
 import wherevercode.agent.core.task.TaskPacket
 import wherevercode.agent.core.task.PipelineRunnerHook
@@ -31,20 +32,26 @@ import wherevercode.agent.core.task.TaskScheduler
  * Agent（如 VPS 上的 Example Agent），进度流式记为任务步骤，
  * 结果/错误/停止按同一账本语义落态：
  * - Progress → 任务步骤（可见进度）；
- * - Result → 先过 [RemoteMemberVerdictClassifier] 看正文开头：
- *   显式失败表述（或空结果）→ failed；否则 working → review →
- *   completed（与本地执行同一条边，TaskStates 没有 working →
- *   completed 直边）。Hand 的 result 帧没有成功/失败标志、退出码
- *   也救不了（Codex 退出码 0 但正文报失败，见 692638e2），所以
- *   必须看正文；分类器只认开头陈述，是启发式（见
- *   [RemoteMemberVerdict]）。
- * - Blocked（远端拒绝/执行失败）→ failed，带真实原因；
+ * - Result（T6 结构化结果协议 v1，2026-11-15）：优先读结构化
+ *   status（[RemoteResultProtocol]）：succeeded/failed/cancelled
+ *   按协议落态，正文 output 只用于展示、日志与产物拼接，**不再参与
+ *   成败判定**；旧 Hand 缺 status 字段时保留正文分类器兜底
+ *   （[RemoteMemberVerdictClassifier]），但必须带
+ *   legacy_verdict_fallback 显式标记，不得伪装成结构化结果；
+ *   status 非法或自相矛盾 → invalid_protocol_status 保守失败，
+ *   绝不降级成功（见 T6-S2 §4 映射表）；
+ * - Blocked（远端拒绝/执行失败，含 error code）→ failed，code 透传
+ *   进 error 前缀；
  * - Blocked（控制停止，code=[REMOTE_CONTROLLED_STOP_CODE]）→ cancelled；
+ * - Blocked（传输中断，code=transport_interrupted）或无任何终态帧
+ *   且交付恢复失败 → failed + remote_result_unknown：**结果未知**
+ *  （远端可能仍在执行或已完成），绝不写成确定失败或取消成功；
+ *   原始歧义说明进审计事件（Muse 批复 #1 条件）；
+ * - Host 确认“无交付记录”（artifact_missing 等终态码）→ 确认失败，
+ *   与结果未知严格区分；
  * - 执行中途目标变了（goalVersion 与派发时不一致）→ 本次结果作废，
  *   任务 cancelled（与 TurnTaskRecorder GOAL_CHANGED → cancelled
- *   一致），不把旧目标的结果当成新目标的交付；
- * - 流无终态就断了（断线）→ failed，原因写明“未收到结果”，
- *   不伪造完成。
+ *   一致），不把旧目标的结果当成新目标的交付。
  *
  * 租约：执行中每 180 秒续一次 600 秒租约（与 LocalTaskRunner 同口径），
  * 长任务不会中途被回队。每次状态写都按认领到的 attemptId 核对
@@ -53,10 +60,16 @@ import wherevercode.agent.core.task.TaskScheduler
  * 发给远端的是版本化任务包（[TaskPacket]）渲染的文本，不是裸目标：
  * 跨设备只传任务包，不传聊天记录。
  */
+/**
+ * 一次远端执行的终态。[fromStructured]/[errorCode] 是 T6 协议来源
+ * 标记：结构化（帧带合法 status 或 error code）为 true；旧协议正文
+ * 兜底为 false。[errorCode] 机器可读（[RemoteResultProtocol] 代码表），
+ * null 表示无码（如用户停止、目标变更）。
+ */
 sealed class RemoteTaskOutcome {
-    data class Completed(val result: String) : RemoteTaskOutcome()
-    data class Failed(val error: String) : RemoteTaskOutcome()
-    data class Cancelled(val note: String) : RemoteTaskOutcome()
+    data class Completed(val result: String, val fromStructured: Boolean = false) : RemoteTaskOutcome()
+    data class Failed(val error: String, val errorCode: String? = null) : RemoteTaskOutcome()
+    data class Cancelled(val note: String, val errorCode: String? = null) : RemoteTaskOutcome()
 }
 
 class RemoteTaskDispatcher(
@@ -90,8 +103,12 @@ class RemoteTaskDispatcher(
     /** Result of a bounded delivery fetch. */
     private sealed class Fetch {
         class Delivered(val result: HandEvent.Result) : Fetch()
-        /** The Host says refetching cannot help (nothing delivered / corrupt / stale). */
-        object Terminal : Fetch()
+        /**
+         * The Host says refetching cannot help (nothing delivered / corrupt /
+         * stale). [code] 是 Host 的终态码（artifact_missing 等）：确认失败，
+         * 与“结果未知”（Exhausted / 无帧）严格区分。
+         */
+        class Terminal(val code: String?) : Fetch()
         /** Every bounded attempt hit a transient failure. */
         object Exhausted : Fetch()
     }
@@ -139,8 +156,13 @@ class RemoteTaskDispatcher(
                     finishAsCancelled(task.taskId, "任务被用户停止。", attemptId)
                     throw e
                 } catch (e: Exception) {
-                    finishAsFailed(task.taskId, "远端执行异常：${e.message ?: "未知错误"}", attemptId)
-                    RemoteTaskOutcome.Failed("远端执行异常：${e.message ?: "未知错误"}")
+                    // 执行器异常（T6-S2 §4 情形 4）：App 侧链路坏，与远端结果无关。
+                    val error = RemoteResultProtocol.errorText(
+                        RemoteResultProtocol.CODE_REMOTE_EXECUTOR_ERROR,
+                        "远端执行异常：${e.message ?: "未知错误"}",
+                    )
+                    finishAsFailed(task.taskId, error, attemptId)
+                    RemoteTaskOutcome.Failed(error, RemoteResultProtocol.CODE_REMOTE_EXECUTOR_ERROR)
                 } finally {
                     renewJob.cancel()
                 }
@@ -158,6 +180,9 @@ class RemoteTaskDispatcher(
     ): RemoteTaskOutcome {
         var finalResult: HandEvent.Result? = null
         var finalBlocked: HandEvent.Blocked? = null
+        // Host 确认“无交付记录/记录损坏/轮次过期”时的终态码：确认失败，
+        // 不是结果未知（与 [RemoteResultProtocol.CODE_REMOTE_RESULT_UNKNOWN] 区分）。
+        var deliveryTerminalCode: String? = null
         val text = pipelineHook?.coderPrompt(task) ?: TaskPacket.fromTask(
             task, folder = target.folder, folderSource = target.folderSource.name.lowercase(),
         ).toPromptText()
@@ -191,48 +216,157 @@ class RemoteTaskDispatcher(
             (finalBlocked == null || finalBlocked?.code == HandClient.TRANSPORT_INTERRUPTED)
         ) {
             // First fetch immediately, then the bounded backoff schedule.
-            finalResult = (fetchDelivery(target, task.taskId, attemptId, listOf(0L) + artifactRetryDelaysMs.drop(1))
-                as? Fetch.Delivered)?.result
-            if (finalResult != null) finalBlocked = null
+            when (val fetched = fetchDelivery(target, task.taskId, attemptId, listOf(0L) + artifactRetryDelaysMs.drop(1))) {
+                is Fetch.Delivered -> {
+                    finalResult = fetched.result
+                    finalBlocked = null
+                }
+                is Fetch.Terminal -> deliveryTerminalCode = fetched.code
+                Fetch.Exhausted -> Unit
+            }
         }
         val blocked = finalBlocked
         if (blocked != null) {
             if (blocked.code == REMOTE_CONTROLLED_STOP_CODE) {
+                // 远端确认取消（T6-S2 §4 情形 3）：只有这个出口能落 cancelled。
                 finishAsCancelled(task.taskId, "已按控制指令停止。", attemptId)
-                return RemoteTaskOutcome.Cancelled("已按控制指令停止。")
+                return RemoteTaskOutcome.Cancelled("已按控制指令停止。", blocked.code)
             }
-            finishAsFailed(task.taskId, blocked.reason, attemptId)
-            return RemoteTaskOutcome.Failed(blocked.reason)
-        }
-        val output = finalResult?.output
-        if (output == null) {
-            finishAsFailed(task.taskId, "远端连接中断，未收到结果：请检查网络与远端设备后重新派发", attemptId)
-            return RemoteTaskOutcome.Failed("远端连接中断，未收到结果")
-        }
-        // 2026-11-11（任务 692638e2）：Result 只说明“远端回了话”，
-        // 不说明“远端做成了”。正文开头是显式失败表述时必须落 failed，
-        // 不能按完成记。目标变更与 Blocked 检查在前，顺序不动。
-        return when (val verdict = classifyRemoteMemberOutput(output)) {
-            is RemoteMemberVerdict.Failed -> {
-                finishAsFailed(task.taskId, verdict.reason, attemptId)
-                RemoteTaskOutcome.Failed(verdict.reason)
+            if (blocked.code == HandClient.TRANSPORT_INTERRUPTED) {
+                // 客户端传输中断（读超时/连接重置/零帧）：结果未知，不是确定失败。
+                return finishAsUnknown(task.taskId, attemptId, blocked.reason)
             }
-            RemoteMemberVerdict.Success -> {
-                val result = checkNotNull(finalResult)
-                val artifact = if (result.artifactPresent == true) {
-                    val verified = verifyOrRefetchArtifact(target, task.taskId, attemptId, result)
-                    if (verified == null) {
-                        val reason = "产物校验失败：已向远端重取 ${artifactRetryDelaysMs.size} 次仍不一致，未保存产物"
-                        finishAsFailed(task.taskId, reason, attemptId)
-                        return RemoteTaskOutcome.Failed(reason)
+            // error 帧本身就是结构化出口：code 透传进前缀，按失败落账
+            //（含旧 Hand 滥用 agent_not_found 报非 0 退出码的情形——映射表 #9）。
+            val error = RemoteResultProtocol.errorText(blocked.code, blocked.reason)
+            finishAsFailed(task.taskId, error, attemptId)
+            return RemoteTaskOutcome.Failed(error, blocked.code)
+        }
+        val result = finalResult
+        if (result == null) {
+            if (deliveryTerminalCode != null) {
+                // Host 已明确回答“这次执行没有可用交付”：确认失败。
+                val text = "远端确认本次执行没有可用的交付记录：请重新派发。"
+                val error = RemoteResultProtocol.errorText(deliveryTerminalCode, text)
+                finishAsFailed(task.taskId, error, attemptId)
+                return RemoteTaskOutcome.Failed(error, deliveryTerminalCode)
+            }
+            // 连一个终态帧都没有：结果未知（旧文案“未收到结果”按 T6-S2
+            // §4 情形 5b 改为显式未知，不许写成普通失败）。
+            return finishAsUnknown(task.taskId, attemptId, "流结束，未收到任何终态帧")
+        }
+        // —— T6 结构化优先判定（2026-11-15）——
+        // status 在 → 协议说了算，正文不参与成败；status 缺 → 旧协议
+        // 兜底（分类器）但显式标记；status 非法 → 保守失败。
+        return when (
+            val verdict = RemoteResultProtocol.resolveStructured(
+                result.status, result.errorCode, result.errorMessage, result.output,
+            )
+        ) {
+            is RemoteResultProtocol.StructuredVerdict.Failed -> {
+                val error = RemoteResultProtocol.errorText(verdict.code, verdict.message)
+                finishAsFailed(task.taskId, error, attemptId)
+                RemoteTaskOutcome.Failed(error, verdict.code)
+            }
+
+            is RemoteResultProtocol.StructuredVerdict.Cancelled -> {
+                val note = result.errorMessage?.takeIf { it.isNotBlank() } ?: "远端确认执行已取消。"
+                finishAsCancelled(task.taskId, note, attemptId)
+                RemoteTaskOutcome.Cancelled(note, verdict.code)
+            }
+
+            is RemoteResultProtocol.StructuredVerdict.Invalid -> {
+                val error = RemoteResultProtocol.errorText(
+                    RemoteResultProtocol.CODE_INVALID_PROTOCOL_STATUS,
+                    "远端回包状态非法（status=${verdict.rawStatus}）：请检查目标设备 Hand 版本",
+                )
+                finishAsFailed(task.taskId, error, attemptId)
+                RemoteTaskOutcome.Failed(error, RemoteResultProtocol.CODE_INVALID_PROTOCOL_STATUS)
+            }
+
+            RemoteResultProtocol.StructuredVerdict.Succeeded ->
+                deliverSuccess(task, target, attemptId, result, fromStructured = true)
+
+            RemoteResultProtocol.StructuredVerdict.NeedsLegacyFallback -> {
+                // 旧 Hand（Result 无 status 字段）：保留原有正文分类器兼容判定，
+                // 但失败必须带 legacy_verdict_fallback + fallback 来源显式标记，
+                // 成功记审计事件——兜底不得伪装成结构化结果（T6-S2 §5）。
+                when (val legacy = classifyRemoteMemberOutput(result.output)) {
+                    is RemoteMemberVerdict.Failed -> {
+                        val error = RemoteResultProtocol.errorPrefix(RemoteResultProtocol.CODE_LEGACY_VERDICT_FALLBACK) +
+                            RemoteResultProtocol.sourcePrefix(RemoteResultProtocol.SOURCE_FALLBACK) +
+                            legacy.reason
+                        finishAsFailed(task.taskId, error, attemptId)
+                        RemoteTaskOutcome.Failed(error, RemoteResultProtocol.CODE_LEGACY_VERDICT_FALLBACK)
                     }
-                    storeArtifact(task.taskId, checkNotNull(attemptId), verified)
-                } else null
-                val delivery = if (artifact == null) output else "产物：$artifact\n\n$output"
-                finishAsCompleted(task.taskId, delivery, attemptId)
-                RemoteTaskOutcome.Completed(delivery)
+                    RemoteMemberVerdict.Success ->
+                        deliverSuccess(task, target, attemptId, result, fromStructured = false)
+                }
             }
         }
+    }
+
+    /**
+     * 成功交付（结构化 succeeded 或旧协议兜底 Success 共用）：产物校验、
+     * 落态 review → completed（流水线 hold 停 review，P2 行为不变）。
+     * [fromStructured] 只影响来源标记：兜底成功额外记
+     * [RemoteResultProtocol.EVENT_REMOTE_RESULT_FALLBACK] 审计事件，
+     * result 正文不加前缀（用户可见文案不污染）。
+     */
+    private suspend fun deliverSuccess(
+        task: TaskRecord,
+        target: RemoteTarget,
+        attemptId: String?,
+        result: HandEvent.Result,
+        fromStructured: Boolean,
+    ): RemoteTaskOutcome {
+        val artifact = if (result.artifactPresent == true) {
+            val verified = verifyOrRefetchArtifact(target, task.taskId, attemptId, result)
+            if (verified == null) {
+                val error = RemoteResultProtocol.errorText(
+                    RemoteResultProtocol.CODE_ARTIFACT_VERIFY_FAILED,
+                    "产物校验失败：已向远端重取 ${artifactRetryDelaysMs.size} 次仍不一致，未保存产物",
+                )
+                finishAsFailed(task.taskId, error, attemptId)
+                return RemoteTaskOutcome.Failed(error, RemoteResultProtocol.CODE_ARTIFACT_VERIFY_FAILED)
+            }
+            storeArtifact(task.taskId, checkNotNull(attemptId), verified)
+        } else null
+        val delivery = if (artifact == null) result.output else "产物：$artifact\n\n${result.output}"
+        if (!fromStructured) {
+            taskStore.recordTaskEvent(
+                task.taskId,
+                RemoteResultProtocol.EVENT_REMOTE_RESULT_FALLBACK,
+                "终态由旧协议正文分类器兜底判定（远端 Hand 未返回结构化 status）",
+                "remote-dispatcher",
+            )
+        }
+        finishAsCompleted(task.taskId, delivery, attemptId)
+        return RemoteTaskOutcome.Completed(delivery, fromStructured)
+    }
+
+    /**
+     * 结果未知落账（T6-S2 §4 情形 5b）：断线/客户端超时且交付恢复失败。
+     * 落 failed（TaskStates 禁止扩状态集，无法新增 unknown 态）但
+     * error_code=remote_result_unknown 显式区分，文案必须含“结果未知”，
+     * 不许只显示普通“失败”；原始歧义说明（[detail]）进审计事件
+     * （Muse 2026-11-15 批复 #1 条件）。
+     */
+    private fun finishAsUnknown(taskId: String, attemptId: String?, detail: String): RemoteTaskOutcome {
+        val note = "远端连接中断或超时，本次执行结果未知（远端可能仍在执行或已完成）：" +
+            "请在远端确认实际结果后重新派发。"
+        taskStore.recordTaskEvent(
+            taskId,
+            RemoteResultProtocol.EVENT_REMOTE_RESULT_UNKNOWN,
+            detail.take(500),
+            "remote-dispatcher",
+        )
+        val error = RemoteResultProtocol.errorText(
+            RemoteResultProtocol.CODE_REMOTE_RESULT_UNKNOWN,
+            note,
+        )
+        finishAsFailed(taskId, error, attemptId)
+        return RemoteTaskOutcome.Failed(error, RemoteResultProtocol.CODE_REMOTE_RESULT_UNKNOWN)
     }
 
     /**
@@ -264,7 +398,7 @@ class RemoteTaskDispatcher(
                 continue // Transport failure: next bounded attempt.
             }
             result?.let { return Fetch.Delivered(it) }
-            if (blocked?.code in TERMINAL_ARTIFACT_CODES) return Fetch.Terminal
+            if (blocked?.code in TERMINAL_ARTIFACT_CODES) return Fetch.Terminal(blocked?.code)
         }
         return Fetch.Exhausted
     }
@@ -289,7 +423,7 @@ class RemoteTaskDispatcher(
         for (wait in artifactRetryDelaysMs) {
             val again = when (val fetched = fetchDelivery(target, taskId, attempt, listOf(wait))) {
                 is Fetch.Delivered -> fetched.result
-                Fetch.Terminal -> return null
+                is Fetch.Terminal -> return null
                 Fetch.Exhausted -> continue
             }
             if (again.artifactPresent != true) return null

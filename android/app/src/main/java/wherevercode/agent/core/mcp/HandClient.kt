@@ -50,13 +50,25 @@ sealed class HandEvent {
     /** 进度事件（流式）。 */
     data class Progress(val seq: Long, val message: String, val percent: Int? = null) : HandEvent()
 
-    /** 终态：成功结果。 */
+    /**
+     * 终态：成功结果。
+     *
+     * T6 结构化结果协议 v1（2026-11-15）：新增可选键 status / errorCode /
+     * errorMessage / exitCode（wire 键名与值见 [RemoteResultProtocol]）。
+     * 全部默认 null——旧 Hand 不发这些键，旧测试替身与调用方零改动；
+     * 新 Hand 发送后，终态由 status 决定，正文 output 只用于展示、日志
+     * 与产物拼接，不再参与成败判定。
+     */
     data class Result(
         val seq: Long,
         val output: String,
         val artifactPresent: Boolean? = null,
         val artifactBase64: String? = null,
         val artifactSha256: String? = null,
+        val status: String? = null,
+        val errorCode: String? = null,
+        val errorMessage: String? = null,
+        val exitCode: String? = null,
     ) : HandEvent()
 
     /** 终态：被拒绝，任务进 blocked（可恢复）。reason 必须是中文可操作文案。 */
@@ -571,6 +583,12 @@ class HandClient(
                                 response.args["artifact_present"]?.toBooleanStrictOrNull(),
                                 response.args["artifact_b64"],
                                 response.args["artifact_sha256"],
+                                // T6 结构化结果协议 v1：可选键，旧 Hand 缺省 null
+                                //（键名常量见 RemoteResultProtocol，与 T4 集成口径一致）。
+                                response.args[RemoteResultProtocol.ARG_STATUS],
+                                response.args[RemoteResultProtocol.ARG_ERROR_CODE],
+                                response.args[RemoteResultProtocol.ARG_ERROR_MESSAGE],
+                                response.args[RemoteResultProtocol.ARG_EXIT_CODE],
                             ))
                             done = true
                             connection.close()
