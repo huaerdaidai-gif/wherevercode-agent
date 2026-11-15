@@ -36,6 +36,26 @@ class LocalFeaturesTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
             device.waitForIdle()
         }
+        fun clickVisibleDescription(description: String) {
+            device.wait(Until.hasObject(By.desc(description)), 30_000)
+            repeat(10) {
+                val target = device.findObject(By.desc(description))
+                val bounds = target?.visibleBounds
+                if (target != null && bounds != null && bounds.width() > 8 && bounds.height() > 8 &&
+                    bounds.top >= 0 && bounds.bottom < device.displayHeight - 8) {
+                    target.click()
+                    return
+                }
+                device.swipe(180, 680, 180, 350, 20)
+                device.waitForIdle()
+            }
+            error("Delete action is not visible: $description")
+        }
+        fun awaitDeletion(absent: () -> Boolean) {
+            val deadline = System.currentTimeMillis() + 10_000
+            while (!absent() && System.currentTimeMillis() < deadline) Thread.sleep(100)
+            assertTrue("Deletion must finish in the persistent store", absent())
+        }
         fun fields(): List<UiObject2> = device.findObjects(By.clazz("android.widget.EditText"))
         fun hideKeyboard() {
             if (device.executeShellCommand("dumpsys input_method").contains("mInputShown=true")) device.pressBack()
@@ -81,19 +101,14 @@ class LocalFeaturesTest {
             route("memory")
             text("事实名称")
             // Test-created record is the only memory entry in this isolated test package on a clean run.
-            repeat(5) { if (!device.hasObject(By.desc("删除记忆 $marker"))) { device.swipe(180, 680, 180, 350, 20); device.waitForIdle() } }
-            val delete = device.wait(Until.findObject(By.desc("删除记忆 $marker")), 30_000)
-            if (delete != null) {
-                delete.click(); text("删除").click()
-                device.waitForIdle()
-                assertNull(PersistentMemoryStore(context.getSharedPreferences("brain_memory", 0)).get(MemoryKind.FACT, marker))
-            } else error("Memory delete action not visible")
+            clickVisibleDescription("删除记忆 $marker")
+            text("删除").click()
+            awaitDeletion { PersistentMemoryStore(context.getSharedPreferences("brain_memory", 0)).get(MemoryKind.FACT, marker) == null }
             route("skills")
             text("技能名称")
-            repeat(5) { if (!device.hasObject(By.desc("删除技能 ${saved.id}"))) { device.swipe(180, 680, 180, 350, 20); device.waitForIdle() } }
-            device.wait(Until.findObject(By.desc("删除技能 ${saved.id}")), 30_000)!!.click(); text("删除").click()
-            device.waitForIdle()
-            assertNull(store.get(saved.id))
+            clickVisibleDescription("删除技能 ${saved.id}")
+            text("删除").click()
+            awaitDeletion { store.get(saved.id) == null }
             File(output, "result.txt").writeText("PASS: UI memory add/confirm/persist/delete; UI skill create/Room/zero evidence/delete; exact route search.\nNo model, cloud sync or automation execution claimed.\n")
         } finally { db.close() }
     }
