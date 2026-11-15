@@ -97,7 +97,7 @@ class ConsoleScreenController(
     init {
         root.addView(content)
         content.addView(
-            UiKit.text(context, "控制台", 20f, R.color.text_primary, bold = true).apply {
+            UiKit.text(context, "控制", 20f, R.color.text_primary, bold = true).apply {
                 setPadding(0, dp(4), 0, dp(2))
             },
         )
@@ -110,6 +110,19 @@ class ConsoleScreenController(
                 R.color.text_tertiary,
             ).apply { setPadding(0, 0, 0, dp(8)) },
         )
+        // Management remains reachable even if data is loading or modules are hidden.
+        val management = UiKit.horizontal(context)
+        listOf(
+            Triple("console_devices", "设备", onOpenDevices),
+            Triple("console_agents", "Agent", onOpenAgents),
+        ).forEach { (viewTag, label, action) ->
+            management.addView(UiKit.text(context, label, 13f, R.color.accent, bold = true).apply {
+                tag = viewTag
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                setOnClickListener { action() }
+            })
+        }
+        content.addView(management)
         val levelRow = UiKit.horizontal(context).apply { setPadding(0, dp(2), 0, dp(6)) }
         levelRow.addView(
             UiKit.text(context, "自由度", 12f, R.color.text_primary, bold = true).apply {

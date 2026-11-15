@@ -65,7 +65,7 @@ interface DrawerPrefsDao {
  * Room — unit-testable on a plain JVM).
  *
  * Decoding discards unknown ids: only ids in [knownIds] survive
- * (default: the ten built-in entries). [DrawerController.applyPrefs]
+ * (default: current and legacy built-in routes). [DrawerController.applyPrefs]
  * discards them again as defence in depth, so a stale row can never
  * resurrect an entry that no longer exists.
  */
@@ -92,7 +92,7 @@ object DrawerPrefsCodec {
 
     fun decode(
         entity: DrawerPrefsEntity?,
-        knownIds: Set<String> = DrawerController.DEFAULT_ORDER.toSet(),
+        knownIds: Set<String> = DrawerController.KNOWN_ROUTE_IDS,
     ): DrawerPrefs {
         if (entity == null) return DrawerPrefs()
         return DrawerPrefs(

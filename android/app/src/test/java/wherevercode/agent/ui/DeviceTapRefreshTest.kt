@@ -50,7 +50,9 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        clickDrawerRow(activity, "nav_devices")
+        activity.findViewById<View>(R.id.buttonMenu).performClick()
+        clickDrawerRow(activity, "nav_control")
+        clickDrawerRow(activity, "console_devices")
 
         val shown = waitForText(activity, "dev-0", timeoutMs = 3000)
         assertTrue("点进设备页 3 秒内应已看到本地添加的设备 dev-0（不等 5 秒 mDNS）", shown)
@@ -68,7 +70,9 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        clickDrawerRow(activity, "nav_devices")
+        activity.findViewById<View>(R.id.buttonMenu).performClick()
+        clickDrawerRow(activity, "nav_control")
+        clickDrawerRow(activity, "console_devices")
         assertTrue(waitForText(activity, "dev-7", timeoutMs = 3000))
 
         val scrollView = activity.findViewById<FrameLayout>(R.id.screenContainer)

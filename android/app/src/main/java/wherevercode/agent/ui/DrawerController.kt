@@ -122,6 +122,9 @@ class DrawerController {
             ID_TEAM_CHANNEL to "团队频道",
         )
 
+        /** Known route ids retained when decoding older preference rows. */
+        val KNOWN_ROUTE_IDS: Set<String> get() = DEFAULT_LABELS.keys
+
         /** 默认 4 项入口（对话、项目、频道、控制）。 */
         fun defaultEntries(): List<DrawerEntry> =
             DEFAULT_ORDER.map { id ->
