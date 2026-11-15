@@ -200,6 +200,7 @@ public final class AgentRegistryStore {
         for i in 0..<agents.count {
             // 对绑定该设备的 Agent 安全解绑，绝不误删 Agent 实体！
             if agents[i].deviceId == deviceId && agents[i].agentId != deviceId {
+                agents[i].deviceId = nil
                 agents[i].memberConnectionState = "NOT_CONNECTED"
                 agents[i].lastTestSummary = "宿主设备已移除（未连接）"
                 agents[i].baseUrl = nil
@@ -222,7 +223,10 @@ public final class AgentRegistryStore {
         let deleted = deletedDeviceIds()
         var agents = try listAgents()
         if !deleted.isEmpty {
-            agents.removeAll { deleted.contains($0.agentId) || ($0.deviceId != nil && deleted.contains($0.deviceId!)) }
+            agents.removeAll { ag in
+                guard ag.kind == .device && (ag.access == .app || ag.agentId == ag.deviceId) else { return false }
+                return deleted.contains(ag.agentId) || (ag.deviceId != nil && deleted.contains(ag.deviceId!))
+            }
         }
         var modified = false
         for i in 0..<agents.count {

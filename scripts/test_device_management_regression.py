@@ -532,6 +532,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
             if a["agentId"] == dev_id or (a.get("access") == "APP" and a.get("deviceId") == dev_id):
                 continue
             if a.get("deviceId") == dev_id:
+                a["deviceId"] = None
                 a["memberConnectionState"] = "NOT_CONNECTED"
                 a["baseUrl"] = None
             updated.append(a)
