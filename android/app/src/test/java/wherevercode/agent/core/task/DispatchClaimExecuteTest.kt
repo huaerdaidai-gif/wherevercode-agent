@@ -1,5 +1,8 @@
 package wherevercode.agent.core.task
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -182,4 +185,33 @@ class DispatchClaimExecuteTest {
         assertEquals("任务被用户停止。", taskStore.getTask("t1")?.result)
         runner.stop()
     }
+    @Test
+    fun `cancel before execution dispatcher starts still records fenced terminal state`() = runBlocking {
+        val held = StandardTestDispatcher()
+        var executed = false
+        runner = LocalTaskRunner(
+            taskStore, scheduler, stepStore,
+            object : TaskExecutor {
+                override suspend fun execute(task: TaskRecord, onStep: (TaskStepEvent) -> Unit): TaskExecutionResult {
+                    executed = true
+                    return TaskExecutionResult(true, "must not execute")
+                }
+            },
+            executionDispatcher = held,
+        )
+        queuedDispatched("t1")
+        val pump = launch(Dispatchers.Default) { runner.pumpOnce() }
+        withTimeout(5000) {
+            while (!runner.isExecuting("t1")) delay(10)
+        }
+        assertTrue(runner.cancel("t1"))
+        held.scheduler.runCurrent()
+        withTimeout(5000) {
+            while (taskStore.getTask("t1")?.state != "cancelled") delay(10)
+        }
+        pump.join()
+        assertTrue(!executed)
+        assertEquals("任务被用户停止。", taskStore.getTask("t1")?.result)
+    }
+
 }

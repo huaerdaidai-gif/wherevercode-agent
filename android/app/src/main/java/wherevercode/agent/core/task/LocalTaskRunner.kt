@@ -1,6 +1,8 @@
 package wherevercode.agent.core.task
 
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -136,6 +138,7 @@ class LocalTaskRunner(
      * review、不自动 completed（[finishTask] 查它）。
      */
     private val pipelineHook: PipelineRunnerHook? = null,
+    private val executionDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     companion object {
         /** The agent id a locally executed task is claimed under. */
@@ -262,7 +265,18 @@ class LocalTaskRunner(
         val claimed = scheduler.claimTask(candidate.taskId, LOCAL_AGENT_ID) ?: return
         val started = scheduler.startTask(claimed.taskId) ?: return
         onTasksChanged?.invoke()
-        val job = scope.launch { runTask(started) }
+        val executionEntered = AtomicBoolean(false)
+        val job = scope.launch(executionDispatcher) { runTask(started, executionEntered) }
+        job.invokeOnCompletion { cause ->
+            if (cause is CancellationException && !executionEntered.get()) {
+                // A cancelled launch may never enter its body. Persist on IO, with
+                // the same attempt fence, instead of leaving the claimed row working.
+                scope.launch {
+                    finishAsCancelled(started.taskId, "任务被用户停止。", started.attemptId,
+                        System.currentTimeMillis())
+                }
+            }
+        }
         executingJob = job
         executingTaskId = started.taskId
         try {
@@ -321,7 +335,7 @@ class LocalTaskRunner(
         }
     }
 
-    private suspend fun runTask(task: TaskRecord) {
+    private suspend fun runTask(task: TaskRecord, executionEntered: AtomicBoolean) {
         // P0 围栏令牌：本次执行认领到的 attemptId；全部状态写都按它
         // 核对（见 updateTask），任务被回队重认领后旧执行器的写丢弃。
         val attemptId = task.attemptId
@@ -336,6 +350,7 @@ class LocalTaskRunner(
                     }
                 }
                 try {
+                    executionEntered.set(true)
                     val result = executor.execute(task) { event ->
                         recordStepEvent(task.taskId, event)
                     }
