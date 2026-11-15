@@ -49,6 +49,15 @@ def load_bundled_hand_server():
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    # Model the installed service's explicit --config-policy bundled. Keep all
+    # original expected bytes/assertions; explicit per-test policies still win.
+    original = module.HandServer
+    class InstalledHandServer(original):
+        def __init__(self, *args, **kwargs):
+            if len(args) < 5:
+                kwargs.setdefault("config_policy", "bundled")
+            super().__init__(*args, **kwargs)
+    module.HandServer = InstalledHandServer
     return module
 
 

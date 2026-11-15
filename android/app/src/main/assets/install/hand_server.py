@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Canonical source: server/hand_server.py. Do not hand-edit assets/install copy.
+# Generate: python3 scripts/sync_hand_server.py --write; verify with --check.
 """WhereverCode V5 远程 Hand 服务端（阶段 B，VPS 侧最小实现）。
 
 协议与 App 侧 `core/mcp/HandClient`、`core/mcp/HandProtocol`、
@@ -54,7 +56,8 @@ cross_device_credentials.py 的协议思路，不复用其代码与 bug）。
       即 APPROVED；码错 5 次锁定该设备 1 小时（防暴力破解）。
   (2) 服务端命令行：`hand_server.py pair-approve <device-id>`。
   之后该设备的密封调用才会被受理。未配对设备的密封调用
-  一律以 cross_device_not_authorized 拒绝（配对确认帧除外）。
+  standalone 对未批准工具调用直接断连；bundled 回密封
+  cross_device_not_authorized。合法密封配对确认帧两种策略均接受。
   hello 回包带 client_status（本机在该 Hand 上的批准状态），
   App 由此显示“对方待批准”，不再靠猜。
 
@@ -62,10 +65,10 @@ cross_device_credentials.py 的协议思路，不复用其代码与 bug）。
   `_wherevercode._tcp`（PTR/SRV/TXT/A），App 的 NsdManager
   发现即列出；广播失败不影响主服务（记日志继续跑）。
 
-授权（auth.json）：agent_id → 允许访问的文件夹列表；或字典形
-  {"folders": […], "authorized_project_folders": […]}，后者是
-  逐项授权的项目文件夹（任务/项目定工作目录，见
-  authorize_project_folder 密封动作）。
+授权：auth.json 支持 agent_id → [folder, …] 或 {"folders": […]}。
+  项目追加授权保存在 project_grants.json，按已配对客户端隔离。
+  默认 standalone 仅用显式授权；安装入口显式选择 bundled，另启用
+  配置/注册目录自动授权，每次隐式授权决策记录审计。
   凭证的 folder 必须在该 agent 的授权列表里（词法归一化后比较），
   否则 wrong_folder。run 只允许注册在 agents.json 里的 agent
   命令（argv[0] == "agent"，argv[1] 为 agent_id），或控制命令
@@ -123,6 +126,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import queue
 import secrets
@@ -513,6 +517,7 @@ def verify_credential(
     revoked_jtis: set[str],
     revoked_tasks: set[str],
     now: int,
+    config_policy: str = "standalone",
 ) -> str | None:
     """返回 None 表示通过，否则返回错误码。校验顺序与 App 侧一致：
     签名 → 过期 → 撤销 → 绑定（任务/目标/文件夹）→ 授权仍存在。
@@ -534,7 +539,8 @@ def verify_credential(
         return ERR_WRONG_TARGET
     if canonical_folder(cred["folder"]) != canonical_folder(expected_folder):
         return ERR_WRONG_FOLDER
-    if os.path.realpath(expected_folder) not in [os.path.realpath(f) for f in authorized_folders]:
+    folder_key = os.path.realpath if config_policy == "bundled" else canonical_folder
+    if folder_key(expected_folder) not in [folder_key(f) for f in authorized_folders]:
         return ERR_WRONG_FOLDER
     if cred["agent_id"] and cred["agent_id"] != expected_agent_id:
         return ERR_WRONG_TASK
@@ -584,6 +590,34 @@ class StateStore:
 # --------------------------------------------------------------------------
 # 服务端
 # --------------------------------------------------------------------------
+
+def git_repos_for_folder(folder: str) -> list[dict]:
+    """P1 能力卡（2026-11-11）：读一个文件夹的 git 检出信息。
+
+    只读 `git rev-parse`（分支 + 12 位短 commit），不写任何东西。
+    不是 git 仓库、git 不在、超时、任何异常都返回 []——调用方按
+    “未知”处理，绝不编造分支/commit。"""
+    if not folder or not os.path.isdir(folder):
+        return []
+    try:
+        branch = subprocess.run(
+            ["git", "-C", folder, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        commit = subprocess.run(
+            ["git", "-C", folder, "rev-parse", "--short=12", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if branch.returncode != 0 or commit.returncode != 0:
+            return []
+        b = branch.stdout.strip()
+        c = commit.stdout.strip()
+        if not b or not c:
+            return []
+        return [{"path": folder, "branch": b, "commit": c}]
+    except Exception:
+        return []
+
 
 # A detached watchdog owns the read end of a pipe held by Hand. EOF
 # means the server exited (including SIGKILL) or finished the run.
@@ -650,7 +684,13 @@ def spawn_agent(argv, **kwargs):
 
 
 class HandServer:
-    def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT):
+    def __init__(self, state_dir: str, device_id: str, display_name: str, port: int = DEFAULT_PORT,
+                 config_policy: str = "standalone", startup_argv=None):
+        if config_policy not in ("standalone", "bundled"):
+            raise ValueError("unknown config policy: " + str(config_policy))
+        self.config_policy = config_policy
+        self.startup_argv = list(startup_argv) if startup_argv is not None else None
+        self.host = "0.0.0.0"
         self.state = StateStore(state_dir)
         self.device_id = device_id
         self.display_name = display_name
@@ -791,6 +831,7 @@ class HandServer:
                 "capabilities": cfg.get("capabilities", []),
                 "folder": cfg.get("folder", reg["folder"]),
                 "available": available,
+                "repos": git_repos_for_folder(cfg.get("folder", reg["folder"])),
                 "source": reg["source"],
                 "discovered": reg["discovered"],
             })
@@ -808,13 +849,15 @@ class HandServer:
                 "capabilities": cfg.get("capabilities", []),
                 "folder": cfg.get("folder", ""),
                 "available": available,
+                "repos": git_repos_for_folder(cfg.get("folder", "")),
                 "source": "agents-json",
                 "discovered": available,
             })
         return out
 
     def agent_config(self, agent_id: str) -> dict | None:
-        """解析后的 Agent 配置：注册表是“怎么跑”的事实来源
+        """配置冲突：standalone 保留 agents.json command；bundled 注册表优先。
+        bundled 下注册表是“怎么跑”的事实来源
         （argv 模板 + 二进制解析 + 登录检查）；agents.json 是遗留
         的设备层覆盖，只覆盖 display_name/kind/capabilities/
         folder/env，以及注册表里没有的 Agent 的整条 command。
@@ -841,7 +884,7 @@ class HandServer:
             for key in ("display_name", "kind", "capabilities", "folder", "env"):
                 if legacy.get(key) not in (None, "", {}):
                     cfg[key] = legacy[key]
-            if reg is None:
+            if reg is None or self.config_policy == "standalone":
                 if legacy.get("command"):
                     cfg["command"] = legacy["command"]
             elif legacy.get("command") and legacy["command"] != reg["command"]:
@@ -857,12 +900,22 @@ class HandServer:
         raw_folders = entry if isinstance(entry, list) else (
             entry.get("folders", []) if isinstance(entry, dict) else [])
         folders = list(raw_folders) if isinstance(raw_folders, list) else []
-        reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
-        if reg is not None and reg.get("folder"):
-            folders.append(reg["folder"])
-        cfg_folder = (self.agent_config(agent_id) or {}).get("folder", "")
-        if cfg_folder:
-            folders.append(cfg_folder)
+        if self.config_policy == "bundled":
+            reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
+            automatic = [
+                ("registry", reg.get("folder", "") if reg else ""),
+                ("agent_config", (self.agent_config(agent_id) or {}).get("folder", "")),
+            ]
+            explicit = {canonical_folder(f) for f in folders if isinstance(f, str)}
+            for source, folder in automatic:
+                if isinstance(folder, str) and folder:
+                    folders.append(folder)
+                    if canonical_folder(folder) not in explicit:
+                        # Audit each implicit authorization decision; do not log credentials.
+                        self.state.audit({"event": "folder_auto_authorized",
+                                          "policy": self.config_policy, "agent": agent_id,
+                                          "client": client_id, "source": source,
+                                          "folder": canonical_folder(folder)})
         if client_id:
             grants = self.state.load_json("project_grants.json", {})
             folders.extend(grants.get(client_id, {}).get(agent_id, []))
@@ -1309,9 +1362,10 @@ class HandServer:
         cross_device_pair_confirm {code} → 码对即 APPROVED，回密封
         cross_device_pair_approved；码不对回密封 cross_device_error
        （code=pair_code_wrong，含中文原因与剩余次数）。
-        不是配对确认帧（旧版 App 直接发的 tool_call 等）→ 回密封
-        cross_device_not_authorized，与此前 live 版 _reject_pending
-        的行为一致；解不开的帧静默关闭，不泄露原因细节。
+        不是配对确认帧（旧版 App 直接发的 tool_call 等）：
+        standalone 保留 A 的直接断连，bundled 保留 B 的密封
+        cross_device_not_authorized 回包；两种策略都不分派工具或执行。
+        解不开的帧静默关闭，不泄露原因细节。
         已撤销（REVOKED）的客户端不接受配对确认，须先在服务端
         pair-approve 解除撤销。只等 15 秒：App 的配对确认紧跟 hello
         发出，超时即关，不占线程。
@@ -1329,6 +1383,8 @@ class HandServer:
         except Exception:
             return  # 解不开：静默关闭
         if envelope.get("type") != "cross_device_pair_confirm" or envelope.get("version") != VERSION:
+            if self.config_policy == "standalone":
+                return  # A compatibility: close without any response or dispatch.
             # 不是配对确认：按未批准拒绝（与 live 版 _reject_pending 同款，
             # 错误形状与 _dispatch 的 cross_device_error 一致：code 在 args 里）。
             try:
@@ -1441,6 +1497,7 @@ class HandServer:
             revoked_jtis=self.revoked_jtis,
             revoked_tasks=set() if self._is_stop_call(action, args) else self.revoked_tasks,
             now=int(time.time()),
+            config_policy=self.config_policy,
         )
         if err is not None:
             self._error(conn, session_key, envelope, seq + 1, err,
@@ -1513,42 +1570,37 @@ class HandServer:
 
     def _do_authorize_project_folder(self, conn, session_key, envelope, seq,
                                      task_id, agent_id, args, client_id) -> None:
-        """Save a project grant for the authenticated device and Agent."""
+        """One grant store; preserve each deployment policy's legacy receipt bytes."""
         requested = args.get("folder", "") if isinstance(args, dict) else ""
-        if not isinstance(requested, str) or not os.path.isabs(requested):
-            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        "项目文件夹必须是已存在的绝对路径")
+        if not isinstance(requested, str) or not requested or not os.path.isabs(requested):
+            message = ("项目文件夹必须是已存在的绝对路径" if self.config_policy == "bundled"
+                       else "授权目录必须是已存在的绝对路径。")
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED, message)
             return
-        canon = os.path.realpath(canonical_folder(requested))
-        if not canon or canon == "/" or not os.path.isdir(canon):
-            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        f"文件夹不存在或不是目录：{requested}")
+        canonical = os.path.realpath(canonical_folder(requested) if self.config_policy == "bundled" else requested)
+        if canonical == os.path.abspath(os.sep) or not os.path.isdir(canonical):
+            message = (f"文件夹不存在或不是目录：{requested}" if self.config_policy == "bundled"
+                       else "授权目录不存在或不是文件夹。")
+            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED, message)
             return
         with self.state.lock:
             grants = self.state.load_json("project_grants.json", {})
             folders = grants.setdefault(client_id, {}).setdefault(agent_id, [])
-            already = canon in folders
+            already = canonical in folders
             if not already:
-                folders.append(canon)
+                folders.append(canonical)
                 self.state.save_json("project_grants.json", grants)
-        self.state.audit({"event": "authorize_project_folder", "agent": agent_id,
-                          "folder": canon, "task": task_id, "already": already})
+        self.state.audit({"event": "authorize_project_folder" if self.config_policy == "bundled" else "folder_authorized",
+                          "agent": agent_id, "folder": canonical, "already": already, "task": task_id})
+        if self.config_policy == "bundled":
+            receipt = {"authorized": True, "agent_id": agent_id,
+                       "requested_folder": requested, "folder": canonical, "already": already}
+        else:
+            receipt = {"authorized": True, "requested_folder": requested,
+                       "agent_id": agent_id, "already": already, "folder": canonical}
         self._send(conn, session_key, envelope, "cross_device_result",
-                   {"output": json.dumps(
-                       {"authorized": True, "agent_id": agent_id,
-                        "requested_folder": requested,
-                        "folder": canon, "already": already},
-                       ensure_ascii=False)}, seq + 1)
+                   {"output": json.dumps(receipt, ensure_ascii=False)}, seq + 1)
 
-    # -- Hand 自更新（App 更新后自动同步已连接设备，2026-11-12）--------------
-    #
-    # 管理消息 wherevercode_device_admin（_handle_connection 里与
-    # wherevercode_ws_token 并列的分支，只在 APPROVED 之后）：设备级动作，
-    # 没有 task，不验任务凭证。认证就是密封信封本身（只有配对 App 持有
-    # 会话密钥）+ APPROVED 检查 + confirmed 标志（App 只在用户确认或
-    # 自动同步开关开时才置 true；没它一律拒绝，防误触）。
-    # 三段式：stage（暂存并校验）→ apply（备份→原子替换→重载）→
-    # App poll hello 验版本；失败时 watchdog 自动回滚，App 也可发 rollback。
     def _handle_device_admin(self, conn, session_key, client_id, envelope) -> None:
         seq = int(envelope.get("seq", 1))
         action = str(envelope.get("action", ""))
@@ -1648,11 +1700,12 @@ class HandServer:
         state_dir = self.state.dir
         watchdog = os.path.join(state_dir, "update-watchdog.sh")
         log = os.path.join(state_dir, "update-watchdog.log")
-        restart_cmd = " ".join(shlex.quote(a) for a in
-                               [sys.executable, live, "--state-dir", state_dir,
-                                "--device-id", self.device_id,
-                                "--display-name", self.display_name,
-                                "--host", "0.0.0.0", "--port", str(self.port), "serve"])
+        restart_args = self.startup_argv
+        if restart_args is None:
+            restart_args = ["--state-dir", state_dir, "--device-id", self.device_id,
+                            "--display-name", self.display_name, "--host", self.host,
+                            "--port", str(self.port), "--config-policy", self.config_policy, "serve"]
+        restart_cmd = " ".join(shlex.quote(arg) for arg in [sys.executable, live, *restart_args])
         sh = []
         sh.append('#!/bin/sh')
         sh.append('# V5 Hand 自更新看门狗（apply 时生成，检查完自删）。')
@@ -2047,7 +2100,8 @@ class HandServer:
                 entry, prompt, task_id, folder,
                 env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
                 on_line=_on_line, log_path=log_path,
-                register_proc=_register_proc, connection=conn)
+                register_proc=_register_proc, connection=conn,
+                on_log_warning=self.state.audit)
             result = {"output": output[-MAX_OUTPUT_CHARS:]}
             if returncode == 0 and not timed_out and staging is not None:
                 with self.process_lock:
@@ -2115,10 +2169,11 @@ class HandServer:
                         f"Agent 执行失败（退出码 {returncode}）："
                         + output[-2000:])
             return
-        _finish_run("ok", "执行完成。")
         if self._was_control_stopped(task_id):
+            _finish_run("stopped", "已按控制指令停止。")
             self._error(conn, session_key, envelope, next_seq, ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
             return
+        _finish_run("ok", "执行完成。")
         self._send(conn, session_key, envelope, "cross_device_result", result, next_seq)
 
     def _artifact_path(self, envelope, client_id, attempt_id):
@@ -2664,8 +2719,10 @@ def start_mdns_advertiser(hand: "HandServer") -> MdnsAdvertiser | None:
         return None
 
 
-def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int) -> None:
-    hand = HandServer(state_dir, device_id, display_name, port)
+def serve(state_dir: str, device_id: str, display_name: str, host: str, port: int,
+          config_policy: str = "standalone", startup_argv=None) -> None:
+    hand = HandServer(state_dir, device_id, display_name, port, config_policy, startup_argv)
+    hand.host = host
     with ThreadedHandServer((host, port), HandConnectionHandler, hand) as server:
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
@@ -2696,6 +2753,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--display-name", default=socket.gethostname())
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--config-policy", choices=("standalone", "bundled"), default="standalone",
+                        help="standalone: explicit grants/legacy command; bundled: registry defaults (audited)")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("serve", help="启动 Hand 服务")
@@ -2744,10 +2803,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp", help="启动 stdio MCP 服务（list/read/write/run）")
 
     args = parser.parse_args(argv)
-    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port)
+    startup_argv = list(sys.argv[1:] if argv is None else argv)
+    hand = HandServer(args.state_dir, args.device_id, args.display_name, args.port, args.config_policy, startup_argv)
 
     if args.command in (None, "serve"):
-        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port)
+        serve(args.state_dir, args.device_id, args.display_name, args.host, args.port, args.config_policy, startup_argv)
         return 0
     if args.command == "fingerprint":
         print(hand.fingerprint())
@@ -2821,9 +2881,11 @@ def main(argv: list[str] | None = None) -> int:
                 "folder": "/workspace/example-project",
                 # 直接调 grok 二进制（stdout 直抓）；旧的 run-grok.sh
                 # wrapper（输出重定向到日志文件）已废弃，见通用 runner。
-                "command": ["/usr/local/bin/grok", "-p", "{prompt}",
-                            "--always-approve", "--sandbox", "workspace",
-                            "--output-format", "plain"],
+                "command": (["/workspace/example-project/run-grok.sh", "{prompt}"]
+                            if args.config_policy == "standalone" else
+                            ["/usr/local/bin/grok", "-p", "{prompt}",
+                             "--always-approve", "--sandbox", "workspace",
+                             "--output-format", "plain"]),
                 "env": {},
             }
         }
@@ -3079,6 +3141,8 @@ BUILTIN_EXTENSIONS: dict[str, dict[str, dict]] = {
         },
     },
     "wakeup": {
+        # T4: preserve sender; dispatch-to-webhook-to-MCP claim wiring is incomplete.
+        # The missing end-to-end wiring is excluded from executable-union acceptance.
         "webhook": {
             "display_name": "Webhook 唤醒",
             "implementation": "webhook_deliver()（本文件）：出站 POST，"
@@ -3115,6 +3179,8 @@ BUILTIN_EXTENSIONS: dict[str, dict[str, dict]] = {
                               "epoch/goal_version 栅栏）。",
             "status": "live",
         },
+        # T4: design registration only; no Hand implementation or fake executor.
+        # Future bus: control/message ledger; unwakeable Agents remain pending-claim.
         "wacf": {
             "display_name": "WACF 自有总线",
             "implementation": "WACF 设计（2026-11-08，U1–U12 已定：控制 + "
@@ -3461,11 +3527,64 @@ def check_login(entry: dict, timeout: float = 10.0) -> bool | None:
 # 通用 runner：一个函数跑任意 CLI Agent
 # --------------------------------------------------------------------------
 
+def _write_log_copy(log_path: str, cwd: str, output: str, task_id: str) -> None:
+    """Configured, task-bound copy inside cwd; reuse Hand path and artifact fd guards.
+
+    No directory creation, symlink traversal, or overwrite. Unsupported fd guards
+    fail closed; the caller reports a non-fatal internal warning.
+    """
+    if not isinstance(log_path, str) or not os.path.isabs(log_path):
+        raise ValueError("log path must be absolute")
+    if ".." in log_path.replace("\\", "/").split("/"):
+        raise ValueError("log path traversal")
+    task_ref = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
+    if task_ref not in os.path.basename(log_path):
+        raise ValueError("log filename must bind the task")
+    base = os.path.abspath(cwd or os.getcwd())
+    rel = os.path.relpath(log_path, base)
+    if HandServer._resolve_path(None, base, rel) is None:
+        raise ValueError("log outside execution folder")
+    # Canonicalize only the already-authorized base. Open every component with
+    # the same no-follow directory-fd primitive used by delivery.bin handling.
+    canonical_base = os.path.realpath(base)
+    if canonical_base == os.path.abspath(os.sep):
+        raise ValueError("filesystem root is not a log scope")
+    parts = [p for p in (canonical_base + os.sep + rel).split(os.sep) if p not in ("", ".")]
+    directory = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(output)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        os.close(directory)
+
+
+def _log_copy_warning(task_id: str, error: Exception, on_warning=None) -> None:
+    # Internal only: do not invent T6 wire fields or log output/path/credentials.
+    event = {"event": "hand_log_copy_failed",
+             "task_ref": hashlib.sha256(task_id.encode("utf-8")).hexdigest(),
+             "error_type": type(error).__name__}
+    logging.warning("hand_log_copy_failed task_ref=%s error_type=%s",
+                    event["task_ref"], event["error_type"])
+    if on_warning is not None:
+        try:
+            on_warning(event)
+        except Exception:
+            logging.warning("hand_log_copy_warning_sink_failed task_ref=%s", event["task_ref"])
+
+
 def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                   task_id: str, cwd: str, env_extra: dict | None = None,
                   timeout_s: float = 600.0,
                   on_line=None, log_path: str | None = None,
-                  register_proc=None, connection=None,
+                  register_proc=None, connection=None, on_log_warning=None,
                   ) -> tuple[int | None, str, bool]:
     """通用 runner：输入（二进制、argv 模板含 {prompt}/{task_id}、
     工作目录、env），跑任意 CLI Agent，stdout 直接抓回。
@@ -3502,21 +3621,14 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
             out_fd = proc.stdout.fileno()
             buf = ""
             while True:
-                if proc.poll() is not None and not buf:
-                    # 2026-11-11 控制台 WebSocket 顺带修：进程已退出时先看
-                    # 管道里还有没有残留输出。旧版这里直接 break，快退出的
-                    # 进程（输出已进管道、父进程还没读）会整段丢输出：
-                    # progress 全丢、result 为空（实测 fake-agent 3/5 次
-                    # 空输出）。残留数据读完后，下面的 os.read 读到 EOF
-                    #（b""）再退出；管道已空才直接 break。
-                    ready_now, _, _ = _select.select([out_fd], [], [], 0)
-                    if not ready_now:
-                        break
                 if time.time() > deadline:
                     timed_out = True
                     break
                 sources = [out_fd] if connection is None else [out_fd, connection]
-                ready, _, _ = _select.select(sources, [], [], 0.2)
+                exited = proc.poll() is not None
+                ready, _, _ = _select.select(sources, [], [], 0 if exited else 0.2)
+                if exited and out_fd not in ready:
+                    break
                 if connection in ready:
                     raise ConnectionError("Hand run connection closed")
                 if out_fd in ready:
@@ -3530,13 +3642,11 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                         output_lines.append(line)
                         if on_line is not None:
                             on_line(line)
-                elif proc.poll() is not None:
-                    break
             if buf:
                 output_lines.append(buf)
                 if on_line is not None:
                     on_line(buf)
-        except OSError:
+        except BaseException:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -3561,10 +3671,17 @@ def run_cli_agent(binary: str, argv_template: list[str], prompt: str,
                 proc.stdout.close()
         except OSError:
             pass
+        if log_path is not None:
+            try:
+                _write_log_copy(log_path, cwd, output, task_id)
+            except Exception as error:
+                _log_copy_warning(task_id, error, on_log_warning)
         return proc.returncode, output, timed_out
 
     finally:
         os.close(lease_fd)
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 class InternalAgentExecution(Exception):
@@ -3575,7 +3692,7 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
                     env_extra: dict | None = None,
                     timeout_s: float = 600.0,
                     on_line=None, log_path: str | None = None,
-                    register_proc=None, connection=None,
+                    register_proc=None, connection=None, on_log_warning=None,
                     ) -> tuple[int | None, str, bool]:
     """统一分派：按注册行的 execution 分派执行方式，两条都是一等路径。
     - cli：子进程跑 CLI（run_cli_agent）。
@@ -3593,7 +3710,8 @@ def run_agent_entry(resolved: dict, prompt: str, task_id: str, cwd: str,
     return run_cli_agent(command[0], command, prompt, task_id, cwd,
                          env_extra=env_extra, timeout_s=timeout_s,
                          on_line=on_line, log_path=log_path,
-                         register_proc=register_proc, connection=connection)
+                         register_proc=register_proc, connection=connection,
+                         on_log_warning=on_log_warning)
 
 
 # --------------------------------------------------------------------------
@@ -3922,7 +4040,7 @@ def _mcp_call_tool(hand: "HandServer", name: str, args: dict) -> dict:
             returncode, output, timed_out = run_agent_entry(
                 entry, prompt, task_id, folder,
                 env_extra=cfg.get("env", {}) or {}, timeout_s=timeout_s,
-                log_path=log_path)
+                log_path=log_path, on_log_warning=hand.state.audit)
         except InternalAgentExecution as e:
             return _mcp_error_text(str(e), "agent_not_found")
         except OSError as e:

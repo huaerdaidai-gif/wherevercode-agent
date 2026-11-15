@@ -1,0 +1,61 @@
+{
+  "scope": "Linux host/loopback DNS packet/Python fixture worker; Android and provider CLI unverified",
+  "module": "bundled_hand_server",
+  "policy": "standalone",
+  "source_sha256": "4a22c65e3a7d1ab7fa0d2428e2afddb86872901c896f94a3a1dae5cbbd0deb1a",
+  "steps": [
+    {
+      "step": "discover",
+      "port": 45783,
+      "transport": "real UDP loopback, not multicast"
+    },
+    {
+      "step": "pair",
+      "status": "APPROVED"
+    },
+    {
+      "step": "dispatch",
+      "pid": 2560,
+      "child_pid": 2562,
+      "heartbeat_bytes": [
+        1,
+        1
+      ]
+    },
+    {
+      "step": "pause",
+      "seconds": 0.005761466999999243,
+      "states": [
+        "stopped",
+        "stopped"
+      ],
+      "stable_observation_seconds": 3,
+      "heartbeat_bytes": [
+        1,
+        1
+      ]
+    },
+    {
+      "step": "resume",
+      "seconds": 0.006419857999986789,
+      "heartbeat_bytes": [
+        2,
+        2
+      ]
+    },
+    {
+      "step": "stop",
+      "seconds": 0.006636763000003043,
+      "stable_observation_seconds": 5,
+      "terminal": "remote_controlled_stop"
+    },
+    {
+      "step": "readback",
+      "stopped_task": "revoked_credential",
+      "successful_task": "chain-delivery",
+      "artifact_sha256": "c200a28baca7f4428dd9d1c7f3b8cf4a8d6cdba30f7319bc6ae6cef2d351b6e8",
+      "artifact_size": 21
+    }
+  ],
+  "success": true
+}

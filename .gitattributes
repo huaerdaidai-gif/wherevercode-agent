@@ -1,0 +1,3 @@
+# Hand content versions are byte based; both paths use identical LF bytes.
+/server/hand_server.py text eol=lf
+/android/app/src/main/assets/install/hand_server.py text eol=lf
