@@ -15,7 +15,7 @@ import Foundation
 /// refuses unconfirmed writes; `addTaskSummary` requires the
 /// task-settlement flag. Anything that looks like a secret is refused
 /// outright.
-public enum MemoryKind: String, Equatable {
+public enum MemoryKind: String, Equatable, Codable, CaseIterable, Sendable {
     case fact = "FACT"
     case taskSummary = "TASK_SUMMARY"
     case deviceAuthorization = "DEVICE_AUTHORIZATION"
@@ -24,7 +24,7 @@ public enum MemoryKind: String, Equatable {
     public var name: String { rawValue }
 }
 
-public struct MemoryEntry: Equatable {
+public struct MemoryEntry: Equatable, Identifiable, Codable, Sendable {
     public var id: String
     public var kind: MemoryKind
     public var key: String
@@ -34,13 +34,13 @@ public struct MemoryEntry: Equatable {
     public var confirmedByUser: Bool
 
     public init(
-        id: String,
-        kind: MemoryKind,
+        id: String = UUID().uuidString,
+        kind: MemoryKind = .fact,
         key: String,
         value: String,
-        source: String,
-        createdAtEpochSeconds: Int64,
-        confirmedByUser: Bool
+        source: String = "user",
+        createdAtEpochSeconds: Int64 = Int64(Date().timeIntervalSince1970),
+        confirmedByUser: Bool = true
     ) {
         self.id = id
         self.kind = kind
@@ -154,5 +154,32 @@ public final class InMemoryMemoryStore: MemoryStore, ObservableObject {
         return lines.map { entry in
             "- [\(entry.kind.name)] \(entry.key)：\(entry.value)（来源：\(entry.source)）"
         }.joined(separator: "\n")
+    }
+
+    public func listEntries() -> [MemoryEntry] {
+        lock.lock(); defer { lock.unlock() }
+        return order.compactMap { entries[$0] }
+    }
+
+    @discardableResult
+    public func addFact(key: String, value: String, confirmedByUser: Bool = true) -> Bool {
+        let entry = MemoryEntry(
+            id: UUID().uuidString,
+            kind: .fact,
+            key: key,
+            value: SecretRedactor.redact(value),
+            source: "user",
+            createdAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+            confirmedByUser: confirmedByUser
+        )
+        return addFact(entry: entry, confirmedByUser: confirmedByUser)
+    }
+
+    public func deleteEntry(id: String) {
+        lock.lock(); defer { lock.unlock() }
+        if let comp = entries.first(where: { $0.value.id == id })?.key {
+            entries.removeValue(forKey: comp)
+            order.removeAll { $0 == comp }
+        }
     }
 }

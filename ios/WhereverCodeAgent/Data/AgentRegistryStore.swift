@@ -71,8 +71,12 @@ public struct AgentRecord: Equatable, Codable, Identifiable, Sendable {
     public var updatedAtEpochSeconds: Int64 = 0
 
     public init(
-        agentId: String, displayName: String, kind: AgentKind,
-        access: AgentAccess, brainKind: String, adapterId: String
+        agentId: String,
+        displayName: String,
+        kind: AgentKind = .cloud,
+        access: AgentAccess = .api,
+        brainKind: String = "MODEL_API",
+        adapterId: String = "model-api-generic"
     ) {
         self.agentId = agentId
         self.displayName = displayName
