@@ -219,7 +219,24 @@ public struct DevicesView: View {
         }
         HandIdentityManager.deleteDeviceCredentials(deviceId: deviceId)
         try? LocalData.shared.agents.deleteDeviceCascade(deviceId: deviceId)
+        try? LocalData.shared.agents.deleteAgent(agentId: deviceId)
+        handleDeviceDeletionForTasks(deviceId: deviceId)
         reload()
+    }
+
+    private func handleDeviceDeletionForTasks(deviceId: String) {
+        if let tasks = try? LocalData.shared.tasks.listTasks() {
+            for t in tasks {
+                let matches = t.assignedAgentId == deviceId || t.assignedAgentId?.hasPrefix("\(deviceId):") == true
+                if matches && !TaskStates.isTerminal(t.state) {
+                    try? LocalData.shared.tasks.transition(
+                        taskId: t.taskId,
+                        to: "cancelled",
+                        note: "关联设备已注销：执行设备已被删除，任务安全终止"
+                    )
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -859,6 +876,10 @@ private struct DeviceDetailSheet: View {
     @State private var fileOpResult: String?
     @State private var testFileText: String = ""
 
+    @State private var showDeleteConfirm = false
+    @State private var showUnpairConfirm = false
+    @State private var isDeleted = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -990,12 +1011,11 @@ private struct DeviceDetailSheet: View {
                     Button("查看关联任务") { onNavigateRoute("tasks") }
                     if isLocallyAuthorized {
                         Button("取消配对并撤销凭据", role: .destructive) {
-                            unpairAndRevokeDevice()
+                            showUnpairConfirm = true
                         }
                     }
                     Button("断开并删除设备", role: .destructive) {
-                        deleteDeviceCascade(device: device)
-                        dismiss()
+                        showDeleteConfirm = true
                     }
                 }
             }
@@ -1005,6 +1025,23 @@ private struct DeviceDetailSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
                 }
+            }
+            .alert("确认取消配对", isPresented: $showUnpairConfirm) {
+                Button("取消", role: .cancel) { }
+                Button("取消配对并撤销凭据", role: .destructive) {
+                    unpairAndRevokeDevice()
+                }
+            } message: {
+                Text("确定要取消与「\(device.displayName)」的配对吗？本地与远端配对凭据将被安全撤销。")
+            }
+            .alert("确认删除设备", isPresented: $showDeleteConfirm) {
+                Button("取消", role: .cancel) { }
+                Button("删除设备", role: .destructive) {
+                    deleteDeviceCascade(device: device)
+                    dismiss()
+                }
+            } message: {
+                Text("确定要删除设备「\(device.displayName)」吗？此操作将清理本地设备记录、关联凭据及任务引用，且不会影响其他设备或项目文件。")
             }
             .onAppear {
                 probeRealConnection()
@@ -1041,6 +1078,7 @@ private struct DeviceDetailSheet: View {
     }
 
     private func deleteDeviceCascade(device: AgentRecord) {
+        isDeleted = true
         let devId = device.deviceId ?? device.agentId
         if let raw = device.baseUrl, !raw.isEmpty {
             let (host, port) = parseHostAndPort(raw)
@@ -1056,10 +1094,30 @@ private struct DeviceDetailSheet: View {
         if device.agentId != devId {
             try? LocalData.shared.agents.deleteAgent(agentId: device.agentId)
         }
+        handleDeviceDeletionForTasks(deviceId: devId, agentId: device.agentId)
         onUpdated()
     }
 
+    private func handleDeviceDeletionForTasks(deviceId: String, agentId: String) {
+        if let tasks = try? LocalData.shared.tasks.listTasks() {
+            for t in tasks {
+                let matches = t.assignedAgentId == deviceId ||
+                              t.assignedAgentId == agentId ||
+                              t.assignedAgentId?.hasPrefix("\(deviceId):") == true ||
+                              t.assignedAgentId?.hasPrefix("\(agentId):") == true
+                if matches && !TaskStates.isTerminal(t.state) {
+                    try? LocalData.shared.tasks.transition(
+                        taskId: t.taskId,
+                        to: "cancelled",
+                        note: "关联设备已注销：执行设备已被删除，任务安全终止"
+                    )
+                }
+            }
+        }
+    }
+
     private func probeRealConnection() {
+        guard !isDeleted else { return }
         guard let raw = device.baseUrl, !raw.isEmpty else {
             probeResult = "请先配置设备地址。"
             return
@@ -1072,6 +1130,8 @@ private struct DeviceDetailSheet: View {
             do {
                 let hello = try await HandClient.shared.probeHello(host: host, port: port)
                 await MainActor.run {
+                    guard !self.isDeleted else { return }
+                    guard (try? LocalData.shared.agents.getAgent(agentId: self.device.agentId)) != nil else { return }
                     self.isProbing = false
                     self.remoteHello = hello
                     self.device.deviceId = hello.deviceId
@@ -1091,6 +1151,8 @@ private struct DeviceDetailSheet: View {
                 }
             } catch {
                 await MainActor.run {
+                    guard !self.isDeleted else { return }
+                    guard (try? LocalData.shared.agents.getAgent(agentId: self.device.agentId)) != nil else { return }
                     self.isProbing = false
                     self.device.memberConnectionState = "NOT_CONNECTED"
                     let errStr: String

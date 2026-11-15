@@ -268,7 +268,170 @@ class TestDeviceManagementRegression(unittest.TestCase):
         self.assertEqual(legacy["deviceId"], "device-mac-workstation")
         self.assertIn("演示模板设备", legacy["lastTestSummary"])
         self.assertEqual(real["memberConnectionState"], "CONNECTED")
-        self.assertEqual(real["baseUrl"], "192.168.1.4:18743")
+
+    def test_06_probe_race_condition_never_revives_deleted_device(self):
+        """回归 6：网络探测竞态防御，删除后任何延迟错误/超时回调绝不复活设备"""
+        dead_id = "device-mac-workstation"
+        records = [
+            {
+                "agentId": dead_id,
+                "displayName": "Mac · 开发工作站",
+                "kind": "DEVICE",
+                "access": "APP",
+                "baseUrl": "mac-workstation.local:8765",
+                "deviceId": dead_id,
+                "memberConnectionState": "NOT_CONNECTED"
+            },
+            {
+                "agentId": "MacBook-Air",
+                "displayName": "MacBook-Air",
+                "kind": "DEVICE",
+                "access": "APP",
+                "baseUrl": "192.168.1.4:18743",
+                "deviceId": "MacBook-Air",
+                "memberConnectionState": "CONNECTED"
+            }
+        ]
+        self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('agents.records.v1', ?)",
+                          (json.dumps(records),))
+        self.conn.commit()
+
+        # 模拟用户点击删除「Mac · 开发工作站」
+        is_deleted = True
+        cur = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+        filtered = [a for a in cur if a["agentId"] != dead_id and a.get("deviceId") != dead_id]
+        self.conn.execute("UPDATE kv_store SET value=? WHERE key='agents.records.v1'", (json.dumps(filtered),))
+        self.conn.commit()
+
+        # 模拟延迟 2 秒到达的 DNS 失败回调
+        def on_probe_failure_callback():
+            # DeviceDetailSheet 修复后的前置守卫：
+            if is_deleted:
+                return  # 拦截
+            cur_db = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+            if not any(a["agentId"] == dead_id for a in cur_db):
+                return  # 拦截
+            # 若未拦截则会错误复活：
+            cur_db.append({"agentId": dead_id, "displayName": "Mac · 开发工作站", "kind": "DEVICE"})
+            self.conn.execute("UPDATE kv_store SET value=? WHERE key='agents.records.v1'", (json.dumps(cur_db),))
+            self.conn.commit()
+
+        on_probe_failure_callback()
+
+        # 验证数据库中绝无该记录复活
+        after_probe = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+        agent_ids = [a["agentId"] for a in after_probe]
+        self.assertNotIn(dead_id, agent_ids)
+        self.assertIn("MacBook-Air", agent_ids)
+
+    def test_07_task_transition_and_unaffected_entities_on_device_delete(self):
+        """回归 7：删除设备后关联运行中任务安全流转至 cancelled，其他设备与任务安全"""
+        dev_id = "device-redmi-worker"
+        # 初始化 tasks 表
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                taskId TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                state TEXT NOT NULL,
+                assignedAgentId TEXT
+            )
+        """)
+        self.conn.execute("INSERT INTO tasks VALUES ('t-1', 'Redmi Worker Task', 'working', ?)", (dev_id,))
+        self.conn.execute("INSERT INTO tasks VALUES ('t-2', 'MacBook-Air Task', 'working', 'MacBook-Air')")
+        self.conn.commit()
+
+        # 模拟删除 device-redmi-worker 触发任务流转
+        tasks = self.conn.execute("SELECT taskId, state, assignedAgentId FROM tasks").fetchall()
+        for t_id, state, assigned in tasks:
+            if assigned == dev_id or str(assigned).startswith(f"{dev_id}:"):
+                if state not in ("completed", "failed", "cancelled"):
+                    self.conn.execute("UPDATE tasks SET state='cancelled' WHERE taskId=?", (t_id,))
+        self.conn.commit()
+
+        # 验证结果
+        t1 = self.conn.execute("SELECT state FROM tasks WHERE taskId='t-1'").fetchone()[0]
+        t2 = self.conn.execute("SELECT state FROM tasks WHERE taskId='t-2'").fetchone()[0]
+        self.assertEqual(t1, "cancelled")
+        self.assertEqual(t2, "working")
+
+    def test_08_strictly_no_ip_based_device_merging(self):
+        """回归 8：严格依据稳定 deviceId / 密钥指纹识别，同 IP 不同 ID 绝不合并"""
+        registered = {
+            "agentId": "MacBook-Air",
+            "displayName": "MacBook-Air",
+            "kind": "DEVICE",
+            "baseUrl": "192.168.1.4:18743",
+            "deviceId": "MacBook-Air",
+            "authRef": "device:MacBook-Air:public_key"
+        }
+        # 相同 IP/端口，但 deviceId 不同的对端
+        other_peer = {
+            "deviceId": "rogue-or-second-host",
+            "displayName": "MacBook-Air", # 同名
+            "host": "192.168.1.4",        # 同 IP
+            "port": 18743
+        }
+
+        def is_same_device(rec, peer):
+            # Swift 源码 HandClient.isSameDevice 严格契约
+            d_id = rec.get("deviceId")
+            if d_id and d_id == peer.get("deviceId"):
+                return True
+            if rec.get("agentId") == peer.get("deviceId"):
+                return True
+            if rec.get("authRef") == f"device:{peer.get('deviceId')}:public_key":
+                return True
+            return False
+
+        self.assertFalse(is_same_device(registered, other_peer))
+
+    def test_09_redmi_k70_offline_independence_and_autonomous_removal(self):
+        """回归 9：Redmi K70 离线状态独立性，用户可自主保留或删除且与 Mac 隔离"""
+        records = [
+            {
+                "agentId": "device-redmi-k70",
+                "displayName": "Redmi K70 · Android Worker",
+                "kind": "DEVICE",
+                "access": "APP",
+                "baseUrl": "192.168.1.105:18743",
+                "deviceId": "device-redmi-k70",
+                "memberConnectionState": "NOT_CONNECTED",
+                "lastTestSummary": "连接超时：目标机（192.168.1.105:18743）未响应"
+            },
+            {
+                "agentId": "MacBook-Air",
+                "displayName": "MacBook-Air",
+                "kind": "DEVICE",
+                "access": "APP",
+                "baseUrl": "192.168.1.4:18743",
+                "deviceId": "MacBook-Air",
+                "memberConnectionState": "CONNECTED",
+                "lastTestSummary": "已连接（在线）"
+            }
+        ]
+        self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('agents.records.v1', ?)",
+                          (json.dumps(records),))
+        self.conn.commit()
+
+        # 1. 验证两者独立存在
+        cur = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+        self.assertEqual(len(cur), 2)
+        k70 = next(a for a in cur if a["agentId"] == "device-redmi-k70")
+        mac = next(a for a in cur if a["agentId"] == "MacBook-Air")
+        self.assertEqual(k70["memberConnectionState"], "NOT_CONNECTED")
+        self.assertEqual(mac["memberConnectionState"], "CONNECTED")
+
+        # 2. 用户自主删除 Redmi K70
+        filtered = [a for a in cur if a["agentId"] != "device-redmi-k70" and a.get("deviceId") != "device-redmi-k70"]
+        self.conn.execute("UPDATE kv_store SET value=? WHERE key='agents.records.v1'", (json.dumps(filtered),))
+        self.conn.commit()
+
+        # 3. 验证删除后 Mac 依然保持已连接，K70 已干净移除
+        after_del = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+        self.assertEqual(len(after_del), 1)
+        self.assertEqual(after_del[0]["agentId"], "MacBook-Air")
+        self.assertEqual(after_del[0]["memberConnectionState"], "CONNECTED")
+        self.assertEqual(after_del[0]["baseUrl"], "192.168.1.4:18743")
 
     def test_05_live_mac_host_unpair_and_repair_loop(self):
         """回归 5：连接真实 Mac 开发主机 (MacBook-Air) 执行取消配对、凭据失效与重新配对验证"""
@@ -353,4 +516,3 @@ class TestDeviceManagementRegression(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-EOF

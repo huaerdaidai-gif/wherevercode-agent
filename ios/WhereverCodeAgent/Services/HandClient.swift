@@ -1010,7 +1010,7 @@ public actor HandClient {
         return args?["output"] as? String ?? "执行完成"
     }
 
-    /// 判断已登记设备记录与发现的对端是否为同一物理设备（基于稳定 deviceId、公钥引用或地址精确匹配，严禁按设备名称猜测合并）
+    /// 判断已登记设备记录与发现的对端是否为同一物理设备（严格基于稳定 deviceId 或已验证公钥引用，严禁按设备名称、IP 或端口猜测合并）
     public static func isSameDevice(record: AgentRecord, peer: DiscoveredPeer) -> Bool {
         if let dId = record.deviceId, !dId.isEmpty, dId == peer.deviceId {
             return true
@@ -1020,13 +1020,6 @@ public actor HandClient {
         }
         if let authRef = record.authRef, authRef == "device:\(peer.deviceId):public_key" {
             return true
-        }
-        if let raw = record.baseUrl {
-            let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
-            let host = String(clean.split(separator: ":").first ?? "")
-            if !host.isEmpty && (host == peer.host || (host == "localhost" && peer.host == "127.0.0.1")) {
-                return true
-            }
         }
         return false
     }

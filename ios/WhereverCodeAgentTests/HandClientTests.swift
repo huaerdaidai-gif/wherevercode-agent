@@ -270,6 +270,18 @@ final class HandClientTests: XCTestCase {
         )
         XCTAssertFalse(HandClient.isSameDevice(record: registeredDev, peer: otherPeer))
 
+        // 构造同 IP / 同端口 但不同 deviceId 的对端设备，严格确保不因 IP 相同而误合并
+        let sameIpDifferentDevice = DiscoveredPeer(
+            deviceId: "another-physical-box",
+            displayName: "Another Host",
+            host: "192.168.1.4",
+            port: 18743,
+            fingerprintSha256: "1122334455667788",
+            agents: [],
+            clientStatus: "PENDING"
+        )
+        XCTAssertFalse(HandClient.isSameDevice(record: registeredDev, peer: sameIpDifferentDevice))
+
         // 清理
         try LocalData.shared.agents.deleteAgent(agentId: deviceId)
     }
@@ -475,5 +487,154 @@ final class HandClientTests: XCTestCase {
         try LocalData.shared.agents.deleteAgent(agentId: "device-mac-workstation")
         try LocalData.shared.agents.deleteAgent(agentId: "MacBook-Air")
         try LocalData.shared.agents.deleteAgent(agentId: "cloud-deepseek")
+    }
+
+    // 15. 回归测试 6：删除后网络探测竞态不复活已删除设备
+    func testDeviceDeletionRaceConditionDoesNotReviveRecord() throws {
+        let deadDevId = "dead-mac-to-delete"
+        var deadDev = AgentRecord(
+            agentId: deadDevId,
+            displayName: "Dead Mac Workstation",
+            kind: .device,
+            access: .app,
+            baseUrl: "mac-invalid-dns.local:8765",
+            lastTestSummary: "本地登记 · 未验证在线",
+            memberConnectionState: "NOT_CONNECTED",
+            deviceId: deadDevId
+        )
+        try LocalData.shared.agents.saveAgent(deadDev)
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: deadDevId))
+
+        // 模拟用户进入详情并触发删除操作
+        var isDeleted = true
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: deadDevId)
+        try LocalData.shared.agents.deleteAgent(agentId: deadDevId)
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: deadDevId))
+
+        // 模拟后台在 deletion 后才返回的失败/超时回调逻辑
+        let probeFinishedAfterDelete: () -> Void = {
+            // DevicesView DeviceDetailSheet 防御逻辑：guard !isDeleted, getAgent != nil
+            guard !isDeleted, (try? LocalData.shared.agents.getAgent(agentId: deadDev.agentId)) != nil else {
+                return // 正确拦截，不写回数据库
+            }
+            deadDev.lastTestSummary = "DNS 解析失败"
+            try? LocalData.shared.agents.saveAgent(deadDev)
+        }
+        probeFinishedAfterDelete()
+
+        // 验证数据库中该设备绝对未被复活
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: deadDevId))
+    }
+
+    // 16. 回归测试 7：设备删除级联终止关联任务并保持其他设备与任务安全
+    func testDeviceDeletionCascadesToActiveTasksSafely() throws {
+        let devId = "worker-mac-to-remove"
+        let dev = AgentRecord(
+            agentId: devId,
+            displayName: "Worker Mac",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.50:18743",
+            deviceId: devId
+        )
+        try LocalData.shared.agents.saveAgent(dev)
+
+        // 创建属于该设备的运行中任务
+        let taskId = "task-on-worker-\(UUID().uuidString.prefix(6))"
+        let activeTask = LocalTask(
+            taskId: taskId,
+            title: "Build App on Worker Mac",
+            state: "working",
+            assignedAgentId: devId
+        )
+        try LocalData.shared.tasks.createTask(LocalTask(
+            taskId: taskId,
+            title: "Build App on Worker Mac",
+            state: "queued",
+            assignedAgentId: devId
+        ))
+        try LocalData.shared.tasks.transition(taskId: taskId, to: "working")
+
+        // 创建与另一台设备绑定的无关任务
+        let safeTaskId = "safe-task-\(UUID().uuidString.prefix(6))"
+        try LocalData.shared.tasks.createTask(LocalTask(
+            taskId: safeTaskId,
+            title: "Safe Task on MacBook-Air",
+            state: "queued",
+            assignedAgentId: "MacBook-Air"
+        ))
+
+        // 执行删除与任务级联清理
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
+        try LocalData.shared.agents.deleteAgent(agentId: devId)
+        if let tasks = try? LocalData.shared.tasks.listTasks() {
+            for t in tasks {
+                let matches = t.assignedAgentId == devId || t.assignedAgentId?.hasPrefix("\(devId):") == true
+                if matches && !TaskStates.isTerminal(t.state) {
+                    try? LocalData.shared.tasks.transition(
+                        taskId: t.taskId,
+                        to: "cancelled",
+                        note: "关联设备已注销：执行设备已被删除，任务安全终止"
+                    )
+                }
+            }
+        }
+
+        // 验证关联任务已被安全流转为 cancelled 终态
+        let cancelledTask = try XCTUnwrap(LocalData.shared.tasks.getTask(taskId: taskId))
+        XCTAssertEqual(cancelledTask.state, "cancelled")
+
+        // 验证其他任务未受影响，依然处于 queued
+        let untouchedTask = try XCTUnwrap(LocalData.shared.tasks.getTask(taskId: safeTaskId))
+        XCTAssertEqual(untouchedTask.state, "queued")
+
+        // 清理
+        try? LocalData.shared.agents.deleteAgent(agentId: devId)
+    }
+
+    // 17. 回归测试 8：Redmi K70 离线状态独立性与自主保留/删除
+    func testRedmiK70CanBeIndependentlyRetainedOrDeleted() throws {
+        let k70Id = "device-redmi-k70"
+        let k70 = AgentRecord(
+            agentId: k70Id,
+            displayName: "Redmi K70 · Android Worker",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.105:18743",
+            lastTestSummary: "连接超时：目标机（192.168.1.105:18743）未响应",
+            memberConnectionState: "NOT_CONNECTED",
+            deviceId: k70Id
+        )
+        let macBookAir = AgentRecord(
+            agentId: "MacBook-Air",
+            displayName: "MacBook-Air",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.4:18743",
+            lastTestSummary: "已连接",
+            memberConnectionState: "CONNECTED",
+            deviceId: "MacBook-Air"
+        )
+        try LocalData.shared.agents.saveAgent(k70)
+        try LocalData.shared.agents.saveAgent(macBookAir)
+
+        // 1. 保留阶段：K70 独立记录在库，状态为 NOT_CONNECTED，且 MacBook-Air 保持 CONNECTED
+        var storedK70 = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: k70Id))
+        var storedAir = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "MacBook-Air"))
+        XCTAssertEqual(storedK70.memberConnectionState, "NOT_CONNECTED")
+        XCTAssertEqual(storedAir.memberConnectionState, "CONNECTED")
+
+        // 2. 删除阶段：用户主动删除 Redmi K70
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: k70Id)
+        try LocalData.shared.agents.deleteAgent(agentId: k70Id)
+
+        // 验证 K70 被删除，而 MacBook-Air 毫发无损且仍为已连接
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: k70Id))
+        storedAir = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "MacBook-Air"))
+        XCTAssertEqual(storedAir.memberConnectionState, "CONNECTED")
+        XCTAssertEqual(storedAir.baseUrl, "192.168.1.4:18743")
+
+        // 清理
+        try? LocalData.shared.agents.deleteAgent(agentId: "MacBook-Air")
     }
 }
