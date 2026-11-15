@@ -93,11 +93,11 @@ class MainActivitySmokeTest {
         val deadline = System.currentTimeMillis() + 8000
         while (System.currentTimeMillis() < deadline) {
             shadowOf(Looper.getMainLooper()).idle()
-            if (collectTexts(activity.window.decorView).contains("全局一眼看全")) break
+            if (collectTexts(activity.window.decorView).contains(wherevercode.agent.ui.ConsoleSnapshot.ConsoleModule.OVERVIEW.title)) break
             Thread.sleep(50)
         }
         assertTrue("control must render data, not just its static header",
-            collectTexts(activity.window.decorView).contains("全局一眼看全"))
+            collectTexts(activity.window.decorView).contains(wherevercode.agent.ui.ConsoleSnapshot.ConsoleModule.OVERVIEW.title))
         controller.pause().stop().destroy()
     }
 
