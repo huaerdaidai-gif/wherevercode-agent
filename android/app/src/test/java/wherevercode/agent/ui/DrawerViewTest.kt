@@ -180,12 +180,15 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `hidden entry is absent from top group`() {
+    fun `legacy hidden prefs cannot remove fixed primary navigation`() {
         val controller = DrawerController()
         val drawerView = view(controller)
         assertTrue(controller.hide(DrawerController.ID_PROJECTS))
         drawerView.refresh()
-        assertFalse(drawerView.renderedIds().contains("nav_projects"))
+        assertEquals(
+            listOf("nav_chat", "nav_projects", "nav_channels", "nav_control"),
+            drawerView.renderedGroupIds("top"),
+        )
     }
 
     @Test
