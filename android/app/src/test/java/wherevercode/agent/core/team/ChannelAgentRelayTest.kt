@@ -167,6 +167,14 @@ class ChannelAgentRelayTest {
         relayOutputIds = relayOutputIds,
         timeoutSeconds = timeoutSeconds,
         timeoutMarginSeconds = 0,
+        // 2026-11-15 任务 B：默认策略已改 fail-closed（{ false }），本夹具
+        // 显式传策略——测试消息的发送者固定为 example-agent，按“App 已
+        // 学到的自身 agent_id”经真实 ChannelSenderPolicy 判定为受信。
+        // 权限判定本身由 ChannelPermissionTest / ChannelFailClosedTest 覆盖，
+        // 本类只测中转机制，不在此另造放行逻辑。
+        isTrustedSender = { m ->
+            ChannelSenderPolicy.isTrustedRelaySender(m, agents, emptySet(), setOf("example-agent"))
+        },
     )
 
     private val agents = listOf(

@@ -18,6 +18,7 @@ import wherevercode.agent.core.security.FileAuditLog
 import wherevercode.agent.core.security.FileAuthorizationStore
 import wherevercode.agent.core.security.LimitError
 import wherevercode.agent.core.security.ReplayGuard
+import wherevercode.agent.core.security.SafePaths
 import wherevercode.agent.core.security.utcNowIso
 import wherevercode.agent.core.workspace.FileWorkspaceAdapter
 import wherevercode.agent.core.workspace.WorkspaceAdapter
@@ -201,6 +202,16 @@ class LocalHand(
         }
         val (_, cwd) = resolve(args["cwd"] ?: "")
         if (!cwd.isDirectory) throw HandError("hand_not_a_directory", "不是文件夹：${args["cwd"] ?: ""}")
+        // 2026-11-13 安全加固：远端调用方的命令参数不得指向授权文件夹之外
+        // （`cat /etc/…`、`grep -r x ../..`、`tail ~/.ssh/…`）。read/list 走
+        // resolve() 有根目录检查，run 的参数此前完全不查。
+        val escaping = SafePaths.argsEscapingRoot(argv, workspace, cwd)
+        if (escaping.isNotEmpty()) {
+            throw HandError(
+                "hand_path_not_allowed",
+                "不允许的命令参数：${escaping.first().take(80)} 指向授权文件夹之外",
+            )
+        }
         val timeout = try {
             limits.checkTimeout(args["timeout"]?.toDoubleOrNull())
         } catch (e: LimitError) {

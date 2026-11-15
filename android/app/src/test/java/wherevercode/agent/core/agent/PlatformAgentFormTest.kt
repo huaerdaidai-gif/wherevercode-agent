@@ -81,6 +81,15 @@ class PlatformAgentFormTest {
     }
 
     @Test
+    fun `platform host with a valid port is retained and malformed ports are rejected`() {
+        val record = (build(platformHost = "platform.example:8443") as PlatformAgentForm.Result.Ok).record
+        assertEquals("platform.example:8443", record.platformHost)
+        assertEquals("https://platform.example:8443", record.baseUrl)
+        val rejected = build(platformHost = "platform.example:70000") as PlatformAgentForm.Result.Rejected
+        assertTrue(rejected.message.contains("格式无效"))
+    }
+
+    @Test
     fun `dedicated channel id is stored when filled`() {
         val record = (build(platformChannelId = "chan-v5-dedicated") as PlatformAgentForm.Result.Ok).record
         assertEquals("chan-v5-dedicated", record.platformChannelId)
@@ -108,6 +117,8 @@ class PlatformAgentFormTest {
         val first = (build(platformChannelId = "chan-v5-dedicated") as PlatformAgentForm.Result.Ok).record
         val second = (build(platformChannelId = "  ", existing = first) as PlatformAgentForm.Result.Ok).record
         assertEquals(null, second.platformChannelId)
+        // Public builds have no configured shared-channel id. Clearing the
+        // dedicated value must stay empty rather than inventing a fallback.
         assertTrue(!PlatformAgent.isSharedChannel(second.platformChannelId))
     }
 

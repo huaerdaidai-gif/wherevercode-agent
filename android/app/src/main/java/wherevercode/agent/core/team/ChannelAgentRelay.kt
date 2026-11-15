@@ -78,6 +78,18 @@ class ChannelAgentRelay(
     private val timeoutSeconds: Long = TeamChatLimits.RELAY_TIMEOUT_SECONDS,
     /** runAgent/runChat 自身超时之外的兜底余量（秒；与扇出同款 30 秒）。 */
     private val timeoutMarginSeconds: Long = 30,
+    /**
+     * 2026-11-13 频道权限：这条消息的发送者有没有资格触发中转（见
+     * [ChannelSenderPolicy]）。生产接线（MainActivity）传入受信名单判定。
+     * 不受信的 @ 一律不执行。
+     *
+     * 2026-11-15 安全加固二轮（任务 B）：默认值改为 fail-closed 的
+     * `{ false }`。此前默认 `{ true }` 时，新调用点忘传策略会静默全
+     * 放行——频道里任何人一句 @ 就能驱动用户设备上的 Agent；现在忘
+     * 传参最多是中转不工作（功能故障、看得见），绝不开放行。调用方
+     * 必须显式传入经核实的发送者策略（回归见 ChannelFailClosedTest）。
+     */
+    private val isTrustedSender: (PlatformChannelMessage) -> Boolean = { false },
 ) {
     /** 两组 id 共用一把锁（调用方传进来的集合本身也要同步访问，见下）。 */
     private val idLock = Any()
@@ -122,6 +134,22 @@ class ChannelAgentRelay(
         if (alreadyHandled) return emptyList()
         val mentions = findMentions(message.text, agents)
         if (mentions.isEmpty()) return emptyList()
+        val trusted = try {
+            isTrustedSender(message)
+        } catch (_: Exception) {
+            false
+        }
+        if (!trusted) {
+            val who = message.agentId.ifBlank { "未知发送者" }.take(64)
+            return mentions.map { agent ->
+                RelayOutcome(
+                    agent.agentId,
+                    agent.displayName,
+                    RelayStatus.FAILED,
+                    "发送者 $who 不在受信名单（不是本机 App，也不是你登记的平台 Agent），未中转。",
+                )
+            }
+        }
         val sender = message.agentName.ifBlank { message.agentId.ifBlank { "频道里有人" } }
         val brief = TeamChatRules.buildRelayBrief(sender, message.text)
         return mentions.map { agent -> relayToAgent(message, agent, brief) }
