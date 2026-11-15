@@ -54,9 +54,16 @@ class InMemoryMemoryStore : MemoryStore {
     private val lock = Any()
     private val entries = LinkedHashMap<Pair<MemoryKind, String>, MemoryEntry>()
 
+    internal fun restorePersisted(entry: MemoryEntry) {
+        require(entry.kind != MemoryKind.FACT || entry.confirmedByUser) { "未确认的事实不能恢复" }
+        require(!SecretRedactor.containsSecret(entry.key) && !SecretRedactor.containsSecret(entry.value)
+            && !SecretRedactor.containsSecret(entry.source)) { "记忆数据含敏感信息" }
+        synchronized(lock) { entries[entry.kind to entry.key] = entry }
+    }
+
     override fun addFact(entry: MemoryEntry, confirmedByUser: Boolean): Boolean {
-        if (!confirmedByUser) return false
-        if (SecretRedactor.containsSecret(entry.value) || SecretRedactor.containsSecret(entry.key)) {
+        if (!confirmedByUser || entry.kind != MemoryKind.FACT) return false
+        if (SecretRedactor.containsSecret(entry.value) || SecretRedactor.containsSecret(entry.key) || SecretRedactor.containsSecret(entry.source)) {
             return false
         }
         synchronized(lock) {
@@ -67,7 +74,7 @@ class InMemoryMemoryStore : MemoryStore {
 
     override fun addTaskSummary(taskId: String, summary: String, settled: Boolean): Boolean {
         if (!settled) return false
-        if (SecretRedactor.containsSecret(summary)) return false
+        if (SecretRedactor.containsSecret(summary) || SecretRedactor.containsSecret(taskId)) return false
         val entry = MemoryEntry(
             id = java.util.UUID.randomUUID().toString(),
             kind = MemoryKind.TASK_SUMMARY,
@@ -82,7 +89,7 @@ class InMemoryMemoryStore : MemoryStore {
     }
 
     override fun addDeviceAuthorization(deviceId: String, note: String): Boolean {
-        if (SecretRedactor.containsSecret(note)) return false
+        if (SecretRedactor.containsSecret(note) || SecretRedactor.containsSecret(deviceId)) return false
         val entry = MemoryEntry(
             id = java.util.UUID.randomUUID().toString(),
             kind = MemoryKind.DEVICE_AUTHORIZATION,

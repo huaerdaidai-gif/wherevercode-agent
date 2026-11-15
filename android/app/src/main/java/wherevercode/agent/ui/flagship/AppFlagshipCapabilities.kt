@@ -7,6 +7,9 @@ import wherevercode.agent.MainActivity
 data class V5Binding(val entry: String, val description: String)
 object V5Bindings {
   val all = mapOf(
+    "search" to V5Binding("local_search", "本机搜索会话正文、任务、项目与全部页面；不含云端索引。"),
+    "memory" to V5Binding("local_memory", "与大脑共用持久记忆；事实经用户确认，拒绝敏感信息。"),
+    "skills" to V5Binding("local_skills", "现有技能库的项目筛选、详情、人工记录与删除；不等于规则自动化。"),
     "chat" to V5Binding("nav_chat", "打开新对话；运行中的轮次仍由现有确认流程保护。"),
     "conversation" to V5Binding("current_conversation", "继续当前会话，保留 Agent、项目和执行状态。"),
     "history" to V5Binding("nav_history", "本地历史会话列表，可搜索与恢复；不包含云端同步。"),

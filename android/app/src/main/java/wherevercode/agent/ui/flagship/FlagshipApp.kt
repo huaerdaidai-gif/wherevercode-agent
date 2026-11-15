@@ -192,7 +192,7 @@ object V5Navigation {
   }
 }
 
-@Composable private fun V5Theme(content: @Composable () -> Unit) {
+@Composable internal fun V5Theme(content: @Composable () -> Unit) {
   val dark = isSystemInDarkTheme()
   MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme(
     primary = Color(0xFFAE6145), background = Color(0xFFFAF9F6),
@@ -218,9 +218,9 @@ object V5Navigation {
 /** Embedded in MainActivity; existing controllers retain their lifecycle and permissions. */
 @Composable fun FlagshipHub(parent: String, onOpen: (String) -> Unit,
   onBack: () -> Unit, provider: FlagshipCapabilityProvider,
-  registerBack: ((() -> Boolean) -> Unit) = {}, onUtility: (String) -> Unit = {}) {
+  registerBack: ((() -> Boolean) -> Unit) = {}, onUtility: (String) -> Unit = {}, initialRoute: String? = null) {
   var query by rememberSaveable(parent) { mutableStateOf("") }
-  var selected by rememberSaveable(parent) { mutableStateOf<String?>(null) }
+  var selected by rememberSaveable(parent, initialRoute) { mutableStateOf(initialRoute) }
   SideEffect { registerBack { if (selected != null) { selected = null; true } else false } }
   V5Theme {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 18.dp)) {

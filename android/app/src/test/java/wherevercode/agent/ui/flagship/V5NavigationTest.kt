@@ -26,7 +26,7 @@ class V5NavigationTest {
         V5Bindings.all.forEach { (id, binding) ->
             assertTrue(id in V5Navigation.parentByRoute)
             assertTrue(binding.description.isNotBlank())
-            if (binding.entry !in setOf("current_conversation", "create_task")) {
+            if (binding.entry !in setOf("current_conversation", "create_task", "local_search", "local_memory", "local_skills")) {
                 val entry = requireNotNull(EntryRegistry.find(binding.entry)) { id }
                 assertEquals(id, EntryRegistry.Status.IMPLEMENTED, entry.status)
             }

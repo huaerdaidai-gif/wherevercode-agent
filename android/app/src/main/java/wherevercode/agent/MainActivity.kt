@@ -1163,13 +1163,17 @@ class MainActivity : AppCompatActivity() {
         pendingTaskDetailId = savedInstanceState?.getString(KEY_TASK_DETAIL)
         showEntry(startEntry)
         v5ReturnParent = savedInstanceState?.getString("v5_return")
-        savedInstanceState?.getString("v5_parent")?.let { showV5Hub(it) }
+        savedInstanceState?.getString("v5_parent")?.let { parent ->
+            val local = savedInstanceState.getString("v5_local_route")
+            if (local in setOf("search", "memory", "skills")) showV5Local(local!!) else showV5Hub(parent)
+        }
         loadBrainComponents()
         maybeShowOnboarding(savedInstanceState?.getString(KEY_ONBOARDING_STEP))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("v5_parent", v5Parent)
+        outState.putString("v5_local_route", v5LocalRoute)
         outState.putString("v5_return", v5ReturnParent)
         outState.putString(KEY_ENTRY, currentEntry)
         outState.putBoolean(KEY_IN_CONVERSATION, inConversation)
@@ -1216,6 +1220,7 @@ class MainActivity : AppCompatActivity() {
 
     private var v5Hub: androidx.compose.ui.platform.ComposeView? = null
     private var v5Parent: String? = null
+    private var v5LocalRoute: String? = null
     private var v5ReturnParent: String? = null
     private var v5DetailBack: (() -> Boolean)? = null
 
@@ -1223,10 +1228,11 @@ class MainActivity : AppCompatActivity() {
         v5Hub?.let { screenContainer.removeView(it); it.disposeComposition() }
         v5Hub = null
         v5Parent = null
+        v5LocalRoute = null
         v5DetailBack = null
     }
 
-    private fun showV5Hub(parent: String) {
+    private fun showV5Hub(parent: String, initialRoute: String? = null) {
         if (parent !in wherevercode.agent.ui.flagship.V5Navigation.parents) return
         hideV5Hub()
         hideTaskDetail()
@@ -1238,7 +1244,7 @@ class MainActivity : AppCompatActivity() {
         v5Hub = androidx.compose.ui.platform.ComposeView(this).apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                wherevercode.agent.ui.flagship.FlagshipHub(parent,
+                wherevercode.agent.ui.flagship.FlagshipHub(parent, initialRoute = initialRoute,
                     onOpen = { openV5Route(it) },
                     onBack = { hideV5Hub(); showEntry(currentEntry) },
                     provider = wherevercode.agent.ui.flagship.AppFlagshipCapabilities(this@MainActivity),
@@ -1255,11 +1261,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showV5Local(routeId: String) {
+        val parent = v5ReturnParent ?: wherevercode.agent.ui.flagship.V5Navigation.parentByRoute.getValue(routeId)
+        hideV5Hub()
+        hideTaskDetail()
+        stopConsoleTicker()
+        stopTeamChannelFeed()
+        v5Parent = parent
+        for (index in 0 until screenContainer.childCount) screenContainer.getChildAt(index).visibility = View.GONE
+        v5LocalRoute = routeId
+        val back = { showV5Hub(parent, routeId) }
+        v5DetailBack = { back(); true }
+        v5Hub = androidx.compose.ui.platform.ComposeView(this).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                wherevercode.agent.ui.flagship.LocalFeatureScreen(routeId,
+                    resolve = { brainComponents }, projects = { projectStore.listProjects() }, onBack = back,
+                    onResult = { result ->
+                        when (result.kind) {
+                            "页面" -> showV5Hub(wherevercode.agent.ui.flagship.V5Navigation.parentByRoute.getValue(result.id), result.id)
+                            "会话" -> { hideV5Hub(); showEntry(DrawerController.ID_NEW_CONVERSATION); openSession(result.id, result.title) }
+                            "任务" -> { hideV5Hub(); showEntry(DrawerController.ID_TASKS); openTaskDetail(result.id) }
+                            "项目" -> {
+                                val project = projectStore.getProject(result.id)
+                                if (project == null) toast("项目已不存在，请重新搜索")
+                                else android.app.AlertDialog.Builder(this@MainActivity).setTitle(project.name)
+                                    .setMessage("项目 ID：${project.projectId}\n仓库：${project.repoUrl ?: "未设置"}\n分支：${project.defaultBranch}")
+                                    .setPositiveButton("浏览授权文件") { _, _ ->
+                                        hideV5Hub(); showEntry(DrawerController.ID_PROJECTS); openProject(project)
+                                    }.setNegativeButton("返回搜索", null).show()
+                            }
+                        }
+                    })
+            }
+            screenContainer.addView(this, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+    }
+
     private fun openV5Route(routeId: String) {
         val binding = wherevercode.agent.ui.flagship.V5Bindings.all[routeId] ?: return
         v5ReturnParent = v5Parent ?: wherevercode.agent.ui.flagship.V5Navigation.parentByRoute[routeId]
         hideV5Hub()
         when (binding.entry) {
+            "local_search", "local_memory", "local_skills" -> showV5Local(routeId)
             "current_conversation" -> showEntry(DrawerController.ID_NEW_CONVERSATION)
             "create_task" -> {
                 showEntry(DrawerController.ID_TASKS)
