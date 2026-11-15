@@ -1067,18 +1067,18 @@ public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendabl
 
     public func toolsForCapabilities(_ capabilities: BrainCapabilities?, authorizedTools: Set<String>) -> [ToolDef] {
         return [
-            ToolDef(name: "list_files", description: "列出远程工作区指定目录下的文件和子目录", parameters: [
-                "path": "相对工作区的子目录路径，传空表示工作区根目录"
+            ToolDef(name: "list_files", description: "列出远程工作区指定目录下的文件和子目录", inputSchema: [
+                "path": .string("相对工作区的子目录路径，传空表示工作区根目录")
             ]),
-            ToolDef(name: "read_file", description: "读取远程工作区指定文件的纯文本内容", parameters: [
-                "path": "相对工作区的文件路径"
+            ToolDef(name: "read_file", description: "读取远程工作区指定文件的纯文本内容", inputSchema: [
+                "path": .string("相对工作区的文件路径")
             ]),
-            ToolDef(name: "write_file", description: "向远程工作区指定文件写入内容", parameters: [
-                "path": "相对工作区的文件路径",
-                "content": "待写入的文本内容"
+            ToolDef(name: "write_file", description: "向远程工作区指定文件写入内容", inputSchema: [
+                "path": .string("相对工作区的文件路径"),
+                "content": .string("待写入的文本内容")
             ]),
-            ToolDef(name: "run_command", description: "在远程设备的工作区中执行命令", parameters: [
-                "command": "待执行的命令字符串"
+            ToolDef(name: "run_command", description: "在远程设备的工作区中执行命令", inputSchema: [
+                "command": .string("待执行的命令字符串")
             ])
         ]
     }
@@ -1104,28 +1104,28 @@ public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendabl
         do {
             switch action.tool {
             case "list_files", "list":
-                let relPath = action.args["path"] ?? ""
+                let relPath = action.args["path"]?.stringValue ?? ""
                 let entries = try await HandClient.shared.listDirectory(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath)
                 let names = entries.map { "\($0.isDir ? "[DIR] " : "")\($0.name)" }.joined(separator: "\n")
                 return ToolOutcome(ok: true, summary: "获取到 \(entries.count) 个条目", data: names)
 
             case "read_file", "read":
-                guard let relPath = action.args["path"], !relPath.isEmpty else {
+                guard let relPath = action.args["path"]?.stringValue, !relPath.isEmpty else {
                     return ToolOutcome(ok: false, summary: "缺少文件路径", errorCode: "missing_path")
                 }
                 let content = try await HandClient.shared.readFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath)
                 return ToolOutcome(ok: true, summary: "成功读取 \(relPath) (\(content.count) 字符)", data: content)
 
             case "write_file", "write":
-                guard let relPath = action.args["path"], !relPath.isEmpty else {
+                guard let relPath = action.args["path"]?.stringValue, !relPath.isEmpty else {
                     return ToolOutcome(ok: false, summary: "缺少写入路径", errorCode: "missing_path")
                 }
-                let content = action.args["content"] ?? ""
+                let content = action.args["content"]?.stringValue ?? ""
                 let ok = try await HandClient.shared.writeFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath, content: content)
                 return ToolOutcome(ok: ok, summary: ok ? "已写入 \(relPath)" : "写入失败", errorCode: ok ? nil : "write_failed")
 
             case "run_command", "run":
-                let prompt = action.args["command"] ?? action.args["prompt"] ?? ""
+                let prompt = action.args["command"]?.stringValue ?? action.args["prompt"]?.stringValue ?? ""
                 let output = try await HandClient.shared.runAgent(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, prompt: prompt, timeoutSeconds: 60.0) { _ in }
                 return ToolOutcome(ok: true, summary: "命令执行完成", data: output)
 
