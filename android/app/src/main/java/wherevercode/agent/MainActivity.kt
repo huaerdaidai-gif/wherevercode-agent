@@ -216,6 +216,9 @@ import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
 import wherevercode.agent.core.security.SecretRedactor
 import wherevercode.agent.core.session.SessionKind
+import wherevercode.agent.core.search.SearchableConversation
+import wherevercode.agent.core.search.SearchableProject
+import wherevercode.agent.core.search.SearchableTask
 import wherevercode.agent.core.task.CapabilityCards
 import wherevercode.agent.core.task.CapabilityRouter
 import wherevercode.agent.core.task.DeliveryCard
@@ -249,7 +252,9 @@ import wherevercode.agent.core.task.TriageRouter
 import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.transport.LanTransport
 import wherevercode.agent.ui.ChatProjectPickerDialog
+import wherevercode.agent.ui.GlobalSearchDialog
 import wherevercode.agent.ui.SessionListController
+import wherevercode.agent.ui.chatConversationId
 import wherevercode.agent.ui.PipelineAction
 import wherevercode.agent.ui.TaskDetailArtifacts
 import wherevercode.agent.ui.TaskDetailController
@@ -4732,6 +4737,9 @@ class MainActivity : AppCompatActivity() {
                 // 分节更新区）都在设置页内，无独立页，落设置页即达。
                 "autonomy" -> showEntry(DrawerController.ID_SETTINGS)
                 "app_update" -> showEntry(DrawerController.ID_SETTINGS)
+                // 全局搜索是独立搜索界面（弹窗）：搜本机会话 / 项目 / 任务，
+                // 结果点开走既有打开方法真跳转（见 showGlobalSearch）。
+                "global_search" -> showGlobalSearch()
                 else -> toast("${entry.title}待开发")
             }
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
@@ -4772,6 +4780,169 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("关闭", null)
             .show()
+    }
+
+    /**
+     * 全局搜索（核心功能推进第 1 项，2026-11-15）：搜本机会话（标题与
+     * 消息正文）、项目（名 / id / 仓库 / 家路径）、任务（标题 / 描述）。
+     * 数据在后台线程用各 Store 的真实列出 API 组装（SessionLedger /
+     * ConversationStore / ProjectStore / TaskStore），匹配与排序走纯
+     * 逻辑 GlobalSearch，界面走 GlobalSearchDialog。频道消息走平台
+     * 远端、本机没有消息缓存，不在搜索范围内（界面与注册表 note 均
+     * 如实标注）。结果跳转全部复用既有打开方法，不另造导航：
+     * 会话 → [openSession]；项目 → [openProject]（先切项目页）；
+     * 任务 → [openTaskDetail]（带 taskId 的详情浮层）。
+     */
+    private fun showGlobalSearch() {
+        val components = brainComponents ?: run {
+            toast("大脑还在加载，请稍候再试。")
+            return
+        }
+        Thread {
+            val conversations = buildSearchableConversations(components)
+            val projects = buildSearchableProjects()
+            val tasks = buildSearchableTasks(components)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                GlobalSearchDialog.show(
+                    context = this,
+                    conversations = conversations,
+                    projects = projects,
+                    tasks = tasks,
+                    onOpenConversation = { sessionId, label -> openSession(sessionId, label) },
+                    onOpenProject = { projectId -> openProjectFromSearch(projectId) },
+                    onOpenTask = { taskId -> openTaskDetail(taskId) },
+                )
+            }
+        }.start()
+    }
+
+    /**
+     * 会话搜索数据：与会话列表同一数据源（SessionLedger）与同一去重
+     * 口径（chat: 碎片行按 conversationId 只留首选行，见
+     * buildSessionListItems）。显示名与会话列表同规则：具名会话用名，
+     * chat: 会话用对话标题或首条用户消息。正文只取用户与助手消息
+     * （工具消息多为结构化载荷，不进搜索正文），每会话最多读最近
+     * [GLOBAL_SEARCH_MESSAGE_LIMIT] 条，界住组装成本。
+     */
+    private fun buildSearchableConversations(
+        components: BrainBootstrap.BrainComponents,
+    ): List<SearchableConversation> {
+        val sessions = try {
+            components.sessionLedger.listSessions("user")
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val preferredHistoryRows = sessions
+            .filter { it.name.startsWith("chat:") }
+            .groupBy(::chatConversationId)
+            .mapValues { (conversationId, rows) ->
+                rows.firstOrNull { it.sessionId == conversationId } ?: rows.first()
+            }
+            .values
+            .mapTo(mutableSetOf()) { it.sessionId }
+        return sessions
+            .filter { !it.name.startsWith("chat:") || it.sessionId in preferredHistoryRows }
+            .map { session ->
+                val conversationId = if (session.name.startsWith("chat:")) {
+                    session.name.removePrefix("chat:")
+                } else {
+                    session.sessionId
+                }
+                val messages = try {
+                    components.conversationStore.listMessages(
+                        conversationId,
+                        GLOBAL_SEARCH_MESSAGE_LIMIT,
+                    )
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                val title = when {
+                    !session.name.startsWith("chat:") && session.name.isNotBlank() ->
+                        session.name
+                    else -> {
+                        val storedTitle = try {
+                            components.conversationStore.getConversation(conversationId)?.title
+                        } catch (_: Exception) {
+                            null
+                        }
+                        val firstUser = messages.firstOrNull { it.role == "user" }
+                            ?.content?.trim().orEmpty()
+                        when {
+                            !storedTitle.isNullOrBlank() -> storedTitle
+                            firstUser.isNotEmpty() -> firstUser.take(40)
+                            messages.isEmpty() -> "空会话"
+                            else -> "没有可显示的对话"
+                        }
+                    }
+                }
+                SearchableConversation(
+                    sessionId = session.sessionId,
+                    title = title,
+                    bodyTexts = messages
+                        .filter { it.role == "user" || it.role == "assistant" }
+                        .map { it.content },
+                    updatedAtEpochSeconds = session.updatedAtEpochSeconds,
+                )
+            }
+    }
+
+    /** 项目搜索数据：项目名 + id / 仓库地址 / 全部家文件夹路径作详情。 */
+    private fun buildSearchableProjects(): List<SearchableProject> {
+        val projects = try {
+            projectStore.listProjects()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val pathsByProject = try {
+            projectStore.listLocations()
+        } catch (_: Exception) {
+            emptyList()
+        }.groupBy({ it.projectId }, { it.workspacePath })
+        return projects.map { project ->
+            SearchableProject(
+                projectId = project.projectId,
+                name = project.name,
+                details = listOfNotNull(project.projectId, project.repoUrl) +
+                    (pathsByProject[project.projectId] ?: emptyList()),
+                createdAtEpochSeconds = project.createdAtEpochSeconds,
+            )
+        }
+    }
+
+    /** 任务搜索数据：标题（空标题回退任务 id）+ 描述 + 状态原文。 */
+    private fun buildSearchableTasks(
+        components: BrainBootstrap.BrainComponents,
+    ): List<SearchableTask> {
+        val tasks = try {
+            components.taskStore.listTasks()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return tasks.map { task ->
+            SearchableTask(
+                taskId = task.taskId,
+                title = task.title.ifBlank { task.taskId },
+                description = task.description,
+                stateLabel = task.state,
+                updatedAtEpochSeconds = task.updatedAt,
+            )
+        }
+    }
+
+    /** 搜索结果打开项目：先切到项目页，再走既有 openProject（指定家/浏览）。 */
+    private fun openProjectFromSearch(projectId: String) {
+        val project = try {
+            projectStore.getProject(projectId)
+        } catch (_: Exception) {
+            null
+        }
+        if (project == null) {
+            toast("该项目已不存在。")
+            return
+        }
+        showEntry(DrawerController.ID_PROJECTS)
+        openProject(project)
     }
 
     // ------------------------------------------------------------------
@@ -11419,6 +11590,8 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_ONBOARDING_DONE = "onboarding_completed"
         private const val KEY_ONBOARDING_DIRECTION = "onboarding_direction"
         private const val KEY_ONBOARDING_STEP = "ui_onboarding_step"
+        /** 全局搜索组装时每会话最多读取的最近消息条数（界住正文组装成本）。 */
+        private const val GLOBAL_SEARCH_MESSAGE_LIMIT = 200
         /** V5 按主流改（maintainer 2026-11-11）：“+”菜单网页搜索开关的持久化。 */
         private const val PREFS_CHAT = "wherevercode_chat_prefs"
         private const val KEY_WEB_SEARCH_ENABLED = "web_search_enabled"

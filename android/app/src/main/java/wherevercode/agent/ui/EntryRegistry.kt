@@ -241,8 +241,9 @@ object EntryRegistry {
         // ── 70 屏补漏（2026-11-15）：按钮先行，全部先以待开发可见入口落地 ──
         // ── 父级：对话 ──
         Entry("feature_global_search", "全局搜索", Group.FEATURE,
-            Status.TODO, TargetKind.TODO, "",
-            "搜", null, "nav_chat", "全局搜索待开发（跨会话、项目与频道统一搜索尚未开发）", "原型页 4。"),
+            Status.IMPLEMENTED, TargetKind.SCREEN, "global_search",
+            "搜", null, "nav_chat", null,
+            "本地全局搜索（GlobalSearch + GlobalSearchDialog）：搜本机会话（标题与消息正文）、项目（名/id/仓库/家路径）、任务（标题/描述）；频道消息走平台远端、本机无消息缓存，不在本地搜索范围内。原型页 4。"),
         Entry("feature_voice_multimodal", "语音与多模态", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
             "音", null, "nav_chat", "语音与多模态待开发（语音输入与多模态消息尚未开发）", "原型页 55。"),

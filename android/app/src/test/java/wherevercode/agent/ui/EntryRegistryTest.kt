@@ -209,9 +209,21 @@ class EntryRegistryTest {
     }
 
     @Test
+    fun `global search is registered as implemented screen feature`() {
+        // 2026-11-15 核心功能推进第 1 项：全局搜索已真实现（GlobalSearch
+        // 纯逻辑 + GlobalSearchDialog，搜本机会话/项目/任务），从待开发
+        // 升为已实现 SCREEN 入口，落点 target = "global_search"。
+        val entry = EntryRegistry.find("feature_global_search")!!
+        assertEquals(Status.IMPLEMENTED, entry.status)
+        assertEquals(EntryRegistry.TargetKind.SCREEN, entry.targetKind)
+        assertEquals("global_search", entry.target)
+        assertEquals(Group.FEATURE, entry.group)
+        assertEquals("nav_chat", entry.parentId)
+    }
+
+    @Test
     fun `seventy screen gap entries are registered as todo features`() {
         val newIds = listOf(
-            "feature_global_search",
             "feature_change_diff",
             "feature_agent_detail",
             "feature_network",
