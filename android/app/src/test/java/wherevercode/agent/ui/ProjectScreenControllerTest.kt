@@ -196,11 +196,13 @@ class ProjectScreenControllerTest {
         val enter = findEnterButton(row) ?: throw AssertionError("选中行没有“进入”")
         assertEquals(View.VISIBLE, enter.visibility)
         assertTrue(row.background != null)
-        // 未选中的行：对勾占位不可见、“进入”不占位、无高亮底。
+        // 未选中的行：对勾占位不可见、“进入”不占位；卡片形态（2026-11-16
+        // 照 iOS 项目页）：未选中行有白卡片底，与选中行的高亮底不同。
         val other = h.projectRow("other-proj") ?: throw AssertionError("找不到另一行")
         assertEquals(View.INVISIBLE, (other.getChildAt(0) as TextView).visibility)
         assertEquals(View.GONE, findEnterButton(other)?.visibility)
-        assertTrue(other.background == null)
+        assertTrue(other.background != null)
+        assertTrue(row.background != other.background)
     }
 
     @Test
@@ -220,7 +222,8 @@ class ProjectScreenControllerTest {
         val row3 = h.projectRow("wherevercode-agent") ?: throw AssertionError("找不到项目行")
         assertEquals(View.INVISIBLE, (row3.getChildAt(0) as TextView).visibility)
         assertEquals(View.GONE, findEnterButton(row3)?.visibility)
-        assertTrue(row3.background == null)
+        // 取消选定后回到卡片底（2026-11-16 照 iOS 项目页），不是无底。
+        assertTrue(row3.background != null)
     }
 
     @Test
