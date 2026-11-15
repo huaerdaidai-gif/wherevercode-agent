@@ -176,10 +176,32 @@ final class WhereverCodeAgentUITests: XCTestCase {
     }
 
     private func navigate(_ app: XCUIApplication, to destination: String) {
-        let menu = app.buttons["navigation.menu"]
+        let menu = app.buttons["navigation.menu"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
-        let row = app.buttons["drawer_\(destination)"]
+
+        let routeMap: [String: (parent: String, group: String?, routeId: String)] = [
+            "chat": ("对话", "对话", "chat"),
+            "tasks": ("工作台", "任务", "tasks"),
+            "projects": ("工作台", "开发", "projects"),
+            "channels": ("工作台", "协作", "channels"),
+            "agents": ("工作台", "协作", "agents"),
+            "devices": ("工作台", "连接", "devices"),
+            "console": ("控制台", "监控", "dashboard"),
+            "settings": ("设置", "系统", "settings"),
+        ]
+        let target = routeMap[destination] ?? ("工作台", nil, destination)
+        let parentBtn = app.buttons["drawer.parent.\(target.parent)"].firstMatch
+        XCTAssertTrue(parentBtn.waitForExistence(timeout: 10))
+        parentBtn.tap()
+
+        let row = app.buttons["drawer.route.\(target.routeId)"].firstMatch
+        if !row.exists, let grp = target.group {
+            let grpBtn = app.buttons["drawer.group.\(grp)"].firstMatch
+            if grpBtn.waitForExistence(timeout: 5) {
+                grpBtn.tap()
+            }
+        }
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         if destination == "tasks" { snap(app, "ui-drawer") }
         row.tap()

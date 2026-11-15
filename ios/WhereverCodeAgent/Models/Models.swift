@@ -13,7 +13,7 @@ import Foundation
 /// Wire shape (verified against the live MCP server, 2026-11-13):
 /// `{"id": ..., "agent_id": ..., "agent_name": ..., "text": ...,
 ///   "reply_to": ... | null, "created_at": <unix seconds, fractional>}`.
-public struct ChannelMessage: Identifiable, Equatable, Hashable {
+public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendable {
     public let id: String
     public let agentId: String
     public let agentName: String
@@ -69,7 +69,7 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable {
 }
 
 /// One channel the current token can see (from `agent_channel_list`).
-public struct ChannelInfo: Identifiable, Equatable, Hashable {
+public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable {
     public let id: String
     public let name: String
     public let participants: [String]
@@ -118,7 +118,7 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable {
 /// is read tolerantly: several candidate keys are tried and anything
 /// missing falls back to an empty value. The task is never considered
 /// "done" from this struct alone — completion is decided by the server.
-public struct AgentTask: Identifiable, Equatable, Hashable {
+public struct AgentTask: Identifiable, Equatable, Hashable, Codable, Sendable {
     public let id: String
     public let title: String
     public let detail: String
@@ -161,7 +161,7 @@ public struct AgentTask: Identifiable, Equatable, Hashable {
 /// Channel connection state, shown honestly in the chat header.
 /// LIVE means messages arrive by WebSocket push; POLLING means the
 /// socket is down and the app is falling back to polling.
-public enum ChannelConnectionState: Equatable {
+public enum ChannelConnectionState: String, Equatable, Sendable {
     case stopped
     case connecting
     case live
@@ -194,4 +194,54 @@ func numberField(_ dict: [String: Any], keys: [String]) -> Double? {
         if let value = dict[key] as? String, let parsed = Double(value) { return parsed }
     }
     return nil
+}
+
+/// A feature the product design reserves but the V5 server does not expose yet.
+public enum ReservedFeature: String, CaseIterable, Identifiable, Sendable {
+    case approval
+    case pauseTask
+    case resumeTask
+    case stopTask
+    case retargetTask
+    case deviceManagement
+    case brainChat
+    case singleAgentChat
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .approval: return "审批"
+        case .pauseTask: return "暂停任务"
+        case .resumeTask: return "恢复任务"
+        case .stopTask: return "停止任务"
+        case .retargetTask: return "改目标"
+        case .deviceManagement: return "设备管理"
+        case .brainChat: return "大脑对话"
+        case .singleAgentChat: return "单兵对话"
+        }
+    }
+
+    public var note: String {
+        switch self {
+        case .approval:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有审批工具，无法真实执行；任务提交前请先在频道里人工确认。"
+        case .pauseTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有暂停任务工具，无法真实执行。"
+        case .resumeTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有恢复任务工具，无法真实执行。"
+        case .stopTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有停止任务工具，无法真实执行；不要的任务请用「放手任务」交回。"
+        case .retargetTask:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有改目标工具，无法真实执行；请放手任务后由调度重新派发。"
+        case .deviceManagement:
+            return "服务端无此接口，阻塞中：V5 平台的 13 个 MCP 工具里没有设备 / Agent 列表与配对工具，本页读不到真实设备；设备需先在 Android 端或平台侧添加。"
+        case .brainChat:
+            return "未实现：大脑对话尚未接入，先用团队频道与任务页。"
+        case .singleAgentChat:
+            return "未实现：单兵对话尚未接入，先用团队频道与任务页。"
+        }
+    }
+
+    public var notImplementedReason: String { note }
 }

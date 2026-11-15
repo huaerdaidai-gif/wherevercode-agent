@@ -18,7 +18,8 @@ import Foundation
 ///   message, never persisted into conversation history;
 /// - when a search fails, the turn still answers, but must say the
 ///   search results were not used.
-public struct WebSearchHit: Equatable {
+public struct WebSearchHit: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { url }
     public var title: String
     public var url: String
     public var snippet: String
@@ -216,6 +217,13 @@ public final class WebSearchClient {
             return .failure(error)
         } catch {
             return .failure(.transport(error.localizedDescription))
+        }
+    }
+
+    public func searchHits(query: String) async throws -> [WebSearchHit] {
+        switch await search(query: query) {
+        case .success(let res): return res.hits
+        case .failure(let err): throw err
         }
     }
 }

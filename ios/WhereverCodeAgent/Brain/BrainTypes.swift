@@ -23,7 +23,7 @@ import Foundation
 /// - CLOUD_AGENT: a cloud Agent that takes work through an MCP
 ///   connector; not a model API, not a CLI.
 
-public enum BrainKind: String, Codable, Equatable, CaseIterable {
+public enum BrainKind: String, Codable, Equatable, CaseIterable, Sendable {
     case modelApi = "MODEL_API"
     case agentRuntime = "AGENT_RUNTIME"
     case subscription = "SUBSCRIPTION"
@@ -39,7 +39,7 @@ public enum BrainKind: String, Codable, Equatable, CaseIterable {
 /// A JSON value, standing in for Kotlin's `Any?` inside
 /// `Map<String, Any?>` (tool arguments, tool schemas). Codable and
 /// Equatable so messages and calls can be compared and persisted.
-public enum JSONValue: Equatable, Codable {
+public enum JSONValue: Equatable, Codable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
@@ -175,7 +175,7 @@ public enum JSONValue: Equatable, Codable {
 /// only self-report + `/models` probing, never guesses. Unknown =
 /// null, and the UI must show "未知" (unknown) instead of inventing a
 /// value.
-public struct BrainCapabilities: Equatable {
+public struct BrainCapabilities: Equatable, Codable, Sendable {
     public var streaming: Bool
     public var toolCalling: Bool
     public var vision: Bool = false
@@ -207,12 +207,12 @@ public struct BrainCapabilities: Equatable {
 /// An image attached to a message for the brain. Valid for the current
 /// turn only: the bytes never enter conversation history. `dataUrl` is
 /// a downsampled JPEG data URL produced by the sender.
-public struct ChatImage: Equatable {
+public struct ChatImage: Equatable, Codable, Sendable {
     public var dataUrl: String
     public init(dataUrl: String) { self.dataUrl = dataUrl }
 }
 
-public struct ChatMessage: Equatable {
+public struct ChatMessage: Equatable, Codable, Sendable {
     /// user | assistant | tool | system
     public var role: String
     public var content: String
@@ -245,7 +245,7 @@ public struct ChatMessage: Equatable {
     }
 }
 
-public struct ToolDef: Equatable {
+public struct ToolDef: Equatable, Codable, Sendable {
     public var name: String
     public var description: String
     /// JSON-Schema-style object.
@@ -258,7 +258,7 @@ public struct ToolDef: Equatable {
     }
 }
 
-public struct ModelInfo: Equatable {
+public struct ModelInfo: Equatable, Codable, Identifiable, Sendable {
     public var id: String
     public var displayName: String
     public var contextTokens: Int? = nil
@@ -270,7 +270,7 @@ public struct ModelInfo: Equatable {
     }
 }
 
-public struct ChatRequest: Equatable {
+public struct ChatRequest: Equatable, Sendable {
     public var messages: [ChatMessage]
     public var model: String
     public var tools: [ToolDef] = []
@@ -293,7 +293,7 @@ public struct ChatRequest: Equatable {
 }
 
 /// A tool call emitted by an adapter (Kotlin `BrainEvent.ToolCall`).
-public struct BrainToolCall: Equatable {
+public struct BrainToolCall: Equatable, Codable, Sendable {
     public var id: String
     public var name: String
     public var args: [String: JSONValue]
@@ -312,7 +312,7 @@ public struct BrainToolCall: Equatable {
 /// The error payload of a `BrainEvent.error` (Kotlin
 /// `BrainEvent.Error`). Usage carries ONLY numbers the provider
 /// returned; never an estimate.
-public struct BrainErrorInfo: Equatable, Error {
+public struct BrainErrorInfo: Equatable, Codable, Error, Sendable {
     public var code: String
     public var message: String
     public var retryable: Bool
@@ -325,7 +325,7 @@ public struct BrainErrorInfo: Equatable, Error {
 }
 
 /// Normalised stream events from an adapter.
-public enum BrainEvent: Equatable {
+public enum BrainEvent: Equatable, Sendable {
     case textDelta(String)
     case reasoningDelta(String)
     case toolCall(BrainToolCall)
@@ -428,4 +428,8 @@ public final class BrainAdapterRegistry {
         lock.lock(); defer { lock.unlock() }
         return configOrder.compactMap { configs[$0] }
     }
+
+    public func adapter(for adapterId: String) -> BrainAdapter? { get(adapterId) }
+    public func listConfigs() -> [BrainConfig] { allConfigs() }
+    public func config(for brainId: String) -> BrainConfig? { configFor(brainId) }
 }

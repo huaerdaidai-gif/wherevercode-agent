@@ -162,6 +162,44 @@ final class ScreenshotRenderTests: XCTestCase {
         attach(image, name: "page-06-devices")
     }
 
+    func testScreenshotFlagshipClaudeHomeAndDrawer() async {
+        let state = AppState()
+        let homeImage = await snapshot(
+            FlagshipShellView(appState: state, chatModel: state.chat)
+                .environmentObject(state)
+        )
+        attach(homeImage, name: "flagship-00-claude-home")
+
+        let drawerImage = await snapshot(
+            FlagshipDrawerView(
+                isOpen: .constant(true),
+                selectedParent: .constant(.workbench),
+                expandedGroup: .constant("任务"),
+                capabilities: AppFlagshipCapabilities(appState: state),
+                onSelectRoute: { _ in }
+            )
+        )
+        attach(drawerImage, name: "flagship-01-four-parent-drawer")
+
+        for routeId in ["compose", "approvals", "files", "editor", "diff", "terminal", "mcp", "models", "dashboard", "audit", "memory"] {
+            if let route = FlagshipRoutes.route(for: routeId) {
+                let routeImage = await snapshot(
+                    NavigationStack {
+                        FlagshipRouteDestinationView(
+                            route: route,
+                            appState: state,
+                            chatModel: state.chat,
+                            capabilities: AppFlagshipCapabilities(appState: state),
+                            onNavigateRoute: { _ in }
+                        )
+                    }
+                    .environmentObject(state)
+                )
+                attach(routeImage, name: "flagship-route-\(routeId)")
+            }
+        }
+    }
+
     // MARK: - Snapshot helper
 
     /// Host the view in a real window on the simulator and draw it,

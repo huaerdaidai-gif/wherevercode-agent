@@ -21,6 +21,16 @@
 import Foundation
 
 public struct TaskService {
+    /// Mapping between legacy agent_task_* aliases and live V5 server MCP tool names.
+    public static let legacyToolAliases: [String: String] = [
+        "agent_my_tasks": "list_my_tasks",
+        "agent_task_claim": "claim_task",
+        "agent_task_progress": "report_progress",
+        "agent_task_heartbeat": "heartbeat",
+        "agent_task_submit": "submit_result",
+        "agent_task_release": "release_task",
+    ]
+
     private let client: McpClient
 
     public init(client: McpClient) {

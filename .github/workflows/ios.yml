@@ -40,6 +40,12 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
+      - name: Verify 70-Screen Contract & E2E Wiring
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_ios_v5_assembly.py
+          python3 scripts/run_e2e_wiring_tests.py
+
       - name: Select latest stable Xcode on the runner
         run: |
           set -euo pipefail

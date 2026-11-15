@@ -137,6 +137,15 @@ struct ChannelContentView: View {
 struct ChannelMessageRow: View {
     let message: ChannelMessage
 
+    private func promoteToTask(_ msg: ChannelMessage) {
+        let newTask = LocalTask(
+            title: String(msg.text.prefix(40)),
+            description: "来自团队频道 (@\(msg.displaySender))：\(msg.text)",
+            state: "queued"
+        )
+        _ = try? LocalData.shared.tasks.createTask(newTask)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -159,6 +168,17 @@ struct ChannelMessageRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            HStack {
+                Spacer()
+                Button {
+                    promoteToTask(message)
+                } label: {
+                    Label("转为正式任务", systemImage: "arrow.triangle.branch")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -168,6 +188,14 @@ struct ChannelChatView: View {
     let channel: ChannelInfo
 
     @EnvironmentObject private var appState: AppState
+
+    init(channel: ChannelInfo) {
+        self.channel = channel
+    }
+
+    init(appState: AppState, channel: ChannelInfo) {
+        self.channel = channel
+    }
     @State private var messages: [ChannelMessage] = []
     @State private var connectionState: ChannelConnectionState = .stopped
     @State private var connectionError: String?

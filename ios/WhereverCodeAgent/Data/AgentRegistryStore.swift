@@ -5,13 +5,13 @@ import Foundation
 /// in the record: `authRef` / `webhookSecretRef` are reference names
 /// only; values live in the credential vault (Keychain), exactly
 /// the Android rule.
-public enum AgentKind: String, Codable, Equatable {
+public enum AgentKind: String, Codable, CaseIterable, Equatable, Sendable {
     case cloud = "CLOUD"
     case device = "DEVICE"
     case localModel = "LOCAL_MODEL"
 }
 
-public enum AgentAccess: String, Codable, Equatable {
+public enum AgentAccess: String, Codable, CaseIterable, Equatable, Sendable {
     case cli = "CLI"
     case app = "APP"
     case connector = "CONNECTOR"
@@ -20,13 +20,14 @@ public enum AgentAccess: String, Codable, Equatable {
     case manual = "MANUAL"
 }
 
-public enum AgentLoginState: String, Codable, Equatable {
+public enum AgentLoginState: String, Codable, CaseIterable, Equatable, Sendable {
     case unknown = "UNKNOWN"
     case loggedIn = "LOGGED_IN"
     case notLoggedIn = "NOT_LOGGED_IN"
 }
 
-public struct AgentRecord: Equatable, Codable {
+public struct AgentRecord: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { agentId }
     public var agentId: String
     public var displayName: String
     public var kind: AgentKind

@@ -47,8 +47,8 @@ public final class ContextManager {
     /// the provider (BrainEvent.usage).
     public static let estimatedTokensPerImage = 1000
 
-    private let budgetEstimatedTokens: Int
-    private let charsPerToken: Int
+    public var budgetEstimatedTokens: Int
+    public let charsPerToken: Int
 
     public init(
         budgetEstimatedTokens: Int = ContextManager.defaultBudgetEstimatedTokens,
@@ -62,6 +62,10 @@ public final class ContextManager {
     public func estimateTokens(_ text: String) -> Int {
         if text.isEmpty { return 0 }
         return (text.count + charsPerToken - 1) / charsPerToken
+    }
+
+    public func estimateTokens(for messages: [ConversationMessage]) -> Int {
+        messages.reduce(0) { $0 + estimateTokens($1.content) + 4 }
     }
 
     private func estimateMessages(_ messages: [ChatMessage]) -> Int {

@@ -107,6 +107,9 @@ struct TasksNotConnectedContentView: View {
 
 struct TasksView: View {
     @EnvironmentObject private var appState: AppState
+
+    init() {}
+    init(appState: AppState) {}
     @State private var showPlatform = false
     @State private var localTasks: [LocalTask] = []
     @State private var localError: String?
@@ -212,6 +215,10 @@ struct TaskDetailView: View {
     @State private var errorMessage: String?
 
     init(task: AgentTask) {
+        _current = State(initialValue: task)
+    }
+
+    init(appState: AppState, task: AgentTask) {
         _current = State(initialValue: task)
     }
 
@@ -393,6 +400,87 @@ private struct LocalTaskDetailView: View {
         .task {
             do { events = try LocalData.shared.tasks.listEvents(taskId: task.taskId) }
             catch { loadError = error.localizedDescription }
+        }
+    }
+}
+
+public struct LocalTaskDetailScreen: View {
+    @State public var task: LocalTask
+    public var onUpdated: () -> Void
+    @State private var events: [TaskEvent] = []
+    @State private var transitionNote: String = ""
+    @State private var errorMsg: String?
+
+    public var body: some View {
+        List {
+            Section("任务基本信息") {
+                LabeledContent("标题", value: task.title)
+                LabeledContent("当前状态", value: TaskStates.displayLabel(for: task.state, isPaused: task.isPaused))
+                LabeledContent("独立暂停位 (isPaused)", value: task.isPaused ? "true (已暂停)" : "false (正常运行)")
+                LabeledContent("指派 Agent", value: task.assignedAgentId ?? "未指派")
+                LabeledContent("执行栅栏", value: "v\(task.version) / goalVersion=\(task.goalVersion) / authEpoch=\(task.authEpoch)")
+                if let desc = task.description {
+                    Text(desc).font(.footnote)
+                }
+            }
+
+            Section("状态机合法流转与控制操作") {
+                TextField("流转备注（可选）", text: $transitionNote)
+                let allowed = Array(TaskStates.allowedTransitions[task.state] ?? []).sorted()
+                if allowed.isEmpty {
+                    Text("当前处于终态 (\(task.state))，不可直接流转。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(allowed, id: \.self) { nextState in
+                        Button("流转至 -> \(TaskStates.displayLabel(for: nextState))") {
+                            do {
+                                task = try LocalData.shared.tasks.transition(
+                                    taskId: task.taskId,
+                                    to: nextState,
+                                    note: transitionNote.isEmpty ? nil : transitionNote
+                                )
+                                transitionNote = ""
+                                events = (try? LocalData.shared.tasks.listEvents(taskId: task.taskId)) ?? []
+                                onUpdated()
+                            } catch {
+                                errorMsg = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+                Button(task.isPaused ? "恢复任务 (isPaused = false)" : "暂停任务 (isPaused = true，不改变主状态)") {
+                    task.isPaused.toggle()
+                    try? LocalData.shared.tasks.updateTask(task)
+                    onUpdated()
+                }
+            }
+
+            if let err = errorMsg {
+                Section("错误提示") {
+                    Text(err).foregroundStyle(.red).font(.caption)
+                }
+            }
+
+            Section("任务事件审计流 (task_events)") {
+                if events.isEmpty {
+                    Text("暂无事件记录").foregroundStyle(.secondary)
+                } else {
+                    ForEach(events) { ev in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(ev.kind): \(ev.fromState ?? "-") → \(ev.toState ?? "-")")
+                                .font(.caption.bold())
+                            if let note = ev.note {
+                                Text(note).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("本地任务详情")
+        .onAppear {
+            events = (try? LocalData.shared.tasks.listEvents(taskId: task.taskId)) ?? []
         }
     }
 }

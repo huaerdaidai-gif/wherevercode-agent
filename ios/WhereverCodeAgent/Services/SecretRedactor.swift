@@ -58,6 +58,9 @@ public enum SecretRedactor {
         PatternRule(
             regex: regex("(?i)\\bBearer\\s+[A-Za-z0-9._-]{8,}"),
             groups: 0),
+        PatternRule(
+            regex: regex("\\bv5_[A-Za-z0-9_-]{8,}\\b"),
+            groups: 0),
     ]
 
     private static let openTailSecretName = regex(

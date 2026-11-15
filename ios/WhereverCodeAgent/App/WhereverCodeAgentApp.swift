@@ -1,14 +1,11 @@
-// WhereverCode Agent — iOS
+// WhereverCode Agent — iOS v1.5 Build 6 Flagship Assembly
 //
-// Chat-first native shell. AppState owns the existing workspace selection,
-// settings, model registry and one presentation model over LocalData. The
-// legacy AppTab type/property names remain for source compatibility; there
-// is no TabView or bottom tab bar. Unavailable execution is labelled honestly.
+// Root shell: Claude minimal home + 4-parent drawer (对话 / 工作台 / 控制台 / 设置),
+// zero bottom TabBar, full PR #13 AppState capabilities preserved.
 
 import SwiftUI
 
-/// Existing workspace selection, presented through the single drawer.
-enum AppTab: Hashable {
+public enum AppTab: String, CaseIterable, Hashable {
     case chat
     case tasks
     case devices
@@ -19,204 +16,70 @@ enum AppTab: Hashable {
     case console
 }
 
-/// Result of the last real platform connection check. Shown in
-/// Settings after every save and on demand; a failure always carries
-/// the server's / transport's real error text, never a generic one.
-enum PlatformConnectionStatus: Equatable {
-    /// No check has run yet in this session.
+public enum PlatformConnectionStatus: Equatable {
     case unknown
-    /// The app cannot even attempt a connection; the string says
-    /// exactly what is missing.
     case notConfigured(String)
     case checking
-    /// Human-readable summary of what the platform answered.
     case connected(String)
-    /// The server's or transport's real error text.
     case failed(String)
+
+    public var displayText: String {
+        switch self {
+        case .unknown: return "尚未检查"
+        case .notConfigured(let msg): return msg
+        case .checking: return "正在检查连接…"
+        case .connected(let msg): return msg
+        case .failed(let msg): return "连接失败：\(msg)"
+        }
+    }
 }
 
 @main
 struct WhereverCodeAgentApp: App {
     @StateObject private var appState = AppState()
-    @State private var isDrawerOpen = false
 
     var body: some Scene {
         WindowGroup {
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        Button { withAnimation { isDrawerOpen.toggle() } } label: {
-                            Image(systemName: "line.3.horizontal").frame(width: 44, height: 44)
-                        }
-                        .foregroundStyle(AgentUI.ink)
-                        .accessibilityLabel("打开导航")
-                        .accessibilityIdentifier("navigation.menu")
-                        Text("∞").foregroundStyle(AgentUI.accent).font(.title2.bold())
-                        Text("WhereverCode").font(.system(size: 17, weight: .semibold))
-                        Spacer()
-                        Button { appState.selectedTab = .chat; appState.chat.showHistory = true } label: {
-                            Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
-                        }.foregroundStyle(AgentUI.ink).accessibilityLabel("搜索会话")
-                        Button { appState.selectedTab = .chat; appState.chat.newConversation() } label: {
-                            Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
-                        }.foregroundStyle(AgentUI.ink).accessibilityLabel("新对话")
-                    }
-                    .padding(.horizontal, 8).frame(height: 60)
-                    Group {
-                        switch appState.selectedTab {
-                        case .chat: LocalChatHomeView(model: appState.chat)
-                        case .channels: ChatListView()
-                        case .tasks: TasksView()
-                        case .devices: DevicesView()
-                        case .settings: SettingsView()
-                        case .projects: LocalWorkbenchView(section: .projects)
-                        case .agents: LocalWorkbenchView(section: .agents)
-                        case .console: LocalWorkbenchView(section: .console)
-                        }
-                    }
-                }
-                .background(AgentUI.background)
+            FlagshipShellView(appState: appState, chatModel: appState.chat)
                 .environmentObject(appState)
-                .tint(AgentUI.accent)
-
-                if isDrawerOpen {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .onTapGesture { withAnimation { isDrawerOpen = false } }
-                    HStack(spacing: 0) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack(spacing: 8) {
-                                Text("∞").foregroundStyle(AgentUI.accent)
-                                Text("WhereverCode")
-                            }.font(.system(size: 20, weight: .semibold)).padding(.vertical, 20)
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    drawerItem("新对话", icon: "bubble.left", tab: .chat)
-                                    Button {
-                                        appState.selectedTab = .chat
-                                        appState.chat.showHistory = true
-                                        withAnimation { isDrawerOpen = false }
-                                    } label: {
-                                        Label("会话", systemImage: "magnifyingglass")
-                                            .font(.system(size: 15)).foregroundStyle(AgentUI.ink)
-                                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                                    }.accessibilityIdentifier("drawer_history")
-                                    drawerItem("项目", icon: "folder", tab: .projects)
-                                    drawerItem("任务", icon: "clock", tab: .tasks)
-                                    drawerItem("团队（Agent / 成员）", icon: "person.2", tab: .agents)
-                                    drawerItem("设备", icon: "iphone", tab: .devices)
-                                    drawerItem("工具与连接", icon: "wrench.and.screwdriver", tab: .settings, identifier: "connections")
-                                    drawerItem("团队频道", icon: "bubble.left.and.bubble.right", tab: .channels)
-                                    Text("工作台").font(.caption).foregroundStyle(.secondary).padding(.vertical, 12)
-                                    drawerItem("控制台", icon: "terminal", tab: .console)
-                                    drawerItem("模型与连接", icon: "slider.horizontal.3", tab: .settings, identifier: "models")
-                                    unavailableDrawerItem("待审批", icon: "checkmark.shield", reason: "iOS 审批执行接口尚未接入")
-                                    unavailableDrawerItem("成果聚合", icon: "shippingbox", reason: "iOS 本地成果聚合尚未接入；平台交付见任务详情")
-                                }
-                            }
-                            Divider().padding(.vertical, 8)
-                            drawerItem("设置", icon: "gearshape", tab: .settings)
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(width: 280)
-                        .frame(maxHeight: .infinity, alignment: .topLeading)
-                        .background(AgentUI.card)
-                        Spacer(minLength: 0)
-                    }
-                    .transition(.move(edge: .leading))
+                .task {
+                    await appState.refreshConnectionStatus()
                 }
-            }
-            .task {
-                // Launch check: the connection status must be
-                // truthful from the first second — with a complete
-                // setup it verifies for real, with an incomplete one
-                // it names what is missing. It never sits on
-                // "尚未检查" just because nobody tapped anything.
-                await appState.refreshConnectionStatus()
-            }
-            #if compiler(>=6.0)
-            .onChange(of: appState.selectedTab) { _, tab in
-                // Entering Settings re-checks automatically when
-                // there is anything to check with.
-                if tab == .settings {
-                    Task { await appState.refreshConnectionStatus() }
-                }
-            }
-            #else
-            .onChange(of: appState.selectedTab) { tab in
-                if tab == .settings {
-                    Task { await appState.refreshConnectionStatus() }
-                }
-            }
-            #endif
         }
     }
-    private func drawerItem(_ title: String, icon: String, tab: AppTab, identifier: String? = nil) -> some View {
-        Button {
-            appState.selectedTab = tab
-            if tab == .chat { appState.chat.newConversation() }
-            withAnimation(.easeInOut(duration: 0.2)) { isDrawerOpen = false }
-        } label: {
-            Label(title, systemImage: icon)
-                .font(.system(size: 15))
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .foregroundStyle(.primary)
-        }
-        .accessibilityIdentifier("drawer_\(identifier ?? String(describing: tab))")
-    }
-    private func unavailableDrawerItem(_ title: String, icon: String, reason: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button {} label: { Label(title, systemImage: icon) }.disabled(true)
-            Text(reason).font(.caption2).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.vertical, 4)
-    }
-
 }
 
-/// Shared app state: settings + token access + client factories.
-/// The token itself is never stored here — every read goes to the
-/// Keychain at call time (see `tokenProvider`).
 @MainActor
-final class AppState: ObservableObject {
-    @Published var settings: AppSettings {
+public final class AppState: ObservableObject {
+    @Published public var settings: AppSettings {
         didSet { SettingsStore.save(settings) }
     }
 
-    /// Existing selection state, reused by the drawer and all settings links.
-    @Published var selectedTab: AppTab = .chat
+    @Published public var selectedTab: AppTab = .chat
+    @Published public private(set) var connectionStatus: PlatformConnectionStatus = .unknown
+    @Published public private(set) var availableChannels: [ChannelInfo] = []
+    @Published public private(set) var channelListError: String?
+    @Published public private(set) var isLoadingChannels = false
 
-    /// Outcome of the most recent connection check (see
-    /// `refreshConnectionStatus()`).
-    @Published private(set) var connectionStatus: PlatformConnectionStatus = .unknown
+    public var onSelectRoute: ((String) -> Void)?
 
-    /// Channels the platform returned for the current credential
-    /// (from `agent_channel_list`). Drives the Settings channel
-    /// picker: channels are chosen by tapping, and a single visible
-    /// channel is selected automatically (see `ChannelSelection`).
-    @Published private(set) var availableChannels: [ChannelInfo] = []
-    /// Real error text from the last channel-list load, if it failed.
-    @Published private(set) var channelListError: String?
-    @Published private(set) var isLoadingChannels = false
+    public nonisolated let keychain: KeychainStore
+    public let data: LocalData
+    public lazy var chat = LocalChatModel(appState: self, data: data)
+    public let brainConfigStore: BrainConfigStore
+    public let brainKeyStore: BrainKeyStore
+    @Published public private(set) var brainRegistry: BrainAdapterRegistry
+    public let brainSettingsModel: BrainSettingsModel
 
-    private nonisolated let keychain = KeychainStore()
-
-    /// The local brain stack: the config store over the shared
-    /// local database's kv table, the Keychain-backed key store,
-    /// and the adapter registry BrainBootstrap assembles from
-    /// them. Built once at launch — the first launch seeds the
-    /// built-in brains (a user-deleted brain stays deleted, its
-    /// tombstone persists) — and rebuilt after every change made
-    /// in the brain settings, so the settings UI and the engine
-    /// always read the same stack.
-    lazy var chat = LocalChatModel(appState: self)
-    let brainConfigStore: BrainConfigStore
-    let brainKeyStore: BrainKeyStore
-    @Published private(set) var brainRegistry: BrainAdapterRegistry
-    let brainSettingsModel: BrainSettingsModel
-
-    init() {
-        self.settings = SettingsStore.load()
-        let configStore = KeyValueBrainConfigStore(kv: LocalData.shared.kv)
+    public init(
+        settings: AppSettings = SettingsStore.load(),
+        keychain: KeychainStore = KeychainStore(),
+        data: LocalData = .shared
+    ) {
+        self.settings = settings
+        self.keychain = keychain
+        self.data = data
+        let configStore = KeyValueBrainConfigStore(kv: data.kv)
         let keyStore = BrainKeyStore()
         self.brainConfigStore = configStore
         self.brainKeyStore = keyStore
@@ -230,20 +93,12 @@ final class AppState: ObservableObject {
         model.onChange = { [weak self] in self?.rebuildBrainStack() }
     }
 
-    /// Rebuild the adapter registry after a brain-settings
-    /// change (config saved/deleted/restored, current brain
-    /// switched). Cheap: adapters are thin holders over the
-    /// shared stores.
-    func rebuildBrainStack() {
+    public func rebuildBrainStack() {
         brainRegistry = BrainBootstrap.buildRegistry(
             configStore: brainConfigStore, keyStore: brainKeyStore)
     }
 
-    /// The brain engine over the live stack, for the brain chat.
-    /// The tool registry is empty until the tool group lands —
-    /// the engine reports tool calls as unavailable rather than
-    /// faking execution.
-    func makeBrainEngine(
+    public func makeBrainEngine(
         conversations: ConversationStore,
         tools: ToolRegistry,
         eventLog: EventLog,
@@ -255,52 +110,37 @@ final class AppState: ObservableObject {
             eventLog: eventLog, approvalGate: approvalGate)
     }
 
-    /// Switch to the Settings tab. This is the ONLY way in-app
-    /// "去设置" actions navigate — no view pushes a Settings screen
-    /// onto its own navigation stack.
-    func goToSettings() {
+    public func goToSettings() {
         selectedTab = .settings
+        onSelectRoute?("settings-root")
     }
 
-    /// The token, read fresh from the Keychain each time. Returns nil
-    /// when no token has been saved. Nonisolated so background
-    /// networking code can call it without hopping to the main actor.
-    nonisolated var tokenProvider: () -> String? {
+    public nonisolated var tokenProvider: () -> String? {
         { [keychain] in try? keychain.loadToken() }
     }
 
-    var hasToken: Bool { keychain.hasToken }
+    public var hasToken: Bool { keychain.hasToken }
 
-    func saveToken(_ token: String) throws {
+    public func saveToken(_ token: String) throws {
         try keychain.saveToken(token)
         objectWillChange.send()
     }
 
-    func deleteToken() throws {
+    public func deleteToken() throws {
         try keychain.deleteToken()
         objectWillChange.send()
     }
 
-    /// True when the app has everything needed to talk to the platform.
-    var isConfigured: Bool {
+    public var isConfigured: Bool {
         settings.validation == .ok && hasToken
     }
 
-    /// MCP client for the configured endpoint, or nil when the
-    /// platform address is missing/invalid.
-    func makeMcpClient() -> McpClient? {
+    public func makeMcpClient() -> McpClient? {
         guard let endpoint = settings.mcpEndpoint else { return nil }
         return McpClient(endpoint: endpoint, tokenProvider: tokenProvider)
     }
 
-    // MARK: - Channels
-
-    /// Load the visible channel list from the platform and apply
-    /// the selection rule (`ChannelSelection`): the current
-    /// selection survives while it is still listed; a single
-    /// visible channel is selected automatically. Failures land in
-    /// `channelListError` with the real error text.
-    func loadChannels() async {
+    public func loadChannels() async {
         guard let transport = makeChannelTransport() else {
             channelListError = "平台地址无效，读不到频道列表。"
             return
@@ -322,22 +162,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Select a channel by tapping it (Settings picker or the
-    /// conversation list). The id is persisted via `settings`.
-    func selectChannel(_ channelID: String) {
+    public func selectChannel(_ channelID: String) {
         settings.channelID = channelID
     }
 
-    // MARK: - Token generation
-
-    /// "生成并保存 Token": issue a token through the platform's
-    /// `issue_agent_token` tool (the same call Android makes) and
-    /// store it in the Keychain as this app's platform credential.
-    /// The token value never reaches the view layer — it exists
-    /// only inside the returned result, and only the metadata is
-    /// meant to be shown. On success the connection is re-checked
-    /// (and the channel list reloaded) immediately.
-    func generateAndSaveToken(agentId: String, name: String) async -> IssueTokenResult {
+    public func generateAndSaveToken(agentId: String, name: String) async -> IssueTokenResult {
         guard let client = makeMcpClient() else {
             return .failed("平台地址无效：请先在上方填写并保存一个 https 平台地址。")
         }
@@ -355,24 +184,17 @@ final class AppState: ObservableObject {
         return result
     }
 
-    func makeChannelTransport() -> ChannelTransport? {
+    public func makeChannelTransport() -> ChannelTransport? {
         guard let client = makeMcpClient() else { return nil }
         return ChannelTransport(client: client)
     }
 
-    func makeTaskService() -> TaskService? {
+    public func makeTaskService() -> TaskService? {
         guard let client = makeMcpClient() else { return nil }
         return TaskService(client: client)
     }
 
-    // MARK: - Connection check
-
-    /// Run a real connection check against the platform right now:
-    /// `tools/list` plus the visible channel count. The result is
-    /// published in `connectionStatus` with the real error text on
-    /// failure. Called after every settings/token save and on demand
-    /// from the Settings screen.
-    func refreshConnectionStatus() async {
+    public func refreshConnectionStatus() async {
         guard settings.validation == .ok else {
             switch settings.validation {
             case .missingBaseURL:
@@ -382,7 +204,7 @@ final class AppState: ObservableObject {
             case .missingChannelID:
                 connectionStatus = .notConfigured("还没有选择频道。")
             case .ok:
-                break // unreachable: guarded above
+                break
             }
             return
         }

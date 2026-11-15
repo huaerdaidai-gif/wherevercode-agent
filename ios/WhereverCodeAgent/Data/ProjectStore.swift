@@ -11,7 +11,8 @@ import Foundation
 /// never cloned), or a local folder. Switching the active home
 /// never loses tasks or conversations (they key off projectId).
 
-public struct Project: Equatable, Codable {
+public struct Project: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { projectId }
     /// ASCII slug generated from the name (see `slugProjectId`).
     public var projectId: String
     public var name: String
@@ -24,14 +25,27 @@ public struct Project: Equatable, Codable {
     public var origin: String = "REMOTE"
     public var createdAtEpochSeconds: Int64 = 0
 
-    public init(projectId: String, name: String, repoUrl: String? = nil) {
-        self.projectId = projectId
+    public init(
+        projectId: String? = nil,
+        name: String,
+        repoUrl: String? = nil,
+        defaultBranch: String = "main",
+        canonicalCommit: String? = nil,
+        origin: String = "REMOTE",
+        createdAtEpochSeconds: Int64 = 0
+    ) {
+        self.projectId = projectId ?? "\(slugProjectId(name))-\(Int(Date().timeIntervalSince1970))"
         self.name = name
         self.repoUrl = repoUrl
+        self.defaultBranch = defaultBranch
+        self.canonicalCommit = canonicalCommit
+        self.origin = origin
+        self.createdAtEpochSeconds = createdAtEpochSeconds
     }
 }
 
-public struct ProjectLocation: Equatable, Codable {
+public struct ProjectLocation: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { locationId }
     public var locationId: String
     public var projectId: String
     /// Host device id; for git homes the site wire ("github" /
@@ -70,7 +84,8 @@ public struct ProjectLocation: Equatable, Codable {
     }
 }
 
-public struct ProjectWithHomes: Equatable {
+public struct ProjectWithHomes: Equatable, Identifiable, Sendable {
+    public var id: String { project.projectId }
     public var project: Project
     public var homes: [ProjectLocation]
     public var activeHome: ProjectLocation?

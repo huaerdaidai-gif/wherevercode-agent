@@ -78,6 +78,9 @@ struct ChannelPickerContentView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
+
+    init() {}
+    init(appState: AppState) {}
     private enum FocusField: Hashable { case address, token }
     @FocusState private var focusedField: FocusField?
     @State private var baseURLText = ""

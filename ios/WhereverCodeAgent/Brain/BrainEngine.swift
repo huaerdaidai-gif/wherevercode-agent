@@ -23,34 +23,17 @@ import Foundation
 /// instead of crashing the turn, which is the closest honest analogue
 /// of Android's unthrowing Room calls.
 
-public protocol ApprovalGate {
-    func requestApproval(action: BrainAction) async -> Bool
+// ApprovalGate & DenyApprovalGate are defined in Services/ApprovalGate.swift
 
-    /// Second authorization check, run by the registry after approval
-    /// and before acting: the production gate uses it to void an
-    /// authorization whose UI has gone away. Default: no extra limit.
-    func isApprovalStillValid(action: BrainAction) -> Bool
-}
-
-extension ApprovalGate {
-    public func isApprovalStillValid(action: BrainAction) -> Bool { true }
-}
-
-/// Default gate: refuse anything that needs confirmation. The UI
-/// replaces it in stage 3.
-public struct DenyApprovalGate: ApprovalGate {
-    public init() {}
-    public func requestApproval(action: BrainAction) async -> Bool { false }
-}
-
-public struct EngineEvent: Equatable {
+public struct EngineEvent: Equatable, Identifiable, Codable, Sendable {
+    public var id: Int64 { seq }
     public var seq: Int64
     public var conversationId: String
     public var kind: String
     public var detail: String
     public var epochSeconds: Int64
 
-    public init(seq: Int64, conversationId: String, kind: String, detail: String, epochSeconds: Int64) {
+    public init(seq: Int64 = 0, conversationId: String, kind: String, detail: String, epochSeconds: Int64 = Int64(Date().timeIntervalSince1970)) {
         self.seq = seq
         self.conversationId = conversationId
         self.kind = kind
@@ -64,7 +47,7 @@ public protocol EventLog {
     func entries(conversationId: String?) -> [EngineEvent]
 }
 
-public final class InMemoryEventLog: EventLog {
+public final class InMemoryEventLog: EventLog, ObservableObject {
     private let lock = NSLock()
     private var items: [EngineEvent] = []
     private var seq: Int64 = 0
@@ -85,6 +68,19 @@ public final class InMemoryEventLog: EventLog {
             return items.filter { $0.conversationId == conversationId }
         }
         return items
+    }
+
+    public func listEvents() -> [EngineEvent] {
+        entries(conversationId: nil)
+    }
+
+    public func append(conversationId: String, kind: String, detail: String) {
+        record(EngineEvent(
+            conversationId: conversationId,
+            kind: kind,
+            detail: SecretRedactor.redact(detail),
+            epochSeconds: Int64(Date().timeIntervalSince1970)
+        ))
     }
 }
 

@@ -24,7 +24,7 @@
 import SwiftUI
 
 @MainActor
-final class BrainSettingsModel: ObservableObject {
+public final class BrainSettingsModel: ObservableObject {
     @Published private(set) var configs: [BrainConfig] = []
     @Published private(set) var currentBrainId: String?
 
@@ -468,6 +468,4 @@ private struct BrainEditorView: View {
     }
 }
 
-extension BrainConfig: Identifiable {
-    public var id: String { brainId }
-}
+// BrainConfig conforms to Identifiable in BrainConfig.swift

@@ -1,0 +1,107 @@
+name: iOS V5 70-Screen Assembly Build & Test
+
+on:
+  push:
+    branches:
+      - feat/v5-ios-70screen-4drawer-assembly
+      - feat/v5-ios-1.5-build6-import-20261115
+      - feat/v5-ios-1.5-build6-assembly-20261115
+  workflow_dispatch:
+
+jobs:
+  build-and-test-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          mkdir -p ci-logs
+
+      - name: Version gate (must be 1.5 / 6)
+        run: |
+          P=ios/WhereverCodeAgent.xcodeproj/project.pbxproj
+          MV=$(grep -oE 'MARKETING_VERSION = [^;]+' $P | sort -u)
+          BV=$(grep -oE 'CURRENT_PROJECT_VERSION = [^;]+' $P | sort -u)
+          echo "$MV / $BV"
+          [ "$MV" = "MARKETING_VERSION = 1.5" ] && [ "$BV" = "CURRENT_PROJECT_VERSION = 6" ]
+
+      - name: Verify 70-Screen Contract & State Machine
+        run: |
+          python3 scripts/verify_ios_v5_assembly.py 2>&1 | tee ci-logs/verify-assembly.log
+          exit ${PIPESTATUS[0]}
+
+      - name: E2E wiring tests
+        run: |
+          python3 scripts/run_e2e_wiring_tests.py 2>&1 | tee ci-logs/e2e-wiring.log
+          exit ${PIPESTATUS[0]}
+
+      - name: xcodebuild test (iOS Simulator)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          echo "Simulator: $UDID"
+          xcodebuild test \
+            -project WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -destination "id=$UDID" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath ../ci-logs/tests.xcresult \
+            -only-testing:WhereverCodeAgentTests \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY="-" 2>&1 | tee ../ci-logs/xcodebuild-test.log
+
+      - name: Build Unsigned Release App (iphoneos)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ../.build/derived \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../ci-logs/xcodebuild-release.log
+
+      - name: Package Unsigned IPA
+        run: |
+          APP=.build/derived/Build/Products/Release-iphoneos/WhereverCodeAgent.app
+          V=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' $APP/Info.plist)
+          B=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' $APP/Info.plist)
+          echo "App Info.plist: $V ($B)"
+          [ "$V" = "1.5" ] && [ "$B" = "6" ]
+          mkdir -p Payload
+          cp -R $APP Payload/
+          zip -qry wherevercode-agent-ios-1.5-6-unsigned.ipa Payload
+          SHA=$(shasum -a 256 wherevercode-agent-ios-1.5-6-unsigned.ipa | tee wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256)
+          echo "commit=$GITHUB_SHA run=$GITHUB_RUN_ID" >> wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256
+          echo "::notice::IPA_SHA256=$SHA (version=$V build=$B commit=$GITHUB_SHA run=$GITHUB_RUN_ID)"
+          grep -E "Test Case '.*' (passed|failed)|Executed [0-9]+ tests|\*\* TEST SUCCEEDED \*\*" ci-logs/xcodebuild-test.log | tail -25 | while IFS= read -r l; do echo "::notice::$l"; done
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: wherevercode-agent-ios-1.5-6-unsigned
+          path: |
+            wherevercode-agent-ios-1.5-6-unsigned.ipa
+            wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256
+          if-no-files-found: error
+
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          cat ci-logs/*.log 2>/dev/null | grep -E "error:|: error|failed|Failing tests|\*\* .* FAILED \*\*|Testing failed|Test Case .* failed" | grep -v "^warning" | sort -u | head -45 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          tail -n 25 ci-logs/xcodebuild-test.log 2>/dev/null | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-1.5-6-ci-logs
+          path: ci-logs

@@ -68,7 +68,7 @@ public protocol MemoryStore {
     func summarize() -> String
 }
 
-public final class InMemoryMemoryStore: MemoryStore {
+public final class InMemoryMemoryStore: MemoryStore, ObservableObject {
     private let lock = NSLock()
     private var entries: [String: MemoryEntry] = [:]
     private var order: [String] = []

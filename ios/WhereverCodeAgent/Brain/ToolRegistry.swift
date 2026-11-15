@@ -181,3 +181,36 @@ public enum ToolRegistryRules {
         return rest == ["--version"] || rest == ["-V"]
     }
 }
+
+public struct DefaultiOSToolRegistry: ToolRegistry, Sendable {
+    public let registeredToolNames: Set<String> = [
+        "read_file",
+        "write_file",
+        "list_files",
+        "search_text",
+        "apply_diff"
+    ]
+
+    public init() {}
+
+    public var workspaceRoot: String? { nil }
+
+    public func toolsForCapabilities(_ capabilities: BrainCapabilities?, authorizedTools: Set<String>) -> [ToolDef] { [] }
+
+    public func gitHostToolsFor(project: Project?, location: ProjectLocation?) -> [ToolDef] { [] }
+
+    public func allToolNames() -> Set<String> { registeredToolNames }
+
+    public func validateOnly(_ action: BrainAction, _ context: ToolContext) -> ToolOutcome? {
+        guard registeredToolNames.contains(action.tool) else {
+            return ToolOutcome(ok: false, summary: "未知工具 \(action.tool)", errorCode: "unknown_tool")
+        }
+        return nil
+    }
+
+    public func execute(_ action: BrainAction, _ context: ToolContext, stopped: @escaping () -> Bool) async throws -> ToolOutcome {
+        ToolOutcome(ok: false, summary: "iOS 尚未接入工作区执行工具", errorCode: "not_implemented")
+    }
+
+    public func isReadOnlyExtensionTool(_ name: String) -> Bool { false }
+}

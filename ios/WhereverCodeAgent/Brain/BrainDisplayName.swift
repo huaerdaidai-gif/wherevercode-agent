@@ -46,4 +46,7 @@ public final class BrainDisplayName {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         try? kv.set(Self.key, trimmed.isEmpty ? nil : trimmed)
     }
+
+    public func get() -> String { load() }
+    public func set(_ raw: String) { save(raw) }
 }

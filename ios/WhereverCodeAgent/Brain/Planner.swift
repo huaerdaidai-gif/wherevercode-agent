@@ -12,7 +12,8 @@ import Foundation
 /// - every step carries an idempotency key in `task_id:seq` form, so
 ///   the same action is never executed twice,
 /// - risks are carried as plain strings for the user to see.
-public struct BrainAction: Equatable {
+public struct BrainAction: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { actionId }
     public var actionId: String
     public var tool: String
     public var args: [String: JSONValue] = [:]
@@ -20,7 +21,7 @@ public struct BrainAction: Equatable {
     public var idempotencyKey: String
 
     public init(
-        actionId: String,
+        actionId: String = UUID().uuidString,
         tool: String,
         args: [String: JSONValue] = [:],
         requiresApproval: Bool = false,
@@ -32,9 +33,23 @@ public struct BrainAction: Equatable {
         self.requiresApproval = requiresApproval
         self.idempotencyKey = idempotencyKey
     }
+
+    public init(
+        actionId: String = UUID().uuidString,
+        tool: String,
+        args: [String: String],
+        requiresApproval: Bool = true,
+        idempotencyKey: String
+    ) {
+        self.actionId = actionId
+        self.tool = tool
+        self.args = args.mapValues { .string($0) }
+        self.requiresApproval = requiresApproval
+        self.idempotencyKey = idempotencyKey
+    }
 }
 
-public struct Plan: Equatable {
+public struct Plan: Equatable, Codable, Sendable {
     public var goal: String
     public var steps: [BrainAction]
     public var risks: [String] = []

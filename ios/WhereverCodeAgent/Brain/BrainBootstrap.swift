@@ -54,6 +54,10 @@ public enum BrainBootstrap {
         claudeBrainId,
     ]
 
+    public static var seededConfigs: [BrainConfig] {
+        seedableBrainIds.compactMap { seedConfigFor(brainId: $0) }
+    }
+
     /// The first-run seed config for a seedable brain id, or nil.
     /// Values are Android's seedConfigFor, verbatim.
     public static func seedConfigFor(brainId: String) -> BrainConfig? {

@@ -22,8 +22,10 @@ public enum TaskStates {
     /// Legal targets per source state. Creation (nil source) is
     /// handled separately: it may only go to "queued". Terminal
     /// states have no outgoing edges.
+    public static var allowedTransitions: [String: Set<String>] { transitions }
+
     public static let transitions: [String: Set<String>] = [
-        "queued": ["assigned", "cancelled"],
+        "queued": ["assigned", "working", "cancelled"],
         "requeued": ["assigned", "cancelled"],
         "rework": ["assigned", "cancelled"],
         "assigned": ["working", "queued", "requeued", "failed", "cancelled"],
@@ -35,11 +37,20 @@ public enum TaskStates {
         "cancelled": [],
     ]
 
-    public struct CanonicalMapping: Equatable {
+    public struct CanonicalMapping: Equatable, Sendable {
         public var state: String
+        public let isPaused: Bool
         public var needsAttention: Bool
         public var rawState: String
         public var system: String
+
+        public init(state: String, isPaused: Bool = false, needsAttention: Bool = false, rawState: String = "", system: String = "") {
+            self.state = state
+            self.isPaused = isPaused
+            self.needsAttention = needsAttention
+            self.rawState = rawState
+            self.system = system
+        }
     }
 
     /// system → raw state → (canonical state, needsAttention)
@@ -113,13 +124,46 @@ public enum TaskStates {
     /// Maps one system's raw state to the canonical state. Unknown
     /// systems and unknown raw states throw; nothing is guessed.
     public static func canonical(system: String, rawState: String) throws -> CanonicalMapping {
-        guard let table = mapping[system] else {
+        if (system == "task_assignment" || system == "conversation_task" || system == "v5") && rawState == "paused" {
+            return CanonicalMapping(state: "working", isPaused: true, needsAttention: true, rawState: rawState, system: system)
+        }
+        let lookupSystem = (system == "v5") ? "task_assignment" : system
+        guard let table = mapping[lookupSystem] else {
             throw TaskStateError.unknownSystem(system)
         }
         guard let (state, needsAttention) = table[rawState] else {
             throw TaskStateError.unknownRawState(system: system, rawState: rawState)
         }
-        return CanonicalMapping(state: state, needsAttention: needsAttention, rawState: rawState, system: system)
+        return CanonicalMapping(state: state, isPaused: false, needsAttention: needsAttention, rawState: rawState, system: system)
+    }
+
+    public static func validateTransition(from currentState: String?, to nextState: String) throws {
+        try checkTransition(fromState: currentState, toState: nextState)
+    }
+
+    public static func mapToCanonical(system: String, rawState: String) throws -> CanonicalMapping {
+        if canonicalStates.contains(rawState) {
+            return CanonicalMapping(state: rawState, isPaused: false, needsAttention: rawState == "blocked" || rawState == "rework", rawState: rawState, system: system)
+        }
+        return try canonical(system: system, rawState: rawState)
+    }
+
+    public static func displayLabel(for state: String, isPaused: Bool = false) -> String {
+        let base: String
+        switch state {
+        case "queued": base = "排队中 (queued)"
+        case "assigned": base = "已指派 (assigned)"
+        case "working": base = "执行中 (working)"
+        case "blocked": base = "已阻塞 (blocked)"
+        case "review": base = "待评审 (review)"
+        case "rework": base = "需返工 (rework)"
+        case "requeued": base = "重入队 (requeued)"
+        case "completed": base = "已完成 (completed)"
+        case "failed": base = "已失败 (failed)"
+        case "cancelled": base = "已取消 (cancelled)"
+        default: base = state
+        }
+        return isPaused ? "\(base) · 已暂停" : base
     }
 
     public static func isTerminal(_ state: String) -> Bool {

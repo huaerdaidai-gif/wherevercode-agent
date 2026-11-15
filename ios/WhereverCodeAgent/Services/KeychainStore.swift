@@ -22,7 +22,7 @@ public enum KeychainError: Error, Equatable {
 }
 
 /// Minimal Keychain wrapper for a single generic-password item.
-public struct KeychainStore {
+public struct KeychainStore: Sendable {
     #if os(iOS)
     static let accessibleAttribute: CFString = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     #else

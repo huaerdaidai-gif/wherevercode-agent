@@ -14,7 +14,7 @@ import Foundation
 /// an empty list and never breaks reads. Ordering is by
 /// createdAtEpochSeconds with rowid as the tiebreak.
 
-public struct ChatToolCall: Equatable, Codable {
+public struct ChatToolCall: Equatable, Codable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var argumentsJson: String
@@ -26,7 +26,7 @@ public struct ChatToolCall: Equatable, Codable {
     }
 }
 
-public struct Conversation: Equatable {
+public struct Conversation: Equatable, Codable, Identifiable, Sendable {
     public var id: String
     public var brainId: String?
     public var title: String
@@ -40,7 +40,7 @@ public struct Conversation: Equatable {
     }
 }
 
-public struct ConversationMessage: Equatable {
+public struct ConversationMessage: Equatable, Codable, Identifiable, Sendable {
     public static let roles: Set<String> = ["user", "assistant", "tool", "system"]
 
     public var id: String
@@ -60,12 +60,12 @@ public struct ConversationMessage: Equatable {
     public var toolCallId: String?
 
     public init(
-        id: String,
+        id: String = UUID().uuidString,
         conversationId: String,
         role: String,
         content: String,
-        source: String,
-        createdAtEpochSeconds: Int64,
+        source: String = "ios_user",
+        createdAtEpochSeconds: Int64 = Int64(Date().timeIntervalSince1970),
         taskId: String? = nil,
         toolCalls: [ChatToolCall] = [],
         toolCallId: String? = nil
@@ -111,6 +111,10 @@ public protocol ConversationStore {
 extension ConversationStore {
     public func listMessages(conversationId: String) throws -> [ConversationMessage] {
         try listMessages(conversationId: conversationId, limit: nil)
+    }
+
+    public func appendMessage(_ message: ConversationMessage) throws {
+        _ = try addMessage(message)
     }
 }
 
@@ -198,6 +202,27 @@ public final class SQLiteConversationStore: ConversationStore {
 
     public init(db: SQLiteDatabase) {
         self.db = db
+        try? db.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id TEXT PRIMARY KEY,
+            brainId TEXT,
+            title TEXT NOT NULL,
+            createdAtEpochSeconds INTEGER NOT NULL
+        )
+        """)
+        try? db.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_messages (
+            id TEXT PRIMARY KEY,
+            conversationId TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source TEXT NOT NULL,
+            createdAtEpochSeconds INTEGER NOT NULL,
+            taskId TEXT,
+            toolCallsJson TEXT NOT NULL DEFAULT '[]',
+            toolCallId TEXT
+        )
+        """)
     }
 
     private func conversation(from row: [String: SQLiteValue]) -> Conversation {

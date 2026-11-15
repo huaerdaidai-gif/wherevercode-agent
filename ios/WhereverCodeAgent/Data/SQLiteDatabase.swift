@@ -185,6 +185,18 @@ public final class SQLiteDatabase {
 
     /// Runs `body` inside a transaction; nested calls join the outer
     /// transaction (same shape as Room's runInTransaction usage).
+    public func execute(_ sql: String, parameters: [SQLiteValue]) throws {
+        try execute(sql, parameters)
+    }
+
+    public func query(_ sql: String, parameters: [SQLiteValue]) throws -> [[String: SQLiteValue]] {
+        try query(sql, parameters)
+    }
+
+    public func inTransaction<T>(_ body: () throws -> T) throws -> T {
+        try transaction(body)
+    }
+
     public func transaction<T>(_ body: () throws -> T) throws -> T {
         try onQueue {
             if transactionDepth == 0 {

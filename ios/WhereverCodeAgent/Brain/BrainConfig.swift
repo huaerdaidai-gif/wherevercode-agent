@@ -24,7 +24,8 @@ public let deviceCodeAdapterIdPrefix = "devicecode-"
 /// never makes it usable for inference.
 public let loginOnlyExtraKey = "login_only"
 
-public struct BrainConfig: Equatable {
+public struct BrainConfig: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { brainId }
     public var brainId: String
     public var kind: BrainKind
     public var adapterId: String
@@ -272,6 +273,18 @@ public final class BrainKeyStore {
 
     public func deleteSecret(authRef: String) {
         try? store(for: authRef).deleteToken()
+    }
+
+    public func saveKey(_ key: String, for authRef: String) throws {
+        try putSecret(authRef: authRef, value: key)
+    }
+
+    public func loadKey(for authRef: String) -> String? {
+        getSecret(authRef: authRef)
+    }
+
+    public func deleteKey(for authRef: String) throws {
+        deleteSecret(authRef: authRef)
     }
 }
 

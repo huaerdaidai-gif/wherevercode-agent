@@ -36,6 +36,7 @@ public struct AppSettings: Equatable {
     /// well-known public address, not a private address and not a
     /// credential.
     public static let defaultPlatformBaseURLString = "https://v5.cococolo.xyz/api/open/v1/mcp"
+    public static let defaultPlatformBaseURL = defaultPlatformBaseURLString
 
     /// The team channel this app opens by default. This is a channel
     /// identifier, not a server address and not a credential; after
@@ -50,6 +51,14 @@ public struct AppSettings: Equatable {
     ) {
         self.platformBaseURLString = platformBaseURLString
         self.channelID = channelID
+    }
+
+    public static func load(from defaults: UserDefaults = .standard) -> AppSettings {
+        SettingsStore.load(defaults: defaults)
+    }
+
+    public func save(to defaults: UserDefaults = .standard) {
+        SettingsStore.save(self, defaults: defaults)
     }
 
     /// Validation outcome for the settings form.

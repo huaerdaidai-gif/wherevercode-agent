@@ -12,7 +12,8 @@ import Foundation
 ///   audit trail is never silent.
 /// - `version` is bumped on every update (optimistic concurrency,
 ///   same as the Android DAO's `version = version + 1`).
-public struct LocalTask: Equatable {
+public struct LocalTask: Equatable, Codable, Identifiable, Sendable {
+    public var id: String { taskId }
     public var taskId: String
     public var projectId: String?
     public var sessionId: String?
@@ -32,6 +33,7 @@ public struct LocalTask: Equatable {
     public var version: Int64 = 1
     public var brainId: String?
     public var needsAttention: Bool = false
+    public var isPaused: Bool = false
     public var leaseOwner: String?
     public var leaseExpiresAt: Int64?
     public var memberId: String?
@@ -40,12 +42,66 @@ public struct LocalTask: Equatable {
     public var goalVersion: Int64 = 1
     public var authEpoch: Int64 = 1
 
-    public init(taskId: String) {
+    public init(
+        taskId: String = UUID().uuidString,
+        projectId: String? = nil,
+        sessionId: String? = nil,
+        title: String = "",
+        description: String? = nil,
+        state: String = "queued",
+        assignedAgentId: String? = nil,
+        parentTaskId: String? = nil,
+        dependencies: [String] = [],
+        priority: Int = 0,
+        createdAt: Int64 = 0,
+        startedAt: Int64? = nil,
+        finishedAt: Int64? = nil,
+        updatedAt: Int64 = 0,
+        result: String? = nil,
+        error: String? = nil,
+        version: Int64 = 1,
+        brainId: String? = nil,
+        needsAttention: Bool = false,
+        isPaused: Bool = false,
+        leaseOwner: String? = nil,
+        leaseExpiresAt: Int64? = nil,
+        memberId: String? = nil,
+        attempt: Int = 0,
+        attemptId: String? = nil,
+        goalVersion: Int64 = 1,
+        authEpoch: Int64 = 1
+    ) {
         self.taskId = taskId
+        self.projectId = projectId
+        self.sessionId = sessionId
+        self.title = title
+        self.description = description
+        self.state = state
+        self.assignedAgentId = assignedAgentId
+        self.parentTaskId = parentTaskId
+        self.dependencies = dependencies
+        self.priority = priority
+        self.createdAt = createdAt
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.updatedAt = updatedAt
+        self.result = result
+        self.error = error
+        self.version = version
+        self.brainId = brainId
+        self.needsAttention = needsAttention
+        self.isPaused = isPaused
+        self.leaseOwner = leaseOwner
+        self.leaseExpiresAt = leaseExpiresAt
+        self.memberId = memberId
+        self.attempt = attempt
+        self.attemptId = attemptId
+        self.goalVersion = goalVersion
+        self.authEpoch = authEpoch
     }
 }
 
-public struct TaskEvent: Equatable {
+public struct TaskEvent: Equatable, Codable, Identifiable, Sendable {
     public var id: Int64 = 0
     public var taskId: String
     /// e.g. "created", "state", "updated".
@@ -75,6 +131,47 @@ public final class LocalTaskStore {
 
     public init(db: SQLiteDatabase) {
         self.db = db
+        try? db.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            taskId TEXT PRIMARY KEY,
+            projectId TEXT,
+            sessionId TEXT,
+            title TEXT NOT NULL DEFAULT '',
+            description TEXT,
+            state TEXT NOT NULL DEFAULT 'queued',
+            assignedAgentId TEXT,
+            parentTaskId TEXT,
+            dependenciesJson TEXT NOT NULL DEFAULT '[]',
+            priority INTEGER NOT NULL DEFAULT 0,
+            createdAt INTEGER NOT NULL DEFAULT 0,
+            startedAt INTEGER,
+            finishedAt INTEGER,
+            updatedAt INTEGER NOT NULL DEFAULT 0,
+            result TEXT,
+            error TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            brainId TEXT,
+            needsAttention INTEGER NOT NULL DEFAULT 0,
+            leaseOwner TEXT,
+            leaseExpiresAt INTEGER,
+            memberId TEXT,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            attemptId TEXT,
+            goalVersion INTEGER NOT NULL DEFAULT 1,
+            authEpoch INTEGER NOT NULL DEFAULT 1
+        )
+        """)
+        try? db.execute("""
+        CREATE TABLE IF NOT EXISTS task_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            taskId TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            fromState TEXT,
+            toState TEXT,
+            note TEXT,
+            createdAtEpochSeconds INTEGER NOT NULL
+        )
+        """)
     }
 
     private func now() -> Int64 { Int64(Date().timeIntervalSince1970) }

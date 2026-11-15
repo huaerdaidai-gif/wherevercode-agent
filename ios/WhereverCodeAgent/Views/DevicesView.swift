@@ -4,6 +4,8 @@ import SwiftUI
 /// platform. Discovery/pairing is intentionally disabled until an iOS Hand
 /// adapter exists; a saved record never implies an online device.
 struct DevicesView: View {
+    init() {}
+    init(appState: AppState) {}
     @State private var devices: [AgentRecord] = []
     @State private var loadError: String?
 
