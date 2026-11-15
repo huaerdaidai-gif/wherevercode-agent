@@ -8,16 +8,17 @@ import org.junit.Test
 /**
  * 抽屉路由表测试（V5 导航整改最终定稿，2026-11-15）。
  *
- * 一级菜单只有三项：对话、项目、控制。
+ * 一级菜单只有四项：对话、项目、控制。
  * 旧入口 id 保留兼容路由。
  */
 class DrawerRoutingTest {
 
     @Test
-    fun `three primary entries route to their screens`() {
+    fun `four primary entries route to their screens`() {
         val expected = mapOf(
             DrawerController.ID_CHAT to EntryScreen.HOME,
             DrawerController.ID_PROJECTS to EntryScreen.PROJECTS,
+            DrawerController.ID_CHANNELS to EntryScreen.CHANNELS,
             DrawerController.ID_CONTROL to EntryScreen.CONSOLE,
         )
         assertEquals(DrawerController.DEFAULT_ORDER.toSet(), expected.keys)

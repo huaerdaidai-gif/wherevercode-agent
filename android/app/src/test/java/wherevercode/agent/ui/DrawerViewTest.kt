@@ -1,7 +1,7 @@
 package wherevercode.agent.ui
 
 import android.view.View
-import android.widget.LinearLayout
+import android.view.ViewGroup
 import android.widget.TextView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,7 +16,7 @@ import wherevercode.agent.R
 /**
  * DrawerView rendering test (V5 导航整改最终定稿, 2026-11-15).
  *
- * 一级菜单严格只有三项：对话、项目、控制。
+ * 一级菜单严格只有四项：对话、项目、控制。
  * 抽屉中部显示最近会话列表。
  * 底部固定：账号头像（左，→设置）+ ＋ 新对话（右）。
  */
@@ -42,10 +42,10 @@ class DrawerViewTest {
     )
 
     @Test
-    fun `top group exposes exactly three primary entries in order`() {
+    fun `top group exposes exactly four primary entries in order`() {
         val drawerView = view()
         assertEquals(
-            listOf("nav_chat", "nav_projects", "nav_control"),
+            listOf("nav_chat", "nav_projects", "nav_channels", "nav_control"),
             drawerView.renderedGroupIds("top"),
         )
     }
@@ -54,10 +54,11 @@ class DrawerViewTest {
     fun `top group labels are correct`() {
         val drawerView = view()
         val topRows = drawerView.renderedRows().filter { it.group == "top" }
-        assertEquals(3, topRows.size)
+        assertEquals(4, topRows.size)
         assertEquals("对话", topRows[0].label)
         assertEquals("项目", topRows[1].label)
-        assertEquals("控制", topRows[2].label)
+        assertEquals("频道", topRows[2].label)
+        assertEquals("控制", topRows[3].label)
     }
 
     @Test
@@ -70,11 +71,11 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `default drawer renders three primary rows plus bottom bar`() {
+    fun `default drawer renders four primary rows plus bottom bar`() {
         val drawerView = view()
         // 3 个一级入口 + 1 个底部用户行 = 4 行（无会话时不渲染会话行）
         val topAndBottom = drawerView.renderedRows().filter { it.group == "top" || it.group == "bottom" }
-        assertEquals(4, topAndBottom.size)
+        assertEquals(5, topAndBottom.size)
     }
 
     @Test
@@ -94,11 +95,11 @@ class DrawerViewTest {
     @Test
     fun `empty sessions show placeholder text`() {
         val drawerView = view(recentSessions = emptyList())
-        val content = drawerView.root.getChildAt(0) as LinearLayout
+        val content = drawerView.root
         val texts = mutableListOf<String>()
         fun collect(view: View) {
             if (view is TextView) texts += view.text.toString()
-            if (view is LinearLayout) {
+            if (view is ViewGroup) {
                 for (i in 0 until view.childCount) collect(view.getChildAt(i))
             }
         }
@@ -122,11 +123,11 @@ class DrawerViewTest {
         val texts = mutableListOf<String>()
         fun collect(view: View) {
             if (view is TextView) texts += view.text.toString()
-            if (view is LinearLayout) {
+            if (view is ViewGroup) {
                 for (i in 0 until view.childCount) collect(view.getChildAt(i))
             }
         }
-        collect(drawerView.root.getChildAt(0))
+        collect(drawerView.root)
         assertTrue(texts.contains("V5"))
         assertTrue(texts.contains("WhereverCode"))
         val oldVersionText = "V4" + ".3"
@@ -147,6 +148,7 @@ class DrawerViewTest {
         val expected = mapOf(
             "nav_chat" to R.drawable.ic_chat,
             "nav_projects" to R.drawable.ic_folder,
+            "nav_channels" to R.drawable.ic_chat,
             "nav_control" to R.drawable.ic_console,
         )
         drawerView.renderedRows().filter { it.group == "top" }.forEach { row ->
@@ -160,8 +162,9 @@ class DrawerViewTest {
         val drawerView = view(selected = selected)
         assertTrue(drawerView.clickRowForTest("nav_chat"))
         assertTrue(drawerView.clickRowForTest("nav_projects"))
+        assertTrue(drawerView.clickRowForTest("nav_channels"))
         assertTrue(drawerView.clickRowForTest("nav_control"))
-        assertEquals(listOf("nav_chat", "nav_projects", "nav_control"), selected)
+        assertEquals(listOf("nav_chat", "nav_projects", "nav_channels", "nav_control"), selected)
         assertFalse(drawerView.clickRowForTest("ghost"))
     }
 
@@ -219,16 +222,19 @@ class DrawerViewTest {
     fun `bottom new chat button is present`() {
         val selected = mutableListOf<String>()
         val drawerView = view(selected = selected)
-        val content = drawerView.root.getChildAt(0) as LinearLayout
+        val content = drawerView.root
         // Find the new chat button by tag
         var found = false
         fun find(view: View) {
             if (view.tag == "nav_new_chat") found = true
-            if (view is LinearLayout) {
+            if (view is ViewGroup) {
                 for (i in 0 until view.childCount) find(view.getChildAt(i))
             }
         }
         find(content)
         assertTrue("new chat button must be present", found)
+        assertTrue(drawerView.clickRowForTest("nav_new_chat"))
+        assertTrue(drawerView.clickRowForTest("nav_workbench"))
+        assertEquals(listOf("nav_new_chat", "nav_workbench"), selected)
     }
 }

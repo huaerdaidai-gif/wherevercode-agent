@@ -10,8 +10,8 @@ import wherevercode.agent.ui.EntryRegistry.Status
 /**
  * 入口注册表回归测试（V5 导航整改最终定稿，2026-11-15）。
  *
- * 一级菜单严格只有三项：对话、项目、控制。
- * 旧入口从三个主入口的子页面内逐层访问。
+ * 一级菜单严格只有四项：对话、项目、控制。
+ * 旧入口从四个主入口的子页面内逐层访问。
  */
 class EntryRegistryTest {
 
@@ -22,8 +22,8 @@ class EntryRegistryTest {
 
     @Test
     fun `registry has exactly the de-duplicated entries`() {
-        assertEquals(37, EntryRegistry.ENTRIES.size)
-        assertEquals(37, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
+        assertEquals(38, EntryRegistry.ENTRIES.size)
+        assertEquals(38, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
     }
 
     @Test
@@ -39,9 +39,9 @@ class EntryRegistryTest {
     }
 
     @Test
-    fun `drawer top has exactly three primary entries`() {
+    fun `drawer top has exactly four primary entries`() {
         assertEquals(
-            listOf("nav_chat", "nav_projects", "nav_control"),
+            listOf("nav_chat", "nav_projects", "nav_channels", "nav_control"),
             EntryRegistry.byGroup(Group.DRAWER_TOP).map { it.id },
         )
         // 对话指向 ID_CHAT
@@ -58,7 +58,7 @@ class EntryRegistryTest {
     @Test
     fun `drawer workspace group has secondary entries accessible from primary entries`() {
         val workspace = EntryRegistry.byGroup(Group.DRAWER_WORKSPACE).map { it.id }
-        // 旧一级入口移到工作空间分组，从三个主入口内逐层访问
+        // 旧一级入口移到工作空间分组，从四个主入口内逐层访问
         assertTrue(workspace.contains("nav_history"))
         assertTrue(workspace.contains("nav_running_tasks"))
         assertTrue(workspace.contains("nav_results"))

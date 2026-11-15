@@ -10,7 +10,7 @@ import wherevercode.agent.ui.DrawerController.DrawerEntry
 /**
  * 抽屉模型测试（V5 导航整改最终定稿，2026-11-15）。
  *
- * 一级菜单严格只有三项：对话、项目、控制。
+ * 一级菜单严格只有四项：对话、项目、控制。
  * 旧入口 id 保留为路由常量，但不再出现在 DEFAULT_ORDER 中。
  * 纯 JVM 测试，不依赖 Android。
  */
@@ -20,13 +20,13 @@ class DrawerControllerTest {
         controller.visibleTopLevel().map { it.id }
 
     @Test
-    fun `default entries are exactly the three V5 primary entries in order`() {
+    fun `default entries are exactly the four V5 primary entries in order`() {
         val entries = DrawerController.defaultEntries()
 
-        assertEquals(3, entries.size)
+        assertEquals(4, entries.size)
         assertEquals(DrawerController.DEFAULT_ORDER, entries.map { it.id })
         assertEquals(
-            listOf("对话", "项目", "控制"),
+            listOf("对话", "项目", "频道", "控制"),
             entries.map { it.label },
         )
         assertTrue(entries.all { it.isBasic })
@@ -34,7 +34,7 @@ class DrawerControllerTest {
     }
 
     @Test
-    fun `visible top level defaults to all three in order`() {
+    fun `visible top level defaults to all four in order`() {
         val controller = DrawerController()
 
         assertEquals(DrawerController.DEFAULT_ORDER, ids(controller))
@@ -48,7 +48,7 @@ class DrawerControllerTest {
 
         assertTrue(controller.hide(DrawerController.ID_PROJECTS))
         assertFalse(DrawerController.ID_PROJECTS in ids(controller))
-        assertEquals(2, controller.visibleTopLevel().size)
+        assertEquals(3, controller.visibleTopLevel().size)
         assertFalse(controller.hide(DrawerController.ID_PROJECTS))
 
         assertTrue(controller.show(DrawerController.ID_PROJECTS))
@@ -76,7 +76,7 @@ class DrawerControllerTest {
 
         assertTrue(controller.move(DrawerController.ID_CONTROL, 0))
         assertEquals(DrawerController.ID_CONTROL, ids(controller).first())
-        assertEquals(3, ids(controller).size)
+        assertEquals(4, ids(controller).size)
 
         assertTrue(controller.move(DrawerController.ID_CHAT, 99))
         assertEquals(DrawerController.ID_CHAT, ids(controller).last())
@@ -95,7 +95,7 @@ class DrawerControllerTest {
         val visible = ids(controller)
         assertEquals(DrawerController.ID_CHAT, visible[0])
         assertEquals(DrawerController.ID_PROJECTS, visible[1])
-        assertEquals(3, visible.size)
+        assertEquals(4, visible.size)
 
         controller.toggleFavorite(DrawerController.ID_PROJECTS)
         controller.toggleFavorite(DrawerController.ID_CHAT)
@@ -124,7 +124,7 @@ class DrawerControllerTest {
             controller.childrenOf(DrawerController.ID_PROJECTS).map { it.id },
         )
         assertTrue(controller.isNested(DrawerController.ID_CONTROL))
-        assertEquals(2, controller.visibleTopLevel().size)
+        assertEquals(3, controller.visibleTopLevel().size)
 
         assertTrue(controller.unnest(DrawerController.ID_CONTROL))
         assertFalse(controller.isNested(DrawerController.ID_CONTROL))
@@ -177,7 +177,7 @@ class DrawerControllerTest {
 
         assertFalse("matrix" in ids(controller))
         assertEquals(listOf("matrix"), controller.moreEntries().map { it.id })
-        assertEquals(3, controller.visibleTopLevel().size)
+        assertEquals(4, controller.visibleTopLevel().size)
     }
 
     @Test
@@ -239,7 +239,7 @@ class DrawerControllerTest {
     }
 
     @Test
-    fun `reset restores the three defaults`() {
+    fun `reset restores the four defaults`() {
         val controller = DrawerController()
         controller.move(DrawerController.ID_CONTROL, 0)
         controller.hide(DrawerController.ID_PROJECTS)
