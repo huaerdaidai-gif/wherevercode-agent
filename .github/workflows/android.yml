@@ -6,6 +6,7 @@ on:
       - "integ/**"
       - "feat/**"
       - "fix/**"
+      - "feature/v5-android-cloud"
   pull_request:
     branches:
       - main
@@ -30,7 +31,7 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.0"
+          gradle-version: "8.5"
       - name: Run JVM tests
         run: gradle -p android :app:testDebugUnitTest --stacktrace
       - name: Build debug and compatibility APKs
