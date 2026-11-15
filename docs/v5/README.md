@@ -46,3 +46,5 @@ gradle -p android :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAn
 四父级导航忽略旧版抽屉隐藏/收藏呈现，但原数据表保留；新增 Compose 与原 View 并存，需继续验证旋转恢复、无障碍和不同屏幕/深色主题。
 
 无需任何生产回滚。本批仅独立开发分支与侧装 `.ci` 包；代码可切回 `5f123cc` 或在集成分支逐提交 revert，原应用包名及数据未覆盖。卸载测试包会删除其本机测试数据，勿用于替代备份。
+
+原始上传包按字节保留（包括 CSV 的 CRLF 与原格式）；代码及本批生成文件的空白检查与原包快照分开执行。
