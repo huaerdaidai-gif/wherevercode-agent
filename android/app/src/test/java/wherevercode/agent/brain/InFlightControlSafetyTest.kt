@@ -1,4 +1,3 @@
-# blob=63722b56407dbeef72ec8e9cf85537058cb240c1 size=2640
 package wherevercode.agent.brain
 
 import java.io.File
