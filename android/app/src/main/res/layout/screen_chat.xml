@@ -153,6 +153,34 @@
             android:visibility="gone" />
     </FrameLayout>
 
+    <!-- 项目来源胶囊（2026-11-16 照 iOS 首页）：输入框上方独立一行，
+         常驻显示当前对话的项目来源，点按打开聊天选项目（真实绑定，
+         见 MainActivity.showChatProjectPicker）。未绑定项目时显示
+         「本机 · App 沙盒」——即默认本地来源，不编造项目名。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp">
+
+        <TextView
+            android:id="@+id/sourceCapsule"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="本机 · App 沙盒 ⌄"
+            android:textColor="@color/home_text"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:contentDescription="项目来源，点按切换" />
+    </LinearLayout>
+
     <!-- V5 C2-3-R4（v4.3-01 左半屏）：双层输入区——上层只有输入框
          （hint 与发送逻辑不动），下层一行：+ / 团队下拉 / 发送。
          附件 / 文件夹 / 参数·权限三个隐藏按钮已随“+”菜单重做删掉
@@ -184,7 +212,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@null"
-                android:hint="输入消息…"
+                android:hint="向 Agent 提问或分派任务"
                 android:imeOptions="actionSend"
                 android:inputType="textMultiLine|textCapSentences"
                 android:maxLines="5"

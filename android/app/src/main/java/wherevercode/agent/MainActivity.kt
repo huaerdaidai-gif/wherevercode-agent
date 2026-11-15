@@ -441,6 +441,9 @@ class MainActivity : AppCompatActivity() {
     private var webSearchEnabled: Boolean = false
     /** V5 C2-3-R1：输入行 Agent 选择器（原型图输入行，点开已有选 Agent 对话框）。 */
     private lateinit var buttonAgentSelect: TextView
+
+    /** 项目来源胶囊（2026-11-16 照 iOS 首页）：输入框上方常驻当前来源，点按切换绑定。 */
+    private lateinit var sourceCapsule: TextView
     private lateinit var buttonTaskMark: TextView
     /** 设置清理 2（2026-11-11，Claude 标准）：聊天输入框里的当前大脑胶囊。 */
     private lateinit var brainCapsule: TextView
@@ -1171,13 +1174,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.buttonSearch).setOnClickListener {
             showEntry(DrawerController.ID_HISTORY_SEARCH)
         }
-        // V5 C2-3-R4 (v4.3-01)：铃铛只有图标、没有红点——App 内没有通知
-        // 功能，红点是伪造状态；点按只给“通知中心待开发”提示，绝不编
-        // 造通知数。大脑 pill 与“新建”已删：大脑状态在设置页大脑分节
-        // （refreshBrainStatus 写 brainStatus），新对话走抽屉“对话”
-        // 入口（onDrawerEntrySelected 的 nav_chat 分支调 newConversationAndShow）。
-        findViewById<View>(R.id.buttonBell).setOnClickListener {
-            toast("通知中心待开发")
+        // 2026-11-16（照 iOS 首页）：顶栏右上「新建」与抽屉「＋ 新对话」
+        // 同一动作。原顶栏铃铛（点按只给“通知中心待开发”提示的死入口）
+        // 已随品牌行一并移除——通知功能不存在，就不摆入口。
+        findViewById<View>(R.id.buttonNew).setOnClickListener {
+            newConversationAndShow()
         }
     }
 
@@ -2038,6 +2039,8 @@ class MainActivity : AppCompatActivity() {
         buttonChatChangeGoal = screenChat.findViewById(R.id.buttonChatChangeGoal)
         buttonChatConsole = screenChat.findViewById(R.id.buttonChatConsole)
         buttonAgentSelect = screenChat.findViewById(R.id.buttonAgentSelect)
+        sourceCapsule = screenChat.findViewById(R.id.sourceCapsule)
+        sourceCapsule.setOnClickListener { showChatProjectPicker() }
         brainCapsule = screenChat.findViewById(R.id.brainCapsule)
         buttonTaskMark = screenChat.findViewById(R.id.buttonTaskMark)
         buttonTaskMark.setOnClickListener {
@@ -4583,8 +4586,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * V5 C2-3-R1c：问候区照 v4.3-01 简洁首页——居中品牌 + 问候 + 引导文案 +
-     * 4 个建议 pill（点按填输入框）。问候与建议均可关闭（行为保留）；
+     * V5 C2-3-R1c：问候区照 v4.3-01 简洁首页——居中品牌 + 问候 +
+     * 4 个建议 pill（点按填输入框）。2026-11-16 照 iOS 首页收敛：
+     * 去掉引导副标题与「收起建议」行，问候单行呈现；问候可关闭
+     * （行为保留）；
      * V5 原型图的 4 个导航入口由抽屉承接（R2）；4 个建议 pill 只填输入框，
      * 不代发、不伪装已发送。
      * 配色走 home_* token（浅色默认 Claude 极简，深色档原型霓虹）。
@@ -4615,23 +4620,24 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
-        // V5 C2-3-R4 (v4.3-01)：中央品牌——紫色 ∞ 标志（与抽屉品牌头
-        // 同一做法：UiKit.text 的 "∞" + home_gradient_start，见
-        // DrawerView.addBrandHeader）+ WhereverCode + 副标题（已是
-        // 问候保持轻量；产品名已在顶栏显示。
-        // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
-        // 不显示真人名字（见 HomeScreenController.greeting）。
-        val greetingView =
-            UiKit.text(this, HomeScreenController.greeting(), 22f, R.color.home_text, bold = true).apply {
-                gravity = android.view.Gravity.CENTER
-            }
-        card.addView(greetingView)
+        // 2026-11-16（照 iOS 首页）：中央品牌标志 + 单行问候，不再叠
+        // 副标题。品牌标志沿用安卓既有 ∞ 字标（与抽屉品牌头同一做法：
+        // UiKit.text 的 "∞" + home_gradient_start，见
+        // DrawerView.addBrandHeader），居中放大作视觉锚点。
+        // 问候文案与 iOS 首页统一（见 HomeScreenController.greeting）：
+        // 不读已存身份、不显示真人名字（隐私规则不变）。
         card.addView(
-            UiKit.text(this, "有什么想一起解决的？", 14f, R.color.home_text_secondary).apply {
+            UiKit.text(this, "∞", 40f, R.color.home_gradient_start, bold = true).apply {
                 gravity = android.view.Gravity.CENTER
-                setPadding(0, dp(4), 0, dp(14))
+                setPadding(0, dp(18), 0, dp(10))
             },
         )
+        val greetingView =
+            UiKit.text(this, HomeScreenController.greeting(), 26f, R.color.home_text, bold = true).apply {
+                gravity = android.view.Gravity.CENTER
+                setPadding(0, 0, 0, dp(16))
+            }
+        card.addView(greetingView)
         // V5 C2-3-R1d（v4.3-01）：4 个建议 pill 取自入口注册表
         // （唯一事实来源）；点按把意图填进输入框，等用户补齐细节再
         // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
@@ -4657,18 +4663,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 card.addView(row)
             }
-            card.addView(
-                UiKit.text(this, "收起建议", 11f, R.color.home_text_secondary).apply {
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(0, dp(2), 0, 0)
-                    setOnClickListener {
-                        homeScreenController.dismissSuggestions()
-                        welcomeView?.let { messageList.removeView(it) }
-                        welcomeView = null
-                        renderChat(chatViewModel.stateNow())
-                    }
-                },
-            )
         }
         return card
     }
@@ -9631,6 +9625,21 @@ class MainActivity : AppCompatActivity() {
         // maintainer 2026-11-11：大脑胶囊与横幅同源刷新——跟远程 Agent 对话
         // 时不显示（推理不走全局大脑，显示它是误导）；大脑对话时照常显示。
         refreshBrainCapsule()
+        // 项目来源胶囊（2026-11-16 照 iOS 首页）与横幅同源刷新：绑定项目
+        // 时显示项目名，未绑定时显示默认本地来源「本机 · App 沙盒」。
+        if (::sourceCapsule.isInitialized) {
+            val boundId = chatProjectBinding.projectId
+            sourceCapsule.text = if (boundId == null) {
+                "本机 · App 沙盒 ⌄"
+            } else {
+                val name = try {
+                    projectStore.getProject(boundId)?.name
+                } catch (_: Exception) {
+                    null
+                } ?: boundId
+                "$name ⌄"
+            }
+        }
     }
 
     /**

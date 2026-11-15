@@ -257,9 +257,9 @@ class HomeScreenControllerTest {
     }
 
     @Test
-    fun `greeting is always the fixed plain hello`() {
-        // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
-        // 不显示真人名字；没有带名分支可测。
-        assertEquals("你好", HomeScreenController.greeting())
+    fun `greeting is always the fixed nameless headline`() {
+        // 隐私规则不变：问候不读已存身份、不显示真人名字；没有带名
+        // 分支可测。文案 2026-11-16 与 iOS 首页统一（照苹果版改）。
+        assertEquals("今天想做什么？", HomeScreenController.greeting())
     }
 }
