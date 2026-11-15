@@ -273,8 +273,16 @@ public final class LocalChatModel: ObservableObject {
     /// back to the current usable brain instead of failing with
     /// "找不到大脑配置".
     private func resolveBrainForSend() -> (String?, String?) {
+        guard !selectedBrain.isEmpty else {
+            return (nil, "请在模型与连接中配置并选择模型")
+        }
+        if let cfg = appState.brainRegistry.configFor(selectedBrain),
+           appState.brainRegistry.get(cfg.adapterId) != nil {
+            if cfg.authRef == nil || appState.brainSettingsModel.hasKey(for: cfg) {
+                return (selectedBrain, nil)
+            }
+        }
         let usable = usableBrains
-        if usable.contains(where: { $0.brainId == selectedBrain }) { return (selectedBrain, nil) }
         if let current = appState.brainConfigStore.currentBrainId(),
            usable.contains(where: { $0.brainId == current }) {
             return (current, nil)
@@ -283,6 +291,10 @@ public final class LocalChatModel: ObservableObject {
         if let cfg = appState.brainSettingsModel.configs.first(where: { $0.brainId == selectedBrain }),
            let reason = appState.brainSettingsModel.unusableReason(for: cfg) {
             return (nil, "「\(cfg.label)」不可用：\(reason)。请到 设置 › 模型 连接一个可用的大脑。")
+        }
+        if let cfg = appState.brainRegistry.configFor(selectedBrain),
+           appState.brainRegistry.get(cfg.adapterId) != nil {
+            return (selectedBrain, nil)
         }
         return (nil, "还没有可用的大脑：请到 设置 › 模型 填写 API Key 并设为当前大脑。")
     }
@@ -754,9 +766,15 @@ public struct LocalChatHomeView: View {
                                     .font(.system(size: 27, weight: .regular, design: .serif))
                                     .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
 
-                                HStack(spacing: 10) {
-                                    suggestion("检查项目并修复问题", icon: "wrench.and.screwdriver")
-                                    suggestion("编写新功能模块", icon: "doc.text.magnifyingglass")
+                                VStack(spacing: 8) {
+                                    HStack(spacing: 8) {
+                                        suggestion("检查代码", icon: "magnifyingglass", route: nil)
+                                        suggestion("开始项目", icon: "folder", route: "projects")
+                                    }
+                                    HStack(spacing: 8) {
+                                        suggestion("自动化开发", icon: "bolt.horizontal", route: "automation")
+                                        suggestion("团队协作", icon: "person.2", route: "team")
+                                    }
                                 }
                                 .padding(.top, 8)
                             }
@@ -766,14 +784,19 @@ public struct LocalChatHomeView: View {
                             ForEach(model.messages) { message in
                                 VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 6) {
                                     HStack {
-                                        Text(message.role == "user" ? "你" : "Agent (\(message.source))")
-                                            .font(.caption2)
+                                        if message.role == "user" { Spacer() }
+                                        Text(message.role == "user" ? "你" : "Assistant")
+                                            .font(.system(size: 12, weight: .medium))
                                             .foregroundStyle(.secondary)
-                                        Spacer()
+                                        if message.role != "user" { Spacer() }
                                     }
                                     Text(message.content)
+                                        .font(.system(size: 15))
+                                        .lineSpacing(4)
+                                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                                         .textSelection(.enabled)
-                                        .padding(14)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 11)
                                         .background(
                                             message.role == "user"
                                                 ? Color(red: 0.93, green: 0.92, blue: 0.89)
@@ -883,9 +906,13 @@ public struct LocalChatHomeView: View {
     }
 
     @ViewBuilder
-    private func suggestion(_ title: String, icon: String) -> some View {
+    private func suggestion(_ title: String, icon: String, route: String? = nil) -> some View {
         Button {
-            model.draft = title
+            if let route {
+                onSelectRoute(route)
+            } else {
+                model.draft = title
+            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)

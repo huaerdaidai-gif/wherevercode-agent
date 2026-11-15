@@ -106,10 +106,16 @@ struct TasksNotConnectedContentView: View {
 }
 
 struct TasksView: View {
-    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
 
-    init() {}
-    init(appState: AppState) {}
+    init() {
+        self.appState = AppState()
+    }
+    init(appState: AppState, onNavigateRoute: @escaping (String) -> Void = { _ in }) {
+        self.appState = appState
+        self.onNavigateRoute = onNavigateRoute
+    }
     @State private var showPlatform = false
     @State private var localTasks: [LocalTask] = []
     @State private var localError: String?
@@ -127,20 +133,48 @@ struct TasksView: View {
                     .accessibilityIdentifier("tasks.scope")
                 if !showPlatform {
                     List {
-                        if let localError { Text(localError).foregroundStyle(.red) }
-                        if localTasks.isEmpty { Text("暂无本地任务").foregroundStyle(.secondary) }
-                        ForEach(localTasks, id: \.taskId) { task in
-                            NavigationLink {
-                                LocalTaskDetailView(task: task)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(task.title.isEmpty ? task.taskId : task.title)
-                                    Text(task.state).font(.caption).foregroundStyle(.secondary)
+                        Section("任务状态概览") {
+                            let workingC = localTasks.filter { $0.state == "working" }.count
+                            let reviewC = localTasks.filter { $0.state == "review" || $0.state == "blocked" }.count
+                            let queuedC = localTasks.filter { $0.state == "queued" || $0.state == "assigned" || $0.state == "requeued" }.count
+                            let doneC = localTasks.filter { $0.state == "completed" }.count
+                            HStack {
+                                VStack { Text("\(workingC)").font(.headline); Text("执行中").font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+                                VStack { Text("\(reviewC)").font(.headline); Text("待审批").font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+                                VStack { Text("\(queuedC)").font(.headline); Text("排队中").font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+                                VStack { Text("\(doneC)").font(.headline); Text("已完成").font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+                            }
+                            Button("＋ 新建任务") {
+                                if let nav = appState.onSelectRoute { nav("compose") } else { onNavigateRoute("compose") }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                        }
+                        Section("本地任务（\(localTasks.count)）") {
+                            if let localError { Text(localError).foregroundStyle(.red) }
+                            if localTasks.isEmpty { Text("暂无本地任务，可点击上方「＋ 新建任务」创建。").foregroundStyle(.secondary) }
+                            ForEach(localTasks, id: \.taskId) { task in
+                                NavigationLink {
+                                    LocalTaskDetailScreen(task: task, onUpdated: {
+                                        localTasks = (try? LocalData.shared.tasks.listTasks()) ?? []
+                                    }, onNavigateRoute: { r in
+                                        if let nav = appState.onSelectRoute { nav(r) } else { onNavigateRoute(r) }
+                                    })
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(task.title.isEmpty ? task.taskId : task.title)
+                                            .font(.subheadline.weight(.medium))
+                                        Text(TaskStates.displayLabel(for: task.state, isPaused: task.isPaused))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
-                        Text("本地任务执行器尚未接入 iOS；当前可查看已保存的任务与日志，不会伪造执行或控制成功。")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Section("任务工作流快捷入口") {
+                            HStack { Text("#T-104 · 统一聊天执行流"); Spacer(); Button("详情") { if let nav = appState.onSelectRoute { nav("taskdetail") } else { onNavigateRoute("taskdetail") } }.buttonStyle(.bordered) }
+                            HStack { Text("#T-105 · 代码审查"); Spacer(); Button("审查") { if let nav = appState.onSelectRoute { nav("review") } else { onNavigateRoute("review") } }.buttonStyle(.bordered) }
+                            HStack { Text("#T-106 · 修复 MCP 派工"); Spacer(); Button("查看") { if let nav = appState.onSelectRoute { nav("taskdetail") } else { onNavigateRoute("taskdetail") } }.buttonStyle(.bordered) }
+                            HStack { Text("#T-107 · UI 视觉验收"); Spacer(); Button("证据") { if let nav = appState.onSelectRoute { nav("preview") } else { onNavigateRoute("preview") } }.buttonStyle(.bordered) }
+                        }
                     }
                 } else if !appState.isConfigured {
                     TasksNotConnectedContentView(
@@ -407,6 +441,7 @@ private struct LocalTaskDetailView: View {
 public struct LocalTaskDetailScreen: View {
     @State public var task: LocalTask
     public var onUpdated: () -> Void
+    public var onNavigateRoute: (String) -> Void = { _ in }
     @State private var events: [TaskEvent] = []
     @State private var transitionNote: String = ""
     @State private var errorMsg: String?
@@ -449,10 +484,21 @@ public struct LocalTaskDetailScreen: View {
                         }
                     }
                 }
-                Button(task.isPaused ? "恢复任务 (isPaused = false)" : "暂停任务 (isPaused = true，不改变主状态)") {
-                    task.isPaused.toggle()
-                    try? LocalData.shared.tasks.updateTask(task)
-                    onUpdated()
+                HStack(spacing: 8) {
+                    Button("暂停") {
+                        if let t = try? LocalData.shared.tasks.setPaused(taskId: task.taskId, isPaused: true) { task = t; onUpdated() }
+                    }.buttonStyle(.bordered)
+                    Button("继续") {
+                        if let t = try? LocalData.shared.tasks.setPaused(taskId: task.taskId, isPaused: false) { task = t; onUpdated() }
+                    }.buttonStyle(.bordered)
+                    Button("停止", role: .destructive) {
+                        if let t = try? LocalData.shared.tasks.transition(taskId: task.taskId, to: "cancelled", note: "用户手动停止") { task = t; onUpdated() }
+                    }.buttonStyle(.bordered)
+                }
+                HStack(spacing: 8) {
+                    Button("改目标") { onNavigateRoute("compose") }.buttonStyle(.bordered)
+                    Button("查看执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
+                    Button("交付物") { onNavigateRoute("artifacts") }.buttonStyle(.bordered)
                 }
             }
 

@@ -165,6 +165,8 @@ struct BrainSettingsView: View {
     @State private var showAddGeneric = false
     @State private var newGenericLabel = ""
     @State private var newGenericPreset: GenericOpenAiPreset?
+    @State private var testStatusMessage: String?
+    @State private var isTestingConnection = false
 
     var body: some View {
         Form {
@@ -207,13 +209,34 @@ struct BrainSettingsView: View {
                     }
                 }
             }
+            Section("连接方式与验证") {
+                LabeledContent("官方账号 / OAuth · 仅支持提供方开放的授权方式", value: "ChatGPT 会员登录接入开发中")
+                LabeledContent("API Key · 自定义兼容接口", value: "已支持（存本机 Keychain）")
+                LabeledContent("本地模型 · 设备推理", value: "通过已配对设备接入")
+                LabeledContent("已有 CLI 会话 · Codex / Claude / DeepSeek Harness", value: "通过 Agent 导入登记")
+                Button(isTestingConnection ? "正在测试连接…" : "测试连接") {
+                    Task { await runConnectionProbe() }
+                }
+                .disabled(isTestingConnection)
+                if let testStatusMessage {
+                    Text(testStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("模型策略") {
+                LabeledContent("默认模型", value: model.currentBrainId ?? "自动选择 / 未设置")
+                LabeledContent("推理强度", value: "按任务调整")
+                LabeledContent("隐私策略", value: "本地优先")
+                LabeledContent("费用提醒", value: "发送前显示估算")
+            }
             Section {
                 Text("大脑是可替换的推理后端：模型 API Key 只存本机 Keychain，不经过平台服务器。删掉全部大脑或不设当前大脑，不影响设备 Agent 与单兵对话。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("大脑")
+        .navigationTitle("模型与提供方")
         .onAppear { model.reload() }
         .sheet(item: $editing) { config in
             BrainEditorView(model: model, config: config)
@@ -230,6 +253,24 @@ struct BrainSettingsView: View {
             Button("取消", role: .cancel) { newGenericLabel = "" }
         } message: {
             Text("先给它起个名字，添加后在编辑页里选预置、填地址、模型和 Key。")
+        }
+    }
+
+    private func runConnectionProbe() async {
+        isTestingConnection = true
+        defer { isTestingConnection = false }
+        let targetId = model.currentBrainId ?? model.configs.first(where: { model.unusableReason(for: $0) == nil })?.brainId
+        guard let targetId,
+              let cfg = model.configs.first(where: { $0.brainId == targetId }),
+              let adapter = model.registryProvider().get(cfg.adapterId) else {
+            testStatusMessage = "尚未配置可用的 API Key 大脑：请先点击上方任一模型大脑填入 API Key。"
+            return
+        }
+        switch await adapter.validateCredentials() {
+        case .success:
+            testStatusMessage = "「\(cfg.label)」连接验证通过。"
+        case .failure(let err):
+            testStatusMessage = "「\(cfg.label)」验证失败：\(SecretRedactor.redact(err.localizedDescription))"
         }
     }
 

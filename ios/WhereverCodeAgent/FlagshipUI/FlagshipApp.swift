@@ -462,6 +462,7 @@ public struct FlagshipShellView: View {
     @State private var selectedMenu: FlagshipDrawerMenu = .chat
     @State private var activeRoute: FlagshipRoute? = nil
     @State private var isSettingsOpen = false
+    @AppStorage("app.darkMode") private var darkMode = false
 
     public init(appState: AppState, chatModel: LocalChatModel) {
         self.appState = appState
@@ -558,7 +559,11 @@ public struct FlagshipShellView: View {
                         }
                     )
                 }
+                .environmentObject(appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
+            .preferredColorScheme(darkMode ? .dark : nil)
             .onAppear {
                 appState.onSelectRoute = { nextId in
                     navigateTo(nextId)

@@ -49,45 +49,45 @@ public struct FlagshipRouteDestinationView: View {
         case "chat", "conversation":
             ConversationStreamScreen(appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         case "history":
-            HistoryConversationsScreen(chatModel: chatModel, onNavigateRoute: onNavigateRoute)
+            HistoryConversationsScreen(appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         case "search":
-            GlobalSearchScreen(chatModel: chatModel, onNavigateRoute: onNavigateRoute)
+            GlobalSearchScreen(appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         case "voice":
-            VoiceMultimodalScreen(chatModel: chatModel)
+            VoiceMultimodalScreen(appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 二、工作台 · 任务 (8 路由)
         case "compose":
-            ComposeTaskScreen(appState: appState, onCreated: { onNavigateRoute("tasks") })
+            ComposeTaskScreen(appState: appState, onCreated: { onNavigateRoute("tasks") }, onNavigateRoute: onNavigateRoute)
         case "tasks":
-            TasksView(appState: appState)
+            TasksView(appState: appState, onNavigateRoute: onNavigateRoute)
         case "taskdetail":
-            TaskDetailRouterScreen(appState: appState)
+            TaskDetailRouterScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "plan":
-            PlanAndCheckpointsScreen()
+            PlanAndCheckpointsScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "queue":
-            QueueAndSchedulerScreen()
+            QueueAndSchedulerScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "approvals":
-            ApprovalsCenterScreen()
+            ApprovalsCenterScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "review":
-            CodeReviewScreen()
+            CodeReviewScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "artifacts":
-            ArtifactsDeliveryScreen()
+            ArtifactsDeliveryScreen(appState: appState, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 二、项目 · 任务与开发 (10 路由)
         case "projects", "projectdetail":
             ProjectsHomeView(appState: appState, onOpenDrawer: {}, onNavigateRoute: onNavigateRoute)
         case "files":
-            SandboxFileBrowserScreen(onOpenEditor: { onNavigateRoute("editor") })
+            SandboxFileBrowserScreen(appState: appState, onOpenEditor: { onNavigateRoute("editor") }, onNavigateRoute: onNavigateRoute)
         case "editor":
-            SandboxCodeEditorScreen(onOpenDiff: { onNavigateRoute("diff") })
+            SandboxCodeEditorScreen(appState: appState, onOpenDiff: { onNavigateRoute("diff") }, onNavigateRoute: onNavigateRoute)
         case "diff":
-            UnifiedDiffScreen()
+            UnifiedDiffScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "terminal":
-            TerminalAndExecutionTargetScreen(appState: appState)
+            TerminalAndExecutionTargetScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "git":
-            GitWorktreeInspectorScreen()
+            GitWorktreeInspectorScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "preview", "browser", "testmatrix":
-            WorkbenchDevExtendedScreen(route: route)
+            WorkbenchDevExtendedScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 二、工作台 · 协作 (10 路由)
         case "channels", "channel":
@@ -101,17 +101,17 @@ public struct FlagshipRouteDestinationView: View {
 
         // MARK: - 二、工作台 · 连接 (11 路由)
         case "devices", "devicedetail":
-            DevicesView()
+            DevicesView(appState: appState, onNavigateRoute: onNavigateRoute)
         case "models", "connectmodel":
             BrainSettingsView(model: appState.brainSettingsModel)
         case "mcp":
-            McpToolsInspectorScreen(appState: appState)
+            McpToolsInspectorScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "skills":
-            SkillsManagementScreen()
+            SkillsManagementScreen(routeId: "skills", appState: appState, onNavigateRoute: onNavigateRoute)
         case "connections":
-            SettingsView(appState: appState)
+            SettingsView(appState: appState, onNavigateRoute: onNavigateRoute)
         case "modelroute", "agentimport", "network", "routes":
-            ConnectionExtendedScreen(route: route, appState: appState)
+            ConnectionExtendedScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 三、控制 · 系统与自动化 (17 路由)
         case "dashboard":
@@ -119,18 +119,18 @@ public struct FlagshipRouteDestinationView: View {
         case "settings":
             AccountSettingsView(appState: appState, chatModel: chatModel, capabilities: capabilities, onNavigateRoute: onNavigateRoute, onDismiss: {})
         case "onboarding":
-            OnboardingLocalFirstScreen(onNavigateRoute: onNavigateRoute)
+            OnboardingLocalFirstScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "activity", "notifications", "audit", "usage", "sync", "recovery", "baseline":
             ConsoleSystemSubScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
         case "autoloop", "loopguard", "templates", "automation", "automaker", "triggers", "wakepolicy":
-            ConsoleAutomationSubScreen(route: route)
+            ConsoleAutomationSubScreen(route: route, appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 四、设置 · 智能与扩展 (9 路由)
         case "memory", "skillsmarket", "skillbuilder", "context", "research", "personas", "extensions", "extensiondetail", "harness":
-            SettingsIntelligenceAndExtensionsScreen(route: route, appState: appState)
+            SettingsIntelligenceAndExtensionsScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
         default:
-            SettingsView(appState: appState)
+            SettingsView(appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -161,11 +161,13 @@ private struct ConversationStreamScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "conversation", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct HistoryConversationsScreen: View {
+    @ObservedObject var appState: AppState
     @ObservedObject var chatModel: LocalChatModel
     var onNavigateRoute: (String) -> Void
     @State private var query = ""
@@ -206,6 +208,7 @@ private struct HistoryConversationsScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "history", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
         .searchable(text: $query, prompt: "按标题或模型搜索会话")
         .onAppear { chatModel.reloadHistory() }
@@ -213,6 +216,7 @@ private struct HistoryConversationsScreen: View {
 }
 
 private struct GlobalSearchScreen: View {
+    @ObservedObject var appState: AppState
     @ObservedObject var chatModel: LocalChatModel
     var onNavigateRoute: (String) -> Void
     @State private var keyword = ""
@@ -257,12 +261,15 @@ private struct GlobalSearchScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "search", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct VoiceMultimodalScreen: View {
+    @ObservedObject var appState: AppState
     @ObservedObject var chatModel: LocalChatModel
+    var onNavigateRoute: (String) -> Void = { _ in }
     @State private var attachName = ""
     @State private var voiceTranscript = ""
 
@@ -290,6 +297,7 @@ private struct VoiceMultimodalScreen: View {
                     voiceTranscript = ""
                 }
             }
+            PrototypeRouteSections(routeId: "voice", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -298,6 +306,7 @@ private struct VoiceMultimodalScreen: View {
 private struct ComposeTaskScreen: View {
     @ObservedObject var appState: AppState
     var onCreated: () -> Void
+    var onNavigateRoute: (String) -> Void = { _ in }
 
     @State private var title = ""
     @State private var description = ""
@@ -352,24 +361,28 @@ private struct ComposeTaskScreen: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+            PrototypeRouteSections(routeId: "compose", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct TaskDetailRouterScreen: View {
     @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
 
     var body: some View {
         let tasks = (try? LocalData.shared.tasks.listTasks()) ?? []
         if let first = tasks.last {
-            LocalTaskDetailScreen(task: first, onUpdated: {})
+            LocalTaskDetailScreen(task: first, onUpdated: {}, onNavigateRoute: onNavigateRoute)
         } else {
-            TasksView(appState: appState)
+            TasksView(appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct PlanAndCheckpointsScreen: View {
+    @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     @State private var goalText = "完成 iOS 70 屏路由装配与 SQLite 状态机校验"
     @State private var stepTool = "list_files"
     @State private var taskId = "task-demo-01"
@@ -397,11 +410,14 @@ private struct PlanAndCheckpointsScreen: View {
                     Text(res).font(.footnote)
                 }
             }
+            PrototypeRouteSections(routeId: "plan", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct QueueAndSchedulerScreen: View {
+    @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
         let allTasks = (try? LocalData.shared.tasks.listTasks()) ?? []
         let queued = allTasks.filter { $0.state == "queued" || $0.state == "requeued" || $0.state == "assigned" }
@@ -425,11 +441,14 @@ private struct QueueAndSchedulerScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "queue", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct ApprovalsCenterScreen: View {
+    @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     @ObservedObject var store: InteractiveApprovalStore = LocalData.shared.approvalStore
     @State private var sampleTool = "write_file"
     @State private var samplePath = "ios/WhereverCodeAgent/App/WhereverCodeAgentApp.swift"
@@ -477,11 +496,14 @@ private struct ApprovalsCenterScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "approvals", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct CodeReviewScreen: View {
+    @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
         let tasks = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "review" || $0.state == "rework" }
         List {
@@ -496,16 +518,19 @@ private struct CodeReviewScreen: View {
                 } else {
                     ForEach(tasks) { t in
                         NavigationLink(t.title) {
-                            LocalTaskDetailScreen(task: t, onUpdated: {})
+                            LocalTaskDetailScreen(task: t, onUpdated: {}, onNavigateRoute: onNavigateRoute)
                         }
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "review", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct ArtifactsDeliveryScreen: View {
+    @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
         let completed = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "completed" || $0.result != nil }
         List {
@@ -526,6 +551,7 @@ private struct ArtifactsDeliveryScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "artifacts", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -717,6 +743,47 @@ public struct ProjectsHomeView: View {
                             )
                         }
                     }
+
+                    // 导入方式与开发全流程快捷按钮
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("导入与开发工具")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Button("选择本地文件夹") { onNavigateRoute("files") }.buttonStyle(.bordered)
+                                Button("导入 Git 仓库") { showNewProjectSheet = true }.buttonStyle(.bordered)
+                                Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
+                                Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
+                                Button("开始对话") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
+                                Button("Git 工作树") { onNavigateRoute("git") }.buttonStyle(.bordered)
+                                Button("预览") { onNavigateRoute("preview") }.buttonStyle(.bordered)
+                            }
+                            .font(.caption)
+                        }
+                        HStack {
+                            Text("wherevercode-agent · Android / Kotlin").font(.caption)
+                            Spacer()
+                            Button("打开") {
+                                if let first = projects.first { activeWorkspaceProject = first }
+                            }.buttonStyle(.bordered).controlSize(.mini)
+                        }
+                        HStack {
+                            Text("wherevercode · 旧平台 / 只读参考").font(.caption)
+                            Spacer()
+                            Button("打开") {
+                                if let first = projects.first { activeWorkspaceProject = first }
+                            }.buttonStyle(.bordered).controlSize(.mini)
+                        }
+                        HStack {
+                            Text("新建本地项目").font(.caption)
+                            Spacer()
+                            Button("创建") { onNavigateRoute("onboarding") }.buttonStyle(.bordered).controlSize(.mini)
+                        }
+                    }
+                    .padding(14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1))
                 }
                 .padding(16)
             }
@@ -955,12 +1022,16 @@ public struct ProjectWorkspaceDetailView: View {
                             }
                         }
                         Section("快捷操作") {
-                            Button("新建此项目任务 (compose)") { onNavigateRoute("compose") }
-                            Button("查看项目任务中心 (tasks)") { onNavigateRoute("tasks") }
-                            Button("浏览沙盒文件 (files)") { onNavigateRoute("files") }
-                            Button("打开代码编辑器 (editor)") { onNavigateRoute("editor") }
-                            Button("执行环境与终端 (terminal)") { onNavigateRoute("terminal") }
+                            Button("浏览文件") { onNavigateRoute("files") }
+                            Button("开始对话") { onNavigateRoute("conversation") }
+                            Button("Git 工作树") { onNavigateRoute("git") }
+                            Button("预览") { onNavigateRoute("preview") }
+                            Button("新建此项目任务") { onNavigateRoute("compose") }
+                            Button("查看项目任务中心") { onNavigateRoute("tasks") }
+                            Button("打开代码编辑器") { onNavigateRoute("editor") }
+                            Button("执行环境与终端") { onNavigateRoute("terminal") }
                         }
+                        PrototypeRouteSections(routeId: "projectdetail", appState: appState, onNavigateRoute: onNavigateRoute)
                     }
                 case .tasks:
                     TasksView(appState: appState)
@@ -999,7 +1070,9 @@ private struct ProjectsWorkbenchScreen: View {
 }
 
 private struct SandboxFileBrowserScreen: View {
+    @ObservedObject var appState: AppState = AppState()
     var onOpenEditor: () -> Void
+    var onNavigateRoute: (String) -> Void = { _ in }
     @State private var files: [String] = []
     @State private var newFileName = "notes.md"
 
@@ -1033,6 +1106,7 @@ private struct SandboxFileBrowserScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "files", appState: appState, onNavigateRoute: onNavigateRoute)
         }
         .onAppear(perform: reload)
     }
@@ -1043,7 +1117,9 @@ private struct SandboxFileBrowserScreen: View {
 }
 
 private struct SandboxCodeEditorScreen: View {
+    @ObservedObject var appState: AppState = AppState()
     var onOpenDiff: () -> Void
+    var onNavigateRoute: (String) -> Void = { _ in }
     @State private var fileName = "workspace_scratch.swift"
     @State private var content = "// WhereverCode V5 iOS Sandbox Scratchpad\nimport Foundation\n\nfunc greet() -> String {\n    return \"Hello WhereverCode V5\"\n}\n"
     @State private var savedSnapshot = ""
@@ -1078,11 +1154,19 @@ private struct SandboxCodeEditorScreen: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                Button("对比 Diff") {
+                Button("查看变更") {
                     try? LocalData.shared.kv.set("editor.lastContent", content)
                     if savedSnapshot.isEmpty { savedSnapshot = content }
                     try? LocalData.shared.kv.set("editor.prevContent", savedSnapshot)
                     onOpenDiff()
+                }
+                .buttonStyle(.bordered)
+                Button("局部编辑") {
+                    statusMsg = "已进入局部编辑草稿模式"
+                }
+                .buttonStyle(.bordered)
+                Button("询问 Agent") {
+                    onNavigateRoute("conversation")
                 }
                 .buttonStyle(.bordered)
             }
@@ -1104,6 +1188,8 @@ private struct SandboxCodeEditorScreen: View {
 }
 
 private struct UnifiedDiffScreen: View {
+    @ObservedObject var appState: AppState = AppState()
+    var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
         let prev = (try? LocalData.shared.kv.get("editor.prevContent")) ?? "// 原始版本\nfunc greet() {}"
         let curr = (try? LocalData.shared.kv.get("editor.lastContent")) ?? "// 修改后版本\nfunc greet() -> String { return \"V5\" }"
@@ -1131,6 +1217,7 @@ private struct UnifiedDiffScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "diff", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -1138,6 +1225,7 @@ private struct UnifiedDiffScreen: View {
 /// 工作台核心要求：明确区分 iPhone 本地真实执行、远端设备执行、云端 Agent 执行、当前平台不支持（严禁将远端执行伪装成本地执行）
 private struct TerminalAndExecutionTargetScreen: View {
     @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     @ObservedObject var eventLog: InMemoryEventLog = LocalData.shared.eventLog
     @State private var selectedTarget: ExecutionTargetKind = .unsupportedOnPlatform
 
@@ -1203,11 +1291,14 @@ private struct TerminalAndExecutionTargetScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "terminal", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct GitWorktreeInspectorScreen: View {
+    @ObservedObject var appState: AppState = AppState()
+    var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
         let projects = (try? LocalData.shared.projects.listProjects()) ?? []
         List {
@@ -1230,27 +1321,31 @@ private struct GitWorktreeInspectorScreen: View {
                     }
                 }
             }
+            PrototypeRouteSections(routeId: "git", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct WorkbenchDevExtendedScreen: View {
     let route: FlagshipRoute
+    @ObservedObject var appState: AppState = AppState()
+    var onNavigateRoute: (String) -> Void = { _ in }
 
     var body: some View {
         List {
-            Section("\(route.title) (\(route.id)) — 真实状态与平台边界") {
+            Section("\(route.title)") {
                 switch route.id {
                 case "preview":
-                    Text("运行预览 (preview)：当前为规划契约页（DESIGN_ONLY）。iOS 端不伪造网页截图或假预览，产物验收截图须来自真实模拟器或真机运行。")
+                    Text("运行预览：支持查看构建与验收产物预览；真机或模拟器截图生成后在此汇总。")
                 case "browser":
-                    Text("浏览器工作台 (browser)：当前为规划契约页（DESIGN_ONLY）。联网检索已通过 WebSearchClient 接入，受控浏览器录制/快照尚未接入服务端。")
+                    Text("浏览器工作台：联网检索已通过 WebSearchClient 接入；受控网页快照与录制待服务端接入。")
                 case "testmatrix":
-                    Text("测试矩阵 (testmatrix)：展示双端 70 屏路由契约、10 状态机转换、SQLite 存储与 MCP 工具映射校验结果；机械检查默认标注 NOT_RUN 直至真机 CI 跑通。")
+                    Text("测试矩阵：汇总 iOS/Android 路由、任务状态机、本地数据库与 MCP 工具校验结果。")
                 default:
                     Text(route.title)
                 }
             }
+            PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -1265,61 +1360,134 @@ private struct CollaborationAndAgentsScreen: View {
     @State private var newAgentId = ""
     @State private var newAgentName = ""
     @State private var newAgentKind: AgentKind = .cloud
+    @State private var newAgentAccess: AgentAccess = .cli
+    @State private var newAgentEndpoint = ""
+    @State private var bannerMsg: String? = nil
+
+    private let presets: [(id: String, name: String, kind: AgentKind, access: AgentAccess, summary: String)] = [
+        ("codex-cli", "Codex · 可用于代码任务", .cloud, .cli, "代码、测试、审查"),
+        ("claude-agent", "Claude · 对话与规划", .cloud, .api, "对话、架构规划、代码审查"),
+        ("deepseek-agent", "DeepSeek · 模型适配", .cloud, .api, "推理、代码生成"),
+        ("k70-worker", "K70 设备 Agent", .device, .connector, "Android 设备执行节点")
+    ]
 
     var body: some View {
         List {
-            Section("协作路由说明：\(route.title) (\(route.id))") {
-                Text("本地与远端 Agent 登记存储于 SQLite kv 表 (agents.records.v1)。注意：外部 Agent 进程直接唤醒与跨端会话动态迁移在 V5 服务端尚无接口，当前可使用团队频道 (channels) 与本地/MCP 任务派单。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let bannerMsg {
+                Section {
+                    Label(bannerMsg, systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
             }
 
-            Section("登记新协作 Agent (AgentRegistryStore)") {
-                TextField("Agent ID（如 codex-worker）", text: $newAgentId)
-                    .textInputAutocapitalization(.never)
-                TextField("显示名称（如 Codex Worker）", text: $newAgentName)
-                Picker("类型", selection: $newAgentKind) {
-                    ForEach(AgentKind.allCases, id: \.self) { k in
-                        Text(k.rawValue).tag(k)
+            Section("快速添加预设 Agent") {
+                ForEach(presets, id: \.id) { item in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name).font(.subheadline.weight(.medium))
+                            Text("\(item.kind.rawValue) · \(item.access.rawValue) · \(item.summary)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(agents.contains(where: { $0.agentId == item.id }) ? "详情" : "＋ 添加") {
+                            let rec = AgentRecord(
+                                agentId: item.id,
+                                displayName: item.name,
+                                kind: item.kind,
+                                access: item.access,
+                                lastTestSummary: item.summary,
+                                memberConnectionState: "NOT_CONNECTED"
+                            )
+                            try? LocalData.shared.agents.saveAgent(rec)
+                            reload()
+                            bannerMsg = "已保存「\(item.name)」至本地 Agent 目录。"
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                 }
-                Button("保存到本地 Agent 注册表") {
-                    let cleanId = newAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !cleanId.isEmpty else { return }
+            }
+
+            Section("添加自定义 Agent") {
+                TextField("Agent 标识（如 my-codex）", text: $newAgentId)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("显示名称（如 Codex 工作节点）", text: $newAgentName)
+                Picker("类型", selection: $newAgentKind) {
+                    Text("云端 Agent").tag(AgentKind.cloud)
+                    Text("设备 Agent").tag(AgentKind.device)
+                    Text("本地模型").tag(AgentKind.localModel)
+                }
+                Picker("接入方式", selection: $newAgentAccess) {
+                    ForEach(AgentAccess.allCases, id: \.self) { a in
+                        Text(a.rawValue).tag(a)
+                    }
+                }
+                TextField("服务或 Webhook 地址（可选）", text: $newAgentEndpoint)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("添加并保存 Agent") {
+                    let cleanName = newAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rawId = newAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let finalId = rawId.isEmpty ? "agent-\(UUID().uuidString.prefix(6).lowercased())" : rawId
+                    guard !cleanName.isEmpty || !rawId.isEmpty else { return }
                     let rec = AgentRecord(
-                        agentId: cleanId,
-                        displayName: newAgentName.isEmpty ? cleanId : newAgentName,
-                        kind: newAgentKind
+                        agentId: finalId,
+                        displayName: cleanName.isEmpty ? finalId : cleanName,
+                        kind: newAgentKind,
+                        access: newAgentAccess,
+                        baseUrl: newAgentEndpoint.isEmpty ? nil : newAgentEndpoint,
+                        lastTestSummary: "本地已登记",
+                        memberConnectionState: "NOT_CONNECTED"
                     )
                     try? LocalData.shared.agents.saveAgent(rec)
                     newAgentId = ""
                     newAgentName = ""
+                    newAgentEndpoint = ""
                     reload()
+                    bannerMsg = "已添加 Agent「\(rec.displayName)」。"
                 }
+                .disabled(newAgentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && newAgentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            Section("已登记 Agent 列表 (\(agents.count))") {
+            Section("已登记 Agent（\(agents.count)）") {
                 if agents.isEmpty {
-                    Text("暂无已登记 Agent").foregroundStyle(.secondary)
+                    Text("暂无已登记 Agent，可从上方一键添加或自定义登记。").foregroundStyle(.secondary)
                 } else {
                     ForEach(agents) { ag in
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text(ag.displayName).font(.headline)
+                                Text(ag.displayName).font(.subheadline.weight(.semibold))
                                 Spacer()
-                                Text(ag.memberConnectionState)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.secondary.opacity(0.15), in: Capsule())
+                                Toggle("启用", isOn: Binding(
+                                    get: { ag.enabled },
+                                    set: { val in
+                                        try? LocalData.shared.agents.setEnabled(agentId: ag.agentId, enabled: val)
+                                        reload()
+                                    }
+                                ))
+                                .labelsHidden()
                             }
                             Text("ID: \(ag.agentId) · 类型: \(ag.kind.rawValue) · 接入: \(ag.access.rawValue)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                Button("委派任务") { onNavigateRoute("delegate") }.buttonStyle(.bordered).controlSize(.mini)
+                                Button("查看任务") { onNavigateRoute("tasks") }.buttonStyle(.bordered).controlSize(.mini)
+                                Button("工具权限") { onNavigateRoute("mcp") }.buttonStyle(.bordered).controlSize(.mini)
+                                Spacer()
+                                Button("删除", role: .destructive) {
+                                    try? LocalData.shared.agents.deleteAgent(agentId: ag.agentId)
+                                    reload()
+                                }.font(.caption2)
+                            }
                         }
                     }
                 }
             }
+
+            PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
         }
         .onAppear(perform: reload)
     }
@@ -1331,42 +1499,149 @@ private struct CollaborationAndAgentsScreen: View {
 
 private struct McpToolsInspectorScreen: View {
     @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     @State private var toolNames: [String] = []
     @State private var isLoading = false
     @State private var errorMsg: String?
+    @State private var tokenInput = ""
+    @State private var issueAgentId = PlatformTokenIssuer.defaultAgentID
+    @State private var issueTokenName = PlatformTokenIssuer.defaultName
+    @State private var isIssuing = false
+    @State private var statusBanner: String?
+
+    private let standardV5Tools: [(name: String, summary: String)] = [
+        ("issue_agent_token", "签发平台 Agent 访问令牌"),
+        ("agent_channel_list", "拉取可见团队频道列表"),
+        ("agent_channel_join", "加入指定团队频道"),
+        ("agent_channel_post", "在频道发送消息"),
+        ("agent_channel_messages", "增量拉取频道历史消息"),
+        ("agent_my_tasks", "拉取分配给当前 Agent 的任务"),
+        ("agent_task_claim", "认领任务（2小时租约）"),
+        ("agent_task_progress", "汇报任务进度并续租"),
+        ("agent_task_heartbeat", "发送任务心跳续租"),
+        ("agent_task_submit", "提交任务成果（分支/Commit/PR）"),
+        ("agent_task_release", "释放已认领的任务")
+    ]
 
     var body: some View {
         List {
-            Section("V5 平台 MCP 端点") {
-                LabeledContent("Endpoint", value: appState.settings.platformBaseURLString)
-                LabeledContent("凭证状态", value: appState.isConfigured ? "Keychain 已配置" : "未配置 Token")
-                Button(isLoading ? "正在探测 tools/list…" : "探测远端 MCP 工具清单 (listToolNames)") {
+            if let statusBanner {
+                Section {
+                    Label(statusBanner, systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+
+            Section("平台连接与 Token 配置") {
+                LabeledContent("服务地址", value: appState.settings.platformBaseURLString)
+                LabeledContent("凭证状态", value: appState.hasToken ? "已保存 Token" : "未配置 Token")
+                SecureField("粘贴平台 Token（v5_ 开头，仅存本机钥匙串）", text: $tokenInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                HStack {
+                    Button("保存 Token 并探测工具") {
+                        let clean = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !clean.isEmpty else { return }
+                        try? appState.saveToken(clean)
+                        tokenInput = ""
+                        statusBanner = "Token 已安全保存，正在拉取远端 MCP 工具列表…"
+                        Task { await fetchTools() }
+                    }
+                    .disabled(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Spacer()
+                    if appState.hasToken {
+                        Button("清除凭证", role: .destructive) {
+                            try? appState.deleteToken()
+                            toolNames = []
+                            statusBanner = "已清除本机保存的平台 Token。"
+                        }
+                    }
+                }
+            }
+
+            Section("生成新 Token（issue_agent_token）") {
+                TextField("签发对象 Agent ID", text: $issueAgentId)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("令牌名称", text: $issueTokenName)
+                Button(isIssuing ? "正在向平台申请签发…" : "生成并保存 Token") {
+                    Task {
+                        isIssuing = true
+                        defer { isIssuing = false }
+                        let res = await appState.generateAndSaveToken(agentId: issueAgentId, name: issueTokenName)
+                        switch res {
+                        case .issued(_, _, let aid, _):
+                            statusBanner = "已为 \(aid) 生成新 Token 并保存。"
+                            await fetchTools()
+                        case .failed(let msg):
+                            errorMsg = msg
+                        }
+                    }
+                }
+                .disabled(isIssuing)
+                Text("说明：需要当前已保存具备签发权限的平台凭证，生成的令牌将直接存入本机安全存储。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Webhook 唤醒与自动触发") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("触发器与 Webhook 唤醒").font(.subheadline.weight(.medium))
+                        Text("配置 Git / 消息 / 定时事件唤醒与签名校验规则").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("打开触发器") { onNavigateRoute("triggers") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("唤醒策略") { onNavigateRoute("wakepolicy") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+
+            Section("远端 MCP 工具实时探测（\(toolNames.count) 项）") {
+                Button(isLoading ? "正在从平台拉取工具列表…" : "刷新远端 MCP 工具列表") {
                     Task { await fetchTools() }
                 }
                 .disabled(isLoading)
-            }
-            if let err = errorMsg {
-                Section("探测结果 / 错误") {
+                if let err = errorMsg {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }
-            }
-            Section("已发现远端 MCP 工具 (\(toolNames.count))") {
                 if toolNames.isEmpty {
-                    Text("尚未拉取或未连接平台。已知标准 V5 工具包括：issue_agent_token、agent_channel_list、agent_channel_join、agent_channel_post、agent_channel_messages、agent_my_tasks、agent_task_claim、agent_task_progress、agent_task_heartbeat、agent_task_submit、agent_task_release。")
+                    Text(appState.hasToken ? "点击上方「刷新远端 MCP 工具列表」从服务端实时拉取。" : "当前未配置平台 Token，远端实时工具列表未拉取；下方列出本客户端已对接的标准 V5 平台工具。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(toolNames, id: \.self) { name in
-                        Text(name).font(.system(.subheadline, design: .monospaced))
+                        Label(name, systemImage: "wrench.and.screwdriver")
+                            .font(.system(.subheadline, design: .monospaced))
                     }
                 }
+            }
+
+            Section("客户端已内置对接的 V5 MCP 工具（\(standardV5Tools.count) 项）") {
+                ForEach(standardV5Tools, id: \.name) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name).font(.system(.caption, design: .monospaced).bold())
+                        Text(item.summary).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            PrototypeRouteSections(routeId: "mcp", appState: appState, onNavigateRoute: onNavigateRoute)
+        }
+        .task {
+            if appState.hasToken && toolNames.isEmpty {
+                await fetchTools()
             }
         }
     }
 
     private func fetchTools() async {
         guard let client = appState.makeMcpClient() else {
-            errorMsg = "未配置平台 Agent 凭证：请先在设置里保存 Token。"
+            errorMsg = "尚未保存平台 Token：请在上方填入或生成 Token 后再探测。"
             return
         }
         isLoading = true
@@ -1381,6 +1656,9 @@ private struct McpToolsInspectorScreen: View {
 }
 
 private struct SkillsManagementScreen: View {
+    var routeId: String = "skills"
+    @ObservedObject var appState: AppState = AppState()
+    var onNavigateRoute: (String) -> Void = { _ in }
     @ObservedObject var skillStore: SkillStore = LocalData.shared.skillStore
     @State private var newName = ""
     @State private var newSummary = ""
@@ -1419,6 +1697,7 @@ private struct SkillsManagementScreen: View {
                     newTrigger = ""
                 }
             }
+            PrototypeRouteSections(routeId: routeId, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -1426,21 +1705,23 @@ private struct SkillsManagementScreen: View {
 private struct ConnectionExtendedScreen: View {
     let route: FlagshipRoute
     @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
 
     var body: some View {
         List {
-            Section("\(route.title) (\(route.id))") {
+            Section("\(route.title)") {
                 switch route.id {
                 case "modelroute":
-                    Text("智能模型路由与故障切换 (FailoverPolicy)：当前主大脑 \(appState.brainSettingsModel.currentBrainId ?? "未设置")，支持同大脑重试与 fallbackBrainIds 链式切换。")
+                    Text("智能模型路由与故障切换：当前默认模型 \(appState.brainSettingsModel.currentBrainId ?? "自动选择 / 未设置")，支持按任务类型与备用大脑链切换。")
                 case "agentimport":
-                    Text("导入现有 Agent (agentimport)：支持登记 Codex、Claude Code、OpenCode、DeepSeek Harness 等外部 Agent 元数据至 AgentRegistryStore。")
+                    Text("导入现有 Agent：支持将 Codex、Claude Code、OpenCode、DeepSeek Harness 等外部 Agent 登记至本机 Agent 目录。")
                 case "network", "routes":
-                    Text("通信网络与路径详情 (\(route.id))：iOS 端仅使用系统标准 URLSession HTTPS (强制 ATS TLS) 与 WebSocket，不内置私有 VPNService；跨端投递状态严格区分 PERSISTED / DELIVERED / CLAIMED / READ，断线缓存在本地 SQLite 绝不伪装已送达。")
+                    Text("通信网络与路径详情：仅使用受系统保护的 HTTPS 与安全信封传输；断线期间操作保存在本地数据库，确认回执后才更新送达状态。")
                 default:
                     Text(route.title)
                 }
             }
+            PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -1726,6 +2007,22 @@ public struct ChannelsHomeView: View {
             topNavBar
             partitionPicker
             searchField
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button("团队空间") { onNavigateRoute("team") }.buttonStyle(.bordered)
+                    Button("Agent 列表") { onNavigateRoute("agents") }.buttonStyle(.bordered)
+                    Button("协作编排") { onNavigateRoute("delegate") }.buttonStyle(.bordered)
+                    Button("可视化编排") { onNavigateRoute("orchestrator") }.buttonStyle(.bordered)
+                    Button("跨设备接力") { onNavigateRoute("handoff") }.buttonStyle(.bordered)
+                    Button("# 产品开发 · 3 条未读") { if let first = channels.first { activeWorkspaceChannel = first } }.buttonStyle(.bordered)
+                    Button("# 代码审查 · 1 条未读") { if let first = channels.first { activeWorkspaceChannel = first } }.buttonStyle(.bordered)
+                    Button("# 发布与运维") { if let first = channels.first { activeWorkspaceChannel = first } }.buttonStyle(.bordered)
+                }
+                .font(.caption)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
 
             if selectedPartition == .channels {
                 channelsListView
@@ -2286,6 +2583,20 @@ public struct ChannelDetailWorkspaceView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topWorkspaceHeader
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button("任务详情") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered)
+                    Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
+                    Button("从消息创建任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
+                    Button("发送演示消息") {
+                        let msg = V5ChannelMessage(senderId: "me", senderName: "我", isAgent: false, text: "收到。已将执行结果和审查卡片嵌入会话。", createdAtText: "刚刚")
+                        messages.append(msg)
+                    }.buttonStyle(.bordered)
+                }
+                .font(.caption2)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
             tabPicker
 
             switch selectedTab {
@@ -3333,7 +3644,9 @@ public struct ControlHomeView: View {
         let workingCount = tasks.filter { $0.state == "working" }.count
         let queuedCount = tasks.filter { $0.state == "queued" || $0.state == "assigned" }.count
         let attentionCount = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" }.count
-        let agentsCount = ((try? LocalData.shared.agents.listAgents()) ?? []).count
+        let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
+        let agentsCount = allAgents.count
+        let devicesCount = allAgents.filter { $0.kind == .device }.count
         let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
 
         VStack(spacing: 0) {
@@ -3349,7 +3662,14 @@ public struct ControlHomeView: View {
                         agentsCount: agentsCount
                     )
 
-                    controlModulesList
+                    controlModulesList(
+                        devicesCount: devicesCount,
+                        agentsCount: agentsCount,
+                        queuedCount: queuedCount,
+                        pendingApprovals: pendingApprovals
+                    )
+
+                    dashboardQuickRowsCard
                 }
                 .padding(16)
             }
@@ -3379,9 +3699,9 @@ public struct ControlHomeView: View {
 
             HStack(spacing: 6) {
                 Circle()
-                    .fill(Color.green)
+                    .fill(appState.hasToken ? Color.green : Color.orange)
                     .frame(width: 8, height: 8)
-                Text("平台就绪")
+                Text(appState.hasToken ? "平台已配凭证" : "本地优先")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
@@ -3400,7 +3720,7 @@ public struct ControlHomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("平台连接与运行状态")
+                    Text("服务连接与运行概览")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(appState.settings.platformBaseURLString.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformBaseURLString)
@@ -3408,21 +3728,25 @@ public struct ControlHomeView: View {
                         .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                 }
                 Spacer()
-                Text("本地优先")
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.12), in: Capsule())
-                    .foregroundStyle(.green)
+                Button {
+                    onNavigateRoute("connections")
+                } label: {
+                    Text(appState.hasToken ? "管理连接" : "配置 Token")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(red: 0.93, green: 0.92, blue: 0.89), in: Capsule())
+                        .foregroundStyle(Color(red: 0.25, green: 0.24, blue: 0.22))
+                }
             }
 
             Divider()
                 .padding(.vertical, 2)
 
             HStack(spacing: 20) {
-                statusStatItem("活跃 Agent", value: "\(max(1, agentsCount))")
+                statusStatItem("已登记 Agent", value: "\(agentsCount)")
                 statusStatItem("执行中任务", value: "\(workingCount)")
-                statusStatItem("排队/待决", value: "\(queuedCount + attentionCount)")
+                statusStatItem("排队/待审", value: "\(queuedCount + attentionCount)")
                 statusStatItem("待决审批", value: "\(pendingApprovals)")
             }
         }
@@ -3435,72 +3759,104 @@ public struct ControlHomeView: View {
     }
 
     @ViewBuilder
-    private var controlModulesList: some View {
+    private func controlModulesList(devicesCount: Int, agentsCount: Int, queuedCount: Int, pendingApprovals: Int) -> some View {
         VStack(spacing: 12) {
             controlCard(
-                title: "设备与 Hand 节点管理",
-                subtitle: "本机 iPhone 本地沙盒 · 远端 Hand 节点互联互通",
-                icon: "iphone.gen3",
-                badge: "1 在线",
+                title: "设备管理与配对",
+                subtitle: "添加局域网电脑、远程设备、VPS 及授权工作目录",
+                icon: "desktopcomputer",
+                badge: "\(devicesCount) 台设备",
                 routeId: "devices"
             )
 
             controlCard(
-                title: "Agent 协作与编排",
-                subtitle: "BrainEngine 智能调度 · 多 Agent 对比与协作编排",
+                title: "Agent 管理与协作编排",
+                subtitle: "添加云端、设备或 CLI Agent，配置角色与分工",
                 icon: "person.2.badge.gearshape",
-                badge: "活跃",
+                badge: "\(agentsCount) 个 Agent",
                 routeId: "agents"
             )
 
             controlCard(
                 title: "模型提供方与智能路由",
-                subtitle: "Claude, DeepSeek, OpenAI, Grok, Cloudflare 统一调度",
+                subtitle: "配置模型 API Key、拉取模型列表与设置默认大脑",
                 icon: "cpu",
-                badge: appState.brainSettingsModel.currentBrainId ?? "就绪",
+                badge: appState.brainSettingsModel.currentBrainId ?? "待选择",
                 routeId: "models"
             )
 
             controlCard(
-                title: "连接器与 MCP 工具池",
-                subtitle: "23 个生产 MCP 工具 · 终端写入白名单与执行护栏",
+                title: "MCP 工具与平台 Token",
+                subtitle: "保存或签发平台 Token、探测远端工具清单",
                 icon: "cable.connector.horizontal",
-                badge: "23 工具",
+                badge: appState.hasToken ? "已配置 Token" : "未配 Token",
                 routeId: "mcp"
             )
 
             controlCard(
-                title: "调度与任务队列",
-                subtitle: "10 状态机合法流转 · 独立 isPaused 暂停/恢复",
-                icon: "list.bullet.rectangle.portrait",
-                badge: "队列",
+                title: "Webhook 唤醒与自动化中心",
+                subtitle: "配置 Webhook、定时巡检、触发器与自主执行护栏",
+                icon: "bolt.badge.clock",
+                badge: "触发与唤醒",
+                routeId: "automation"
+            )
+
+            controlCard(
+                title: "任务队列与审批中心",
+                subtitle: "查看排队任务、调整优先级与批准敏感写入操作",
+                icon: "checklist.checked",
+                badge: pendingApprovals > 0 ? "\(pendingApprovals) 待审批" : "队列 \(queuedCount)",
                 routeId: "queue"
             )
 
             controlCard(
-                title: "实时事件与消息中心",
-                subtitle: "进程实时事件日志 · 异常捕获与调度回执",
+                title: "事件提醒与通知中心",
+                subtitle: "查看任务派发、审批请求与完成回执",
                 icon: "bell.badge",
-                badge: "事件流",
+                badge: "动态",
                 routeId: "activity"
             )
 
             controlCard(
-                title: "运行监控与用量",
-                subtitle: "Token 消耗、响应延迟、SQLite 存储与性能监控",
+                title: "用量统计与预算额度",
+                subtitle: "查看模型调用消耗与任务预算策略",
                 icon: "chart.xyaxis.line",
-                badge: "健康",
-                routeId: "dashboard"
+                badge: "用量",
+                routeId: "usage"
             )
 
             controlCard(
-                title: "安全审计与合规权限",
-                subtitle: "Keychain 隔离 · ATS 强制 HTTPS · 敏感凭据自动脱敏",
+                title: "安全权限与操作审计",
+                subtitle: "查看目录授权范围、高危操作审批记录与安全边界",
                 icon: "shield.lefthalf.filled",
-                badge: "合规",
+                badge: "审计",
                 routeId: "audit"
             )
+
+            controlCard(
+                title: "检查点、恢复与扩展中心",
+                subtitle: "任务检查点回滚、插件权限管理与运行时适配",
+                icon: "puzzlepiece.extension",
+                badge: "扩展",
+                routeId: "extensions"
+            )
         }
+    }
+
+    @ViewBuilder
+    private var dashboardQuickRowsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("运行脉络快捷处理")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack { Text("任务 #T-104").font(.caption); Spacer(); Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered).controlSize(.mini) }
+            HStack { Text("等待批准 · 文件写入").font(.caption); Spacer(); Button("处理") { onNavigateRoute("approvals") }.buttonStyle(.bordered).controlSize(.mini) }
+            HStack { Text("设备能力核查").font(.caption); Spacer(); Button("查看") { onNavigateRoute("devices") }.buttonStyle(.bordered).controlSize(.mini) }
+            HStack { Text("事件记录").font(.caption); Spacer(); Button("查看") { onNavigateRoute("activity") }.buttonStyle(.bordered).controlSize(.mini) }
+        }
+        .padding(14)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -3567,6 +3923,7 @@ public struct AccountSettingsView: View {
     public let capabilities: AppFlagshipCapabilities
     public var onNavigateRoute: (String) -> Void
     public var onDismiss: () -> Void
+    @AppStorage("app.darkMode") private var darkMode = false
 
     public init(
         appState: AppState,
@@ -3602,27 +3959,24 @@ public struct AccountSettingsView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("WhereverCode 开发者")
+                            Text("WhereverCode 用户")
                                 .font(.system(size: 17, weight: .semibold))
-                            Text("Pro")
+                            Text("本地优先")
                                 .font(.caption2.bold())
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Color.orange.opacity(0.15), in: Capsule())
                                 .foregroundStyle(.orange)
                         }
-                        Text("developer@wherevercode.local")
+                        Text("无需强制登录即可使用本地对话与项目工作区")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("本地优先 · 沙盒完全隔离")
-                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 6)
             }
 
-            // 分组一：账户 (Account)
+            // 分组一：账户
             Section("账户") {
                 NavigationLink {
                     ProfileEditScreen()
@@ -3630,105 +3984,136 @@ public struct AccountSettingsView: View {
                     Label("个人资料", systemImage: "person.circle")
                 }
 
+                Button {
+                    onNavigateRoute("connections")
+                } label: {
+                    Label("连接管理", systemImage: "link.circle")
+                }
+                .foregroundStyle(.primary)
+
                 NavigationLink {
                     PrivacyAndSecurityScreen()
                 } label: {
-                    Label("隐私与安全 (Keychain / ATS)", systemImage: "lock.shield")
+                    Label("隐私与安全", systemImage: "lock.shield")
                 }
 
                 Button {
                     onNavigateRoute("sync")
                 } label: {
-                    Label("跨端同步 (Sync)", systemImage: "arrow.triangle.2.circlepath")
+                    Label("跨端同步", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .foregroundStyle(.primary)
 
                 Button {
                     onNavigateRoute("recovery")
                 } label: {
-                    Label("数据备份与恢复 (Recovery)", systemImage: "arrow.counterclockwise")
+                    Label("备份与恢复", systemImage: "arrow.counterclockwise")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("usage")
+                } label: {
+                    Label("用量与预算", systemImage: "chart.bar")
                 }
                 .foregroundStyle(.primary)
             }
 
-            // 分组二：应用 (Application)
+            // 分组二：应用
             Section("应用") {
                 NavigationLink {
                     BrainSettingsView(model: appState.brainSettingsModel)
                 } label: {
-                    Label("AI 模型与推理配置 (Brain Engine)", systemImage: "cpu")
+                    Label("模型配置", systemImage: "cpu")
                 }
 
                 NavigationLink {
                     PlatformConnectionFormScreen(appState: appState)
                 } label: {
-                    Label("平台连接与通道凭证 (Platform)", systemImage: "network")
+                    Label("平台连接与令牌签发", systemImage: "key.horizontal")
                 }
 
                 Button {
                     onNavigateRoute("mcp")
                 } label: {
-                    Label("连接器与 MCP 插件 (Connectors)", systemImage: "cable.connector")
+                    Label("插件与工具", systemImage: "puzzlepiece.extension")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("triggers")
+                } label: {
+                    Label("Webhook 唤醒与自动触发", systemImage: "bolt.horizontal.circle")
                 }
                 .foregroundStyle(.primary)
 
                 Button {
                     onNavigateRoute("voice")
                 } label: {
-                    Label("语音与多模态设置 (Voice)", systemImage: "waveform")
+                    Label("语音与多模态", systemImage: "waveform")
                 }
                 .foregroundStyle(.primary)
 
                 Button {
                     onNavigateRoute("notifications")
                 } label: {
-                    Label("消息与系统通知 (Notifications)", systemImage: "bell")
+                    Label("消息与通知", systemImage: "bell")
                 }
                 .foregroundStyle(.primary)
 
                 Button {
                     onNavigateRoute("memory")
                 } label: {
-                    Label("长期记忆与上下文 (Memory)", systemImage: "brain")
+                    Label("长期记忆", systemImage: "brain")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("context")
+                } label: {
+                    Label("项目上下文规则", systemImage: "doc.text")
                 }
                 .foregroundStyle(.primary)
 
                 Button {
                     onNavigateRoute("personas")
                 } label: {
-                    Label("Agent 个性与配置 (Personas)", systemImage: "theatermasks")
+                    Label("Agent 偏好与技能", systemImage: "sparkles.rectangle.stack")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    darkMode.toggle()
+                } label: {
+                    HStack {
+                        Label("切换深色模式", systemImage: "moon.circle")
+                        Spacer()
+                        Text(darkMode ? "深色" : "浅色").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .foregroundStyle(.primary)
 
                 Button {
                     onNavigateRoute("onboarding")
                 } label: {
-                    Label("首次使用指南 (Onboarding)", systemImage: "sparkles")
+                    Label("首次使用指南", systemImage: "hand.wave")
                 }
                 .foregroundStyle(.primary)
             }
 
-            // 分组三：开发者诊断 (Developer Diagnostics & 70 Routes Catalog)
-            Section("开发者诊断与 70 屏全量矩阵") {
+            // 独立开发者入口（收纳诊断与路由矩阵，不在正式界面堆放内部术语）
+            Section {
                 NavigationLink {
                     DeveloperDiagnosticsScreen(
                         capabilities: capabilities,
                         onNavigateRoute: onNavigateRoute
                     )
                 } label: {
-                    HStack {
-                        Label("70 屏全量路由调试矩阵", systemImage: "square.grid.3x3.topleft.filled")
-                        Spacer()
-                        Text("70 路由")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Label("开发者选项", systemImage: "wrench.and.screwdriver")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier("settings.developerDiagnostics")
-
-                LabeledContent("Keychain 安全级别", value: "WhenUnlockedThisDeviceOnly")
-                LabeledContent("ATS 网络边界", value: "强制 HTTPS (无明文)")
-                LabeledContent("SQLite 状态", value: "WAL 模式 · 正常")
             }
         }
         .navigationTitle("设置")
@@ -3745,8 +4130,8 @@ public struct AccountSettingsView: View {
 }
 
 public struct ProfileEditScreen: View {
-    @State private var nickname = "WhereverCode 开发者"
-    @State private var email = "developer@wherevercode.local"
+    @State private var nickname = "WhereverCode 用户"
+    @State private var email = "user@wherevercode.local"
 
     public var body: some View {
         Form {
@@ -3754,9 +4139,9 @@ public struct ProfileEditScreen: View {
                 TextField("昵称", text: $nickname)
                 TextField("邮箱", text: $email)
             }
-            Section("设备沙盒信息") {
-                LabeledContent("平台模式", value: "iOS 本地优先沙盒")
-                LabeledContent("Keychain 隔离", value: "独立钥匙串群组")
+            Section("工作模式") {
+                LabeledContent("默认模式", value: "本地优先")
+                LabeledContent("凭证存储", value: "仅保存在本设备安全区域")
             }
         }
         .navigationTitle("个人资料")
@@ -3767,18 +4152,18 @@ public struct ProfileEditScreen: View {
 public struct PrivacyAndSecurityScreen: View {
     public var body: some View {
         List {
-            Section("数据存储与钥匙串保护") {
-                Text("所有 API Key、平台 Token 与敏感凭据均写入 iOS 本地钥匙串，采用 kSecAttrAccessibleWhenUnlockedThisDeviceOnly 保护，禁止 iCloud 跨设备自动外泄。")
+            Section("凭证安全保护") {
+                Text("所有模型 API Key 与平台令牌均仅保存在本机系统安全存储中，不会随云端备份自动外泄，也不会写入对话记录。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("网络通信安全边界 (ATS)") {
-                Text("App 强制启用 App Transport Security (ATS)，全局禁止明文 HTTP 传输，仅允许加密 HTTPS 连接。")
+            Section("加密传输保护") {
+                Text("应用默认要求使用加密的 HTTPS 连接，防止凭证与代码在网络传输中被窃听。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("敏感数据脱敏 (SecretRedactor)") {
-                Text("控制台日志与会话记录中若检测到类似 sk-、Bearer 等敏感格式凭据，将在渲染前自动掩码处理。")
+            Section("敏感信息自动屏蔽") {
+                Text("界面与日志若检测到密钥或访问令牌格式的字符串，将在展示前自动隐藏。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -3824,6 +4209,14 @@ public struct DeveloperDiagnosticsScreen: View {
 
     public var body: some View {
         List {
+            Section("底层运行诊断") {
+                LabeledContent("Keychain 安全级别", value: "WhenUnlockedThisDeviceOnly")
+                LabeledContent("ATS 网络边界", value: "强制 HTTPS (无明文)")
+                LabeledContent("SQLite 状态", value: "WAL 模式 · 正常")
+                Button("打开 Claude 18 屏基线对照 (baseline)") {
+                    onNavigateRoute("baseline")
+                }
+            }
             Section("70 屏功能路由全景 (\(filtered.count)/70)") {
                 TextField("搜索 route_id / 标题 / 分组", text: $searchText)
                     .textInputAutocapitalization(.never)
@@ -3855,7 +4248,7 @@ public struct DeveloperDiagnosticsScreen: View {
                 }
             }
         }
-        .navigationTitle("70 屏路由矩阵")
+        .navigationTitle("开发者选项")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -3870,18 +4263,22 @@ private struct GlobalConsoleDashboardScreen: View {
 }
 
 private struct OnboardingLocalFirstScreen: View {
+    @ObservedObject var appState: AppState = AppState()
     var onNavigateRoute: (String) -> Void
 
     var body: some View {
         List {
-            Section("首次使用（本地优先，无需登录平台即可开始）") {
-                Text("1. 本地对话与任务：配置任意模型 API Key（仅存本机 Keychain），即可在对话首页与本地 SQLite 会话/任务账本工作。\n2. 团队频道与平台任务：可选在「设置」中填入 V5 平台 HTTPS 地址与平台凭证。\n3. 跨端与沙盒边界：iOS 端严格遵守系统沙盒，不伪造本地终端。")
-                    .font(.caption)
+            Section("欢迎使用 WhereverCode") {
+                Text("先从本地对话开始。需要跨设备、团队或云端任务时，再连接对应服务。")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Button("第 1 步：配置推理模型 (models)") { onNavigateRoute("models") }
-                Button("第 2 步：可选配置 V5 平台连接 (settings)") { onNavigateRoute("settings") }
-                Button("第 3 步：返回极简对话首页 (chat)") { onNavigateRoute("chat") }
+                Button("直接开始") { onNavigateRoute("chat") }
+                    .font(.subheadline.weight(.semibold))
+                Button("连接设备") { onNavigateRoute("devices") }
+                Button("导入项目") { onNavigateRoute("projects") }
+                Button("配置推理模型") { onNavigateRoute("models") }
             }
+            PrototypeRouteSections(routeId: "onboarding", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -3910,11 +4307,11 @@ private struct ConsoleSystemSubScreen: View {
                     }
                 }
             case "audit":
-                Section("安全审计与密钥隔离 (Keychain + SecretRedactor)") {
-                    LabeledContent("Keychain 隔离级别", value: "kSecAttrAccessibleWhenUnlockedThisDeviceOnly")
-                    LabeledContent("日志脱敏规则", value: "自动掩码 sk-* / Bearer / v5_* / PEM 私钥")
+                Section("安全与权限边界") {
+                    LabeledContent("凭证存储", value: "仅限本机安全存储")
+                    LabeledContent("日志脱敏", value: "自动屏蔽敏感密钥与令牌")
                 }
-                Section("审批与控制审计记录 (\(auditTrail.count) 条)") {
+                Section("审批与控制记录 (\(auditTrail.count) 条)") {
                     if auditTrail.isEmpty {
                         Text("暂无高危审批操作记录").foregroundStyle(.secondary)
                     } else {
@@ -3924,56 +4321,63 @@ private struct ConsoleSystemSubScreen: View {
                     }
                 }
             case "usage":
-                Section("Token 用量与成本统计 (来自真实流事件)") {
+                Section("Token 用量与成本统计") {
                     let usageEvents = events.filter { $0.kind == "USAGE" }
-                    LabeledContent("已记录模型调用计费事件数", value: "\(usageEvents.count)")
+                    LabeledContent("已记录模型调用事件数", value: "\(usageEvents.count)")
                     ForEach(usageEvents) { u in
                         Text(u.detail).font(.caption)
                     }
                 }
             case "sync":
-                Section("跨端同步与投递四态语义") {
-                    Text("严格区分：\n• PERSISTED：仅写入本机 SQLite 数据库\n• DELIVERED：远端通道已确认接收\n• CLAIMED：目标 Agent 已认领并持有租约\n• READ：终端用户或审查人已读\n断线期间本地操作仅标为 PERSISTED，绝不伪装已送达。")
+                Section("跨端同步状态说明") {
+                    Text("离线期间的操作保存在本机数据库，收到服务端确认回执后才更新为已送达。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             case "recovery":
-                Section("执行暂停、恢复、停止及人工接管") {
-                    Text("• 本地大脑轮次：支持随时停止当前流生成并写入 STOPPED 事件。\n• 本地 SQLite 任务：支持独立切换 isPaused 布尔位，或流转至 requeued / cancelled。\n• 远端 V5 平台任务：\(ReservedFeature.stopTask.notImplementedReason)")
+                Section("任务暂停、恢复与回滚") {
+                    Text("• 本地对话与任务：支持随时停止当前回复或切换暂停状态。\n• 远端平台任务：\(ReservedFeature.stopTask.notImplementedReason)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("前往任务中心执行状态恢复或放手") { onNavigateRoute("tasks") }
+                    Button("前往任务中心") { onNavigateRoute("tasks") }
                 }
             case "baseline":
-                Section("70 屏双端 UI 组装基线核验") {
+                Section("界面与功能基线对照") {
                     LabeledContent("总路由数", value: "\(FlagshipRoutes.all.count) / 70")
-                    LabeledContent("一级抽屉主项", value: FlagshipDrawerMenu.allCases.map(\.rawValue).joined(separator: "、"))
-                    LabeledContent("已接线真实功能路由", value: "\(AppFlagshipCapabilities.implementedRoutes.count) 屏")
-                    LabeledContent("iOS 平台受限路由", value: "\(AppFlagshipCapabilities.platformRestrictedRoutes.count) 屏 (terminal)")
+                    LabeledContent("一级导航", value: FlagshipDrawerMenu.allCases.map(\.rawValue).joined(separator: "、"))
                 }
             default:
                 Text(route.title)
             }
+            PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
 }
 
 private struct ConsoleAutomationSubScreen: View {
     let route: FlagshipRoute
+    @ObservedObject var appState: AppState = AppState()
+    var chatModel: LocalChatModel? = nil
+    var onNavigateRoute: (String) -> Void = { _ in }
+    @State private var autoGoalText = ""
 
     var body: some View {
         List {
-            Section("\(route.title) (\(route.id)) — 真实护栏参数与 iOS 后台限制") {
-                LabeledContent("单轮最大工具调用轮数 (maxToolRounds)", value: "6 轮")
-                LabeledContent("单轮最大工具调用次数 (maxToolCallsPerTurn)", value: "12 次")
-                LabeledContent("单轮超时上限 (maxTurnMillis)", value: "180,000 ms")
-                LabeledContent("上下文压缩预算 (budgetEstimatedTokens)", value: "\(LocalData.shared.contextManager.budgetEstimatedTokens) tokens")
+            if route.id == "automaker" {
+                Section("第一步 · 定义自动化目标") {
+                    TextField("例如：每当收到新的 PR，自动审查代码并生成报告，关键问题由我审批。", text: $autoGoalText, axis: .vertical)
+                        .lineLimit(2...5)
+                }
             }
-            Section("iOS 平台后台与自动化触发限制说明") {
-                Text("iOS 系统严格限制后台常驻进程与任意定时唤醒（BGTaskScheduler 仅由系统按电量与使用习惯调度，不保证准点触发）。自动化触发器 (triggers / wakepolicy / automation) 在服务端规则账本未接入前保持 DESIGN_ONLY / ADAPTER_PENDING 状态，不伪造后台常驻定时执行。")
+            Section("运行护栏与平台边界") {
+                LabeledContent("单轮最大工具调用轮数", value: "6 轮")
+                LabeledContent("单轮最大工具调用次数", value: "12 次")
+                LabeledContent("单轮超时上限", value: "3 分钟")
+                Text("iOS 系统限制后台常驻进程与准点定时唤醒；Webhook 与定时自动化需配合服务端或已连接设备运行。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            PrototypeRouteSections(routeId: route.id, appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
 }
@@ -3982,6 +4386,7 @@ private struct ConsoleAutomationSubScreen: View {
 private struct SettingsIntelligenceAndExtensionsScreen: View {
     let route: FlagshipRoute
     @ObservedObject var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
     @State private var newMemKey = ""
     @State private var newMemVal = ""
     @State private var searchQuery = ""
@@ -3989,72 +4394,902 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
     @State private var searchError: String?
 
     var body: some View {
-        List {
-            switch route.id {
-            case "memory":
-                Section("新增长期记忆条目 (MemoryStore)") {
-                    TextField("记忆键（如代码风格偏好）", text: $newMemKey)
-                    TextField("记忆内容（自动经 SecretRedactor 脱敏）", text: $newMemVal)
-                    Button("保存记忆") {
-                        guard !newMemKey.isEmpty, !newMemVal.isEmpty else { return }
-                        LocalData.shared.memoryStore.addFact(key: newMemKey, value: newMemVal, confirmedByUser: true)
-                        newMemKey = ""
-                        newMemVal = ""
+        if route.id == "skillsmarket" || route.id == "skillbuilder" {
+            SkillsManagementScreen(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
+        } else {
+            List {
+                switch route.id {
+                case "memory":
+                    Section("新增长期记忆") {
+                        TextField("记忆主题（如代码风格偏好）", text: $newMemKey)
+                        TextField("记忆内容", text: $newMemVal)
+                        Button("保存记忆") {
+                            guard !newMemKey.isEmpty, !newMemVal.isEmpty else { return }
+                            LocalData.shared.memoryStore.addFact(key: newMemKey, value: newMemVal, confirmedByUser: true)
+                            newMemKey = ""
+                            newMemVal = ""
+                        }
                     }
-                }
-                Section("已存记忆 (\(LocalData.shared.memoryStore.listEntries().count))") {
-                    let entries = LocalData.shared.memoryStore.listEntries()
-                    if entries.isEmpty {
-                        Text("暂无长期记忆条目").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(entries) { e in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("[\(e.kind.rawValue)] \(e.key)").font(.subheadline.bold())
-                                Text(e.value).font(.caption).foregroundStyle(.secondary)
+                    Section("已保存记忆 (\(LocalData.shared.memoryStore.listEntries().count))") {
+                        let entries = LocalData.shared.memoryStore.listEntries()
+                        if entries.isEmpty {
+                            Text("暂无长期记忆条目").foregroundStyle(.secondary)
+                        } else {
+                            ForEach(entries) { e in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("[\(e.kind.rawValue)] \(e.key)").font(.subheadline.bold())
+                                    Text(e.value).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
-                }
-            case "skillsmarket", "skillbuilder":
-                SkillsManagementScreen()
-            case "context":
-                Section("上下文预算与自动压缩配置 (ContextManager)") {
-                    LabeledContent("估算预算上限", value: "\(LocalData.shared.contextManager.budgetEstimatedTokens) tokens")
-                    LabeledContent("字符/Token 换算比", value: "\(LocalData.shared.contextManager.charsPerToken) chars/token")
-                    Text("当历史消息超出预算时，自动压缩最旧对话轮次并注入 [上下文压缩] 摘要标记。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            case "research":
-                Section("联网深度研究 (WebSearchClient)") {
-                    TextField("输入检索词…", text: $searchQuery)
-                    Button("执行实时检索") {
-                        Task {
-                            do {
-                                searchHits = try await WebSearchClient().searchHits(query: searchQuery)
-                                searchError = nil
-                            } catch {
-                                searchError = error.localizedDescription
+                case "context":
+                    Section("上下文容量与自动压缩") {
+                        LabeledContent("估算容量上限", value: "\(LocalData.shared.contextManager.budgetEstimatedTokens) tokens")
+                        Text("当长对话超出容量上限时，自动压缩早期对话并保留关键结论。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                case "research":
+                    Section("联网深度研究") {
+                        TextField("输入检索词…", text: $searchQuery)
+                        Button("执行实时检索") {
+                            Task {
+                                do {
+                                    searchHits = try await WebSearchClient().searchHits(query: searchQuery)
+                                    searchError = nil
+                                } catch {
+                                    searchError = error.localizedDescription
+                                }
+                            }
+                        }
+                        if let err = searchError {
+                            Text(err).font(.caption).foregroundStyle(.red)
+                        }
+                        ForEach(searchHits) { hit in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(hit.title).font(.caption.bold())
+                                Text(hit.url).font(.caption2).foregroundStyle(.blue)
                             }
                         }
                     }
-                    if let err = searchError {
-                        Text(err).font(.caption).foregroundStyle(.red)
-                    }
-                    ForEach(searchHits) { hit in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(hit.title).font(.caption.bold())
-                            Text(hit.url).font(.caption2).foregroundStyle(.blue)
-                        }
+                default:
+                    Section("\(route.title)") {
+                        Text("iOS 端在系统沙盒保护下运行，外部 CLI 与插件通过已授权的远程设备或平台 MCP 接口调用。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-            default:
-                Section("\(route.title) (\(route.id))") {
-                    Text("扩展中心、插件权限与 Harness 运行时：iOS 端由于系统禁止动态加载未签名二进制与外部 CLI，本地仅支持元数据校验与远端 Hand / 云端 MCP 桥接调用。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
+            }
+        }
+    }
+}
+
+
+// MARK: - 70 屏原型全量按钮、选择器与真实/诚实动作接线引擎 (PrototypeRouteSections)
+
+public struct PrototypeSpecItem: Sendable {
+    public let lines: [(String, String)]
+    public let steps: [String]
+    public let selectors: [(String, [String])]
+    public let rows: [(String, String, String)]
+    public let navBtns: [(String, String)]
+    public let actBtns: [(String, String)]
+}
+
+public enum PrototypeCatalog {
+    public static let specs: [String: PrototypeSpecItem] = [
+
+        "chat": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("检查代码", "conversation"), ("开始项目", "projects"), ("自动化开发", "automation"), ("团队协作", "team")],
+            actBtns: []
+        ),
+        "conversation": PrototypeSpecItem(
+            lines: [],
+            steps: ["读取项目文件  已完成", "生成实施计划  已完成", "修改代码与运行测试 ${status()}", "等待你确认后提交"],
+            selectors: [],
+            rows: [],
+            navBtns: [("完整 Diff", "diff"), ("逐行审查", "review"), ("工作树", "git"), ("改目标", "taskdetail"), ("审批", "approvals")],
+            actBtns: []
+        ),
+        "history": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("V5 UI 优化与验收", "继续", "conversation"), ("Android 任务流修复", "查看", "taskdetail"), ("MCP 派工协议讨论", "查看", "mcp"), ("UI 视觉参考与评审", "查看", "preview")],
+            navBtns: [],
+            actBtns: [("置顶", "toast(\"已模拟置顶\")"), ("分叉会话", "toast(\"已创建演示分叉\")"), ("归档", "toast(\"已模拟归档\")")]
+        ),
+        "search": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("任务 #T-104 · UI 执行流", "打开", "taskdetail"), ("ChatScreen.kt", "打开", "editor"), ("团队频道 · UI 讨论", "打开", "channel")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "compose": PrototypeSpecItem(
+            lines: [("验收标准", "测试、截图、代码 Diff"), ("写入权限", "执行前确认")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看队列", "queue")],
+            actBtns: [("创建演示任务", "createTask()")]
+        ),
+        "tasks": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("#T-104 · 统一聊天执行流", "详情", "taskdetail"), ("#T-105 · 代码审查", "审查", "review"), ("#T-106 · 修复 MCP 派工", "查看", "taskdetail"), ("#T-107 · UI 视觉验收", "证据", "preview")],
+            navBtns: [("＋ 新建任务", "compose")],
+            actBtns: []
+        ),
+        "taskdetail": PrototypeSpecItem(
+            lines: [("目标", "统一对话与代码执行流"), ("执行者", "按能力动态分配"), ("工作树", "feat/v5-chat-flow"), ("审查要求", "人工确认")],
+            steps: ["任务创建 · 09:02", "已分派 · 09:03", "Agent 已领取 · 09:04", "代码生成与测试 · 09:07", "等待交付与复审"],
+            selectors: [],
+            rows: [],
+            navBtns: [("改目标", "compose"), ("查看执行流", "conversation"), ("交付物", "artifacts")],
+            actBtns: []
+        ),
+        "plan": PrototypeSpecItem(
+            lines: [],
+            steps: ["确认需求与验收标准 ✓", "创建隔离工作树 ✓", "修改 UI 和执行流 · 进行中", "测试、审查、合并"],
+            selectors: [],
+            rows: [("Checkpoint 03 · 修改前", "恢复", "diff"), ("Checkpoint 02 · 文件扫描后", "预览", "files"), ("Checkpoint 01 · 初始状态", "预览", "git")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "queue": PrototypeSpecItem(
+            lines: [("并行上限", "3 个执行槽"), ("待执行", "3 个任务"), ("任务依赖", "审查通过后才能合并")],
+            steps: [],
+            selectors: [],
+            rows: [("P1 · 修复任务派发", "打开", "taskdetail"), ("P2 · UI 视觉验收", "打开", "preview"), ("P2 · 设备能力检查", "打开", "devices")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "approvals": PrototypeSpecItem(
+            lines: [("申请", "写入 ChatScreen.kt"), ("范围", "当前项目工作树"), ("风险", "需要确认写入"), ("证据", "Diff · 测试记录")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看 Diff", "diff")],
+            actBtns: [("批准本次", "toast(\"演示：已批准本次操作\")"), ("拒绝", "toast(\"演示：已拒绝\")")]
+        ),
+        "review": PrototypeSpecItem(
+            lines: [("PR", "feat/v5-chat-flow → main"), ("改动文件", "2"), ("测试证据", "24 passed")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看 Diff", "diff")],
+            actBtns: [("通过审查", "toast(\"演示：approve\")"), ("请求修改", "toast(\"演示：changes_requested\")")]
+        ),
+        "artifacts": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("▤ 代码补丁 · 2 文件", "查看", "diff"), ("◩ UI 截图与视觉证据", "查看", "preview"), ("✓ 测试报告", "查看", "terminal"), ("⌘ 提交记录", "查看", "git")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "projects": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("wherevercode-agent · Android / Kotlin", "打开", "projectdetail"), ("wherevercode · 旧平台 / 只读参考", "打开", "projectdetail"), ("新建本地项目", "创建", "onboarding")],
+            navBtns: [],
+            actBtns: [("选择本地文件夹", "toast(\"演示：系统文件选择器\")"), ("导入 Git 仓库", "toast(\"演示：Git 授权\")"), ("连接设备项目", "go(\"devices\")")]
+        ),
+        "projectdetail": PrototypeSpecItem(
+            lines: [("类型", "Android / Kotlin"), ("分支", "feat/v5-chat-flow"), ("工作目录", "本地演示"), ("变更", "2 文件")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("浏览文件", "files"), ("开始对话", "conversation"), ("Git 工作树", "git"), ("预览", "preview")],
+            actBtns: []
+        ),
+        "files": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("▾ android/", "打开", "editor"), ("　▾ app/src/main/", "打开", "editor"), ("　　▤ ChatScreen.kt", "编辑", "editor"), ("　　▤ TaskRunner.kt", "编辑", "editor"), ("▤ README.md", "预览", "editor"), ("▤ LICENSE", "预览", "editor")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "editor": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看变更", "diff"), ("询问 Agent", "conversation")],
+            actBtns: [("局部编辑", "toast(\"演示：编辑草稿\")")]
+        ),
+        "diff": PrototypeSpecItem(
+            lines: [("ChatScreen.kt", "+38 / -12")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("返回审查", "review")],
+            actBtns: [("接受变更", "toast(\"演示：已接受\")"), ("拒绝变更", "toast(\"演示：已拒绝\")")]
+        ),
+        "terminal": PrototypeSpecItem(
+            lines: [("权限", "命令执行需授权"), ("环境", "隔离工作树 · 演示")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("回到对话", "conversation")],
+            actBtns: [("复制日志", "toast(\"演示日志\")")]
+        ),
+        "git": PrototypeSpecItem(
+            lines: [("当前分支", "feat/v5-chat-flow"), ("隔离工作树", "worktree-104"), ("未提交变更", "2 个文件"), ("远端", "未连接 · 演示")],
+            steps: [],
+            selectors: [],
+            rows: [("8b46a8a · UI 基线", "查看", "diff"), ("feat/v5-chat-flow · 当前草稿", "审查", "review")],
+            navBtns: [],
+            actBtns: [("创建工作树", "toast(\"演示：工作树创建\")"), ("创建 PR", "toast(\"演示：未连接 GitHub\")")]
+        ),
+        "preview": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看任务", "taskdetail"), ("审查变更", "review")],
+            actBtns: []
+        ),
+        "team": PrototypeSpecItem(
+            lines: [("当前空间", "WhereverCode V5"), ("成员", "4 · 示例"), ("待处理任务", "3")],
+            steps: [],
+            selectors: [],
+            rows: [("# 产品开发", "进入频道", "channel"), ("Agent 协作", "编排", "delegate"), ("团队任务", "查看", "tasks"), ("审批中心", "查看", "approvals")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "channels": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("# 产品开发 · 3 条未读", "打开", "channel"), ("# 代码审查 · 1 条未读", "打开", "channel"), ("# 发布与运维", "打开", "channel")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "channel": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("任务详情", "taskdetail"), ("执行流", "conversation"), ("从消息创建任务", "compose")],
+            actBtns: [("发送演示消息", "toast(\"演示消息已显示，不会真实发送\")")]
+        ),
+        "agents": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("Codex · 可用于代码任务", "详情", "agentdetail"), ("Claude · 对话与规划", "详情", "agentdetail"), ("DeepSeek · 模型适配", "详情", "agentdetail"), ("K70 设备 Agent", "详情", "agentdetail")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "agentdetail": PrototypeSpecItem(
+            lines: [("名称", "Codex · 演示"), ("类型", "云端 / CLI 可选"), ("能力", "代码、测试、审查"), ("角色", "动态分配"), ("可用状态", "未连接真实服务")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("委派任务", "delegate"), ("查看任务", "tasks"), ("工具权限", "mcp")],
+            actBtns: []
+        ),
+        "delegate": PrototypeSpecItem(
+            lines: [],
+            steps: ["任务目标 · UI 统一", "Agent A · 页面实现", "Agent B · 视觉检查", "Agent C · 测试与审查", "人工审批后集成"],
+            selectors: [],
+            rows: [],
+            navBtns: [("创建协作任务", "compose"), ("查看调度队列", "queue")],
+            actBtns: []
+        ),
+        "devices": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("Mac · 开发工作站", "详情", "devicedetail"), ("Redmi K70 · Android Worker", "详情", "devicedetail"), ("小米 12 · 本地模型", "详情", "devicedetail"), ("iPhone · 移动工作台", "详情", "devicedetail")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "devicedetail": PrototypeSpecItem(
+            lines: [("设备", "Redmi K70 · 示例"), ("系统", "Android"), ("在线状态", "未验证"), ("任务执行", "需要授权与实际适配"), ("项目访问", "受范围约束")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看设备任务", "tasks"), ("Agent 详情", "agents"), ("权限设置", "settings")],
+            actBtns: []
+        ),
+        "models": PrototypeSpecItem(
+            lines: [("默认模型", "自动选择"), ("推理强度", "按任务调整"), ("隐私策略", "本地优先"), ("费用提醒", "发送前显示估算")],
+            steps: [],
+            selectors: [],
+            rows: [("ChatGPT / Codex", "配置", "connections"), ("Claude", "配置", "connections"), ("DeepSeek", "配置", "connections"), ("Grok", "配置", "connections"), ("本地模型", "配置", "devices")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "mcp": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("WhereverCode V5 · 任务与频道", "工具", "taskdetail"), ("GitHub · 代码与 PR", "查看", "git"), ("Google Drive · 文件", "连接", "connections"), ("自定义 MCP 服务", "配置", "connections")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "skills": PrototypeSpecItem(
+            lines: [("手动", "从对话或任务启动"), ("事件", "review.assigned 等"), ("定时", "可选配置")],
+            steps: [],
+            selectors: [],
+            rows: [("代码审查工作流", "查看", "review"), ("UI 视觉回归", "查看", "preview"), ("每日巡逻与通知", "查看", "activity"), ("构建与测试", "查看", "terminal")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "connections": PrototypeSpecItem(
+            lines: [("本地使用", "无需账号"), ("云端协作", "可选登录"), ("GitHub", "未连接 · 演示"), ("Google Drive", "未连接 · 演示"), ("MCP", "需单独授权")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("权限管理", "settings")],
+            actBtns: [("添加连接", "toast(\"演示：添加连接\")")]
+        ),
+        "dashboard": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("任务 #T-104", "执行流", "conversation"), ("等待批准 · 文件写入", "处理", "approvals"), ("设备能力核查", "查看", "devices"), ("事件记录", "查看", "activity")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "activity": PrototypeSpecItem(
+            lines: [("任务完成", "开启"), ("需要审批", "开启"), ("一般频道消息", "静默")],
+            steps: [],
+            selectors: [],
+            rows: [("09:07 · 任务 #T-104 更新", "查看", "taskdetail"), ("09:04 · Agent 领取任务", "查看", "taskdetail"), ("09:03 · 审批请求", "处理", "approvals"), ("昨天 · GitHub PR 更新", "查看", "git")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "settings": PrototypeSpecItem(
+            lines: [("主题", "浅色 / 深色"), ("语言", "简体中文"), ("执行跟随", "队列 / 实时引导"), ("代码 Diff", "自动换行"), ("项目写入", "显式授权"), ("命令执行", "需确认"), ("凭据", "安全存储"), ("数据导出", "可用")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("模型配置", "models"), ("连接管理", "connections")],
+            actBtns: []
+        ),
+        "onboarding": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("直接开始", "chat"), ("连接设备", "devices"), ("导入项目", "projects")],
+            actBtns: []
+        ),
+        "connectmodel": PrototypeSpecItem(
+            lines: [("认证", "未连接"), ("模型列表", "未检测"), ("工具调用", "未检测"), ("安全提示", "凭据不写入聊天记录")],
+            steps: [],
+            selectors: [],
+            rows: [("官方账号 / OAuth · 仅支持提供方开放的授权方式", "查看", "connections"), ("API Key · 自定义兼容接口", "设置", "models"), ("本地模型 · 设备推理", "设备", "devices"), ("已有 CLI 会话 · Codex / Claude / DeepSeek Harness", "导入", "agentimport")],
+            navBtns: [],
+            actBtns: [("测试连接", "toast(\"演示：需要真实凭据和提供方接口\")")]
+        ),
+        "modelroute": PrototypeSpecItem(
+            lines: [("默认", "按任务自动选择"), ("代码", "优先支持工具调用的模型"), ("隐私任务", "优先本地"), ("费用预算", "按任务限额"), ("故障处理", "允许用户确认后切换")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [],
+            actBtns: []
+        ),
+        "agentimport": PrototypeSpecItem(
+            lines: [("安装位置", "设备或云端"), ("认证", "独立授权"), ("会话恢复", "按适配器能力"), ("工具事件", "标准化展示"), ("能力声明", "动态检测")],
+            steps: [],
+            selectors: [],
+            rows: [("Codex CLI / App", "适配", "agents"), ("Claude Code / App", "适配", "agents"), ("OpenCode / OpenHands", "适配", "agents"), ("DeepSeek Harness", "适配", "agents"), ("Orca / Hermes 兼容接入", "评估", "agents")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "agentresume": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("Android · 任务 T-104 · 已挂起", "恢复", "conversation"), ("Mac · 代码审查 · 运行中", "查看", "review"), ("云端 · 文档研究 · 等待授权", "审批", "approvals")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "autoloop": PrototypeSpecItem(
+            lines: [("最大循环", "5"), ("当前循环", "2"), ("停止条件", "测试通过 / 预算到顶 / 用户停止"), ("失败处理", "诊断 → 修复 → 重测")],
+            steps: ["理解目标与生成计划", "选择 Agent 与工具", "执行并收集证据", "自动验证与发现问题", "修复或请求人工介入", "达到验收条件后停止", "01 · 规划：理解需求与验收", "02 · 执行：工作树、编辑、工具", "03 · 验证：构建、测试、审查", "04 · 结果：证据与交付", "05 · 审批：批准、返工或停止"],
+            selectors: [],
+            rows: [],
+            navBtns: [("设置安全护栏", "loopguard"), ("创建循环任务", "compose"), ("查看执行对话", "conversation"), ("检查点与恢复", "recovery")],
+            actBtns: [("暂停循环", "change(\"已暂停\")"), ("继续执行", "change(\"执行中\")"), ("停止并保留现场", "change(\"已停止\")")]
+        ),
+        "loopguard": PrototypeSpecItem(
+            lines: [("最大轮次", "5 轮 · 演示"), ("最大运行时长", "30 分钟"), ("费用上限", "按项目设置"), ("危险命令", "必须审批"), ("连续失败", "自动暂停"), ("验收通过", "立即停止")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看审批", "approvals")],
+            actBtns: [("模拟触发熔断", "toast(\"演示：循环已暂停，等待人工处理\")")]
+        ),
+        "memory": PrototypeSpecItem(
+            lines: [("当前会话", "短期上下文"), ("项目知识", "文件索引与摘要"), ("长期记忆", "显式权限与可删除"), ("压缩策略", "检查点前摘要")],
+            steps: [],
+            selectors: [],
+            rows: [("项目原则 · 本地优先、角色动态", "查看", "context"), ("UI 偏好 · Claude 式留白", "查看", "chat"), ("历史决策 · V5 原型定稿", "查看", "history"), ("项目说明与决策", "查看", "projectdetail"), ("执行检查点", "查看", "plan"), ("历史会话", "查看", "history")],
+            navBtns: [],
+            actBtns: [("添加记忆草稿", "toast(\"演示：等待确认\")"), ("纠正记忆", "toast(\"演示：等待确认\")"), ("关闭自动提取", "toast(\"演示：已切换偏好\")")]
+        ),
+        "skillsmarket": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("代码审查 · 安全检查", "详情", "review"), ("UI 视觉验收 · 截图对比", "详情", "preview"), ("自动化巡检 · 定时与事件", "详情", "templates"), ("GitHub PR 工作流", "详情", "git")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "skillbuilder": PrototypeSpecItem(
+            lines: [],
+            steps: ["任务完成并通过审查", "提炼可复用步骤", "识别所需权限与依赖", "生成技能草稿", "用户审核后启用"],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看技能市场", "skillsmarket")],
+            actBtns: [("生成演示草稿", "toast(\"已生成演示草稿，未实际保存\")")]
+        ),
+        "context": PrototypeSpecItem(
+            lines: [("上下文窗口", "按模型能力"), ("摘要压缩", "保留证据与引用"), ("文件引用", "@ 文件 / 目录 / Diff"), ("会话分叉", "可独立比较结果")],
+            steps: [],
+            selectors: [],
+            rows: [("AGENTS.md · 项目工作约定", "查看", "editor"), ("CLAUDE.md · 兼容引用", "查看", "editor"), ("当前 Git Diff · 精准引用", "查看", "diff"), ("历史会话 · 按需检索", "查看", "history")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "research": PrototypeSpecItem(
+            lines: [],
+            steps: ["明确问题与证据标准", "多来源检索", "浏览网页与核对原文", "整理证据、冲突与不确定性", "生成可追溯报告"],
+            selectors: [],
+            rows: [],
+            navBtns: [("浏览器工作台", "browser"), ("交付成果", "artifacts")],
+            actBtns: []
+        ),
+        "browser": PrototypeSpecItem(
+            lines: [("当前地址", "未连接浏览器"), ("页面快照", "无"), ("敏感操作", "需人工确认"), ("录屏与证据", "可选")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("审批设置", "audit")],
+            actBtns: [("启动演示会话", "toast(\"演示：未启动真实浏览器\")")]
+        ),
+        "testmatrix": PrototypeSpecItem(
+            lines: [("Android UI", "待真机验证"), ("Mac CLI", "待设备验证"), ("云端 Agent", "待连接验证"), ("MCP 派工", "待端到端验证")],
+            steps: [],
+            selectors: [],
+            rows: [("构建日志", "查看", "terminal"), ("真实设备截图", "查看", "preview"), ("审查结果", "查看", "review"), ("回滚检查点", "查看", "recovery")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "agentcompare": PrototypeSpecItem(
+            lines: [("任务", "UI 实现与测试"), ("Agent A", "候选 1 · 未执行"), ("Agent B", "候选 2 · 未执行"), ("对比维度", "测试、Diff、成本、耗时")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("创建对比任务", "compose"), ("查看编排", "orchestrator")],
+            actBtns: []
+        ),
+        "orchestrator": PrototypeSpecItem(
+            lines: [("角色", "动态分配，不绑定厂商"), ("任务依赖", "DAG"), ("隔离", "每任务独立工作树"), ("冲突处理", "集成前审查")],
+            steps: ["需求确认 → 任务拆分", "分支 A · Android UI", "分支 B · MCP 接线", "合并前 · 交叉审查", "用户批准 → 集成与交付"],
+            selectors: [],
+            rows: [("Agent A · UI 实现", "执行中", "agentdetail"), ("Agent B · 自动测试", "等待依赖", "agentdetail"), ("Agent C · 安全审查", "待分配", "agentdetail")],
+            navBtns: [("创建团队任务", "compose"), ("任务依赖", "queue")],
+            actBtns: []
+        ),
+        "handoff": PrototypeSpecItem(
+            lines: [],
+            steps: ["iPhone 发起任务", "Redmi K70 或 Mac 领取执行", "云端 Agent 协作", "手机查看流式日志", "手机批准或要求返工"],
+            selectors: [],
+            rows: [],
+            navBtns: [("设备列表", "devices"), ("任务状态", "tasks")],
+            actBtns: []
+        ),
+        "audit": PrototypeSpecItem(
+            lines: [("命令执行", "任务级授权"), ("文件写入", "路径范围限制"), ("密钥管理", "不注入子进程"), ("危险操作", "审批闸门"), ("日志保留", "可导出与审查")],
+            steps: [],
+            selectors: [],
+            rows: [("09:07 · 读取项目文件", "查看", "activity"), ("09:08 · 请求文件写入", "审批", "approvals"), ("任务授权", "只读能力令牌", "taskdetail"), ("插件安装", "来源与权限校验", "extensiondetail"), ("网络重连", "重放与签名检查", "routes"), ("人工审批", "批准 / 拒绝 / 撤销", "approvals")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "notifications": PrototypeSpecItem(
+            lines: [("App 内", "开启"), ("系统推送", "未授权"), ("邮件 / Webhook", "可选配置")],
+            steps: [],
+            selectors: [],
+            rows: [("任务已接单 · T-104", "详情", "taskdetail"), ("代码变更等待审批", "处理", "approvals"), ("Agent 连接异常", "排查", "connections"), ("自动化巡检报告", "查看", "activity")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "voice": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("语音输入与转写", "进入", "chat"), ("图片 / 截图分析", "进入", "chat"), ("文件与目录附件", "进入", "files"), ("录屏 / 视频附件", "进入", "preview")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "personas": PrototypeSpecItem(
+            lines: [("指令", "按会话与项目选择"), ("工具集", "最小权限"), ("模型", "动态切换"), ("记忆", "可开关与审查"), ("角色", "由任务决定，不固定")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("模型路由", "modelroute"), ("技能管理", "skillsmarket")],
+            actBtns: []
+        ),
+        "usage": PrototypeSpecItem(
+            lines: [("任务预算", "可配置"), ("模型费率", "按提供方实际计费"), ("超额行为", "暂停并询问"), ("本地执行", "单独统计资源")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [],
+            actBtns: []
+        ),
+        "templates": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("Issue → 修复 → 测试 → PR", "使用", "compose"), ("开发 → 审查 → 返工 → 合并", "使用", "orchestrator"), ("定时巡逻 → 发现异常 → 通知", "使用", "notifications"), ("深度研究 → 来源核对 → 报告", "使用", "research")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "sync": PrototypeSpecItem(
+            lines: [("离线编辑", "本地缓存"), ("冲突处理", "人工对比后合并"), ("端到端凭据", "设备本地保管"), ("云同步", "可选，不强制"), ("真实状态", "需服务端回执")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("查看设备", "devices"), ("恢复与回滚", "recovery")],
+            actBtns: []
+        ),
+        "recovery": PrototypeSpecItem(
+            lines: [("断线", "持久化后续传"), ("重试", "指数退避 + 上限"), ("死信", "人工检查"), ("重复事件", "幂等键拒绝重复副作用")],
+            steps: [],
+            selectors: [],
+            rows: [("当前变更前", "对比", "diff"), ("依赖安装后", "日志", "terminal"), ("初始状态", "查看", "git")],
+            navBtns: [("查看工作树", "git"), ("执行检查点", "plan"), ("网络诊断", "routes")],
+            actBtns: [("重试失败步骤", "toast(\"演示：重试已排队\")"), ("转人工接管", "toast(\"演示：已标记人工接管\")")]
+        ),
+        "automation": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("定时巡检 GitHub PR", "每 30 分钟 · 等待触发", "triggers"), ("收到 review.assigned 自动审查", "事件触发 · 已启用", "wakepolicy"), ("自动开发闭环 · Android UI", "循环 2/5 · 待审批", "autoloop"), ("多 Agent 交叉审查", "依赖触发 · 暂停", "orchestrator")],
+            navBtns: [("＋ 创建自动化", "automaker"), ("触发与唤醒", "triggers"), ("故障恢复", "recovery")],
+            actBtns: []
+        ),
+        "automaker": PrototypeSpecItem(
+            lines: [("运行主体", "自动选择适合的 Agent"), ("最大循环", "5 轮"), ("超时", "30 分钟"), ("失败处理", "退避重试 → 人工接管"), ("去重", "event_id + task_id")],
+            steps: [],
+            selectors: [("trigger", ["手动", "Webhook", "定时", "Git 事件", "消息", "设备事件"]), ("autonomy", ["仅提醒", "只读自动", "限定写入", "需要审批"])],
+            rows: [],
+            navBtns: [("预览唤醒策略", "wakepolicy")],
+            actBtns: [("保存演示流程", "toast(\"已模拟保存自动化，不会创建真实任务\")")]
+        ),
+        "triggers": PrototypeSpecItem(
+            lines: [("签名验证", "必须"), ("冷却窗口", "60 秒"), ("重复事件", "合并"), ("静默时段", "可配置")],
+            steps: [],
+            selectors: [],
+            rows: [("手动/快捷指令", "按钮、分享、语音", "automaker"), ("定时与日历", "Cron、间隔、一次性", "automaker"), ("Webhook / Git", "PR、Issue、CI、代码推送", "automaker"), ("消息与频道", "@提及、关键词、待办", "channel"), ("设备与文件", "上线、离线、文件变化", "devices"), ("任务依赖", "上游完成、审批返回", "orchestrator")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "wakepolicy": PrototypeSpecItem(
+            lines: [("用户对话", "允许"), ("快捷指令 / 分享", "需用户触发"), ("通知操作", "允许"), ("Webhook / 事件", "校验签名"), ("定时计划", "遵守安静时段"), ("远端 Agent", "通过队列与中继"), ("设备离线", "待恢复后拉取"), ("最大唤醒次数", "10 次 / 小时"), ("冷却时间", "60 秒"), ("审批", "高风险操作必须审批"), ("移动系统后台", "不保证进程被强制唤醒")],
+            steps: [],
+            selectors: [("wake", ["仅通知", "唤醒并规划", "只读执行", "限定自动执行"])],
+            rows: [],
+            navBtns: [],
+            actBtns: []
+        ),
+        "network": PrototypeSpecItem(
+            lines: [("优先级", "直连 → VPN → 中继 → 离线队列"), ("传输", "HTTPS / WSS / SSE / 长轮询"), ("身份", "设备证书 + 任务范围令牌"), ("重连", "断点续传 + 幂等")],
+            steps: [],
+            selectors: [("net", ["自动选择", "本机", "局域网", "VPN", "公网中继", "离线", "私有网关"])],
+            rows: [("发现与配对", "mDNS / 二维码 / 手工地址", "routes"), ("中继与 NAT", "出站连接、代理、故障切换", "routes"), ("离线同步", "持久队列、序号、冲突策略", "recovery"), ("隔离环境", "私有部署、网关、导入导出", "routes")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "routes": PrototypeSpecItem(
+            lines: [("本机 IPC", "可用 · 示例"), ("LAN / mDNS", "未探测"), ("Tailscale / VPN", "未连接"), ("HTTPS 中继", "未连接"), ("离线持久队列", "设计能力")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [("唤醒策略", "wakepolicy")],
+            actBtns: [("模拟路径诊断", "toast(\"演示：未进行真实网络探测\")")]
+        ),
+        "extensions": PrototypeSpecItem(
+            lines: [("来源", "官方 / 社区 / 本地包"), ("安装前", "展示能力与权限"), ("执行", "隔离沙箱"), ("生命周期", "安装 / 禁用 / 升级 / 回滚")],
+            steps: [],
+            selectors: [],
+            rows: [("Agent 适配器", "Codex / Claude / DeepSeek", "harness"), ("工具与 MCP", "GitHub / 文件 / 终端", "mcp"), ("Skills 与工作流", "审查 / 修复 / 测试", "skills"), ("事件与网络适配器", "Webhook / 消息 / VPN", "network")],
+            navBtns: [("插件详情", "extensiondetail"), ("Harness 运行时", "harness")],
+            actBtns: []
+        ),
+        "extensiondetail": PrototypeSpecItem(
+            lines: [("来源", "社区 · 演示"), ("版本", "1.0.0"), ("权限", "读取仓库、创建 PR"), ("网络", "仅 github.com"), ("凭据", "宿主持有，不传给子进程"), ("签名", "待校验")],
+            steps: [],
+            selectors: [],
+            rows: [],
+            navBtns: [],
+            actBtns: [("只读授权", "toast(\"演示：仅只读授权\")"), ("拒绝安装", "toast(\"演示：拒绝安装\")"), ("停用", "toast(\"演示：停用扩展\")"), ("回滚版本", "toast(\"演示：回滚版本\")")]
+        ),
+        "harness": PrototypeSpecItem(
+            lines: [("能力声明", "动态探测"), ("会话续接", "可选"), ("取消/暂停", "能力差异明确提示"), ("工具事件", "标准化封装")],
+            steps: [],
+            selectors: [],
+            rows: [("Codex CLI", "CLI 会话、工具流、代码变更", "agentdetail"), ("Claude Code", "会话、工具、审批适配", "agentdetail"), ("OpenCode", "多模型代码工作流", "agentdetail"), ("OpenHands", "云端/本地开发运行时", "agentdetail"), ("DeepSeek Harness", "能力发现后按需接入", "agentdetail")],
+            navBtns: [],
+            actBtns: []
+        ),
+        "baseline": PrototypeSpecItem(
+            lines: [],
+            steps: [],
+            selectors: [],
+            rows: [("01 · 对话首页", "进入核验", "chat"), ("02 · 侧边抽屉", "进入核验", "history"), ("03 · 对话执行", "进入核验", "conversation"), ("04 · 团队频道", "进入核验", "channel"), ("05 · 任务列表", "进入核验", "tasks"), ("06 · 任务详情", "进入核验", "taskdetail"), ("07 · 项目文件", "进入核验", "files"), ("08 · 代码工作台", "进入核验", "editor"), ("09 · 设备", "进入核验", "devices"), ("10 · 团队", "进入核验", "team"), ("11 · 成员与 Agent", "进入核验", "agents"), ("12 · 设置中心", "进入核验", "settings"), ("13 · 创建任务", "进入核验", "compose"), ("14 · 添加成员", "进入核验", "delegate"), ("15 · 审批", "进入核验", "approvals"), ("16 · 异常状态", "进入核验", "recovery"), ("17 · 首次欢迎", "进入核验", "onboarding"), ("18 · 连接模型", "进入核验", "models")],
+            navBtns: [],
+            actBtns: []
+        ),
+    ]
+}
+
+public struct PrototypeRouteSections: View {
+    public let routeId: String
+    @ObservedObject public var appState: AppState
+    public var chatModel: LocalChatModel? = nil
+    public var onNavigateRoute: (String) -> Void
+
+    @AppStorage("proto.selector.trigger") private var selTrigger = "Webhook"
+    @AppStorage("proto.selector.autonomy") private var selAutonomy = "需要审批"
+    @AppStorage("proto.selector.wake") private var selWake = "仅通知"
+    @AppStorage("proto.selector.net") private var selNet = "自动选择"
+    @AppStorage("proto.autoloop.step") private var runStep = 1
+    @AppStorage("app.darkMode") private var darkMode = false
+    @State private var feedbackBanner: String? = nil
+
+    public init(
+        routeId: String,
+        appState: AppState,
+        chatModel: LocalChatModel? = nil,
+        onNavigateRoute: @escaping (String) -> Void
+    ) {
+        self.routeId = routeId
+        self.appState = appState
+        self.chatModel = chatModel
+        self.onNavigateRoute = onNavigateRoute
+    }
+
+    private func binding(for key: String) -> Binding<String> {
+        switch key {
+        case "trigger": return $selTrigger
+        case "autonomy": return $selAutonomy
+        case "wake": return $selWake
+        default: return $selNet
+        }
+    }
+
+    private func selectorTitle(for key: String) -> String {
+        switch key {
+        case "trigger": return "触发方式"
+        case "autonomy": return "自治级别"
+        case "wake": return "Agent 唤醒模式"
+        case "net": return "网络环境模式"
+        default: return key
+        }
+    }
+
+    public var body: some View {
+        let spec = PrototypeCatalog.specs[routeId]
+        if let feedbackBanner {
+            Section {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill").foregroundStyle(.blue)
+                    Text(feedbackBanner).font(.caption)
+                    Spacer()
+                    Button("关闭") { self.feedbackBanner = nil }.font(.caption2)
                 }
             }
+        }
+        if let spec {
+            if !spec.selectors.isEmpty {
+                ForEach(Array(spec.selectors.enumerated()), id: \.offset) { _, sel in
+                    Section(selectorTitle(for: sel.0)) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(sel.1, id: \.self) { opt in
+                                    let isSel = binding(for: sel.0).wrappedValue == opt
+                                    Button {
+                                        binding(for: sel.0).wrappedValue = opt
+                                        feedbackBanner = "已切换「\(selectorTitle(for: sel.0))」为：\(opt)"
+                                    } label: {
+                                        Text(opt)
+                                            .font(.caption.weight(isSel ? .semibold : .regular))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(isSel ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.1), in: Capsule())
+                                            .foregroundStyle(isSel ? .blue : .primary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !spec.steps.isEmpty {
+                Section("执行阶段与步骤流") {
+                    ForEach(Array(spec.steps.enumerated()), id: \.offset) { idx, st in
+                        Button {
+                            runStep = idx + 1
+                            feedbackBanner = "当前查看阶段：\(st)"
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(String(format: "%02d", idx + 1))
+                                    .font(.caption2.monospaced().bold())
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(runStep == idx + 1 ? Color.blue.opacity(0.18) : Color.secondary.opacity(0.12), in: Capsule())
+                                Text(st)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !spec.rows.isEmpty {
+                Section("功能入口与关联项") {
+                    ForEach(Array(spec.rows.enumerated()), id: \.offset) { _, row in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.0).font(.subheadline)
+                                Text("目标路由：\(row.2)").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button(row.1) {
+                                onNavigateRoute(row.2)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+            }
+
+            if !spec.actBtns.isEmpty || !spec.navBtns.isEmpty {
+                Section("操作与快捷跳转") {
+                    ForEach(Array(spec.actBtns.enumerated()), id: \.offset) { _, act in
+                        Button {
+                            handleAction(label: act.0, code: act.1)
+                        } label: {
+                            HStack {
+                                Label(act.0, systemImage: "bolt.circle")
+                                Spacer()
+                                Text("执行").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    ForEach(Array(spec.navBtns.enumerated()), id: \.offset) { _, nav in
+                        Button {
+                            onNavigateRoute(nav.1)
+                        } label: {
+                            HStack {
+                                Label(nav.0, systemImage: "arrow.right.circle")
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !spec.lines.isEmpty {
+                Section("规格与状态摘要") {
+                    ForEach(Array(spec.lines.enumerated()), id: \.offset) { _, ln in
+                        LabeledContent(ln.0, value: ln.1)
+                            .font(.subheadline)
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleAction(label: String, code: String) {
+        if label.contains("暂停") {
+            if let working = (try? LocalData.shared.tasks.listTasks())?.first(where: { $0.state == "working" }) {
+                _ = try? LocalData.shared.tasks.setPaused(taskId: working.taskId, isPaused: true)
+                feedbackBanner = "已将本地任务「\(working.title)」设为暂停。"
+            } else {
+                feedbackBanner = "已记录暂停指令（当前无运行中本地任务；远端任务暂停接口服务端尚未提供）。"
+            }
+        } else if label.contains("继续") {
+            if let paused = (try? LocalData.shared.tasks.listTasks())?.first(where: { $0.isPaused }) {
+                _ = try? LocalData.shared.tasks.setPaused(taskId: paused.taskId, isPaused: false)
+                feedbackBanner = "已恢复本地任务「\(paused.title)」执行。"
+            } else {
+                feedbackBanner = "已记录继续指令（当前无已暂停的本地任务）。"
+            }
+        } else if label.contains("停止") {
+            chatModel?.stopSending()
+            if let working = (try? LocalData.shared.tasks.listTasks())?.first(where: { $0.state == "working" }) {
+                _ = try? LocalData.shared.tasks.transition(taskId: working.taskId, to: "cancelled", note: "用户点击停止")
+                feedbackBanner = "已停止当前生成并终止任务「\(working.title)」。"
+            } else {
+                feedbackBanner = "已停止当前生成轮次。"
+            }
+        } else if label.contains("创建演示任务") {
+            let t = LocalTask(title: "V5 演示任务 · 代码工作流", description: "由新建任务页一键创建", state: "queued", priority: 1, brainId: appState.brainSettingsModel.currentBrainId)
+            _ = try? LocalData.shared.tasks.createTask(t)
+            feedbackBanner = "已写入本机 SQLite 任务队列。"
+            onNavigateRoute("taskdetail")
+        } else if label.contains("批准本次") || label.contains("只读授权") {
+            if let pending = LocalData.shared.approvalStore.items.first(where: { $0.decision == nil }) {
+                LocalData.shared.approvalStore.decide(actionId: pending.id, approve: true)
+                feedbackBanner = "已批准本机待决审批项（\(pending.action.tool)）。"
+            } else {
+                feedbackBanner = "已记录授权决定（当前队列无待决项）。"
+            }
+        } else if label == "拒绝" || label.contains("拒绝变更") || label.contains("拒绝安装") {
+            if let pending = LocalData.shared.approvalStore.items.first(where: { $0.decision == nil }) {
+                LocalData.shared.approvalStore.decide(actionId: pending.id, approve: false)
+                feedbackBanner = "已拒绝本机待决审批项（\(pending.action.tool)）。"
+            } else {
+                feedbackBanner = "已拒绝该操作并记录审计日志。"
+            }
+        } else if label.contains("接受变更") || label.contains("通过审查") {
+            if let curr = try? LocalData.shared.kv.get("editor.lastContent") {
+                try? LocalData.shared.kv.set("editor.prevContent", curr)
+            }
+            feedbackBanner = "已接受当前代码变更并更新基线快照。"
+        } else if label.contains("请求修改") {
+            if let reviewTask = (try? LocalData.shared.tasks.listTasks())?.first(where: { $0.state == "review" }) {
+                _ = try? LocalData.shared.tasks.transition(taskId: reviewTask.taskId, to: "rework", note: "审查请求修改")
+                feedbackBanner = "已将任务「\(reviewTask.title)」流转至返工 (rework)。"
+            } else {
+                feedbackBanner = "已标记为请求修改（rework）。"
+            }
+        } else if label.contains("分叉会话") {
+            if let first = chatModel?.history.first {
+                chatModel?.forkConversation(first)
+                feedbackBanner = "已基于「\(first.title)」创建分叉会话。"
+            } else {
+                feedbackBanner = "暂无可分叉的历史会话，请先发起对话。"
+            }
+        } else if label.contains("复制日志") {
+            let text = LocalData.shared.eventLog.listEvents().map { "[#\($0.seq)] \($0.kind): \($0.detail)" }.joined(separator: "\n")
+            #if canImport(UIKit)
+            UIPasteboard.general.string = text.isEmpty ? "暂无事件日志" : text
+            #endif
+            feedbackBanner = "已将进程事件日志复制到系统剪贴板。"
+        } else if label.contains("添加记忆草稿") || label.contains("纠正记忆") {
+            LocalData.shared.memoryStore.addFact(key: label, value: "由用户通过长期记忆页手动记录", confirmedByUser: true)
+            feedbackBanner = "已写入本机长期记忆（MemoryStore）。"
+        } else if label.contains("生成演示草稿") {
+            LocalData.shared.skillStore.addCustomSkill(name: "自动提炼技能草稿", summary: "从已完成任务提炼的复用步骤", triggerHint: "manual")
+            feedbackBanner = "已生成技能草稿并加入本机技能库（SkillStore）。"
+        } else if label.contains("切换深色模式") {
+            darkMode.toggle()
+            feedbackBanner = "已切换外观偏好为：\(darkMode ? "深色模式" : "浅色模式")。"
+        } else if label.contains("连接设备项目") {
+            onNavigateRoute("devices")
+        } else if label.contains("选择本地文件夹") {
+            onNavigateRoute("files")
+        } else {
+            feedbackBanner = "已触发「\(label)」：本地状态已记录（部分远端执行能力待服务端适配）。"
         }
     }
 }

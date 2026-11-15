@@ -77,10 +77,16 @@ struct ChannelPickerContentView: View {
 }
 
 struct SettingsView: View {
-    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var appState: AppState
+    var onNavigateRoute: (String) -> Void = { _ in }
 
-    init() {}
-    init(appState: AppState) {}
+    init() {
+        self.appState = AppState()
+    }
+    init(appState: AppState, onNavigateRoute: @escaping (String) -> Void = { _ in }) {
+        self.appState = appState
+        self.onNavigateRoute = onNavigateRoute
+    }
     private enum FocusField: Hashable { case address, token }
     @FocusState private var focusedField: FocusField?
     @State private var baseURLText = ""
@@ -220,6 +226,28 @@ struct SettingsView: View {
                     Button("重新检查连接") {
                         Task { await appState.refreshConnectionStatus() }
                     }
+                }
+                Section("账号与外部连接") {
+                    LabeledContent("本地使用", value: "无需账号")
+                    LabeledContent("云端协作", value: appState.hasToken ? "已配置平台凭证" : "可选登录")
+                    LabeledContent("GitHub", value: "未连接 · 授权接入开发中")
+                    LabeledContent("Google Drive", value: "未连接 · 授权接入开发中")
+                    LabeledContent("MCP", value: "按工具与范围单独授权")
+                    HStack(spacing: 12) {
+                        Button("添加连接") {
+                            saveMessage = "外部账号（GitHub / 网盘）OAuth 接入开发中；模型与平台凭证可在上方直接配置。"
+                        }
+                        .buttonStyle(.bordered)
+                        Button("权限管理") {
+                            onNavigateRoute("settings")
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Webhook 唤醒") {
+                            onNavigateRoute("triggers")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .font(.caption)
                 }
                 Section("关于") {
                     LabeledContent("版本", value: Self.versionString)
