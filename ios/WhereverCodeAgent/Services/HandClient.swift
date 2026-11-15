@@ -1121,8 +1121,8 @@ public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendabl
                     return ToolOutcome(ok: false, summary: "缺少写入路径", errorCode: "missing_path")
                 }
                 let content = action.args["content"]?.stringValue ?? ""
-                let ok = try await HandClient.shared.writeFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath, content: content)
-                return ToolOutcome(ok: ok, summary: ok ? "已写入 \(relPath)" : "写入失败", errorCode: ok ? nil : "write_failed")
+                let resultMsg = try await HandClient.shared.writeFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath, content: content)
+                return ToolOutcome(ok: true, summary: "已写入 \(relPath): \(resultMsg)", data: resultMsg)
 
             case "run_command", "run":
                 let prompt = action.args["command"]?.stringValue ?? action.args["prompt"]?.stringValue ?? ""
