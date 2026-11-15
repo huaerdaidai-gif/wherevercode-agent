@@ -1511,22 +1511,7 @@ class MainActivity : AppCompatActivity() {
             this,
             onOpenFile = { path -> openDetailFile(path) },
             onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
-            onReplyPost = { text, replyId -> postTeamChannelMessage(text, replyId) },
-            onLoadHistory = { before, query, complete ->
-                Thread {
-                    val result = runCatching {
-                        val (host, channelId) = teamChannelEndpoint() ?: error("频道未配置。")
-                        val transport = PlatformChannelMcpTransport(
-                            tokenProvider = { platformCredentialStore.loadPlatformToken() },
-                            endpoint = PlatformAgent.mcpEndpoint(host),
-                        )
-                        runBlocking { transport.queryMessages(channelId, before, query) }
-                    }
-                    runOnUiThread {
-                        if (!isFinishing && !isDestroyed) complete(result)
-                    }
-                }.start()
-            },
+
         )
         screenResults = resultsController.root
         container.addView(screenResults)
@@ -1569,6 +1554,22 @@ class MainActivity : AppCompatActivity() {
             },
             onPost = { text -> postTeamChannelMessage(text) },
             onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
+            onReplyPost = { text, replyId -> postTeamChannelMessage(text, replyId) },
+            onLoadHistory = { before, query, complete ->
+                Thread {
+                    val result = runCatching {
+                        val (host, channelId) = teamChannelEndpoint() ?: error("频道未配置。")
+                        val transport = PlatformChannelMcpTransport(
+                            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                            endpoint = PlatformAgent.mcpEndpoint(host),
+                        )
+                        runBlocking { transport.queryMessages(channelId, before, query) }
+                    }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) complete(result)
+                    }
+                }.start()
+            },
             onMarkRead = { markTeamChannelRead() },
             onNewRound = {
                 teamChannelRoundsUsed = 0

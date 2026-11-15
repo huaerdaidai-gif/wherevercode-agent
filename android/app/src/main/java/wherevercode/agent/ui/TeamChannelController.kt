@@ -164,10 +164,7 @@ class TeamChannelController(
         root.addView(
             UiKit.text(
                 context,
-                "全部 Agent 都在频道里：本机 App + 注册表里的每一位；" +
-                    "设备/云端 Agent 由调度器当中转——@名字 叫它，回复贴回频道。" +
-                    "短消息、3 轮一议、建议-only——群消息绝不直接触发派活；" +
-                    "只读扇出最多问 5 个分支，大家只看不写。",
+                "长按 Agent 名字快速 @，或点名字打开对话。任务在项目中管理。",
                 11f,
                 R.color.text_tertiary,
             ).apply { setPadding(dp(16), 0, dp(16), dp(6)) },
@@ -350,7 +347,7 @@ class TeamChannelController(
     private fun membersRow(snapshot: TeamChannelSnapshot): LinearLayout {
         val row = UiKit.horizontal(context).apply { setPadding(0, dp(4), 0, dp(8)) }
         row.addView(
-            UiKit.text(context, "成员", 12f, R.color.text_primary, bold = true).apply {
+            UiKit.text(context, "Agent", 12f, R.color.text_primary, bold = true).apply {
                 setPadding(0, 0, dp(8), 0)
             },
         )

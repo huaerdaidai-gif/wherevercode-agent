@@ -124,13 +124,15 @@ class ConsoleScreenController(
                 setOnClickListener { action() }
             })
         }
+        val connections = UiKit.horizontal(context)
         listOf("工具与连接" to onOpenTools, "MCP / 插件" to onOpenMcp).forEach { (label, action) ->
-            if (action != null) management.addView(UiKit.text(context, label, 13f, R.color.accent).apply {
+            if (action != null) connections.addView(UiKit.text(context, label, 13f, R.color.accent).apply {
                 setPadding(dp(10), dp(12), dp(10), dp(12))
                 setOnClickListener { action() }
             })
         }
         content.addView(management)
+        content.addView(connections)
         val levelRow = UiKit.horizontal(context).apply { setPadding(0, dp(2), 0, dp(6)) }
         levelRow.addView(
             UiKit.text(context, "自由度", 12f, R.color.text_primary, bold = true).apply {
