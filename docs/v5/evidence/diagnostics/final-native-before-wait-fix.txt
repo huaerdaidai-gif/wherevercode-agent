@@ -14,5 +14,3 @@ java.lang.NullPointerException: Attempt to invoke virtual method 'void androidx.
 
 FAILURES!!!
 Tests run: 2,  Failures: 1
-
-

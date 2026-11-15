@@ -4,5 +4,3 @@ wherevercode.agent.ui.NativeTaskCreationTest:.
 Time: 80.976
 
 OK (1 test)
-
-
