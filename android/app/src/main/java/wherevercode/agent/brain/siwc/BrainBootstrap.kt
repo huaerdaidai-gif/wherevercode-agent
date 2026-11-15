@@ -71,6 +71,7 @@ import wherevercode.agent.core.extension.ExtensionToolBridge
 import wherevercode.agent.core.extension.InMemoryExtensionStore
 import wherevercode.agent.core.extension.SharedPreferencesExtensionStore
 import wherevercode.agent.core.extension.mcp.McpRoot
+import wherevercode.agent.core.extension.mcp.McpSecretSealer
 import wherevercode.agent.core.extension.mcp.McpServerManager
 import wherevercode.agent.core.extension.mcp.StaticMcpRootsProvider
 import wherevercode.agent.core.extension.plugin.LocalUtilsPlugin
@@ -538,6 +539,14 @@ object BrainBootstrap {
         val pluginRegistry: PluginRegistry = PluginRegistry(),
         val mcpServerManager: McpServerManager = McpServerManager(extensionRegistry),
         /**
+         * R3 C-2：MCP 凭据封存器（与注册表落盘包装同一实例）。删除
+         * MCP 服务器时 MainActivity 经它同步删该服务器在密钥库里的
+         * 凭据。默认 null 只在直接构造 BrainComponents 的测试里生效
+         * （那些注册表是内存版、本就没有真实凭据可删）；生产经
+         * BrainBootstrap.build() 传入真实实例。
+         */
+        val mcpSecretSealer: McpSecretSealer? = null,
+        /**
          * P1 确定性自动派活（2026-11-11）：eval 日志、路由决策日志、
          * 能力卡 hello 快照。默认值是内存版（只在直接构造
          * BrainComponents 的测试里生效；生产经 BrainBootstrap.build()
@@ -844,10 +853,11 @@ object BrainBootstrap {
                 wherevercode.agent.brain.BrainKeyStore(appContext),
             )
         }
+        val mcpSecretSealer = McpSecretSealer(mcpSecretStore)
         val extensionRegistry = ExtensionRegistry(
             wherevercode.agent.core.extension.mcp.SecretSealingExtensionStore(
                 SharedPreferencesExtensionStore(appContext),
-                wherevercode.agent.core.extension.mcp.McpSecretSealer(mcpSecretStore),
+                mcpSecretSealer,
             ),
         )
         val pluginRegistry = PluginRegistry(
@@ -1537,6 +1547,7 @@ object BrainBootstrap {
             extensionRegistry = extensionRegistry,
             pluginRegistry = pluginRegistry,
             mcpServerManager = mcpServerManager,
+            mcpSecretSealer = mcpSecretSealer,
             evalLogStore = evalLogStore,
             routingDecisionLog = routingDecisionLog,
             routerSettings = routerSettings,
