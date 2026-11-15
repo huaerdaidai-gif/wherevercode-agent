@@ -373,6 +373,15 @@ public final class LocalTaskStore {
         }
     }
 
+    /// 便捷方法：反转任务的 isPaused 状态
+    @discardableResult
+    public func togglePause(taskId: String) throws -> LocalTask {
+        guard let task = try getTask(taskId: taskId) else {
+            throw LocalTaskStoreError.unknownTask(taskId)
+        }
+        return try setPaused(taskId: taskId, isPaused: !task.isPaused)
+    }
+
     public func listEvents(taskId: String) throws -> [TaskEvent] {
         try db.query(
             """
