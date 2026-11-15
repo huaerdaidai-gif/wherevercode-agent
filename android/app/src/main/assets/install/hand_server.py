@@ -193,6 +193,7 @@ ERR_PATH_NOT_ALLOWED = "path_not_allowed"
 ERR_STALE_GOAL_VERSION = "stale_goal_version"
 ERR_STALE_EPOCH = "stale_epoch"
 ERR_AGENT_NOT_FOUND = "agent_not_found"
+ERR_EXECUTION_FAILED = "execution_failed"
 ERR_REMOTE_CONTROLLED_STOP = "remote_controlled_stop"
 ERR_AGENT_TIMEOUT = "agent_timeout"
 ERR_PAIR_CODE_WRONG = "pair_code_wrong"
@@ -511,6 +512,24 @@ def parse_wire_credential(wire: str) -> dict | None:
         return None
 
 
+def is_folder_authorized(folder: str, authorized_folders: list[str]) -> bool:
+    """校验目标目录是否在授权范围内（严格门禁：精确匹配或授权目录下的子项目目录；越权与逃逸一律拒绝）。"""
+    if not isinstance(folder, str) or not folder:
+        return False
+    target = os.path.realpath(folder)
+    if not target or target == "/" or not os.path.isdir(target):
+        return False
+    for grant in authorized_folders:
+        if not isinstance(grant, str) or not grant:
+            continue
+        base = os.path.realpath(grant)
+        if not base or base == "/" or not os.path.isdir(base):
+            continue
+        if target == base or target.startswith(base + os.sep):
+            return True
+    return False
+
+
 def verify_credential(
     cred: dict,
     signing_key: bytes,
@@ -543,7 +562,7 @@ def verify_credential(
         return ERR_WRONG_TARGET
     if canonical_folder(cred["folder"]) != canonical_folder(expected_folder):
         return ERR_WRONG_FOLDER
-    if os.path.realpath(expected_folder) not in [os.path.realpath(f) for f in authorized_folders]:
+    if not is_folder_authorized(expected_folder, authorized_folders):
         return ERR_WRONG_FOLDER
     if cred["agent_id"] and cred["agent_id"] != expected_agent_id:
         return ERR_WRONG_TASK
@@ -1024,9 +1043,19 @@ class HandServer:
         """Host-configured folders are shared; project grants belong to a paired client."""
         auth = self.state.load_json("auth.json", {})
         entry = auth.get(agent_id, []) if isinstance(auth, dict) else []
-        raw_folders = entry if isinstance(entry, list) else (
-            entry.get("folders", []) if isinstance(entry, dict) else [])
-        folders = list(raw_folders) if isinstance(raw_folders, list) else []
+        raw_folders = []
+        if isinstance(entry, list):
+            raw_folders.extend(entry)
+        elif isinstance(entry, dict):
+            raw_folders.extend(entry.get("folders", []) or [])
+            raw_folders.extend(entry.get("authorized_project_folders", []) or [])
+        global_auth = auth.get("*", []) if isinstance(auth, dict) else []
+        if isinstance(global_auth, list):
+            raw_folders.extend(global_auth)
+        elif isinstance(global_auth, dict):
+            raw_folders.extend(global_auth.get("folders", []) or [])
+            raw_folders.extend(global_auth.get("authorized_project_folders", []) or [])
+        folders = list(raw_folders)
         reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
         if reg is not None and reg.get("folder"):
             folders.append(reg["folder"])
@@ -1035,14 +1064,18 @@ class HandServer:
             folders.append(cfg_folder)
         if client_id:
             grants = self.state.load_json("project_grants.json", {})
-            folders.extend(grants.get(client_id, {}).get(agent_id, []))
+            client_grants = grants.get(client_id, {})
+            folders.extend(client_grants.get(agent_id, []) or [])
+            folders.extend(client_grants.get("*", []) or [])
+            all_grants = grants.get("*", {})
+            folders.extend(all_grants.get(agent_id, []) or [])
         seen: set[str] = set()
         out: list[str] = []
         for folder in folders:
             if not isinstance(folder, str) or not folder:
                 continue
             canon = canonical_folder(folder)
-            if canon not in seen:
+            if canon not in seen and os.path.isdir(canon):
                 seen.add(canon)
                 out.append(canon)
         return out
@@ -1626,6 +1659,10 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TARGET,
                         "连接凭证不属于本设备，请重新选择设备。")
             return
+        if self.agent_config(agent_id) is None:
+            self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
+                        f"该设备上没有这个 Agent（{agent_id}）：请先在设备上确认 Agent 已安装。")
+            return
         # 凭证校验。
         wire = args.get("credential", "")
         cred = parse_wire_credential(wire) if wire else None
@@ -1662,8 +1699,7 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
                         _credential_error_message(ERR_WRONG_FOLDER))
             return
-        if not any(os.path.realpath(folder) == os.path.realpath(grant) for grant in
-                   self.authorized_folders(agent_id, client_id)):
+        if not is_folder_authorized(folder, self.authorized_folders(agent_id, client_id)):
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_FOLDER,
                         _credential_error_message(ERR_WRONG_FOLDER))
             return
@@ -2103,14 +2139,27 @@ class HandServer:
     def _do_write(self, conn, session_key, envelope, seq, folder, args) -> None:
         rel = args.get("path", "")
         content = args.get("content", "")
+        encoding = args.get("encoding", "utf-8")
         if not rel:
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         "写入需要指定 path。")
             return
-        if len(content.encode("utf-8")) > MAX_TEXT_BYTES:
-            self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
-                        f"内容太大（上限 {MAX_TEXT_BYTES} 字节）。")
-            return
+        if encoding == "base64":
+            try:
+                raw_bytes = base64.b64decode(content)
+            except Exception as e:
+                self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                            f"Base64 解码失败：{e}")
+                return
+            if len(raw_bytes) > MAX_TEXT_BYTES:
+                self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                            f"内容太大（上限 {MAX_TEXT_BYTES} 字节）。")
+                return
+        else:
+            if len(content.encode("utf-8")) > MAX_TEXT_BYTES:
+                self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
+                            f"内容太大（上限 {MAX_TEXT_BYTES} 字节）。")
+                return
         target = self._resolve_path(folder, rel)
         if target is None:
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
@@ -2118,8 +2167,12 @@ class HandServer:
             return
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            with open(target, "w", encoding="utf-8") as f:
-                f.write(content)
+            if encoding == "base64":
+                with open(target, "wb") as f:
+                    f.write(raw_bytes)
+            else:
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(content)
         except OSError as e:
             self._error(conn, session_key, envelope, seq + 1, ERR_PATH_NOT_ALLOWED,
                         f"无法写入文件：{e}")
@@ -2346,13 +2399,13 @@ class HandServer:
                             ERR_REMOTE_CONTROLLED_STOP, "已按控制指令停止。")
                 return
             _finish_run("error", f"Agent 被信号终止（退出码 {returncode}）。")
-            self._error(conn, session_key, envelope, next_seq, ERR_AGENT_NOT_FOUND,
+            self._error(conn, session_key, envelope, next_seq, ERR_EXECUTION_FAILED,
                         f"Agent 被信号终止（退出码 {returncode}）。")
             return
         if returncode != 0:
             _finish_run("error", f"Agent 执行失败（退出码 {returncode}）。")
-            self._error(conn, session_key, envelope, next_seq, ERR_AGENT_NOT_FOUND,
-                        f"Agent 执行失败（退出码 {returncode}）："
+            self._error(conn, session_key, envelope, next_seq, ERR_EXECUTION_FAILED,
+                        f"Agent 执行失败（退出码 {returncode}）：\n"
                         + output[-2000:])
             return
         _finish_run("ok", "执行完成。")
@@ -3345,13 +3398,12 @@ BUILTIN_EXTENSIONS: dict[str, dict[str, dict]] = {
         "agy": {
             "display_name": "agy", "binary": "agy",
             "binary_candidates": ["~/.local/bin/agy", "agy"],
-            "argv": ["agy", "--dangerously-skip-permissions", "{prompt}"],
+            "argv": ["agy", "-p", "{prompt}", "--model", "Gemini 3.8 Flash (Low)", "--dangerously-skip-permissions"],
             "login_check": {"type": "smoke",
                             "how": "无头模式冒烟为准；凭证位置待小米 12 上核实"},
             "folders_by_device": {},
-            "capabilities": ["dev"], "env": {}, "verified": False,
-            "note": "已知行，只在小米 12 Termux 见过（1.5.4）；本次不在范围，"
-                    "argv 待小米 12 Hand 接入时核实。",
+            "capabilities": ["dev"], "env": {}, "verified": True,
+            "note": "Android Termux 本地 Antigravity Agent（-p 非交互模式执行）。",
         },
     },
     "connector": {
@@ -4255,8 +4307,8 @@ def _mcp_call_tool(hand: "HandServer", name: str, args: dict) -> dict:
                                    "agent_timeout")
         if returncode != 0:
             return _mcp_error_text(
-                f"Agent 执行失败（退出码 {returncode}）：" + output[-2000:],
-                "agent_not_found")
+                f"Agent 执行失败（退出码 {returncode}）：\n" + output[-2000:],
+                "execution_failed")
         return _mcp_text(output[-MAX_OUTPUT_CHARS:])
     return _mcp_error_text(f"未知工具：{name}", "invalid")
 

@@ -1232,13 +1232,23 @@ private struct DeviceDetailSheet: View {
         let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
         fileOpResult = "正在请求授权目录「\(folder)」…"
 
+        let cleanAgentId: String = {
+            if let targetDev = device.deviceId {
+                if let ag = (try? localData.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.agentId != targetDev }) {
+                    let aid = ag.agentId
+                    return aid.contains(":") ? String(aid.split(separator: ":").last!) : aid
+                }
+            }
+            return "codex"
+        }()
+
         Task {
             do {
                 let ok = try await HandClient.shared.authorizeProjectFolder(
                     host: host,
                     port: port,
                     targetDeviceId: device.deviceId ?? device.agentId,
-                    agentId: "codex",
+                    agentId: cleanAgentId,
                     folder: folder
                 )
                 await MainActor.run {

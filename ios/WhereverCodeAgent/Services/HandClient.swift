@@ -878,8 +878,13 @@ public actor HandClient {
         folder: String,
         agentId: String = "codex",
         path: String,
-        content: String
+        content: String,
+        encoding: String = "utf-8"
     ) async throws -> String {
+        var callArgs: [String: Any] = ["path": path, "content": content]
+        if encoding != "utf-8" {
+            callArgs["encoding"] = encoding
+        }
         let res = try await executeCall(
             host: host,
             port: port,
@@ -887,7 +892,7 @@ public actor HandClient {
             folder: folder,
             agentId: agentId,
             action: "write",
-            args: ["path": path, "content": content]
+            args: callArgs
         )
         guard let args = res["args"] as? [String: Any],
               let output = args["output"] as? String else {
@@ -1189,25 +1194,42 @@ public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendabl
             return ToolOutcome(ok: false, summary: "操作已被用户终止", errorCode: "stopped")
         }
         let folder = defaultFolder.isEmpty ? "/Users/a1234/v5-codex-work" : defaultFolder
+
+        func normalizeRelativePath(_ p: String) -> String {
+            var path = p.trimmingCharacters(in: .whitespacesAndNewlines)
+            if path == "." || path == "./" { return "" }
+            if path.hasPrefix(folder) {
+                path = String(path.dropFirst(folder.count))
+                while path.hasPrefix("/") { path.removeFirst() }
+            }
+            if path.hasPrefix("./") {
+                path = String(path.dropFirst(2))
+            }
+            return path
+        }
+
         do {
             switch action.tool {
             case "list_files", "list":
-                let relPath = action.args["path"]?.stringValue ?? ""
+                let rawRelPath = action.args["path"]?.stringValue ?? ""
+                let relPath = normalizeRelativePath(rawRelPath)
                 let entries = try await HandClient.shared.listDirectory(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath)
                 let names = entries.map { "\($0.isDir ? "[DIR] " : "")\($0.name)" }.joined(separator: "\n")
                 return ToolOutcome(ok: true, summary: "获取到 \(entries.count) 个条目", data: names)
 
             case "read_file", "read":
-                guard let relPath = action.args["path"]?.stringValue, !relPath.isEmpty else {
+                guard let rawRelPath = action.args["path"]?.stringValue, !rawRelPath.isEmpty else {
                     return ToolOutcome(ok: false, summary: "缺少文件路径", errorCode: "missing_path")
                 }
+                let relPath = normalizeRelativePath(rawRelPath)
                 let content = try await HandClient.shared.readFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath)
                 return ToolOutcome(ok: true, summary: "成功读取 \(relPath) (\(content.count) 字符)", data: content)
 
             case "write_file", "write":
-                guard let relPath = action.args["path"]?.stringValue, !relPath.isEmpty else {
+                guard let rawRelPath = action.args["path"]?.stringValue, !rawRelPath.isEmpty else {
                     return ToolOutcome(ok: false, summary: "缺少写入路径", errorCode: "missing_path")
                 }
+                let relPath = normalizeRelativePath(rawRelPath)
                 let content = action.args["content"]?.stringValue ?? ""
                 let resultMsg = try await HandClient.shared.writeFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath, content: content)
                 return ToolOutcome(ok: true, summary: "已写入 \(relPath): \(resultMsg)", data: resultMsg)

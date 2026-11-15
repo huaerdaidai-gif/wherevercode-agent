@@ -680,22 +680,64 @@ public final class LocalChatModel: ObservableObject {
                         try? data.conversations.appendMessage(assistantMsg)
                     }
                 }
-            } else if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl, isTaskIntent {
+            } else if let agent = selectedAgent, agent.kind == .device, isTaskIntent {
                 // 单兵 Agent 明确执行工程任务
+                guard let hostRaw = agent.baseUrl ?? ((try? data.agents.listAgents())?.first(where: { $0.deviceId == agent.deviceId && $0.baseUrl != nil })?.baseUrl), !hostRaw.isEmpty else {
+                    let errMsg = "设备「\(agent.deviceId ?? "未知")」离线或未配置连接地址，无法执行任务。"
+                    if let tid = activeTaskId {
+                        _ = try? data.tasks.transition(taskId: tid, to: "failed", note: errMsg)
+                    }
+                    self.error = errMsg
+                    let assistantMsg = ConversationMessage(
+                        conversationId: id,
+                        role: "assistant",
+                        content: errMsg,
+                        source: agent.displayName,
+                        taskId: activeTaskId
+                    )
+                    try? data.conversations.appendMessage(assistantMsg)
+                    reload()
+                    return
+                }
+
                 let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
                 let parts = clean.split(separator: ":")
                 let host = String(parts[0])
                 let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
                 let targetDev = agent.deviceId ?? "MacBook-Air"
 
-                // 确保工作目录绝对非空且经过合法授权
-                let rawFolder = (agent.deviceFolder?.isEmpty == false) ? agent.deviceFolder! :
-                                ((try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.deviceFolder?.isEmpty == false })?.deviceFolder ?? "")
+                // 优先采用项目源中明确绑定的路径；若未指定则回退到 Agent/设备授权根目录
+                let projectFolder = (projectSource.targetId == targetDev || projectSource.providerId == "device") ? (projectSource.path ?? "") : ""
+                let rawFolder = !projectFolder.isEmpty ? projectFolder :
+                                ((agent.deviceFolder?.isEmpty == false) ? agent.deviceFolder! :
+                                ((try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.deviceFolder?.isEmpty == false })?.deviceFolder ?? ""))
                 let folder = !rawFolder.isEmpty ? rawFolder : (targetDev.contains("Android") || targetDev.contains("Termux") || targetDev.contains("x") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
 
                 let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
 
-                let userMsg = ConversationMessage(conversationId: id, role: "user", content: outgoing, source: "user", taskId: activeTaskId)
+                // 附件同步：若有二进制或图片附件，先推送到设备端工作区 attachments/
+                var attachmentNotice = ""
+                for name in attachedFiles {
+                    let url = ChatAttachmentStore.url(for: name)
+                    if let d = try? Data(contentsOf: url) {
+                        let relPath = "attachments/\(name)"
+                        _ = try? await HandClient.shared.writeFile(
+                            host: host,
+                            port: port,
+                            targetDeviceId: targetDev,
+                            folder: folder,
+                            agentId: realAgentId,
+                            path: relPath,
+                            content: d.base64EncodedString(),
+                            encoding: "base64"
+                        )
+                        attachmentNotice += "\n- 附件已上传至项目路径：\(relPath)"
+                    }
+                }
+
+                let finalPrompt = outgoing + (attachmentNotice.isEmpty ? "" : "\n\n[已传输附件]" + attachmentNotice)
+
+                let userMsg = ConversationMessage(conversationId: id, role: "user", content: finalPrompt, source: "user", taskId: activeTaskId)
                 try? data.conversations.appendMessage(userMsg)
                 reload()
 
@@ -705,7 +747,7 @@ public final class LocalChatModel: ObservableObject {
                     targetDeviceId: targetDev,
                     folder: folder,
                     agentId: realAgentId,
-                    prompt: outgoing,
+                    prompt: finalPrompt,
                     timeoutSeconds: 60.0
                 ) { progress in
                     Task { @MainActor in
@@ -724,18 +766,27 @@ public final class LocalChatModel: ObservableObject {
             } else {
                 // 大脑推理模式：若有已连接设备，装配真实跨设备工具
                 let toolRegistry: ToolRegistry
-                if let dev = (try? data.agents.listAgents())?.first(where: { $0.kind == .device && $0.memberConnectionState == "CONNECTED" }),
-                   let hostRaw = dev.baseUrl {
+                let targetDevObj = (selectedAgent?.kind == .device) ? selectedAgent :
+                                   (try? data.agents.listAgents())?.first(where: { $0.deviceId == projectSource.targetId && $0.memberConnectionState == "CONNECTED" }) ??
+                                   (try? data.agents.listAgents())?.first(where: { $0.kind == .device && $0.memberConnectionState == "CONNECTED" })
+
+                if let dev = targetDevObj, let hostRaw = dev.baseUrl ?? ((try? data.agents.listAgents())?.first(where: { $0.deviceId == dev.deviceId && $0.baseUrl != nil })?.baseUrl) {
                     let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
                     let parts = clean.split(separator: ":")
                     let host = String(parts[0])
                     let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-                    let rawFolder = (dev.deviceFolder?.isEmpty == false) ? dev.deviceFolder! : ""
-                    let folder = !rawFolder.isEmpty ? rawFolder : (dev.deviceId?.contains("Android") == true || dev.deviceId?.contains("x") == true ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
-                    let boundAgentId = (try? data.agents.listAgents())?.first(where: { $0.deviceId == dev.deviceId && $0.agentId != dev.agentId })?.agentId ?? "codex"
+
+                    let targetDevId = dev.deviceId ?? dev.agentId
+                    let projectFolder = (projectSource.targetId == targetDevId || projectSource.providerId == "device") ? (projectSource.path ?? "") : ""
+                    let rawFolder = !projectFolder.isEmpty ? projectFolder :
+                                    ((dev.deviceFolder?.isEmpty == false) ? dev.deviceFolder! : "")
+                    let folder = !rawFolder.isEmpty ? rawFolder : (targetDevId.contains("Android") || targetDevId.contains("x") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
+
+                    let boundAgentId = (selectedAgent != nil && selectedAgent?.kind == .device) ? selectedAgent!.agentId :
+                                       ((try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDevId && $0.agentId != targetDevId })?.agentId ?? "codex")
                     let realAgentId = boundAgentId.contains(":") ? String(boundAgentId.split(separator: ":").last!) : boundAgentId
 
-                    toolRegistry = HandCrossDeviceToolRegistry(host: host, port: port, targetDeviceId: dev.deviceId ?? dev.agentId, agentId: realAgentId, defaultFolder: folder)
+                    toolRegistry = HandCrossDeviceToolRegistry(host: host, port: port, targetDeviceId: targetDevId, agentId: realAgentId, defaultFolder: folder)
                 } else {
                     toolRegistry = ChatUnavailableTools()
                 }
@@ -746,11 +797,13 @@ public final class LocalChatModel: ObservableObject {
                     eventLog: eventLog,
                     approvalGate: DenyApprovalGate()
                 )
+                let images = collectImageDataUrls()
                 for try await event in engine.chat(
                     conversationId: id,
                     userText: outgoing,
                     brainIdOverride: selectedBrain,
-                    allowFailover: false
+                    allowFailover: false,
+                    imageDataUrls: images
                 ) {
                     try Task.checkCancellation()
                     switch event {
@@ -766,8 +819,25 @@ public final class LocalChatModel: ObservableObject {
             }
         } catch is CancellationError {
             self.error = "回复已停止"
+            if let tid = activeTaskId {
+                _ = try? data.tasks.transition(taskId: tid, to: "cancelled", note: "任务已取消")
+            }
+            reload()
         } catch {
-            self.error = SecretRedactor.redact(error.localizedDescription)
+            let errorText = SecretRedactor.redact(error.localizedDescription)
+            self.error = errorText
+            if let tid = activeTaskId {
+                _ = try? data.tasks.transition(taskId: tid, to: "failed", note: errorText)
+                let failMsg = ConversationMessage(
+                    conversationId: conversationID ?? "conv",
+                    role: "assistant",
+                    content: "任务执行失败：\(errorText)",
+                    source: selectedAgent?.displayName ?? "系统",
+                    taskId: tid
+                )
+                try? data.conversations.appendMessage(failMsg)
+            }
+            reload()
             if messages.last?.content != text { draft = text }
         }
     }
@@ -777,18 +847,42 @@ public final class LocalChatModel: ObservableObject {
         await send()
     }
 
+    /// 提取本轮所有图片附件为 Data URL 供大脑多模态使用
+    private func collectImageDataUrls() -> [String] {
+        var urls: [String] = []
+        for name in attachedFiles {
+            let lower = name.lowercased()
+            if lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") || lower.hasSuffix(".png") || lower.hasSuffix(".webp") || lower.hasSuffix(".gif") {
+                let url = ChatAttachmentStore.url(for: name)
+                if let d = try? Data(contentsOf: url), d.count <= 5 * 1024 * 1024 {
+                    let mime: String
+                    if lower.hasSuffix(".png") { mime = "image/png" }
+                    else if lower.hasSuffix(".webp") { mime = "image/webp" }
+                    else if lower.hasSuffix(".gif") { mime = "image/gif" }
+                    else { mime = "image/jpeg" }
+                    urls.append("data:\(mime);base64,\(d.base64EncodedString())")
+                }
+            }
+        }
+        return urls
+    }
+
     /// Text attachments are inlined (bounded); binary attachments are
-    /// named honestly as not sent — the chat path has no upload API.
+    /// named honestly with file sizes.
     private func attachmentContext() -> String {
         guard !attachedFiles.isEmpty else { return "" }
         var out = "\n\n[附件]"
         for name in attachedFiles {
             let url = ChatAttachmentStore.url(for: name)
-            if let d = try? Data(contentsOf: url), d.count <= 64 * 1024,
-               let text = String(data: d, encoding: .utf8) {
-                out += "\n--- \(name) ---\n\(text)"
-            } else {
-                out += "\n- \(name)（图片或二进制文件，当前大脑通道不上传内容）"
+            if let d = try? Data(contentsOf: url) {
+                if d.count <= 64 * 1024, let text = String(data: d, encoding: .utf8) {
+                    out += "\n--- \(name) ---\n\(text)"
+                } else {
+                    let lower = name.lowercased()
+                    let isImg = lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") || lower.hasSuffix(".png") || lower.hasSuffix(".webp") || lower.hasSuffix(".gif")
+                    let kind = isImg ? "图片" : "二进制文件"
+                    out += "\n- \(name)（\(kind)，\(d.count / 1024) KB，已作为多模态图像/任务附件传递）"
+                }
             }
         }
         return out
