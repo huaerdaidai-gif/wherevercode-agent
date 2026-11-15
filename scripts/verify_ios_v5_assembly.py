@@ -18,11 +18,11 @@ def run_checks():
     assert len(set(route_ids)) == 70, "Duplicate route_id found in FlagshipApp.swift"
     results.append(f"[PASS] FlagshipRoutes.all 路由完整性校验：70/70 唯一路由全部在位")
 
-    # Check 2: 3 Drawer Menus + 70 routes in 4 functional domains
+    # Check 2: 4 Drawer Menus + 70 routes in 4 functional domains
     assert "enum FlagshipDrawerMenu" in flagship_src
     menu_block = flagship_src.split("enum FlagshipDrawerMenu")[1].split("}")[0]
     menu_matches = re.findall(r'case ([a-z]+) = "([^"]+)"', menu_block)
-    assert [m[1] for m in menu_matches] == ["对话", "项目", "控制"], f"Expected drawer menus ['对话', '项目', '控制'], got {[m[1] for m in menu_matches]}"
+    assert [m[1] for m in menu_matches] == ["对话", "项目", "频道", "控制"], f"Expected drawer menus ['对话', '项目', '频道', '控制'], got {[m[1] for m in menu_matches]}"
 
     by_parent = {}
     for rid, title, parent_enum, grp, p0 in route_matches:
@@ -32,7 +32,7 @@ def run_checks():
     assert len(by_parent["projects"]) == 39
     assert len(by_parent["control"]) == 17
     assert len(by_parent["settings"]) == 9
-    results.append(f"[PASS] 抽屉三主入口(对话/项目/控制)严格限定与 70 屏功能领域对齐：对话(5) + 项目(39) + 控制(17) + 设置(9) = 70 屏")
+    results.append(f"[PASS] 抽屉四主入口(对话/项目/频道/控制)严格限定与 70 屏功能领域对齐：对话(5) + 项目(39) + 控制(17) + 设置(9) = 70 屏")
 
     # Check 3: Zero bottom TabView in App/ and FlagshipUI/
     with open(os.path.join(APP_DIR, "App", "WhereverCodeAgentApp.swift"), encoding="utf-8") as f:

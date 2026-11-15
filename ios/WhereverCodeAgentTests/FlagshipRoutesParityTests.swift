@@ -15,13 +15,44 @@ final class FlagshipRoutesParityTests: XCTestCase {
 
     func testDrawerPrimaryMenuAndRouteDomainsEnforced() {
         let menus = FlagshipDrawerMenu.allCases.map(\.rawValue)
-        XCTAssertEqual(menus, ["对话", "项目", "控制"], "左侧抽屉一级菜单严格只有：对话、项目、控制")
+        XCTAssertEqual(menus, ["对话", "项目", "频道", "控制"], "左侧抽屉一级菜单严格为：对话、项目、频道、控制")
         let domains = FlagshipDrawerParent.allCases.map(\.rawValue)
         XCTAssertEqual(domains, ["对话", "项目", "控制", "设置"], "功能领域严格划分为：对话、项目、控制、设置")
         XCTAssertEqual(FlagshipRoutes.routes(for: .chat).count, 5)
         XCTAssertEqual(FlagshipRoutes.routes(for: .projects).count, 39)
         XCTAssertEqual(FlagshipRoutes.routes(for: .control).count, 17)
         XCTAssertEqual(FlagshipRoutes.routes(for: .settings).count, 9)
+    }
+
+    func testPrivateChatPolicyValidatorStrictlyBlocksAgentToAgentDirectMessage() {
+        // 用户 ↔ 用户：允许
+        XCTAssertNoThrow(try PrivateChatPolicyValidator.validate(initiatorIsAgent: false, targetIsAgent: false))
+        // 用户 ↔ Agent：允许
+        XCTAssertNoThrow(try PrivateChatPolicyValidator.validate(initiatorIsAgent: false, targetIsAgent: true))
+        XCTAssertNoThrow(try PrivateChatPolicyValidator.validate(initiatorIsAgent: true, targetIsAgent: false))
+
+        // 严格禁止：Agent ↔ Agent 私聊
+        XCTAssertThrowsError(try PrivateChatPolicyValidator.validate(initiatorIsAgent: true, targetIsAgent: true)) { error in
+            guard let policyErr = error as? PrivateChatPolicyError else {
+                XCTFail("应抛出 PrivateChatPolicyError")
+                return
+            }
+            XCTAssertEqual(policyErr, .forbiddenAgentToAgentChat)
+            XCTAssertTrue(policyErr.localizedDescription.contains("严格禁止 Agent ↔ Agent 私聊"))
+        }
+    }
+
+    func testChannelItemModelAndActionFlags() {
+        var ch = V5ChannelItem(id: "c1", name: "架构设计", topic: "内核与边界讨论", isPrivate: true)
+        XCTAssertEqual(ch.name, "架构设计")
+        XCTAssertTrue(ch.isPrivate)
+        XCTAssertFalse(ch.isMuted)
+        XCTAssertFalse(ch.isIgnored)
+
+        ch.isMuted = true
+        XCTAssertTrue(ch.isMuted)
+        ch.isIgnored = true
+        XCTAssertTrue(ch.isIgnored)
     }
 
     func testTerminalRouteExplicitlyMarksPlatformRestriction() {

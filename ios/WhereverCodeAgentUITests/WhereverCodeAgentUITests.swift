@@ -203,6 +203,13 @@ final class WhereverCodeAgentUITests: XCTestCase {
             return
         }
 
+        if destination == "channels" || destination == "channel" {
+            let channelBtn = app.buttons["drawer.parent.频道"].firstMatch
+            XCTAssertTrue(channelBtn.waitForExistence(timeout: 10))
+            channelBtn.tap()
+            return
+        }
+
         if destination == "console" || destination == "dashboard" {
             let ctrlBtn = app.buttons["drawer.parent.控制"].firstMatch
             XCTAssertTrue(ctrlBtn.waitForExistence(timeout: 10))

@@ -91,7 +91,11 @@ public struct FlagshipRouteDestinationView: View {
 
         // MARK: - 二、工作台 · 协作 (10 路由)
         case "channels", "channel":
-            ChatListView(appState: appState)
+            ChannelsHomeView(
+                appState: appState,
+                onOpenDrawer: { onNavigateRoute("chat") },
+                onNavigateRoute: onNavigateRoute
+            )
         case "team", "agents", "agentdetail", "delegate", "agentresume", "agentcompare", "orchestrator", "handoff":
             CollaborationAndAgentsScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
@@ -1435,6 +1439,1867 @@ private struct ConnectionExtendedScreen: View {
                     Text("通信网络与路径详情 (\(route.id))：iOS 端仅使用系统标准 URLSession HTTPS (强制 ATS TLS) 与 WebSocket，不内置私有 VPNService；跨端投递状态严格区分 PERSISTED / DELIVERED / CLAIMED / READ，断线缓存在本地 SQLite 绝不伪装已送达。")
                 default:
                     Text(route.title)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 3. 频道与私聊主视图实现 (ChannelsHomeView & ChannelDetailWorkspaceView)
+
+public struct V5ChannelItem: Identifiable, Equatable, Hashable {
+    public let id: String
+    public var name: String
+    public var topic: String
+    public var isPrivate: Bool
+    public var associatedProjectId: String?
+    public var associatedProjectName: String?
+    public var memberCount: Int
+    public var agentCount: Int
+    public var lastMessageText: String
+    public var lastMessageTime: String
+    public var unreadCount: Int
+    public var isMuted: Bool
+    public var isIgnored: Bool
+    public var isArchived: Bool
+
+    public init(
+        id: String,
+        name: String,
+        topic: String = "",
+        isPrivate: Bool = false,
+        associatedProjectId: String? = nil,
+        associatedProjectName: String? = nil,
+        memberCount: Int = 3,
+        agentCount: Int = 1,
+        lastMessageText: String = "",
+        lastMessageTime: String = "12:00",
+        unreadCount: Int = 0,
+        isMuted: Bool = false,
+        isIgnored: Bool = false,
+        isArchived: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.topic = topic
+        self.isPrivate = isPrivate
+        self.associatedProjectId = associatedProjectId
+        self.associatedProjectName = associatedProjectName
+        self.memberCount = memberCount
+        self.agentCount = agentCount
+        self.lastMessageText = lastMessageText
+        self.lastMessageTime = lastMessageTime
+        self.unreadCount = unreadCount
+        self.isMuted = isMuted
+        self.isIgnored = isIgnored
+        self.isArchived = isArchived
+    }
+}
+
+public struct V5DirectMessageItem: Identifiable, Equatable, Hashable {
+    public let id: String
+    public var targetId: String
+    public var targetName: String
+    public var isAgent: Bool
+    public var targetRole: String
+    public var lastMessageText: String
+    public var lastMessageTime: String
+    public var unreadCount: Int
+    public var isMuted: Bool
+    public var isIgnored: Bool
+
+    public init(
+        id: String,
+        targetId: String,
+        targetName: String,
+        isAgent: Bool,
+        targetRole: String = "",
+        lastMessageText: String = "",
+        lastMessageTime: String = "12:00",
+        unreadCount: Int = 0,
+        isMuted: Bool = false,
+        isIgnored: Bool = false
+    ) {
+        self.id = id
+        self.targetId = targetId
+        self.targetName = targetName
+        self.isAgent = isAgent
+        self.targetRole = targetRole
+        self.lastMessageText = lastMessageText
+        self.lastMessageTime = lastMessageTime
+        self.unreadCount = unreadCount
+        self.isMuted = isMuted
+        self.isIgnored = isIgnored
+    }
+}
+
+public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
+    public let id: String
+    public var senderId: String
+    public var senderName: String
+    public var isAgent: Bool
+    public var text: String
+    public var timestamp: String
+    public var fullDateTime: String
+    public var replyToId: String?
+    public var replyToText: String?
+    public var linkedTaskId: String?
+    public var linkedTaskTitle: String?
+    public var linkedTaskState: String?
+    public var attachmentName: String?
+    public var attachmentType: String?
+    public var attachmentSize: String?
+
+    public init(
+        id: String,
+        senderId: String,
+        senderName: String,
+        isAgent: Bool,
+        text: String,
+        timestamp: String = "12:00",
+        fullDateTime: String = "2026-11-15 12:00:00",
+        replyToId: String? = nil,
+        replyToText: String? = nil,
+        linkedTaskId: String? = nil,
+        linkedTaskTitle: String? = nil,
+        linkedTaskState: String? = nil,
+        attachmentName: String? = nil,
+        attachmentType: String? = nil,
+        attachmentSize: String? = nil
+    ) {
+        self.id = id
+        self.senderId = senderId
+        self.senderName = senderName
+        self.isAgent = isAgent
+        self.text = text
+        self.timestamp = timestamp
+        self.fullDateTime = fullDateTime
+        self.replyToId = replyToId
+        self.replyToText = replyToText
+        self.linkedTaskId = linkedTaskId
+        self.linkedTaskTitle = linkedTaskTitle
+        self.linkedTaskState = linkedTaskState
+        self.attachmentName = attachmentName
+        self.attachmentType = attachmentType
+        self.attachmentSize = attachmentSize
+    }
+}
+
+public struct V5ChannelFile: Identifiable, Equatable, Hashable {
+    public let id: String
+    public var fileName: String
+    public var fileSize: String
+    public var fileType: String
+    public var uploaderName: String
+    public var uploadTime: String
+    public var associatedProjectName: String?
+    public var associatedTaskId: String?
+    public var sourceKind: String
+
+    public init(
+        id: String,
+        fileName: String,
+        fileSize: String,
+        fileType: String,
+        uploaderName: String,
+        uploadTime: String = "11-15 12:00",
+        associatedProjectName: String? = nil,
+        associatedTaskId: String? = nil,
+        sourceKind: String = "local"
+    ) {
+        self.id = id
+        self.fileName = fileName
+        self.fileSize = fileSize
+        self.fileType = fileType
+        self.uploaderName = uploaderName
+        self.uploadTime = uploadTime
+        self.associatedProjectName = associatedProjectName
+        self.associatedTaskId = associatedTaskId
+        self.sourceKind = sourceKind
+    }
+}
+
+public struct CloudDriveProvider: Identifiable, Equatable, Hashable {
+    public let id: String
+    public let name: String
+    public let iconName: String
+    public let isConnected: Bool
+    public let accountName: String?
+    public let quotaText: String
+
+    public init(id: String, name: String, iconName: String, isConnected: Bool, accountName: String? = nil, quotaText: String = "") {
+        self.id = id
+        self.name = name
+        self.iconName = iconName
+        self.isConnected = isConnected
+        self.accountName = accountName
+        self.quotaText = quotaText
+    }
+}
+
+public enum PrivateChatPolicyValidator {
+    /// 严格私聊规则：
+    /// 允许：用户 ↔ 用户、用户 ↔ Agent
+    /// 严格禁止：Agent ↔ Agent 私聊！
+    public static func validate(initiatorIsAgent: Bool, targetIsAgent: Bool) throws {
+        if initiatorIsAgent && targetIsAgent {
+            throw PrivateChatPolicyError.forbiddenAgentToAgentChat
+        }
+    }
+}
+
+public enum PrivateChatPolicyError: LocalizedError {
+    case forbiddenAgentToAgentChat
+
+    public var errorDescription: String? {
+        switch self {
+        case .forbiddenAgentToAgentChat:
+            return "平台安全规范拦截：严格禁止 Agent ↔ Agent 私聊。Agent 间协作统一通过有权限和审计记录的频道或任务工作流进行。"
+        }
+    }
+}
+
+/// 频道与私聊主首页
+public struct ChannelsHomeView: View {
+    @ObservedObject public var appState: AppState
+    public var onOpenDrawer: () -> Void
+    public var onNavigateRoute: (String) -> Void
+
+    @State private var selectedPartition: ChannelPartition = .channels
+    @State private var searchQuery = ""
+    @State private var showCreateChannelSheet = false
+    @State private var showCreateDMSheet = false
+    @State private var showPolicyAlert = false
+    @State private var policyAlertMessage = ""
+
+    // 频道数据与选中
+    @State private var channels: [V5ChannelItem] = []
+    @State private var activeWorkspaceChannel: V5ChannelItem? = nil
+
+    // 私聊数据与选中
+    @State private var directMessages: [V5DirectMessageItem] = []
+    @State private var activeWorkspaceDM: V5DirectMessageItem? = nil
+
+    // 删除二次确认
+    @State private var channelToDelete: V5ChannelItem? = nil
+    @State private var showDeleteConfirmation = false
+
+    public enum ChannelPartition: String, CaseIterable, Identifiable {
+        case channels = "频道"
+        case directMessages = "私聊"
+
+        public var id: String { rawValue }
+    }
+
+    public init(
+        appState: AppState,
+        onOpenDrawer: @escaping () -> Void = {},
+        onNavigateRoute: @escaping (String) -> Void = { _ in }
+    ) {
+        self.appState = appState
+        self.onOpenDrawer = onOpenDrawer
+        self.onNavigateRoute = onNavigateRoute
+    }
+
+    private var filteredChannels: [V5ChannelItem] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty { return channels }
+        return channels.filter {
+            $0.name.lowercased().contains(q) ||
+            $0.topic.lowercased().contains(q) ||
+            $0.lastMessageText.lowercased().contains(q)
+        }
+    }
+
+    private var filteredDMs: [V5DirectMessageItem] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty { return directMessages }
+        return directMessages.filter {
+            $0.targetName.lowercased().contains(q) ||
+            $0.targetRole.lowercased().contains(q) ||
+            $0.lastMessageText.lowercased().contains(q)
+        }
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            topNavBar
+            partitionPicker
+            searchField
+
+            if selectedPartition == .channels {
+                channelsListView
+            } else {
+                directMessagesListView
+            }
+        }
+        .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
+        .onAppear(perform: loadData)
+        .sheet(isPresented: $showCreateChannelSheet) {
+            CreateChannelSheet(appState: appState) { newChannel in
+                channels.insert(newChannel, at: 0)
+            }
+        }
+        .sheet(isPresented: $showCreateDMSheet) {
+            CreateDirectMessageSheet(appState: appState) { newDM in
+                directMessages.insert(newDM, at: 0)
+            }
+        }
+        .alert("删除频道", isPresented: $showDeleteConfirmation, presenting: channelToDelete) { ch in
+            Button("取消", role: .cancel) {}
+            Button("删除", role: .destructive) {
+                channels.removeAll { $0.id == ch.id }
+            }
+        } message: { ch in
+            Text("确定要删除「#\(ch.name)」吗？删除后该频道的消息记录将对所有成员不可见，此操作需要平台授权。")
+        }
+        .alert("安全规范提示", isPresented: $showPolicyAlert) {
+            Button("我知道了", role: .cancel) {}
+        } message: {
+            Text(policyAlertMessage)
+        }
+        .navigationDestination(item: $activeWorkspaceChannel) { ch in
+            ChannelDetailWorkspaceView(
+                appState: appState,
+                channelItem: ch,
+                dmItem: nil,
+                onNavigateRoute: onNavigateRoute
+            )
+        }
+        .navigationDestination(item: $activeWorkspaceDM) { dm in
+            ChannelDetailWorkspaceView(
+                appState: appState,
+                channelItem: nil,
+                dmItem: dm,
+                onNavigateRoute: onNavigateRoute
+            )
+        }
+    }
+
+    // MARK: - 顶栏
+    private var topNavBar: some View {
+        HStack(spacing: 12) {
+            Button(action: onOpenDrawer) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .frame(width: 38, height: 38)
+                    .background(Color.white, in: Circle())
+                    .overlay(Circle().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+            }
+            .accessibilityIdentifier("navigation.menu")
+            .accessibilityLabel("打开导航抽屉")
+
+            Text("频道与协作")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+
+            Spacer()
+
+            Menu {
+                Button {
+                    showCreateChannelSheet = true
+                } label: {
+                    Label("新建频道", systemImage: "number")
+                }
+                .accessibilityIdentifier("channels.action.createChannel")
+
+                Button {
+                    showCreateDMSheet = true
+                } label: {
+                    Label("发起私聊", systemImage: "person.2")
+                }
+                .accessibilityIdentifier("channels.action.createDM")
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("新建")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.white, in: Capsule())
+                .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+            }
+            .accessibilityIdentifier("channels.addButton")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - 分区选择器
+    private var partitionPicker: some View {
+        Picker("分区", selection: $selectedPartition) {
+            ForEach(ChannelPartition.allCases) { part in
+                Text(part.rawValue).tag(part)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - 搜索框
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .font(.system(size: 14))
+            TextField(selectedPartition == .channels ? "搜索频道名称、简介或消息…" : "搜索私聊成员、Agent 或对话…", text: $searchQuery)
+                .font(.system(size: 14))
+                .textInputAutocapitalization(.never)
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - 频道列表
+    private var channelsListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if filteredChannels.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "number.circle")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Text(searchQuery.isEmpty ? "暂无频道" : "未找到匹配的频道")
+                            .font(.headline)
+                            .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                        Text("点击右上角「＋」可创建团队讨论频道")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    ForEach(filteredChannels) { ch in
+                        Button {
+                            activeWorkspaceChannel = ch
+                        } label: {
+                            channelRow(ch)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("channels.row.\(ch.id)")
+                        .contextMenu {
+                            Button {
+                                toggleMute(ch)
+                            } label: {
+                                Label(ch.isMuted ? "取消免打扰" : "设为免打扰", systemImage: ch.isMuted ? "bell" : "bell.slash")
+                            }
+                            Button {
+                                toggleIgnore(ch)
+                            } label: {
+                                Label(ch.isIgnored ? "取消忽略" : "忽略消息", systemImage: "eye.slash")
+                            }
+                            Button {
+                                toggleArchive(ch)
+                            } label: {
+                                Label(ch.isArchived ? "移出归档" : "归档频道", systemImage: "archivebox")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                channelToDelete = ch
+                                showDeleteConfirmation = true
+                            } label: {
+                                Label("删除频道", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func channelRow(_ ch: V5ChannelItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(ch.isPrivate ? Color(red: 0.90, green: 0.88, blue: 0.84) : Color(red: 0.88, green: 0.90, blue: 0.94))
+                    .frame(width: 44, height: 44)
+                Image(systemName: ch.isPrivate ? "lock.fill" : "number")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.22, green: 0.21, blue: 0.20))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(ch.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    if ch.isMuted {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let proj = ch.associatedProjectName {
+                        Text(proj)
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color(red: 0.92, green: 0.91, blue: 0.88), in: Capsule())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(ch.lastMessageTime)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(ch.lastMessageText.isEmpty ? (ch.topic.isEmpty ? "暂无新消息" : ch.topic) : ch.lastMessageText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    Text("\(ch.memberCount) 成员 · \(ch.agentCount) Agent")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if ch.unreadCount > 0 {
+                        Text("\(ch.unreadCount)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color(red: 0.82, green: 0.35, blue: 0.20), in: Capsule())
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
+    }
+
+    // MARK: - 私聊列表
+    private var directMessagesListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if filteredDMs.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Text(searchQuery.isEmpty ? "暂无私聊会话" : "未找到匹配的私聊")
+                            .font(.headline)
+                            .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                        Text("点击右上角「＋」可发起与成员或 Agent 的 1:1 私聊\n（平台规范：严格禁止 Agent ↔ Agent 直连私聊）")
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    ForEach(filteredDMs) { dm in
+                        Button {
+                            activeWorkspaceDM = dm
+                        } label: {
+                            directMessageRow(dm)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("dms.row.\(dm.id)")
+                        .contextMenu {
+                            Button {
+                                toggleMuteDM(dm)
+                            } label: {
+                                Label(dm.isMuted ? "取消免打扰" : "设为免打扰", systemImage: dm.isMuted ? "bell" : "bell.slash")
+                            }
+                            Button {
+                                toggleIgnoreDM(dm)
+                            } label: {
+                                Label(dm.isIgnored ? "取消忽略" : "忽略消息", systemImage: "eye.slash")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                directMessages.removeAll { $0.id == dm.id }
+                            } label: {
+                                Label("关闭私聊", systemImage: "xmark.circle")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func directMessageRow(_ dm: V5DirectMessageItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(dm.isAgent ? Color(red: 0.85, green: 0.52, blue: 0.38) : Color(red: 0.45, green: 0.58, blue: 0.70))
+                    .frame(width: 44, height: 44)
+                Text(String(dm.targetName.prefix(1)))
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(dm.targetName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    Text(dm.isAgent ? "Agent" : "用户")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(dm.isAgent ? Color(red: 0.95, green: 0.88, blue: 0.84) : Color(red: 0.88, green: 0.92, blue: 0.96), in: Capsule())
+                        .foregroundStyle(dm.isAgent ? Color(red: 0.70, green: 0.30, blue: 0.15) : Color(red: 0.20, green: 0.40, blue: 0.60))
+                    if dm.isMuted {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(dm.lastMessageTime)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(dm.lastMessageText.isEmpty ? "暂无新消息" : dm.lastMessageText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    Text(dm.targetRole)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if dm.unreadCount > 0 {
+                        Text("\(dm.unreadCount)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color(red: 0.82, green: 0.35, blue: 0.20), in: Capsule())
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
+    }
+
+    private func toggleMute(_ ch: V5ChannelItem) {
+        if let idx = channels.firstIndex(where: { $0.id == ch.id }) {
+            channels[idx].isMuted.toggle()
+        }
+    }
+
+    private func toggleIgnore(_ ch: V5ChannelItem) {
+        if let idx = channels.firstIndex(where: { $0.id == ch.id }) {
+            channels[idx].isIgnored.toggle()
+        }
+    }
+
+    private func toggleArchive(_ ch: V5ChannelItem) {
+        if let idx = channels.firstIndex(where: { $0.id == ch.id }) {
+            channels[idx].isArchived.toggle()
+        }
+    }
+
+    private func toggleMuteDM(_ dm: V5DirectMessageItem) {
+        if let idx = directMessages.firstIndex(where: { $0.id == dm.id }) {
+            directMessages[idx].isMuted.toggle()
+        }
+    }
+
+    private func toggleIgnoreDM(_ dm: V5DirectMessageItem) {
+        if let idx = directMessages.firstIndex(where: { $0.id == dm.id }) {
+            directMessages[idx].isIgnored.toggle()
+        }
+    }
+
+    private func loadData() {
+        if channels.isEmpty {
+            channels = [
+                V5ChannelItem(
+                    id: "ch-general",
+                    name: "全员协作",
+                    topic: "WhereverCode 全平台项目总线与 Agent 协同讨论",
+                    isPrivate: false,
+                    associatedProjectId: "proj-wherevercode",
+                    associatedProjectName: "WhereverCode V5",
+                    memberCount: 5,
+                    agentCount: 3,
+                    lastMessageText: "@Codex 请确认当前 iOS 端 7 处核心 UI 截图与编译状态",
+                    lastMessageTime: "12:45",
+                    unreadCount: 2
+                ),
+                V5ChannelItem(
+                    id: "ch-frontend",
+                    name: "前端开发",
+                    topic: "SwiftUI 与 Compose 原生端对齐及路由一致性审查",
+                    isPrivate: false,
+                    associatedProjectId: "proj-ios",
+                    associatedProjectName: "iOS Native",
+                    memberCount: 4,
+                    agentCount: 2,
+                    lastMessageText: "已完成左侧抽屉严格 4 菜单改造，正在运行 XCTest",
+                    lastMessageTime: "12:30",
+                    unreadCount: 0
+                ),
+                V5ChannelItem(
+                    id: "ch-arch",
+                    name: "架构设计",
+                    topic: "BrainEngine、17 模型适配器、Task 10 状态机边界",
+                    isPrivate: true,
+                    associatedProjectId: "proj-brain",
+                    associatedProjectName: "Brain Engine",
+                    memberCount: 3,
+                    agentCount: 1,
+                    lastMessageText: "已合入 PR #13 安全修复，ATS 与 Keychain 策略严格保留",
+                    lastMessageTime: "11:15",
+                    unreadCount: 0
+                ),
+                V5ChannelItem(
+                    id: "ch-qa",
+                    name: "QA 验证",
+                    topic: "自动化 CI、真机端到端验收与截图交付审查",
+                    isPrivate: false,
+                    associatedProjectId: nil,
+                    associatedProjectName: nil,
+                    memberCount: 6,
+                    agentCount: 2,
+                    lastMessageText: "模拟器与真机运行产物均已打标并归档",
+                    lastMessageTime: "10:20",
+                    unreadCount: 0
+                )
+            ]
+        }
+
+        if directMessages.isEmpty {
+            directMessages = [
+                V5DirectMessageItem(
+                    id: "dm-codex",
+                    targetId: "agent-codex",
+                    targetName: "Codex",
+                    isAgent: true,
+                    targetRole: "设备 Agent · 代码实现与构建",
+                    lastMessageText: "收到任务，正在执行 70 屏契约校验与截图导出。",
+                    lastMessageTime: "12:44",
+                    unreadCount: 1
+                ),
+                V5DirectMessageItem(
+                    id: "dm-claude",
+                    targetId: "agent-claude",
+                    targetName: "Claude Code",
+                    isAgent: true,
+                    targetRole: "云端 Agent · 架构规划与重构",
+                    lastMessageText: "建议将频道分为消息、文件、任务三个独立内部分区。",
+                    lastMessageTime: "12:10",
+                    unreadCount: 0
+                ),
+                V5DirectMessageItem(
+                    id: "dm-user-lead",
+                    targetId: "user-lead",
+                    targetName: "项目主管",
+                    isAgent: false,
+                    targetRole: "平台管理员 · 审批中心",
+                    lastMessageText: "验收标准以最终定稿为准，严禁自行合并 main 分支。",
+                    lastMessageTime: "09:30",
+                    unreadCount: 0
+                )
+            ]
+        }
+    }
+}
+
+/// 频道与私聊内部多功能工作台
+public struct ChannelDetailWorkspaceView: View {
+    @ObservedObject public var appState: AppState
+    public var channelItem: V5ChannelItem?
+    public var dmItem: V5DirectMessageItem?
+    public var onNavigateRoute: (String) -> Void
+
+    @State private var selectedTab: WorkspaceTab = .messages
+    @State private var composerText = ""
+    @State private var isSending = false
+    @State private var messages: [V5ChannelMessage] = []
+    @State private var files: [V5ChannelFile] = []
+    @State private var activeTasks: [LocalTask] = []
+
+    // 交互状态
+    @State private var replyingTo: V5ChannelMessage? = nil
+    @State private var selectedAttachment: V5ChannelFile? = nil
+    @State private var showAttachmentActionSheet = false
+    @State private var showProjectFilePicker = false
+    @State private var showCloudDrivePicker = false
+    @State private var showLinkTaskPicker = false
+    @State private var selectedAgentProfile: V5ChannelMessage? = nil
+    @State private var showChannelSettingsSheet = false
+    @State private var showSendErrorAlert = false
+    @State private var sendErrorMessage = ""
+
+    public enum WorkspaceTab: String, CaseIterable, Identifiable {
+        case messages = "消息"
+        case files = "文件"
+        case tasks = "任务"
+
+        public var id: String { rawValue }
+    }
+
+    public init(
+        appState: AppState,
+        channelItem: V5ChannelItem? = nil,
+        dmItem: V5DirectMessageItem? = nil,
+        onNavigateRoute: @escaping (String) -> Void = { _ in }
+    ) {
+        self.appState = appState
+        self.channelItem = channelItem
+        self.dmItem = dmItem
+        self.onNavigateRoute = onNavigateRoute
+    }
+
+    private var displayName: String {
+        if let ch = channelItem {
+            return "# \(ch.name)"
+        }
+        if let dm = dmItem {
+            return dm.targetName
+        }
+        return "会话工作台"
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            topWorkspaceHeader
+            tabPicker
+
+            switch selectedTab {
+            case .messages:
+                messagesTab
+            case .files:
+                filesTab
+            case .tasks:
+                tasksTab
+            }
+        }
+        .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showChannelSettingsSheet = true
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                }
+                .accessibilityIdentifier("channel.settingsButton")
+            }
+        }
+        .onAppear(perform: loadWorkspaceData)
+        .sheet(item: $selectedAgentProfile) { msg in
+            AgentProfileSheet(message: msg)
+        }
+        .sheet(isPresented: $showChannelSettingsSheet) {
+            ChannelSettingsSheet(channel: channelItem, dm: dmItem)
+        }
+        .sheet(isPresented: $showProjectFilePicker) {
+            ProjectFilePickerSheet { selectedFile in
+                selectedAttachment = selectedFile
+            }
+        }
+        .sheet(isPresented: $showCloudDrivePicker) {
+            CloudDrivePickerSheet { selectedCloudFile in
+                selectedAttachment = selectedCloudFile
+            }
+        }
+        .sheet(isPresented: $showLinkTaskPicker) {
+            LinkTaskPickerSheet(tasks: activeTasks) { linkedTask in
+                composerText += " [关联任务: \(linkedTask.title)]"
+            }
+        }
+        .alert("发送失败", isPresented: $showSendErrorAlert) {
+            Button("好的", role: .cancel) {}
+        } message: {
+            Text(sendErrorMessage)
+        }
+    }
+
+    // MARK: - 工作台顶部
+    private var topWorkspaceHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(displayName)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    if let ch = channelItem, ch.isPrivate {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 7, height: 7)
+                    Text("实时连接 · WebSocket live")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var tabPicker: some View {
+        Picker("内部分区", selection: $selectedTab) {
+            ForEach(WorkspaceTab.allCases) { tab in
+                Text(tab.rawValue).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
+    }
+
+    // MARK: - 消息分区
+    private var messagesTab: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(messages) { msg in
+                            messageRow(msg)
+                                .id(msg.id)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+            }
+
+            composerSection
+        }
+    }
+
+    private func messageRow(_ msg: V5ChannelMessage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 10) {
+                // 头像：点击查看 Agent 资料，长按快速 @ 插入输入框
+                Button {
+                    selectedAgentProfile = msg
+                } label: {
+                    Circle()
+                        .fill(msg.isAgent ? Color(red: 0.85, green: 0.52, blue: 0.38) : Color(red: 0.45, green: 0.58, blue: 0.70))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Text(String(msg.senderName.prefix(1)))
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                        )
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        if msg.isAgent {
+                            let mention = "@\(msg.senderName) "
+                            if !composerText.contains(mention) {
+                                composerText = mention + composerText
+                            }
+                        }
+                    }
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(msg.senderName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        if msg.isAgent {
+                            Text("Agent")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color(red: 0.95, green: 0.88, blue: 0.84), in: Capsule())
+                                .foregroundStyle(Color(red: 0.70, green: 0.30, blue: 0.15))
+                        }
+                        Spacer()
+                        // 真实时间：点击展开完整日期与具体秒数
+                        Text(msg.timestamp)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let reply = msg.replyToText {
+                        HStack(spacing: 4) {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.4))
+                                .frame(width: 2)
+                            Text("回复: \(reply)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    Text(msg.text)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.16))
+                        .textSelection(.enabled)
+
+                    // 附件卡片展示
+                    if let attName = msg.attachmentName {
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(attName)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                Text("\(msg.attachmentType ?? "文件") · \(msg.attachmentSize ?? "")")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(8)
+                        .background(Color(red: 0.94, green: 0.93, blue: 0.90), in: RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    // 关联任务卡片
+                    if let tId = msg.linkedTaskId, let tTitle = msg.linkedTaskTitle {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checklist")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("关联任务: \(tTitle)")
+                                    .font(.system(size: 12, weight: .medium))
+                                Text("状态: \(msg.linkedTaskState ?? "working") · ID: \(String(tId.prefix(8)))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(8)
+                        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.91, green: 0.90, blue: 0.88), lineWidth: 1))
+        .contextMenu {
+            Button {
+                replyingTo = msg
+            } label: {
+                Label("回复", systemImage: "arrowshape.turn.up.left")
+            }
+            Button {
+                UIPasteboard.general.string = msg.text
+            } label: {
+                Label("复制文本", systemImage: "doc.on.doc")
+            }
+            if msg.senderId == "user-me" {
+                Button {
+                    composerText = msg.text
+                } label: {
+                    Label("编辑消息", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    messages.removeAll { $0.id == msg.id }
+                } label: {
+                    Label("撤回消息", systemImage: "arrow.uturn.backward")
+                }
+            }
+            Button {
+                showLinkTaskPicker = true
+            } label: {
+                Label("关联任务", systemImage: "link")
+            }
+        }
+    }
+
+    // MARK: - 输入框区域（仅一个「＋」展开四项）
+    private var composerSection: some View {
+        VStack(spacing: 4) {
+            if let reply = replyingTo {
+                HStack {
+                    Text("回复 \(reply.senderName): \(reply.text)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button {
+                        replyingTo = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+            }
+
+            if let att = selectedAttachment {
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Text("\(att.fileName) (\(att.fileSize))")
+                        .font(.caption2)
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    Spacer()
+                    Button {
+                        selectedAttachment = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+            }
+
+            HStack(spacing: 8) {
+                // 单一「＋」展开入口：上传附件、从项目选择、从网盘选择、关联任务
+                Menu {
+                    Button {
+                        // 上传本地附件模拟
+                        selectedAttachment = V5ChannelFile(
+                            id: UUID().uuidString,
+                            fileName: "evidence_ios_v5.png",
+                            fileSize: "2.4 MB",
+                            fileType: "image",
+                            uploaderName: "我",
+                            sourceKind: "local"
+                        )
+                    } label: {
+                        Label("上传附件", systemImage: "arrow.up.doc")
+                    }
+
+                    Button {
+                        showProjectFilePicker = true
+                    } label: {
+                        Label("从项目选择", systemImage: "folder")
+                    }
+
+                    Button {
+                        showCloudDrivePicker = true
+                    } label: {
+                        Label("从网盘选择", systemImage: "cloud")
+                    }
+
+                    Button {
+                        showLinkTaskPicker = true
+                    } label: {
+                        Label("关联任务", systemImage: "link")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        .frame(width: 36, height: 36)
+                        .background(Color(red: 0.92, green: 0.91, blue: 0.89), in: Circle())
+                }
+                .accessibilityIdentifier("channel.composer.plus")
+
+                TextField("发消息，长按头像 @ Agent…", text: $composerText)
+                    .font(.system(size: 14))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                    .accessibilityIdentifier("channel.composer.input")
+
+                Button {
+                    sendMessage()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil) ? Color.secondary.opacity(0.3) : Color(red: 0.82, green: 0.49, blue: 0.35))
+                }
+                .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil)
+                .accessibilityIdentifier("channel.composer.send")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(red: 0.95, green: 0.94, blue: 0.92))
+        }
+    }
+
+    private func sendMessage() {
+        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || selectedAttachment != nil else { return }
+
+        let newMsg = V5ChannelMessage(
+            id: UUID().uuidString,
+            senderId: "user-me",
+            senderName: "我",
+            isAgent: false,
+            text: text.isEmpty ? "分享了附件" : text,
+            timestamp: "12:46",
+            fullDateTime: "2026-11-15 12:46:00",
+            replyToId: replyingTo?.id,
+            replyToText: replyingTo?.text,
+            attachmentName: selectedAttachment?.fileName,
+            attachmentType: selectedAttachment?.fileType,
+            attachmentSize: selectedAttachment?.fileSize
+        )
+        messages.append(newMsg)
+        composerText = ""
+        replyingTo = nil
+        selectedAttachment = nil
+    }
+
+    // MARK: - 文件分区
+    private var filesTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                // 网盘统一适配器状态卡片
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("统一网盘适配器")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        cloudDriveBadge(name: "Google Drive", status: "可用 · OAuth2", isOk: true)
+                        cloudDriveBadge(name: "OneDrive", status: "可用 · OAuth2", isOk: true)
+                        cloudDriveBadge(name: "WebDAV", status: "已连接 · NAS", isOk: true)
+                        cloudDriveBadge(name: "Cloudreve", status: "已连接 · 私有", isOk: true)
+                    }
+                }
+                .padding(12)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
+
+                // 文件汇总列表
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("频道文件汇总 (\(files.count))")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        Spacer()
+                    }
+
+                    ForEach(files) { file in
+                        HStack(spacing: 12) {
+                            Image(systemName: fileIcon(file.fileType))
+                                .font(.system(size: 20))
+                                .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                                .frame(width: 32)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.fileName)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                HStack(spacing: 6) {
+                                    Text("\(file.fileSize) · \(file.uploaderName) · \(file.uploadTime)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    if let p = file.associatedProjectName {
+                                        Text(p)
+                                            .font(.caption2)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                                    }
+                                }
+                            }
+                            Spacer()
+
+                            Menu {
+                                Button("预览文件") {}
+                                Button("下载至本地") {}
+                                Button("分享链接") {}
+                                Divider()
+                                Button(role: .destructive) {
+                                    files.removeAll { $0.id == file.id }
+                                } label: {
+                                    Label("从频道移除", systemImage: "trash")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 30, height: 30)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(red: 0.92, green: 0.91, blue: 0.89), lineWidth: 1))
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func cloudDriveBadge(name: String, status: String, isOk: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "externaldrive.connected.to.line.below")
+                .font(.system(size: 12))
+                .foregroundStyle(isOk ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.16))
+                Text(status)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(6)
+        .background(Color(red: 0.96, green: 0.96, blue: 0.94), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func fileIcon(_ kind: String) -> String {
+        switch kind {
+        case "image": return "photo"
+        case "pdf": return "doc.richtext"
+        case "code": return "chevron.left.forwardslash.chevron.right"
+        case "zip": return "doc.zipper"
+        default: return "doc"
+        }
+    }
+
+    // MARK: - 任务分区
+    private var tasksTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("频道关联任务 (\(activeTasks.count))")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    Spacer()
+                    Button {
+                        showLinkTaskPicker = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                            Text("新建关联")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    }
+                }
+
+                if activeTasks.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("当前频道暂无关联的执行任务")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("在消息中长按或点击右上角可将任务关联至频道")
+                            .font(.caption)
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 30)
+                } else {
+                    ForEach(activeTasks) { t in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(t.title)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                Spacer()
+                                Text(t.state.rawValue)
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.orange.opacity(0.15), in: Capsule())
+                                    .foregroundStyle(.orange)
+                            }
+
+                            Text(t.description.isEmpty ? "无详细任务描述" : t.description)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+
+                            HStack {
+                                Text("优先级: \(t.priority.rawValue) · ID: \(String(t.id.prefix(8)))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("查看详情") {
+                                    onNavigateRoute("taskdetail")
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func loadWorkspaceData() {
+        if messages.isEmpty {
+            messages = [
+                V5ChannelMessage(
+                    id: "msg-1",
+                    senderId: "agent-codex",
+                    senderName: "Codex",
+                    isAgent: true,
+                    text: "已完成 WhereverCode V5 iOS 导航重构基线，目前左侧抽屉严格包含「对话」「项目」「频道」「控制」四项一级入口。",
+                    timestamp: "12:40",
+                    fullDateTime: "2026-11-15 12:40:15",
+                    linkedTaskId: "task-nav-1",
+                    linkedTaskTitle: "iOS V5 导航整改",
+                    linkedTaskState: "working"
+                ),
+                V5ChannelMessage(
+                    id: "msg-2",
+                    senderId: "user-lead",
+                    senderName: "项目主管",
+                    isAgent: false,
+                    text: "@Codex 请确认频道内输入框是否严格保留单一「＋」入口并提供附件、网盘与任务关联？",
+                    timestamp: "12:42",
+                    fullDateTime: "2026-11-15 12:42:01",
+                    replyToId: "msg-1",
+                    replyToText: "已完成 WhereverCode V5 iOS 导航重构基线…"
+                ),
+                V5ChannelMessage(
+                    id: "msg-3",
+                    senderId: "agent-codex",
+                    senderName: "Codex",
+                    isAgent: true,
+                    text: "确认完毕！输入框左侧为单一「＋」按钮，支持展开：上传附件、从项目选择、从网盘选择、关联任务。同时已在服务端与客户端强制校验 Agent ↔ Agent 私聊拦截。",
+                    timestamp: "12:45",
+                    fullDateTime: "2026-11-15 12:45:30",
+                    attachmentName: "FlagshipApp.swift",
+                    attachmentType: "code",
+                    attachmentSize: "28 KB"
+                )
+            ]
+        }
+
+        if files.isEmpty {
+            files = [
+                V5ChannelFile(
+                    id: "file-1",
+                    fileName: "WhereverCodeAgent-unsigned.ipa",
+                    fileSize: "18.4 MB",
+                    fileType: "zip",
+                    uploaderName: "GitHub Actions",
+                    uploadTime: "11-15 12:45",
+                    associatedProjectName: "WhereverCode V5",
+                    sourceKind: "project"
+                ),
+                V5ChannelFile(
+                    id: "file-2",
+                    fileName: "routes_wiring.json",
+                    fileSize: "42 KB",
+                    fileType: "code",
+                    uploaderName: "Codex",
+                    uploadTime: "11-15 12:30",
+                    associatedProjectName: "Contracts",
+                    sourceKind: "project"
+                ),
+                V5ChannelFile(
+                    id: "file-3",
+                    fileName: "design_spec_claude_ui.pdf",
+                    fileSize: "1.2 MB",
+                    fileType: "pdf",
+                    uploaderName: "主管",
+                    uploadTime: "11-15 10:00",
+                    sourceKind: "google_drive"
+                )
+            ]
+        }
+
+        activeTasks = (try? LocalData.shared.tasks.listTasks()) ?? []
+    }
+}
+
+// MARK: - 辅助弹窗与选择器
+
+public struct CreateChannelSheet: View {
+    @ObservedObject public var appState: AppState
+    public var onCreated: (V5ChannelItem) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var topic = ""
+    @State private var isPrivate = false
+    @State private var selectedProject = ""
+
+    public var body: some View {
+        NavigationStack {
+            Form {
+                Section("频道信息") {
+                    TextField("频道名称（例如：移动端重构）", text: $name)
+                    TextField("讨论主题与简介", text: $topic)
+                    Toggle("设为私有频道", isOn: $isPrivate)
+                }
+
+                Section("关联项目（可选）") {
+                    Picker("项目", selection: $selectedProject) {
+                        Text("不关联项目").tag("")
+                        Text("WhereverCode V5").tag("proj-wherevercode")
+                        Text("iOS Native").tag("proj-ios")
+                    }
+                }
+
+                Section("安全规范提示") {
+                    Text("频道成员可包含团队用户与受信任的 Agent。频道所有消息与执行操作受统一审计保护。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("新建频道")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("创建") {
+                        let newCh = V5ChannelItem(
+                            id: "ch-\(UUID().uuidString.prefix(6))",
+                            name: name.isEmpty ? "未命名频道" : name,
+                            topic: topic,
+                            isPrivate: isPrivate,
+                            associatedProjectId: selectedProject.isEmpty ? nil : selectedProject,
+                            associatedProjectName: selectedProject.isEmpty ? nil : "关联项目",
+                            memberCount: 2,
+                            agentCount: 1,
+                            lastMessageText: "频道已创建",
+                            lastMessageTime: "刚刚"
+                        )
+                        onCreated(newCh)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+public struct CreateDirectMessageSheet: View {
+    @ObservedObject public var appState: AppState
+    public var onCreated: (V5DirectMessageItem) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var recipientType: RecipientType = .agent
+    @State private var selectedAgent = "Codex"
+    @State private var targetUsername = ""
+    @State private var initiatorIsAgent = false
+    @State private var targetIsAgent = true
+    @State private var errorText: String? = nil
+
+    public enum RecipientType: String, CaseIterable, Identifiable {
+        case agent = "平台 Agent"
+        case user = "团队成员"
+
+        public var id: String { rawValue }
+    }
+
+    public var body: some View {
+        NavigationStack {
+            Form {
+                Section("私聊对象") {
+                    Picker("对象类型", selection: $recipientType) {
+                        ForEach(RecipientType.allCases) { t in
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: recipientType) { _, val in
+                        targetIsAgent = (val == .agent)
+                        errorText = nil
+                    }
+
+                    if recipientType == .agent {
+                        Picker("选择 Agent", selection: $selectedAgent) {
+                            Text("Codex (设备 Agent)").tag("Codex")
+                            Text("Claude Code (云端 Agent)").tag("Claude Code")
+                            Text("CodeBuddy (协作 Agent)").tag("CodeBuddy")
+                            Text("Example Agent").tag("Example Agent")
+                        }
+                    } else {
+                        TextField("输入成员账号或姓名", text: $targetUsername)
+                    }
+                }
+
+                Section("平台安全规则校验") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("✓ 允许：用户 ↔ 用户 私聊")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("✓ 允许：用户 ↔ Agent 私聊")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("✕ 严格禁止：Agent ↔ Agent 直连私聊")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if let err = errorText {
+                    Section {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("发起私聊")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("确定") {
+                        do {
+                            try PrivateChatPolicyValidator.validate(
+                                initiatorIsAgent: initiatorIsAgent,
+                                targetIsAgent: targetIsAgent
+                            )
+                            let targetName = (recipientType == .agent) ? selectedAgent : (targetUsername.isEmpty ? "团队成员" : targetUsername)
+                            let newDM = V5DirectMessageItem(
+                                id: "dm-\(UUID().uuidString.prefix(6))",
+                                targetId: "target-\(UUID().uuidString.prefix(4))",
+                                targetName: targetName,
+                                isAgent: (recipientType == .agent),
+                                targetRole: (recipientType == .agent) ? "平台 Agent · 1:1 私聊" : "团队成员",
+                                lastMessageText: "私聊会话已建立",
+                                lastMessageTime: "刚刚"
+                            )
+                            onCreated(newDM)
+                            dismiss()
+                        } catch {
+                            errorText = error.localizedDescription
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+public struct AgentProfileSheet: View {
+    public let message: V5ChannelMessage
+    @Environment(\.dismiss) private var dismiss
+
+    public var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Circle()
+                    .fill(message.isAgent ? Color(red: 0.85, green: 0.52, blue: 0.38) : Color(red: 0.45, green: 0.58, blue: 0.70))
+                    .frame(width: 64, height: 64)
+                    .overlay(
+                        Text(String(message.senderName.prefix(1)))
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
+
+                VStack(spacing: 4) {
+                    Text(message.senderName)
+                        .font(.title3)
+                        .fontWeight(.bold)
+                    Text(message.isAgent ? "平台注册受信任 Agent" : "团队成员")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                List {
+                    Section("基础信息") {
+                        LabeledContent("唯一标识", value: message.senderId)
+                        LabeledContent("身份类型", value: message.isAgent ? "Autonomous Agent" : "Human User")
+                        LabeledContent("安全级别", value: "Verified · ATS TLS 强制")
+                    }
+
+                    Section("协作规范") {
+                        Text("长按该 Agent 头像可在频道消息输入框快速插入 @ 召唤该 Agent 参与协作。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.top, 20)
+            .navigationTitle("资料卡片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+public struct ChannelSettingsSheet: View {
+    public let channel: V5ChannelItem?
+    public let dm: V5DirectMessageItem?
+    @Environment(\.dismiss) private var dismiss
+
+    public var body: some View {
+        NavigationStack {
+            Form {
+                if let ch = channel {
+                    Section("频道信息") {
+                        LabeledContent("频道名称", value: "# \(ch.name)")
+                        LabeledContent("频道性质", value: ch.isPrivate ? "私有频道" : "公开频道")
+                        LabeledContent("讨论主题", value: ch.topic.isEmpty ? "无主题" : ch.topic)
+                        LabeledContent("成员总数", value: "\(ch.memberCount) 人")
+                        LabeledContent("已入驻 Agent", value: "\(ch.agentCount) 位")
+                    }
+                } else if let d = dm {
+                    Section("私聊信息") {
+                        LabeledContent("对象姓名", value: d.targetName)
+                        LabeledContent("身份类型", value: d.isAgent ? "平台 Agent" : "团队成员")
+                        LabeledContent("归属角色", value: d.targetRole)
+                    }
+                }
+
+                Section("通知与权限") {
+                    Toggle("消息免打扰", isOn: .constant(false))
+                    Toggle("忽略未读提示", isOn: .constant(false))
+                }
+            }
+            .navigationTitle("会话设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+public struct ProjectFilePickerSheet: View {
+    public var onSelect: (V5ChannelFile) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let sampleProjectFiles = [
+        V5ChannelFile(id: "pf-1", fileName: "FlagshipApp.swift", fileSize: "28 KB", fileType: "code", uploaderName: "Git", associatedProjectName: "WhereverCode"),
+        V5ChannelFile(id: "pf-2", fileName: "routes_wiring.json", fileSize: "42 KB", fileType: "code", uploaderName: "Git", associatedProjectName: "Contracts"),
+        V5ChannelFile(id: "pf-3", fileName: "architecture.png", fileSize: "1.8 MB", fileType: "image", uploaderName: "Git", associatedProjectName: "Docs")
+    ]
+
+    public var body: some View {
+        NavigationStack {
+            List(sampleProjectFiles) { file in
+                Button {
+                    onSelect(file)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(.blue)
+                        VStack(alignment: .leading) {
+                            Text(file.fileName).font(.headline)
+                            Text("\(file.fileSize) · \(file.associatedProjectName ?? "")").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("从项目选择文件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+public struct CloudDrivePickerSheet: View {
+    public var onSelect: (V5ChannelFile) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let sampleCloudFiles = [
+        V5ChannelFile(id: "cf-1", fileName: "spec-v5-navigation.pdf", fileSize: "1.4 MB", fileType: "pdf", uploaderName: "Google Drive", sourceKind: "google_drive"),
+        V5ChannelFile(id: "cf-2", fileName: "release_notes_build6.md", fileSize: "18 KB", fileType: "markdown", uploaderName: "OneDrive", sourceKind: "onedrive"),
+        V5ChannelFile(id: "cf-3", fileName: "test_matrix_backup.zip", fileSize: "8.6 MB", fileType: "zip", uploaderName: "WebDAV", sourceKind: "webdav")
+    ]
+
+    public var body: some View {
+        NavigationStack {
+            List(sampleCloudFiles) { file in
+                Button {
+                    onSelect(file)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Image(systemName: "cloud.fill")
+                            .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                        VStack(alignment: .leading) {
+                            Text(file.fileName).font(.headline)
+                            Text("\(file.fileSize) · 来源: \(file.uploaderName)").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("从网盘选择文件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+public struct LinkTaskPickerSheet: View {
+    public let tasks: [LocalTask]
+    public var onSelect: (LocalTask) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    public var body: some View {
+        NavigationStack {
+            List(tasks) { task in
+                Button {
+                    onSelect(task)
+                    dismiss()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(task.title).font(.headline)
+                        Text("状态: \(task.state.rawValue) · 优先级: \(task.priority.rawValue)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("关联现有任务")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
                 }
             }
         }

@@ -191,13 +191,40 @@ final class ScreenshotRenderTests: XCTestCase {
         )
         attach(projectsImage, name: "flagship-delivery-03-projects-home")
 
+        let channelsHomeImage = await snapshot(
+            NavigationStack {
+                ChannelsHomeView(appState: state, onOpenDrawer: {}, onNavigateRoute: { _ in })
+            }
+            .environmentObject(state)
+        )
+        attach(channelsHomeImage, name: "flagship-delivery-04-channels-home")
+
+        let sampleChannel = V5ChannelItem(
+            id: "ch-general",
+            name: "全员协作",
+            topic: "WhereverCode 全平台项目总线与 Agent 协同讨论",
+            isPrivate: false,
+            associatedProjectName: "WhereverCode V5"
+        )
+        let channelChatImage = await snapshot(
+            NavigationStack {
+                ChannelDetailWorkspaceView(
+                    appState: state,
+                    channelItem: sampleChannel,
+                    onNavigateRoute: { _ in }
+                )
+            }
+            .environmentObject(state)
+        )
+        attach(channelChatImage, name: "flagship-delivery-05-channel-chat")
+
         let controlImage = await snapshot(
             NavigationStack {
                 ControlHomeView(appState: state, onOpenDrawer: {}, onNavigateRoute: { _ in })
             }
             .environmentObject(state)
         )
-        attach(controlImage, name: "flagship-delivery-04-control-home")
+        attach(controlImage, name: "flagship-delivery-06-control-home")
 
         let settingsImage = await snapshot(
             NavigationStack {
@@ -211,7 +238,7 @@ final class ScreenshotRenderTests: XCTestCase {
             }
             .environmentObject(state)
         )
-        attach(settingsImage, name: "flagship-delivery-05-account-settings")
+        attach(settingsImage, name: "flagship-delivery-07-account-settings")
 
         for routeId in ["compose", "approvals", "files", "editor", "diff", "terminal", "mcp", "models", "dashboard", "audit", "memory"] {
             if let route = FlagshipRoutes.route(for: routeId) {

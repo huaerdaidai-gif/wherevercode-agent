@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// 左侧抽屉一级菜单严格只有：对话、项目、控制
+/// 左侧抽屉一级菜单严格四项：对话、项目、频道、控制
 public enum FlagshipDrawerMenu: String, CaseIterable, Identifiable, Sendable {
     case chat = "对话"
     case projects = "项目"
+    case channels = "频道"
     case control = "控制"
 
     public var id: String { rawValue }
@@ -12,6 +13,7 @@ public enum FlagshipDrawerMenu: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .chat: return "bubble.left.and.bubble.right"
         case .projects: return "shippingbox"
+        case .channels: return "number"
         case .control: return "gauge.with.dots.needle.bottom.50percent"
         }
     }
@@ -204,8 +206,8 @@ public struct PlannedCapabilities: FlagshipCapabilityProvider {
 
 /// 左侧抽屉组件
 /// 严格结构要求：
-/// 1. 一级菜单严格只有：对话、项目、控制
-/// 2. 中部显示最近会话（加载自本地真实会话记录）
+/// 1. 一级菜单严格只有：对话、项目、频道、控制
+/// 2. 中部显示最近会话与会话搜索（加载自本地真实会话记录）
 /// 3. 底部固定：左侧账号头像（点击进入设置），右侧「＋ 新对话」
 public struct FlagshipDrawerView: View {
     @Binding public var isOpen: Bool
@@ -215,6 +217,7 @@ public struct FlagshipDrawerView: View {
     public var onNewChat: () -> Void
 
     @State private var recentConversations: [Conversation] = []
+    @State private var searchChatQuery = ""
 
     public init(
         isOpen: Binding<Bool>,
@@ -228,6 +231,12 @@ public struct FlagshipDrawerView: View {
         self.onSelectConversation = onSelectConversation
         self.onOpenSettings = onOpenSettings
         self.onNewChat = onNewChat
+    }
+
+    private var filteredConversations: [Conversation] {
+        let q = searchChatQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty { return recentConversations }
+        return recentConversations.filter { $0.title.lowercased().contains(q) }
     }
 
     public var body: some View {
@@ -254,7 +263,7 @@ public struct FlagshipDrawerView: View {
             .padding(.top, 20)
             .padding(.bottom, 14)
 
-            // 一级菜单：严格只有「对话」「项目」「控制」
+            // 一级菜单：严格四项「对话」「项目」「频道」「控制」
             VStack(spacing: 4) {
                 ForEach(FlagshipDrawerMenu.allCases) { menu in
                     let isSelected = (selectedMenu == menu)
@@ -290,7 +299,7 @@ public struct FlagshipDrawerView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
 
-            // 中部显示最近会话
+            // 中部搜索与最近会话
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("最近会话")
@@ -302,11 +311,36 @@ public struct FlagshipDrawerView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 4)
 
+                // 搜索框
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    TextField("搜索会话与消息…", text: $searchChatQuery)
+                        .font(.system(size: 13))
+                        .textInputAutocapitalization(.never)
+                    if !searchChatQuery.isEmpty {
+                        Button {
+                            searchChatQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        if recentConversations.isEmpty {
+                        if filteredConversations.isEmpty {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("暂无历史会话")
+                                Text(searchChatQuery.isEmpty ? "暂无历史会话" : "未找到匹配会话")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 Text("点击右下角「＋ 新对话」开始")
@@ -316,7 +350,7 @@ public struct FlagshipDrawerView: View {
                             .padding(.horizontal, 20)
                             .padding(.vertical, 16)
                         } else {
-                            ForEach(recentConversations) { conv in
+                            ForEach(filteredConversations) { conv in
                                 Button {
                                     onSelectConversation(conv)
                                     withAnimation(.easeOut(duration: 0.2)) { isOpen = false }
@@ -464,6 +498,16 @@ public struct FlagshipShellView: View {
                                 navigateTo(routeId)
                             }
                         )
+                    case .channels:
+                        ChannelsHomeView(
+                            appState: appState,
+                            onOpenDrawer: {
+                                withAnimation(.easeOut(duration: 0.2)) { isDrawerOpen = true }
+                            },
+                            onNavigateRoute: { routeId in
+                                navigateTo(routeId)
+                            }
+                        )
                     case .control:
                         ControlHomeView(
                             appState: appState,
@@ -559,6 +603,10 @@ public struct FlagshipShellView: View {
             isSettingsOpen = false
         } else if resolved == "projects" {
             selectedMenu = .projects
+            activeRoute = nil
+            isSettingsOpen = false
+        } else if resolved == "channels" {
+            selectedMenu = .channels
             activeRoute = nil
             isSettingsOpen = false
         } else if resolved == "console" || resolved == "control" {
