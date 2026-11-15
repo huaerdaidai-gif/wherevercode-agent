@@ -429,6 +429,16 @@ final class P0DeviceAcceptanceTests: XCTestCase {
         XCTAssertEqual(decoded, cfg)
     }
 
+    func testChatSessionConfigBrainAndAgentPersistence() throws {
+        let b = ProjectSourceBinding(providerId: "local", targetId: "", targetTitle: "", path: "/Users/dev/work")
+        let cfg = ChatSessionConfig(source: b, permission: .readOnly, brainId: "deepseek", agentId: "codex")
+        let encoded = try JSONEncoder().encode(cfg)
+        let decoded = try JSONDecoder().decode(ChatSessionConfig.self, from: encoded)
+        XCTAssertEqual(decoded.brainId, "deepseek")
+        XCTAssertEqual(decoded.agentId, "codex")
+        XCTAssertEqual(decoded, cfg)
+    }
+
     func testRegistryIsExtensible() {
         let reg = ProjectSourceRegistry()
         let ids = reg.all(data: LocalData.shared).map(\.id)

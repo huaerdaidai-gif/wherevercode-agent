@@ -241,7 +241,22 @@ public final class LocalChatModel: ObservableObject {
         reload()
     }
 
-    // MARK: Session config + draft persistence (P0)
+    // MARK: Session config + draft persistence + default resources (P0)
+
+    public var defaultBrainId: String {
+        get { (try? data.kv.get("chat.defaultBrainId")) ?? nil ?? appState.brainConfigStore.currentBrainId() ?? "" }
+        set {
+            try? data.kv.set("chat.defaultBrainId", newValue.isEmpty ? nil : newValue)
+            appState.brainConfigStore.setCurrent(brainId: newValue)
+        }
+    }
+
+    public var defaultAgentId: String? {
+        get { (try? data.kv.get("chat.defaultAgentId")) ?? nil }
+        set {
+            try? data.kv.set("chat.defaultAgentId", (newValue?.isEmpty ?? true) ? nil : newValue)
+        }
+    }
 
     private var draftKey: String { "chat.draft.\(conversationID ?? "new")" }
     private var configKey: String? { conversationID.map { "chat.sessionConfig.\($0)" } }
@@ -250,12 +265,54 @@ public final class LocalChatModel: ObservableObject {
         let cfg = configKey.flatMap { try? data.kv.getJSON($0, as: ChatSessionConfig.self) }
         projectSource = cfg?.source ?? .localDefault
         permissionMode = cfg?.permission ?? .readOnly
+        if let bid = cfg?.brainId, !bid.isEmpty {
+            selectedBrain = bid
+        } else if let convId = conversationID, let conv = try? data.conversations.getConversation(id: convId), let bid = conv.brainId, !bid.isEmpty {
+            selectedBrain = bid
+        } else if !defaultBrainId.isEmpty {
+            selectedBrain = defaultBrainId
+        }
+        if let aid = cfg?.agentId, !aid.isEmpty {
+            selectedAgent = (try? data.agents.getAgent(id: aid))
+        } else if let defAid = defaultAgentId, !defAid.isEmpty {
+            selectedAgent = (try? data.agents.getAgent(id: defAid))
+        } else {
+            selectedAgent = nil
+        }
         draft = (try? data.kv.get(draftKey)) ?? nil ?? ""
     }
 
     public func persistSessionConfig() {
         guard let key = configKey else { return }
-        try? data.kv.setJSON(key, ChatSessionConfig(source: projectSource, permission: permissionMode))
+        try? data.kv.setJSON(key, ChatSessionConfig(
+            source: projectSource,
+            permission: permissionMode,
+            brainId: selectedBrain.isEmpty ? nil : selectedBrain,
+            agentId: selectedAgent?.agentId
+        ))
+        if let cid = conversationID {
+            try? data.conversations.updateConversationBrain(id: cid, brainId: selectedBrain.isEmpty ? nil : selectedBrain)
+        }
+    }
+
+    public func selectBrainInCurrentSession(_ brainId: String) {
+        selectedBrain = brainId
+        persistSessionConfig()
+    }
+
+    public func selectAgentInCurrentSession(_ agent: AgentRecord?) {
+        selectedAgent = agent
+        persistSessionConfig()
+    }
+
+    public func setAsDefaultBrain(_ brainId: String) {
+        defaultBrainId = brainId
+        selectBrainInCurrentSession(brainId)
+    }
+
+    public func setAsDefaultAgent(_ agent: AgentRecord?) {
+        defaultAgentId = agent?.agentId
+        selectAgentInCurrentSession(agent)
     }
 
     public func persistDraft() {
@@ -324,6 +381,14 @@ public final class LocalChatModel: ObservableObject {
         draft = ""
         projectSource = .localDefault
         permissionMode = .readOnly
+        if !defaultBrainId.isEmpty {
+            selectedBrain = defaultBrainId
+        }
+        if let defAid = defaultAgentId, !defAid.isEmpty {
+            selectedAgent = (try? data.agents.getAgent(id: defAid))
+        } else {
+            selectedAgent = nil
+        }
         messages = []
         streaming = ""
         error = nil
@@ -596,7 +661,6 @@ public final class LocalChatModel: ObservableObject {
                     case .error(let info): error = info.message
                     default: break
                     }
-                    reload()
                 }
             }
 
@@ -1357,6 +1421,20 @@ public enum ChatPermissionMode: String, Codable, CaseIterable, Identifiable, Sen
 public struct ChatSessionConfig: Codable, Equatable, Sendable {
     public var source: ProjectSourceBinding
     public var permission: ChatPermissionMode
+    public var brainId: String?
+    public var agentId: String?
+
+    public init(
+        source: ProjectSourceBinding,
+        permission: ChatPermissionMode,
+        brainId: String? = nil,
+        agentId: String? = nil
+    ) {
+        self.source = source
+        self.permission = permission
+        self.brainId = brainId
+        self.agentId = agentId
+    }
 }
 
 public enum ChatAttachmentStore {
@@ -1545,14 +1623,26 @@ public struct ModelAndAgentSheet: View {
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     ForEach(model.usableBrains) { cfg in
-                        Button {
-                            model.selectedBrain = cfg.brainId
-                            Task { await loadModels() }
-                        } label: {
-                            HStack {
-                                Text(cfg.label).foregroundStyle(.primary)
-                                Spacer()
-                                if cfg.brainId == model.selectedBrain { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                        HStack {
+                            Button {
+                                model.selectBrainInCurrentSession(cfg.brainId)
+                                Task { await loadModels() }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(cfg.label).foregroundStyle(.primary)
+                                    if model.defaultBrainId == cfg.brainId {
+                                        Text("默认大脑").font(.caption2).foregroundStyle(.green)
+                                    }
+                                }
+                            }
+                            Spacer()
+                            if cfg.brainId == model.selectedBrain { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            if model.defaultBrainId != cfg.brainId {
+                                Button("设为默认") {
+                                    model.setAsDefaultBrain(cfg.brainId)
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.bordered)
                             }
                         }
                     }
@@ -1560,16 +1650,26 @@ public struct ModelAndAgentSheet: View {
                 }
 
                 Section("执行主体 (Agent)") {
-                    Button {
-                        model.selectedAgent = nil
-                    } label: {
-                        HStack {
+                    HStack {
+                        Button {
+                            model.selectAgentInCurrentSession(nil)
+                        } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("大脑单兵直接执行 (默认)").foregroundStyle(.primary)
                                 Text("由当前大脑使用跨设备工具集直接读写").font(.caption2).foregroundStyle(.secondary)
+                                if model.defaultAgentId == nil {
+                                    Text("默认执行主体").font(.caption2).foregroundStyle(.green)
+                                }
                             }
-                            Spacer()
-                            if model.selectedAgent == nil { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                        }
+                        Spacer()
+                        if model.selectedAgent == nil { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                        if model.defaultAgentId != nil {
+                            Button("设为默认") {
+                                model.setAsDefaultAgent(nil)
+                            }
+                            .font(.caption2)
+                            .buttonStyle(.bordered)
                         }
                     }
 
@@ -1577,21 +1677,31 @@ public struct ModelAndAgentSheet: View {
                         !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.enabled
                     }
                     ForEach(availableAgents) { ag in
-                        Button {
-                            model.selectedAgent = ag
-                        } label: {
-                            HStack {
+                        HStack {
+                            Button {
+                                model.selectAgentInCurrentSession(ag)
+                            } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(ag.displayName).foregroundStyle(.primary)
                                     Text("类型: \(ag.kind.rawValue) · 设备: \(ag.deviceId ?? "本机")").font(.caption2).foregroundStyle(.secondary)
+                                    if model.defaultAgentId == ag.agentId {
+                                        Text("默认 Agent").font(.caption2).foregroundStyle(.green)
+                                    }
                                 }
-                                Spacer()
-                                if model.selectedAgent?.agentId == ag.agentId { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            }
+                            Spacer()
+                            if model.selectedAgent?.agentId == ag.agentId { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            if model.defaultAgentId != ag.agentId {
+                                Button("设为默认") {
+                                    model.setAsDefaultAgent(ag)
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.bordered)
                             }
                         }
                     }
                 }
-                Section("模型（从服务商实时获取）") {
+                Section("模型规格（当前大脑：\(currentConfig?.label ?? "未选择")）") {
                     if loading { ProgressView() }
                     if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
                     ForEach(models) { m in
