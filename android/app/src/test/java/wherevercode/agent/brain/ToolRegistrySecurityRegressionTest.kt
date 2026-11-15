@@ -178,6 +178,34 @@ class ToolRegistrySecurityRegressionTest {
     }
 
     @Test
+    fun `pause during approval prevents both local and MCP writes`() = runTest {
+        for (remote in listOf(false, true)) {
+            var paused = false
+            val extension = RecordingExtension()
+            val outcome = tools(extension).executeControlled(
+                if (remote) action("mcp_remote_write", emptyMap())
+                else action("write_file", mapOf("path" to "paused.txt", "content" to "late")),
+                context(StopDuringApprovalGate { paused = true }),
+                paused = { paused },
+            )
+            assertEquals("turn_paused", outcome.errorCode)
+            assertEquals(0, extension.executed)
+            assertFalse(File(workspaceRoot, "paused.txt").exists())
+            assertEquals(null, workspaceAdapter.activeRound())
+        }
+    }
+
+    @Test
+    fun `legacy trailing callback still means stopped`() = runTest {
+        val outcome = tools().execute(
+            action("write_file", mapOf("path" to "legacy.txt", "content" to "late")),
+            context(AllowGate()),
+        ) { true }
+        assertEquals("turn_stopped", outcome.errorCode)
+        assertFalse(File(workspaceRoot, "legacy.txt").exists())
+    }
+
+    @Test
     fun `tool timeout kills the command and releases the write round`() = runTest {
         val started = System.nanoTime()
         val outcome = tools().execute(

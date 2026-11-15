@@ -78,6 +78,9 @@ class TaskDetailController(
         root.addView(content)
     }
 
+    private var renderedTaskId: String? = null
+    private val expandedSections = mutableSetOf<String>()
+
     fun render(
         task: TaskRecord,
         steps: List<TaskStep>,
@@ -92,6 +95,10 @@ class TaskDetailController(
         autoDecisions: List<ControlAuditEntry> = emptyList(),
         controlStatus: String? = null,
     ) {
+        if (renderedTaskId != task.taskId) {
+            renderedTaskId = task.taskId
+            expandedSections.clear()
+        }
         content.removeAllViews()
 
         val back = UiKit.text(context, "‹ 返回任务列表", 12f, R.color.accent, bold = true).apply {
@@ -304,18 +311,21 @@ class TaskDetailController(
 
     /** Optional details remain available without pushing the progress and controls off screen. */
     private fun foldSection(start: Int, title: String) {
-        val body = UiKit.vertical(context).apply { visibility = View.GONE }
+        val key = title.substringBefore('（')
+        val wasExpanded = key in expandedSections
+        val body = UiKit.vertical(context).apply { visibility = if (wasExpanded) View.VISIBLE else View.GONE }
         while (content.childCount > start) {
             val child = content.getChildAt(start)
             content.removeViewAt(start)
             body.addView(child)
         }
-        val heading = UiKit.text(context, "$title　展开 ›", 13f, R.color.text_primary, bold = true).apply {
+        val heading = UiKit.text(context, if (wasExpanded) "$title　收起 ⌃" else "$title　展开 ›", 13f, R.color.text_primary, bold = true).apply {
             minHeight = dp(48)
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
         heading.setOnClickListener {
             val expanded = body.visibility != View.VISIBLE
+            if (expanded) expandedSections.add(key) else expandedSections.remove(key)
             body.visibility = if (expanded) View.VISIBLE else View.GONE
             heading.text = if (expanded) "$title　收起 ⌃" else "$title　展开 ›"
         }

@@ -497,6 +497,7 @@ object BrainBootstrap {
          * 的 Manus 任务终态与返工入口经它打磨技能。
          */
         val skillStore: SkillStore,
+        val memoryStore: wherevercode.agent.brain.MemoryStore = InMemoryMemoryStore(),
         /**
          * V5 Phase B C1：配对信任记录（Room 持久化，重启仍在）。
          * MainActivity 经 MigratingPairingTrustStore 接本字段：大脑建
@@ -1350,11 +1351,13 @@ object BrainBootstrap {
             controlRouter,
             authStore,
         )
+        val memoryStore = wherevercode.agent.brain.PersistentMemoryStore(
+            appContext.getSharedPreferences("brain_memory", android.content.Context.MODE_PRIVATE))
         val engine = BrainEngine(
             adapters = BrainAdapterRegistry,
             conversations = conversationStore,
             contextManager = ContextManager(),
-            memory = InMemoryMemoryStore(),
+            memory = memoryStore,
             skillStore = skillStore,
             tools = toolRegistry,
             eventLog = eventLog,
@@ -1538,6 +1541,7 @@ object BrainBootstrap {
             pipelineOrchestrator = pipelineOrchestrator,
             fanoutStore = fanoutStore,
             skillStore = skillStore,
+            memoryStore = memoryStore,
             pairingTrustStore = pairingTrustStore,
             taskRunner = taskRunner,
             eventLog = eventLog,

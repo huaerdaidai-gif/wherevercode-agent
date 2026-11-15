@@ -1,0 +1,62 @@
+[
+  {
+    "path": "README_开发组装.md",
+    "bytes": 1152,
+    "sha256": "82f6ba7d4b972a535b91f8546815cae08c3f23d88021567b6ddb0d495938bfc5"
+  },
+  {
+    "path": "TASK.md",
+    "bytes": 2827,
+    "sha256": "2ff98c3b80c730a2e9a2714e9daf09ae802ba58889684751978b598117c833d6"
+  },
+  {
+    "path": "V5_四父级抽屉_70路由交互预览.html",
+    "bytes": 36572,
+    "sha256": "5e5b0b8a4df664f754a12a7a4c6bdc882d2a449cb7c1e2caaafa5e4258c19ef7"
+  },
+  {
+    "path": "contracts/route_acceptance.csv",
+    "bytes": 7913,
+    "sha256": "1dc089553b7b45b1e60274ee30f53030e11eda9f1d305e04317505140f959b47"
+  },
+  {
+    "path": "contracts/routes_wiring.json",
+    "bytes": 35711,
+    "sha256": "2da4a0ec93a4b8648da504dcd394bd96cf3383563c50e97b4568fcc4ad16206c"
+  },
+  {
+    "path": "contracts/ui_states.json",
+    "bytes": 512,
+    "sha256": "e68b7a3fe06fb759908c661682a4b9406bc7e3e0033dce7eee2cd001a057fad5"
+  },
+  {
+    "path": "original_70_screen_source/README.md",
+    "bytes": 1514,
+    "sha256": "5d1943b228d75f5b43a84a342722e085f7c7b3bea25144d869cd54358110c4a9"
+  },
+  {
+    "path": "original_70_screen_source/acceptance.csv",
+    "bytes": 6974,
+    "sha256": "42dbb6783547dd7319536d2fed080724513d653e1aa3e8a81bead1f02f29e8df"
+  },
+  {
+    "path": "original_70_screen_source/android/src/main/java/wherevercode/agent/ui/flagship/FlagshipApp.kt",
+    "bytes": 10649,
+    "sha256": "012bd98c5800d555835cafafde107ca5188ef1d502f571be45c87414ef69f362"
+  },
+  {
+    "path": "original_70_screen_source/ios/WhereverCodeAgent/FlagshipUI/FlagshipApp.swift",
+    "bytes": 11329,
+    "sha256": "8cc6ed167d43a440fe64cfdc4c73460f29d7050bd5f7313fd7652dcfb425a2f0"
+  },
+  {
+    "path": "original_70_screen_source/reference.html",
+    "bytes": 63213,
+    "sha256": "b155b1a0d0de01b814c2f4322e9ae69e43e418eb56c2ea6cf843b213e9e39ab7"
+  },
+  {
+    "path": "original_70_screen_source/routes.json",
+    "bytes": 9503,
+    "sha256": "1a06d61abf21ca3b6209ec2899d9268ef5cb267580c003d086824566740fbba8"
+  }
+]

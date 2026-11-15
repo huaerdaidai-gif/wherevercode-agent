@@ -162,6 +162,85 @@ final class ScreenshotRenderTests: XCTestCase {
         attach(image, name: "page-06-devices")
     }
 
+    // MARK: - Flagship 70 routes (real shell renders, NOT real-device proof)
+    //
+    // Coverage: every route in FlagshipRoutes.all (70) gets one PNG
+    // attachment named "flagship-<NN>-<route_id>". The route table
+    // and the capability statuses come from the real app code
+    // (FlagshipRoutes / AppFlagshipCapabilities, including the new
+    // taskdetail -> .tasks wiring, which is also asserted directly
+    // below without rendering).
+    //
+    // 真壳直渲 (real shell, rendered directly): every per-route
+    // render below is the REAL FlagshipApp itself, pointed at the
+    // route via its initial-route initializer
+    // `FlagshipApp(capabilities:initialRoute:)` — the initializer's
+    // default is "chat", so the production construction in
+    // FlagshipTabView (capabilities only, no initialRoute) behaves
+    // exactly as before. There is no test-only replica view: what
+    // is rendered is the shipped shell — header, drawer, page
+    // template, status line and bottom nav — with the REAL route
+    // entry and the REAL AppFlagshipCapabilities status for that
+    // route. testFlagshipRealShellDefaultRoute additionally renders
+    // the real shell with NO initialRoute (the production default,
+    // chat) as flagship-00-real-shell-chat.
+    // These are simulator XCTest renders of the real flagship
+    // shell — never real-device evidence, and they do not change
+    // any route's capability state.
+    //
+    // No route needs network or Keychain here: the shell's page
+    // template is pure SwiftUI and
+    // AppFlagshipCapabilities.status(for:) is a pure lookup, so no
+    // route is skipped (skipped count: 0).
+
+    func testFlagshipRouteTableIsComplete() {
+        XCTAssertEqual(FlagshipRoutes.all.count, 70, "flagship route table must hold exactly 70 routes")
+        XCTAssertEqual(Set(FlagshipRoutes.all.map(\.id)).count, 70, "flagship route ids must be unique")
+    }
+
+    func testFlagshipTaskDetailCapabilityIsWired() {
+        var openedTab: AppTab?
+        let capabilities = AppFlagshipCapabilities(onOpenTab: { openedTab = $0 })
+        XCTAssertEqual(capabilities.status(for: "taskdetail").state, .implementedUnverified,
+                       "taskdetail must be implementedUnverified (real TaskDetailView, no real-device proof)")
+        XCTAssertTrue(capabilities.openExistingFeature("taskdetail"),
+                      "taskdetail must open an existing feature")
+        XCTAssertEqual(openedTab, .tasks, "taskdetail must route to the tasks tab")
+    }
+
+    func testFlagshipRealShellDefaultRoute() async {
+        let image = await snapshot(
+            FlagshipApp(capabilities: AppFlagshipCapabilities(onOpenTab: { _ in }))
+        )
+        attach(image, name: "flagship-00-real-shell-chat")
+    }
+
+    func testFlagshipRoutes01To10() async { await renderFlagshipRoutes(FlagshipRoutes.all[0..<10]) }
+    func testFlagshipRoutes11To20() async { await renderFlagshipRoutes(FlagshipRoutes.all[10..<20]) }
+    func testFlagshipRoutes21To30() async { await renderFlagshipRoutes(FlagshipRoutes.all[20..<30]) }
+    func testFlagshipRoutes31To40() async { await renderFlagshipRoutes(FlagshipRoutes.all[30..<40]) }
+    func testFlagshipRoutes41To50() async { await renderFlagshipRoutes(FlagshipRoutes.all[40..<50]) }
+    func testFlagshipRoutes51To60() async { await renderFlagshipRoutes(FlagshipRoutes.all[50..<60]) }
+    func testFlagshipRoutes61To70() async { await renderFlagshipRoutes(FlagshipRoutes.all[60..<70]) }
+
+    /// Render one snapshot of the REAL FlagshipApp per route in
+    /// the slice (真壳直渲: the shipped shell itself, entered at
+    /// the route via `initialRoute`), named with the route's
+    /// 1-based position in FlagshipRoutes.all and its id.
+    private func renderFlagshipRoutes(_ routes: ArraySlice<FlagshipRoute>) async {
+        let capabilities = AppFlagshipCapabilities(onOpenTab: { _ in })
+        for route in routes {
+            guard let index = FlagshipRoutes.all.firstIndex(where: { $0.id == route.id }) else {
+                XCTFail("route \(route.id) is not in FlagshipRoutes.all")
+                continue
+            }
+            let image = await snapshot(
+                FlagshipApp(capabilities: capabilities, initialRoute: route.id)
+            )
+            attach(image, name: String(format: "flagship-%02d-%@", index + 1, route.id))
+        }
+    }
+
     // MARK: - Snapshot helper
 
     /// Host the view in a real window on the simulator and draw it,

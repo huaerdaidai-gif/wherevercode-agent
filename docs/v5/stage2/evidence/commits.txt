@@ -1,0 +1,8 @@
+f0f16289cee4074e81460d0b36a2515e27822a37 fix(android-test): scroll to visible delete controls and await persistence
+03c3178a5832b4b0b932ec924e1bb3a69b7d14af feat(android): wire local search persistent memory and skill records
+50cd0ed80a58f7afbaf8d52d04bb4095a470ada7 fix(android): preserve task transactions and recheck paused tool approvals
+89a1b25963c226d6a9f6574b07ed432eb6a96011 docs(android): verify stage2 baseline, PR13 status and classify all 70 routes
+05693a3d12b2477c0dafe570cadf62586dd612c2 fix(security): wrap McpDispatchHost default TaskStore in TerminalWriteGuard [task C C-1]
+f6735cd5bed0d0f0a59b0b700a991f0f9a342dec Task B (任务 B): ChannelAgentRelay sender policy default fail-closed ({true} -> {false}), explicit test fixture policy, ChannelFailClosedTest 9 regressions [skip ci]
+f9f5411a7b19016082fe8019cae6baa48caa972e fix(security): integrate permissions-recovery hardening and tests [stage1]
+4f9fd1f429ce0f756f72e50da09140739ffc7343 fix(android): restore mandatory system CA trust with endpoint pinning [stage1]

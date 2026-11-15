@@ -1,0 +1,16 @@
+
+wherevercode.agent.ui.FlagshipNavTest:
+Error in fourParentsAndAllSeventyRoutesAreReachableInMainActivity(wherevercode.agent.ui.FlagshipNavTest):
+java.lang.NullPointerException: Attempt to invoke virtual method 'void androidx.test.uiautomator.UiObject2.click()' on a null object reference
+	at wherevercode.agent.ui.FlagshipNavTest.fourParentsAndAllSeventyRoutesAreReachableInMainActivity(FlagshipNavTest.kt:67)
+
+wherevercode.agent.ui.NativeTaskCreationTest:.
+
+Time: 331.018
+There was 1 failure:
+1) fourParentsAndAllSeventyRoutesAreReachableInMainActivity(wherevercode.agent.ui.FlagshipNavTest)
+java.lang.NullPointerException: Attempt to invoke virtual method 'void androidx.test.uiautomator.UiObject2.click()' on a null object reference
+	at wherevercode.agent.ui.FlagshipNavTest.fourParentsAndAllSeventyRoutesAreReachableInMainActivity(FlagshipNavTest.kt:67)
+
+FAILURES!!!
+Tests run: 2,  Failures: 1

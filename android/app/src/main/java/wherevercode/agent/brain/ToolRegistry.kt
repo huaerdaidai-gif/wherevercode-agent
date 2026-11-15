@@ -501,8 +501,12 @@ class ToolRegistry(
         return WorkspaceState.OK
     }
 
+    /** Compatibility boundary: existing trailing lambdas still mean stopped, never paused. */
+    suspend fun execute(action: Action, context: ToolContext, stopped: () -> Boolean = { false }): ToolOutcome =
+        executeControlled(action, context, stopped = stopped)
+
     /** Full validation pipeline + execution. Denied actions are never executed. */
-    suspend fun execute(
+    suspend fun executeControlled(
         action: Action,
         context: ToolContext,
         /**

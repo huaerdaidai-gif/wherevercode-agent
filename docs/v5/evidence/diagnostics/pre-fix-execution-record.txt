@@ -1,0 +1,6 @@
+taskId=b9d3073d-0d07-4dbc-8ea7-4b14361c4671
+transitions=queued@54ms,working@2199ms,failed@3741ms
+finalState=failed
+result=null
+error=brain_not_configured：未配置大脑：请先在设置里配置一个大脑，再发送消息。
+Scope: LocalTaskRunner claim and executor outcome in the cloud emulator. No brain is configured there, so a failed outcome carrying the real reason is the honest result; approval is not asserted (no brain, no tool call).

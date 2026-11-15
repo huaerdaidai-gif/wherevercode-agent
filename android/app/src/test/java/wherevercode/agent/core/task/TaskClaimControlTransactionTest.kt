@@ -83,7 +83,7 @@ class TaskClaimControlTransactionTest {
         )
         val updateReached = CountDownLatch(1)
         val allowUpdate = CountDownLatch(1)
-        val gatedStore = PausingTaskStore(storeB, updateReached, allowUpdate)
+        val gatedStore = TerminalWriteGuardTaskStore(PausingTaskStore(storeB, updateReached, allowUpdate))
         val scheduler = TaskScheduler(gatedStore, AgentDiscovery(context), controlB)
         var claimed: TaskRecord? = null
         val claimThread = Thread {

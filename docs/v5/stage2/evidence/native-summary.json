@@ -1,0 +1,21 @@
+{
+  "device": "Google ATD built for x86_64",
+  "android": "11",
+  "api": 30,
+  "resolution": "360x800",
+  "acceleration": "software TCG; no KVM",
+  "package": "wherevercode.agent.ci",
+  "app_source_commit": "03c3178a5832b4b0b932ec924e1bb3a69b7d14af",
+  "test_source_commit": "f0f16289cee4074e81460d0b36a2515e27822a37",
+  "navigation_70": true,
+  "local_features": true,
+  "task_detail": true,
+  "unique_scenarios_passed": 3,
+  "first_run": "2 passed, 1 failed (offscreen delete test selector); full failure log retained",
+  "rerun": "LocalFeaturesTest passed after visibility/await fix; installed app APK unchanged",
+  "external_model_success": false,
+  "task_control_pause_resume_stop_device_verified": false,
+  "arm64_device_verified": false,
+  "manual_real_task_search": "NOT_VERIFIED: post-instrumentation UI hierarchy did not become ready; stopped at user handoff instruction",
+  "console_drilldown_this_build": "NOT_VERIFIED: manual recheck not reached; previous fix preserved, prior-stage evidence not counted as current"
+}

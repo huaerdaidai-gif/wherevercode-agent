@@ -44,14 +44,14 @@
              through the drawer "对话" entry. -->
         <TextView
             android:id="@+id/buttonMenu"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
             android:gravity="center"
             android:text="☰"
             android:textColor="@color/home_text"
             android:textSize="20sp"
             android:contentDescription="打开抽屉"
-            android:background="?attr/selectableItemBackgroundBorderless" />
+            android:background="@drawable/bg_v5_circle" />
 
         <TextView
             android:id="@+id/topBrandLogo"
@@ -90,12 +90,12 @@
              提示（见 MainActivity.bindShell）。 -->
         <ImageView
             android:id="@+id/buttonSearch"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
             android:padding="6dp"
             android:src="@drawable/ic_search"
-            android:contentDescription="搜索会话"
-            android:background="?attr/selectableItemBackgroundBorderless" />
+            android:contentDescription="会话"
+            android:background="@drawable/bg_v5_circle" />
 
         <ImageView
             android:id="@+id/buttonBell"

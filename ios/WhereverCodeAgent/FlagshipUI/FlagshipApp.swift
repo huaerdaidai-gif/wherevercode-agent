@@ -91,3 +91,85 @@ struct PlannedCapabilities: FlagshipCapabilityProvider {
     func status(for route: String) -> CapabilityStatus { CapabilityStatus() }
     func openExistingFeature(_ route: String) -> Bool { false }
 }
+struct FlagshipApp: View {
+    var capabilities: any FlagshipCapabilityProvider = PlannedCapabilities()
+    @State private var current: String
+    @State private var showDrawer = false
+    @State private var query = ""
+
+    /// `initialRoute` 只决定首次显示的路由，默认 "chat" 与原先写死的
+    /// `@State private var current = "chat"` 一致：无参构造、以及生产
+    /// `FlagshipTabView` 的 `FlagshipApp(capabilities:)` 构造，行为不变。
+    /// 测试可经此初始化器直接渲染壳本体的任意路由（真壳直渲）。
+    init(capabilities: any FlagshipCapabilityProvider = PlannedCapabilities(), initialRoute: String = "chat") {
+        self.capabilities = capabilities
+        _current = State(initialValue: initialRoute)
+    }
+    private let ink = Color(red: 0.16, green: 0.16, blue: 0.15)
+    private let accent = Color(red: 0.78, green: 0.47, blue: 0.34)
+    private let warm = Color(red: 0.98, green: 0.976, blue: 0.965)
+    private var page: FlagshipRoute { FlagshipRoutes.find(current) }
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("☰") { showDrawer.toggle() }
+                Text(page.title).fontWeight(.semibold).frame(maxWidth: .infinity, alignment: .leading)
+                Button("控制台") { current = "dashboard"; showDrawer = false }
+            }.padding()
+            if showDrawer {
+                TextField("查找 70 个页面", text: $query).textFieldStyle(.roundedBorder).padding(.horizontal)
+                List {
+                    ForEach(Array(Set(FlagshipRoutes.all.map(\.group))).sorted(), id: \.self) { group in
+                        Section(group) {
+                            ForEach(FlagshipRoutes.all.filter { $0.group == group && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.id.localizedCaseInsensitiveContains(query)) }) { route in
+                                Button { current = route.id; showDrawer = false } label: {
+                                    HStack { Text(route.title); Spacer(); Text(isVerified(route.id) ? "已验证" : "待开发").foregroundStyle(.secondary).font(.caption) }
+                                }
+                            }
+                        }
+                    }
+                }.listStyle(.plain)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text(current == "chat" ? "今天想做些什么？" : page.title).font(.largeTitle)
+                        Text(statusText).foregroundStyle(accent)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("\(page.group) · \(page.id)").font(.caption).foregroundStyle(.secondary)
+                            Text(isVerified(current) ? "此功能已通过真机验证，可进入现有实现。" : "此页面已预留。接入真实能力并完成真机验证后才能标记可用。")
+                            Button("打开功能") { _ = capabilities.openExistingFeature(current) }.disabled(!isVerified(current))
+                        }.padding().frame(maxWidth: .infinity, alignment: .leading).background(.white, in: RoundedRectangle(cornerRadius: 18))
+                        if current == "dashboard" {
+                            Text("运行总览").font(.headline)
+                            ForEach(["项目", "任务队列", "设备", "模型与 Agent", "审批与审计"], id: \.self) { item in
+                                HStack { Text(item); Spacer(); Text("未接入").foregroundStyle(.secondary) }; Divider()
+                            }
+                        }
+                        if current == "chat" { Text("聊天发送必须接入现有模型会话服务；当前脚手架不伪造回复。") .foregroundStyle(.secondary) }
+                    }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: .infinity)
+                HStack {
+                    nav("对话", "chat"); nav("项目", "projects"); nav("任务", "tasks"); nav("控制台", "dashboard"); nav("更多", "settings")
+                }.padding(.vertical, 12).background(.white)
+            }
+        }.foregroundStyle(ink).background(warm).tint(accent)
+    }
+    private func isVerified(_ route: String) -> Bool {
+        let status = capabilities.status(for: route)
+        return status.state == .readyVerified && !(status.evidence ?? "").isEmpty
+    }
+    private var statusText: String {
+        let status = capabilities.status(for: current)
+        if isVerified(current) { return "已验证" }
+        switch status.state {
+        case .implementedUnverified: return "待验收"
+        case .disconnected: return "未连接"
+        case .failed: return "运行失败"
+        case .unsupported: return "此平台暂不支持"
+        default: return "待开发"
+        }
+    }
+    private func nav(_ title: String, _ id: String) -> some View {
+        Button(title) { current = id }.font(.caption).frame(maxWidth: .infinity)
+    }
+}

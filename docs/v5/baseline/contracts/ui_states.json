@@ -1,0 +1,28 @@
+{
+  "task_statuses": [
+    "queued",
+    "assigned",
+    "working",
+    "blocked",
+    "review",
+    "rework",
+    "requeued",
+    "completed",
+    "failed",
+    "cancelled"
+  ],
+  "pause": "independent boolean, not task status",
+  "delivery_states": [
+    "PERSISTED",
+    "DELIVERED",
+    "CLAIMED",
+    "READ"
+  ],
+  "verification": [
+    "DESIGN_ONLY",
+    "ADAPTER_PENDING",
+    "IMPLEMENTED_UNVERIFIED",
+    "READY_VERIFIED"
+  ],
+  "principle": "禁止伪造在线状态、执行结果、权限和用量"
+}

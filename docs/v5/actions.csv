@@ -1,0 +1,17 @@
+route_id,action,request,response,actual_call,auth_and_protection,states_and_receipt,test
+compose,提交任务,goal:String; agentId/projectId/brainId:String?,TaskRecord,TaskComposer.submit → TaskStore.createTask,校验成员存在/enabled/dispatchable、项目存在；显式表单提交,异常保留表单；落库不代表已领取,TaskComposerTest / NativeTaskCreationTest
+tasks,查看任务,projectId/sessionId:String?,List<TaskRecord>,TaskStore.listTasks,本机 Room，只读,加载/空/失败；queued/working/review 等按原状态,TaskStoreTest / KanbanStatusTest
+taskdetail,暂停,taskId:String; operationId UUID; reason:String,ControlResult,TaskControlActions.request(PAUSE) → ControlCommandPort.pause,withTaskLock；聊天轮次禁止从任务页控制,ok 与 confirmed 分开；PAUSING ≠ PAUSED,TaskControlActionsTest / TaskControlViewTest
+taskdetail,恢复,taskId:String; operationId UUID; reason:String,ControlResult,TaskControlActions.request(RESUME) → ControlCommandPort.resume,控制平面租约/权限校验,不因点击而假报恢复；沿用真实回执,TaskControlActionsTest
+taskdetail,停止,taskId:String; operationId UUID; reason:String,ControlResult,TaskControlActions.request(STOP) → ControlCommandPort.stop,沿用原确认对话框；保留日志产物；取消传播不新增协议,STOPPING 等确认；离线不等于 stopped,TaskControlActionsTest / ExecutionFenceTest
+taskdetail,改目标,taskId:String; goal:String,ControlResult,TaskControlActions.request(CHANGE_GOAL),仅未认领任务；已执行任务必须先停止确认,返回 ui_goal_requires_unclaimed 时不改目标,TaskControlActionsTest
+taskdetail,删除记录,taskId:String,Boolean,TaskControlActions.deleteAfterConfirmedStop,删除确认；未确认停止不能删除,保留未终态记录与审计,TaskControlActionsTest
+plan,提交计划,taskId:String; plan:PlanArtifact; plannerId:String?,PipelineResult.Ok/Rejected,PipelineOrchestrator.submitPlan,现有流水线门禁,阶段和计划状态来自 PipelineStore,PipelineOrchestratorTest
+plan,批准计划,taskId:String; approver:String,PipelineResult.Ok/Rejected,PipelineOrchestrator.approvePlan,用户审批或原有自治授权策略,不跳过审查与执行授权,PipelineOrchestratorTest
+review,记录审查,taskId; verdict; reviewer; checklist; mechanical,PipelineResult.Ok/Rejected,PipelineOrchestrator.recordReview,仅 review 阶段；机械检查失败不能 approve,approve→completed；changes_requested→rework/failed；最多2轮,PipelineOrchestratorTest
+review,请求返工,taskId:String; reason:String,PipelineResult,PipelineOrchestrator.userRequestRework,原流程确认；拒绝空 checklist/无效阶段,不把频道建议当作任务指派,PipelineOrchestratorTest
+editor,保存编辑,授权 relativePath；编辑缓冲区文本,原 WorkspaceEditSession 结果,ProjectScreenController.saveEdit,路径授权与真实行级差异确认；写轮次,失败不报成功；不宣称全仓库 Git diff,WorkspaceEditTest
+artifacts,保留/撤销写轮次,roundId:String?; confirm:Boolean,KeepResult / UndoResult,WorkspaceAdapter.keep / undo,沿用原确认和工作区范围,undo 不修改任务回执语义,WorkspaceEditTest
+channels,发送频道消息,channelId:String; text:String,消息 ID String,PlatformChannelTransport.postMessage,配置的用户端点、Bearer 与成员边界,HTTP失败保留草稿；消息送达不代表任务执行,TeamChannelTest
+mcp,连接服务器,serverId:String,现有 MCP 连接状态与工具列表,McpServerManager.connect → initialize / tools/list,Bearer scopes、roots、工具审批,连接失败/断开不伪造工具数,McpGenericTest
+models,模型对话,ChatRequest; apiKey; baseUrl,Flow<GenericOpenAiEvent>,GenericOpenAiApiClient.streamChat,用户提供配置、Authorization；远端无key拒绝,真实 HTTP/SSE、not_configured、transport_error,GenericOpenAiBrainAdapterTest

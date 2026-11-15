@@ -4,6 +4,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -79,17 +80,17 @@ class MainActivitySmokeTest {
         val texts = collectTexts(activity.window.decorView)
         assertTrue(texts.contains("WhereverCode"))
         assertTrue(texts.contains("今天想做什么？"))
-        assertTrue(texts.contains("项目 · 选择或切换 ›"))
-        assertTrue(texts.contains("检查项目并修复问题"))
-        assertTrue(texts.contains("解释这段代码"))
-        assertTrue(texts.contains("拆成任务"))
+        assertFalse(texts.contains("项目 · 选择或切换 ›"))
+        assertFalse(texts.contains("检查项目并修复问题"))
+        assertFalse(texts.contains("解释这段代码"))
+        assertFalse(texts.contains("拆成任务"))
 
         controller.pause().stop().destroy()
     }
 
     /** The historical bell resource id now opens a real conversation. */
     @Test
-    fun `top action opens real new conversation`() {
+    fun `home shows exactly menu and new conversation chrome`() {
         val controller = Robolectric.buildActivity(MainActivity::class.java)
             .create()
             .start()
@@ -97,10 +98,12 @@ class MainActivitySmokeTest {
             .visible()
         val activity = controller.get()
 
-        activity.findViewById<View>(R.id.buttonBell).performClick()
-
-        assertTrue(collectTexts(activity.window.decorView).contains("今天想做什么？"))
-        assertEquals("新对话", activity.findViewById<View>(R.id.buttonBell).contentDescription)
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.buttonBell).visibility)
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.topBrandLogo).visibility)
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.topBrandName).visibility)
+        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.buttonMenu).visibility)
+        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.buttonSearch).visibility)
+        assertEquals("新对话", activity.findViewById<View>(R.id.buttonSearch).contentDescription)
 
         controller.pause().stop().destroy()
     }

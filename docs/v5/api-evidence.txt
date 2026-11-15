@@ -1,0 +1,119 @@
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:40: * - Gitee（gitee.com/api/v5）：
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:61:    suspend fun getRepo(token: String, namespacePath: String): Result<GitRepo> =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:85:    suspend fun listContents(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:132:    suspend fun getFile(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:199:    suspend fun getBranchHead(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:243:    suspend fun createBranch(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:297:    suspend fun createOrUpdateFile(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:393:    suspend fun createPullRequest(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:451:    private fun headers(token: String): Map<String, String> {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:456:    private fun requireToken(token: String): IllegalStateException? =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:465:    private fun transportFailure(e: IOException): IllegalStateException {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:470:    private fun mapHttpError(connection: GitHostConnection): IllegalStateException {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:485:    private fun parseErrorBody(body: String?): String {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:499:    private fun parseRepo(root: JSONObject, namespacePath: String): GitRepo {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:526:    private fun parseContentEntry(obj: JSONObject?): GitContentEntry? {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:538:    private fun parseTreeEntry(obj: JSONObject?): GitContentEntry? {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:554:    private fun closeQuietly(connection: GitHostConnection) {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:564:        internal fun repoUrl(host: GitHost, namespacePath: String): String =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:577:        internal fun contentsUrl(host: GitHost, namespacePath: String, path: String): String =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:592:        internal fun treeUrl(host: GitHost, namespacePath: String, path: String, ref: String): String {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:598:        internal fun encodeSegment(segment: String): String =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:601:        internal fun encodeBase64(text: String): String =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:604:        internal fun decodeBase64(content: String): String? = try {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:617:data class GitRepo(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:627:data class GitContentEntry(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:636:data class GitFile(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:644:data class GitFileWrite(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:651:data class GitPullRequest(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:664:    fun get(url: String, headers: Map<String, String>): GitHostConnection
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:667:    fun put(url: String, headers: Map<String, String>, requestBody: String): GitHostConnection
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:670:    fun post(url: String, headers: Map<String, String>, requestBody: String): GitHostConnection
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:675:    fun openBodyReader(): BufferedReader
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:676:    fun readErrorBody(): String?
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:686:    override fun get(url: String, headers: Map<String, String>): GitHostConnection =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:689:    override fun put(url: String, headers: Map<String, String>, requestBody: String): GitHostConnection =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:692:    override fun post(url: String, headers: Map<String, String>, requestBody: String): GitHostConnection =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:695:    private fun open(
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:734:    override fun openBodyReader(): BufferedReader =
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:737:    override fun readErrorBody(): String? = try {
+android/app/src/main/java/wherevercode/agent/core/project/GitHostApiClient.kt:744:    override fun close() {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:51:    data class Progress(val seq: Long, val message: String, val percent: Int? = null) : HandEvent()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:54:    data class Result(val seq: Long, val output: String) : HandEvent()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:57:    data class Blocked(val reason: String, val code: String) : HandEvent()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:66:    data class Ok(val token: String, val expiresInSeconds: Long) : WsTokenResult()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:67:    data class Failed(val reason: String) : WsTokenResult()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:77:    data class Ok(val args: Map<String, String>) : HandAdminResult()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:78:    data class Failed(val reason: String) : HandAdminResult()
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:81:data class HandCallRequest(
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:115:    fun register(taskId: String, connection: TransportConnection) {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:119:    fun unregister(taskId: String, connection: TransportConnection) {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:126:    fun abort(taskId: String) {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:180:    suspend fun requestWsToken(peer: DiscoveredPeer): WsTokenResult {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:212:            action = "",
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:276:    suspend fun requestHandAdmin(
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:305:            action = action,
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:351:    fun call(request: HandCallRequest): Flow<HandEvent> = flow {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:417:            action = request.action,
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:652:fun parseWsTokenReply(json: String): WsTokenResult? {
+android/app/src/main/java/wherevercode/agent/core/mcp/HandClient.kt:675:fun parseHandAdminReply(json: String): HandAdminResult? {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:40:data class McpTool(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:48:data class McpToolResult(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:53:data class McpServerInfo(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:61:data class McpResource(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:69:data class McpResourceContent(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:77:data class McpPromptArgument(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:83:data class McpPrompt(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:89:data class McpPromptMessage(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:94:data class McpPromptResult(
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:141:    suspend fun initialize(): McpServerInfo {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:174:    suspend fun ping() {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:185:    suspend fun rawRequest(method: String, params: Map<String, Any?> = emptyMap()): Any? =
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:189:    suspend fun listTools(): List<McpTool> {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:212:    suspend fun callTool(name: String, arguments: Map<String, Any?>): McpToolResult {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:237:    fun supportsResources(): Boolean = serverInfo?.capabilities?.has("resources") == true
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:240:    fun supportsResourceSubscribe(): Boolean {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:246:    suspend fun listResources(): List<McpResource> {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:275:    suspend fun readResource(uri: String): List<McpResourceContent> {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:294:    suspend fun subscribeResource(uri: String) {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:311:    suspend fun unsubscribeResource(uri: String) {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:329:    fun supportsPrompts(): Boolean = serverInfo?.capabilities?.has("prompts") == true
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:332:    suspend fun listPrompts(): List<McpPrompt> {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:373:    suspend fun getPrompt(name: String, arguments: Map<String, Any?> = emptyMap()): McpPromptResult {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:410:    fun handleNotification(notification: McpNotification) {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:475:    fun handleServerRequest(request: McpJsonRpc.Response.ServerRequest) {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:516:    private suspend fun requestWithSessionRetry(method: String, params: JSONObject?, timeoutMillis: Long = 60_000): Any? {
+android/app/src/main/java/wherevercode/agent/core/extension/mcp/McpClient.kt:527:    suspend fun close() {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:19:data class PlatformChannelMessage(
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:34:    suspend fun postMessage(channelId: String, text: String): String
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:42:    suspend fun pollMessages(
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:54:    fun postJson(url: String, bearerToken: String, bodyJson: String): String
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:62:    fun getJson(url: String, bearerToken: String?): String {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:85:        fun pinnedSocketFactoryFor(
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:100:        fun httpErrorMessage(status: Int, body: String): String {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:118:        private fun pinningFailureMessage(url: String, e: SSLHandshakeException): String {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:138:    override fun postJson(url: String, bearerToken: String, bodyJson: String): String {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:168:    override fun getJson(url: String, bearerToken: String?): String {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:221:    override suspend fun postMessage(channelId: String, text: String): String {
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:234:    override suspend fun pollMessages(
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:269:    fun callTool(name: String, arguments: JSONObject): JSONObject = toolsCall(name, arguments)
+android/app/src/main/java/wherevercode/agent/core/agent/PlatformChannelTransport.kt:276:    private fun toolsCall(name: String, arguments: JSONObject): JSONObject {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:48:    fun streamChat(
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:143:    suspend fun listModels(apiKey: String, baseUrl: String): Result<List<ModelInfo>> =
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:186:    private fun mapHttpError(status: Int, detail: String): GenericOpenAiEvent.Failed = when (status) {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:234:    private fun parseErrorBody(body: String?): String {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:252:        internal fun ioReason(e: IOException): String =
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:255:        internal fun chatCompletionsUrl(baseUrl: String): String {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:260:        internal fun modelsUrl(baseUrl: String): String {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:283:        internal fun buildGenericRequestBody(request: ChatRequest): JSONObject {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:320:        private fun toWireMessage(message: ChatMessage): JSONObject {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:400:private fun JSONObject.stringOrEmpty(name: String): String =
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:410:    fun post(url: String, apiKey: String, requestBody: String): GenericOpenAiConnection
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:413:    fun get(url: String, apiKey: String): GenericOpenAiConnection
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:418:    fun openBodyReader(): BufferedReader
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:419:    fun readErrorBody(): String?
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:428:    override fun post(url: String, apiKey: String, requestBody: String): GenericOpenAiConnection {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:442:    override fun get(url: String, apiKey: String): GenericOpenAiConnection {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:464:    override fun openBodyReader(): BufferedReader =
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:467:    override fun readErrorBody(): String? = try {
+android/app/src/main/java/wherevercode/agent/brain/generic/GenericOpenAiApiClient.kt:474:    override fun close() {

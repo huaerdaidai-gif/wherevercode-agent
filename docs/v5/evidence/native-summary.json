@@ -1,0 +1,129 @@
+{
+  "apk_sha256": "84befeb976b4a718956b7a2870b81172677d1682a04cc4174ac8880d6d5221e5",
+  "app_source_commit": "67c11024dd66c11ef2efece611b387f1d9e43f2c",
+  "navigation_test_commit": "a5965440240a03fd67cf2ea729ebd1d237183060",
+  "navigation": "PASS",
+  "route_count": 70,
+  "navigation_scope": "native route/detail reachability plus entering existing task library; not full backend feature verification",
+  "local_execution": "PASS",
+  "local_task_verified": true,
+  "task_id": "e9234fcf-73ec-4082-a722-fc79d6ca4783",
+  "attempt_id": "ac6b5bd4fff1460fb16adae0e0a140f6",
+  "transitions": "queued@46ms,assigned@8882ms,working@9412ms,failed@9923ms",
+  "final_state": "failed",
+  "visible_state_assertion": "状态：失败",
+  "model_execution": "NOT_VERIFIED: no configured model; genuine brain_not_configured error",
+  "environment": {
+    "device": "Google ATD emulator",
+    "api": 30,
+    "android": "11",
+    "abi": "x86_64",
+    "resolution": "360x800",
+    "density_dpi": 160,
+    "kvm": false,
+    "gpu": "swiftshader_indirect",
+    "debug.hwui.drawing_enabled": 1
+  },
+  "images": [
+    {
+      "file": "device/console-overview.png",
+      "bytes": 76010,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "dc998a6f8562c2c963c49e69bd0546b09d64aff3ace7012ca07d1fb3b7f3a9c6"
+    },
+    {
+      "file": "device/console-task-detail.png",
+      "bytes": 69063,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "ed3cbb3c2dc6a2c960aca32177e14526bb26d4467cbf68995a6bee6018e8a3ef"
+    },
+    {
+      "file": "device/dashboard.png",
+      "bytes": 26468,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "df31675b4bab0dcc04b513b5be7b4d4a35ac7cfa5b8c5c0fe1544109f76bd6e3"
+    },
+    {
+      "file": "device/drawer.png",
+      "bytes": 13242,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "dbb92003a3d7451bc72b74e02a4efa998baab8a51880f4baf365c1c0ae7438b7"
+    },
+    {
+      "file": "device/home.png",
+      "bytes": 19929,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "10d1a72665784c0cdc95de68604ad348efb2bd5bc99aa7f3c4c339011290aa50"
+    },
+    {
+      "file": "device/native-tasks.png",
+      "bytes": 79289,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "445492be1acf5c57e12eda209da0f3b2a74b35ad574b3ac7d0b968b385b2bd1d"
+    },
+    {
+      "file": "device/projects.png",
+      "bytes": 22276,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "933bcd034c746595f2df42f7824ef7594fa00db27b34727267a8fb0bc8bcc69c"
+    },
+    {
+      "file": "device/settings.png",
+      "bytes": 25226,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "28a89146f95d44c94b3451a2aa89a83c62031bacac15bc634777a3511cefe444"
+    },
+    {
+      "file": "device/task-detail-result.png",
+      "bytes": 63308,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "2fa6ecf1d552daa6336fe39fee536e9f52602ca6bdbd34b066e5424f4b2a3b8c"
+    },
+    {
+      "file": "device/usage.png",
+      "bytes": 20346,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "cffdc2a3b5169f9a478c6940d0792131c583b7926ea374c0c5e39d5038db863b"
+    },
+    {
+      "file": "device/voice.png",
+      "bytes": 23782,
+      "dimensions": [
+        360,
+        800
+      ],
+      "sha256": "d6149558325d9c6d0bf921b7ed1c5ea46711ea02de50d7969924f9694d99b966"
+    }
+  ],
+  "console_drilldown": "PASS (manual ADB/UIAutomator)"
+}

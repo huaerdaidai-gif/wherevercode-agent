@@ -345,7 +345,7 @@ class MainActivity : AppCompatActivity() {
     /** 阶段 3（U1）：默认会话历史快照（SharedPreferences）。 */
     private val chatHistoryStore by lazy { ChatHistoryStore(this) }
 
-    private lateinit var screenContainer: View
+    private lateinit var screenContainer: android.widget.FrameLayout
     private lateinit var screenChat: View
     private lateinit var screenProjects: View
     private lateinit var screenTasks: View
@@ -610,6 +610,17 @@ class MainActivity : AppCompatActivity() {
     /** 阶段 3（U3/批 3a）：任务详情浮层（复用设置浮层的宿主模式）。 */
     private var taskDetailVisible = false
     private var taskDetailTaskId: String? = null
+    private val taskDetailHandler = Handler(Looper.getMainLooper())
+    private var taskDetailRequestGeneration = 0
+    private var lastTaskDetailSnapshot: List<Any?>? = null
+    private val taskDetailRefresh = Runnable {
+        val id = taskDetailTaskId
+        if (id != null && taskDetailVisible &&
+            lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            openTaskDetail(id)
+        }
+    }
+
     private var pendingTaskDetailId: String? = null
     /** 2026-11-11（事件密度）：任务屏“运行事件”分组的展开状态（刷新后不丢）。 */
     private val expandedEventGroupKeys = mutableSetOf<String>()
@@ -1152,11 +1163,19 @@ class MainActivity : AppCompatActivity() {
         inConversation = savedInstanceState?.getBoolean(KEY_IN_CONVERSATION, false) ?: false
         pendingTaskDetailId = savedInstanceState?.getString(KEY_TASK_DETAIL)
         showEntry(startEntry)
+        v5ReturnParent = savedInstanceState?.getString("v5_return")
+        savedInstanceState?.getString("v5_parent")?.let { parent ->
+            val local = savedInstanceState.getString("v5_local_route")
+            if (local in setOf("search", "memory", "skills")) showV5Local(local!!) else showV5Hub(parent)
+        }
         loadBrainComponents()
         maybeShowOnboarding(savedInstanceState?.getString(KEY_ONBOARDING_STEP))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("v5_parent", v5Parent)
+        outState.putString("v5_local_route", v5LocalRoute)
+        outState.putString("v5_return", v5ReturnParent)
         outState.putString(KEY_ENTRY, currentEntry)
         outState.putBoolean(KEY_IN_CONVERSATION, inConversation)
         taskDetailTaskId?.let { outState.putString(KEY_TASK_DETAIL, it) }
@@ -1174,9 +1193,17 @@ class MainActivity : AppCompatActivity() {
         drawerScrim = findViewById(R.id.drawerScrim)
         drawerScrim.setOnClickListener { closeDrawer() }
         findViewById<View>(R.id.buttonMenu).setOnClickListener { openDrawer() }
+        listOf(R.id.topBrandLogo, R.id.topBrandName, R.id.buttonBell).forEach {
+            findViewById<View>(it).visibility = View.GONE
+        }
+        findViewById<TextView>(R.id.topBrandVersion).text = ""
+        findViewById<android.widget.ImageView>(R.id.buttonSearch).apply {
+            setImageResource(R.drawable.ic_edit)
+            contentDescription = "新对话"
+        }
         // V5 C2-3-R1c：顶栏搜索（v4.3-01）→ 会话（真实入口）。
         findViewById<View>(R.id.buttonSearch).setOnClickListener {
-            showEntry(DrawerController.ID_HISTORY_SEARCH)
+            newConversationAndShow()
         }
         // Historical resource id retained; this is the real new-conversation action.
         findViewById<View>(R.id.buttonBell).setOnClickListener {
@@ -1188,18 +1215,112 @@ class MainActivity : AppCompatActivity() {
     // Drawer (V5 Phase B C2, batch 2)
     // ------------------------------------------------------------------
 
-    private fun bindDrawer() {
-        drawerView = DrawerView(
-            this,
-            drawerController,
-            onEntrySelected = { id -> onDrawerEntrySelected(id) },
-            onPrefsChanged = { saveDrawerPrefs() },
-            activeTargetProvider = { currentEntry },
-            userLabelProvider = { drawerUserLabel() },
-            themeLabelProvider = { currentThemeLabel() },
-        ).also { view ->
-            drawerContainer.addView(view.root)
+    private var v5Hub: androidx.compose.ui.platform.ComposeView? = null
+    private var v5Parent: String? = null
+    private var v5LocalRoute: String? = null
+    private var v5ReturnParent: String? = null
+    private var v5DetailBack: (() -> Boolean)? = null
+
+    private fun hideV5Hub() {
+        v5Hub?.let { screenContainer.removeView(it); it.disposeComposition() }
+        v5Hub = null
+        v5Parent = null
+        v5LocalRoute = null
+        v5DetailBack = null
+    }
+
+    private fun showV5Hub(parent: String, initialRoute: String? = null) {
+        if (parent !in wherevercode.agent.ui.flagship.V5Navigation.parents) return
+        hideV5Hub()
+        hideTaskDetail()
+        // Stop background UI polling while its screen is covered; execution keeps running.
+        stopConsoleTicker()
+        stopTeamChannelFeed()
+        v5Parent = parent
+        for (index in 0 until screenContainer.childCount) screenContainer.getChildAt(index).visibility = View.GONE
+        v5Hub = androidx.compose.ui.platform.ComposeView(this).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                wherevercode.agent.ui.flagship.FlagshipHub(parent, initialRoute = initialRoute,
+                    onOpen = { openV5Route(it) },
+                    onBack = { hideV5Hub(); showEntry(currentEntry) },
+                    provider = wherevercode.agent.ui.flagship.AppFlagshipCapabilities(this@MainActivity),
+                    registerBack = { v5DetailBack = it },
+                    onUtility = { entry ->
+                        if (entry == "nav_help") {
+                            v5ReturnParent = "设置"
+                            hideV5Hub()
+                        }
+                        openRegistryEntry(entry)
+                    })
+            }
+            screenContainer.addView(this, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
+    }
+
+    private fun showV5Local(routeId: String) {
+        val parent = v5ReturnParent ?: wherevercode.agent.ui.flagship.V5Navigation.parentByRoute.getValue(routeId)
+        hideV5Hub()
+        hideTaskDetail()
+        stopConsoleTicker()
+        stopTeamChannelFeed()
+        v5Parent = parent
+        for (index in 0 until screenContainer.childCount) screenContainer.getChildAt(index).visibility = View.GONE
+        v5LocalRoute = routeId
+        val back = { showV5Hub(parent, routeId) }
+        v5DetailBack = { back(); true }
+        v5Hub = androidx.compose.ui.platform.ComposeView(this).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                wherevercode.agent.ui.flagship.LocalFeatureScreen(routeId,
+                    resolve = { brainComponents }, projects = { projectStore.listProjects() }, onBack = back,
+                    onResult = { result ->
+                        when (result.kind) {
+                            "页面" -> showV5Hub(wherevercode.agent.ui.flagship.V5Navigation.parentByRoute.getValue(result.id), result.id)
+                            "会话" -> { hideV5Hub(); showEntry(DrawerController.ID_NEW_CONVERSATION); openSession(result.id, result.title) }
+                            "任务" -> { hideV5Hub(); showEntry(DrawerController.ID_TASKS); openTaskDetail(result.id) }
+                            "项目" -> {
+                                val project = projectStore.getProject(result.id)
+                                if (project == null) toast("项目已不存在，请重新搜索")
+                                else android.app.AlertDialog.Builder(this@MainActivity).setTitle(project.name)
+                                    .setMessage("项目 ID：${project.projectId}\n仓库：${project.repoUrl ?: "未设置"}\n分支：${project.defaultBranch}")
+                                    .setPositiveButton("浏览授权文件") { _, _ ->
+                                        hideV5Hub(); showEntry(DrawerController.ID_PROJECTS); openProject(project)
+                                    }.setNegativeButton("返回搜索", null).show()
+                            }
+                        }
+                    })
+            }
+            screenContainer.addView(this, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+    }
+
+    private fun openV5Route(routeId: String) {
+        val binding = wherevercode.agent.ui.flagship.V5Bindings.all[routeId] ?: return
+        v5ReturnParent = v5Parent ?: wherevercode.agent.ui.flagship.V5Navigation.parentByRoute[routeId]
+        hideV5Hub()
+        when (binding.entry) {
+            "local_search", "local_memory", "local_skills" -> showV5Local(routeId)
+            "current_conversation" -> showEntry(DrawerController.ID_NEW_CONVERSATION)
+            "create_task" -> {
+                showEntry(DrawerController.ID_TASKS)
+                showCreateTaskDialog()
+            }
+            else -> onDrawerEntrySelected(binding.entry)
+        }
+    }
+
+    private fun bindDrawer() {
+        drawerContainer.addView(androidx.compose.ui.platform.ComposeView(this).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                wherevercode.agent.ui.flagship.FourParentDrawer { parent ->
+                    closeDrawer()
+                    v5ReturnParent = null
+                    showV5Hub(parent)
+                }
+            }
+        })
         drawerContainer.visibility = View.GONE
         drawerContainer.post {
             drawerContainer.translationX = -drawerContainer.width.toFloat()
@@ -1614,6 +1735,7 @@ class MainActivity : AppCompatActivity() {
      * 顶栏“新建”按钮、会话列表“新对话”各走自己的 newConversation()）。
      */
     private fun showEntry(entryId: String) {
+        hideV5Hub()
         hideTaskDetail()
         val screen = DrawerRouter.screenFor(entryId)
         val entry = when (screen) {
@@ -4516,6 +4638,7 @@ class MainActivity : AppCompatActivity() {
                 turnRevisions[turn.id] = turn.revision
             }
         }
+        messageList.gravity = if (state.turns.isEmpty()) android.view.Gravity.CENTER_VERTICAL else android.view.Gravity.TOP
         if (state.turns.isEmpty()) {
             // V5 C2（批 2）：问候只在“未手动关闭、且尚未开始聊天”时出现。
             if (homeScreenController.greetingVisible()) {
@@ -4553,97 +4676,18 @@ class MainActivity : AppCompatActivity() {
      * 不代发、不伪装已发送。
      * 配色走 home_* token（浅色默认 Claude 极简，深色档原型霓虹）。
      */
-    private fun buildWelcomeView(): View {
-        val card = UiKit.vertical(this).apply {
-            // 原型图问候直接落在首页底色上，不另套大卡片。
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8); bottomMargin = dp(12) }
-        }
-        card.addView(
-            UiKit.text(this, "✕ 关闭问候", 11f, R.color.home_text_secondary).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                )
-                gravity = android.view.Gravity.END
-                setPadding(0, 0, 0, dp(4))
-                setOnClickListener {
-                    // V5 C2（批 2）：问候可关闭，关闭后不再出现。
-                    homeScreenController.dismissGreeting()
-                    welcomeView?.let { messageList.removeView(it) }
-                    welcomeView = null
-                    renderChat(chatViewModel.stateNow())
-                }
-            },
-        )
-        // V5 C2-3-R4 (v4.3-01)：中央品牌——紫色 ∞ 标志（与抽屉品牌头
-        // 同一做法：UiKit.text 的 "∞" + home_gradient_start，见
-        // DrawerView.addBrandHeader）+ WhereverCode + 副标题（已是
-        // 问候保持轻量；产品名已在顶栏显示。
-        // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
-        // 不显示真人名字（见 HomeScreenController.greeting）。
-        val greetingView =
-            UiKit.text(this, HomeScreenController.greeting(), 28f, R.color.home_text, bold = true).apply {
-                gravity = android.view.Gravity.CENTER
-            }
-        card.addView(UiKit.text(this, "∞", 34f, R.color.home_gradient_start).apply {
+    private fun buildWelcomeView(): View = UiKit.vertical(this).apply {
+        gravity = android.view.Gravity.CENTER
+        setPadding(dp(16), dp(80), dp(16), dp(80))
+        addView(UiKit.text(this@MainActivity, "✳", 56f, R.color.home_star).apply {
             gravity = android.view.Gravity.CENTER
-            setPadding(0, dp(20), 0, dp(12))
+            setPadding(0, 0, 0, dp(20))
         })
-        card.addView(greetingView)
-        card.addView(UiKit.text(this, "项目 · 选择或切换 ›", 12f, R.color.home_text_secondary).apply {
-            minHeight = dp(48)
+        addView(UiKit.text(this@MainActivity, HomeScreenController.greeting(), 28f, R.color.home_text).apply {
             gravity = android.view.Gravity.CENTER
-            setOnClickListener { showChatProjectPicker() }
         })
-        card.addView(
-            UiKit.text(this, "", 14f, R.color.home_text_secondary).apply {
-                gravity = android.view.Gravity.CENTER
-                setPadding(0, dp(4), 0, dp(14))
-            },
-        )
-        // V5 C2-3-R1d（v4.3-01）：4 个建议 pill 取自入口注册表
-        // （唯一事实来源）；点按把意图填进输入框，等用户补齐细节再
-        // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
-        // 连接设备/Agent 团队/任务中心）由抽屉承接（R2）。
-        if (homeScreenController.suggestionsVisible()) {
-            EntryRegistry.homeSuggestions().take(3).chunked(2).forEach { rowSuggestions ->
-                val row = UiKit.horizontal(this).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { bottomMargin = dp(8) }
-                }
-                rowSuggestions.forEachIndexed { index, entry ->
-                    row.addView(
-                        homeSuggestionPill(entry.iconGlyph, entry.title) { applySuggestion(entry.target) },
-                        LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-                            marginEnd = if (index == 0) dp(8) else 0
-                        },
-                    )
-                }
-                card.addView(row)
-            }
-            card.addView(
-                UiKit.text(this, "收起建议", 11f, R.color.home_text_secondary).apply {
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(0, dp(2), 0, 0)
-                    setOnClickListener {
-                        homeScreenController.dismissSuggestions()
-                        welcomeView?.let { messageList.removeView(it) }
-                        welcomeView = null
-                        renderChat(chatViewModel.stateNow())
-                    }
-                },
-            )
-        }
-        return card
     }
 
-    /** V5 C2-3-R1c：问候区建议 pill（v4.3-01）：白底细边框圆 pill + 字标 + 建议名。 */
     private fun homeSuggestionPill(glyph: String, label: String, onClick: () -> Unit): View {
         val row = UiKit.horizontal(this).apply {
             background = UiKit.rounded(this@MainActivity, R.color.home_card, 999, R.color.home_card_border, 1)
@@ -4689,6 +4733,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleFlagshipEntryIntent(intent: Intent?) {
+        intent?.getStringExtra(wherevercode.agent.ui.flagship.EXTRA_V5_ROUTE)?.let { route ->
+            intent.removeExtra(wherevercode.agent.ui.flagship.EXTRA_V5_ROUTE)
+            openV5Route(route)
+            return
+        }
         val entryId = intent?.getStringExtra(
             wherevercode.agent.ui.flagship.EXTRA_FLAGSHIP_ENTRY,
         ) ?: return
@@ -6414,11 +6463,16 @@ class MainActivity : AppCompatActivity() {
             toast("大脑还在加载，请稍候再打开详情。")
             return
         }
+        val opening = !taskDetailVisible || taskDetailTaskId != taskId
+        if (opening) lastTaskDetailSnapshot = null
+        val requestGeneration = ++taskDetailRequestGeneration
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
         taskDetailTaskId = taskId
         taskDetailVisible = true
         screenSettings.visibility = View.GONE
         taskDetailController.root.visibility = View.VISIBLE
-        taskDetailController.root.post { taskDetailController.root.fullScroll(View.FOCUS_UP) }
+        taskDetailController.root.bringToFront()
+        if (opening) taskDetailController.root.post { taskDetailController.root.fullScroll(View.FOCUS_UP) }
         Thread {
             val task = try {
                 components.taskStore.getTask(taskId)
@@ -6479,7 +6533,7 @@ class MainActivity : AppCompatActivity() {
                 emptyList()
             }
             runOnUiThread {
-                if (!taskDetailVisible || taskDetailTaskId != taskId || isFinishing || isDestroyed) {
+                if (!taskDetailVisible || taskDetailTaskId != taskId || requestGeneration != taskDetailRequestGeneration || isFinishing || isDestroyed) {
                     return@runOnUiThread
                 }
                 if (task == null) {
@@ -6487,18 +6541,32 @@ class MainActivity : AppCompatActivity() {
                     hideTaskDetail()
                     return@runOnUiThread
                 }
-                taskDetailController.render(
-                    task, steps, events, approvals, history.size, artifactPaths, taskEvents,
-                    pipeline = pipelineView,
-                    onPipelineAction = { action -> handlePipelineAction(taskId, action, artifactPaths) },
-                    autoDecisions = autoDecisions,
-                    controlStatus = controlStatus,
-                )
+                val snapshot = listOf(task, steps, events, approvals, history.size, artifactPaths,
+                    taskEvents, pipelineView, autoDecisions, controlStatus)
+                if (snapshot != lastTaskDetailSnapshot) {
+                    val scrollY = if (opening) 0 else taskDetailController.root.scrollY
+                    taskDetailController.render(
+                        task, steps, events, approvals, history.size, artifactPaths, taskEvents,
+                        pipeline = pipelineView,
+                        onPipelineAction = { action -> handlePipelineAction(taskId, action, artifactPaths) },
+                        autoDecisions = autoDecisions,
+                        controlStatus = controlStatus,
+                    )
+                    lastTaskDetailSnapshot = snapshot
+                    taskDetailController.root.post { taskDetailController.root.scrollTo(0, scrollY) }
+                }
+                // One read at a time; only visible, resumed details keep polling.
+                if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                    taskDetailHandler.postDelayed(taskDetailRefresh, 2000)
+                }
             }
         }.start()
     }
 
     private fun hideTaskDetail() {
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
+        taskDetailRequestGeneration++
+        lastTaskDetailSnapshot = null
         taskDetailVisible = false
         taskDetailTaskId = null
         if (::taskDetailController.isInitialized) {
@@ -9349,7 +9417,7 @@ class MainActivity : AppCompatActivity() {
         }
         chatRouteBanner.text = spannable
         chatRouteBanner.movementMethod = LinkMovementMethod.getInstance()
-        chatRouteBanner.visibility = View.VISIBLE
+        chatRouteBanner.visibility = if (chatViewModel.stateNow().turns.isEmpty()) View.GONE else View.VISIBLE
         // V5 聊天清理 20261111：输入框里的设备/Agent 胶囊与横幅同源刷新——
         // 未选 Agent 显示“团队 ⌄”，选了显示当前对话方展示名 + ⌄；点按
         // 开选 Agent 对话框（见 buttonAgentSelect 的点击监听）。
@@ -9379,7 +9447,7 @@ class MainActivity : AppCompatActivity() {
             val components = brainComponents
             val id = components?.configStore?.currentBrainId()
             val configured = id != null && components?.isBrainConfigured(id) == true
-            visibility = if (components != null && agent == null && !configured) View.VISIBLE else View.GONE
+            visibility = if (components != null && agent == null && !configured && chatViewModel.stateNow().turns.isNotEmpty()) View.VISIBLE else View.GONE
             setOnClickListener { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
         }
         if (agent == null) {
@@ -11383,7 +11451,19 @@ class MainActivity : AppCompatActivity() {
             closeDrawer()
             return
         }
+        if (v5Hub != null) {
+            if (v5DetailBack?.invoke() != true) {
+                hideV5Hub()
+                showEntry(currentEntry)
+            }
+            return
+        }
         if (isSettingsEntry(currentEntry)) {
+            if (v5ReturnParent != null) {
+                showV5Hub(v5ReturnParent!!)
+                v5ReturnParent = null
+                return
+            }
             hideSettings()
             return
         }
@@ -11401,6 +11481,11 @@ class MainActivity : AppCompatActivity() {
             projectController.showProjectList()
             return
         }
+        if (v5ReturnParent != null) {
+            showV5Hub(v5ReturnParent!!)
+            v5ReturnParent = null
+            return
+        }
         if (currentEntry == DrawerController.ID_NEW_CONVERSATION && inConversation) {
             backToSessionList()
             return
@@ -11414,11 +11499,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (taskDetailVisible) taskDetailHandler.post(taskDetailRefresh)
         // 阶段 3（U4）：回前台时补一次审批 ticker（审批可能在后台到达）。
         pokeApprovalTicker()
     }
 
+    override fun onPause() {
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
+        taskDetailRequestGeneration++
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        taskDetailHandler.removeCallbacks(taskDetailRefresh)
+        taskDetailRequestGeneration++
         // The turn lives in ChatViewModel, not the Activity: detaching the
         // gate must not stop an in-flight turn during a theme/config change.
         // A permanently finishing Activity lets ViewModel.onCleared() stop it.

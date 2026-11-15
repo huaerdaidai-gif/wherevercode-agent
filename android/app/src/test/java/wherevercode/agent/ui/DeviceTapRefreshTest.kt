@@ -1,6 +1,7 @@
 package wherevercode.agent.ui
 
 import android.content.Context
+import android.content.Intent
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
@@ -15,6 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.android.controller.ActivityController
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
@@ -50,7 +52,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        clickDrawerRow(activity, "nav_devices")
+        openDevices(controller)
 
         val shown = waitForText(activity, "dev-0", timeoutMs = 3000)
         assertTrue("点进设备页 3 秒内应已看到本地添加的设备 dev-0（不等 5 秒 mDNS）", shown)
@@ -68,7 +70,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        clickDrawerRow(activity, "nav_devices")
+        openDevices(controller)
         assertTrue(waitForText(activity, "dev-7", timeoutMs = 3000))
 
         val scrollView = activity.findViewById<FrameLayout>(R.id.screenContainer)
@@ -103,20 +105,10 @@ class DeviceTapRefreshTest {
             .edit().putString("devices_json", json).apply()
     }
 
-    private fun clickDrawerRow(activity: MainActivity, tag: String) {
-        val row = findByTag(activity.window.decorView, tag)
-        assertNotNull("抽屉里应有 tag=$tag 的行", row)
-        row!!.performClick()
-    }
-
-    private fun findByTag(root: View, tag: String): View? {
-        if (root.tag == tag) return root
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                findByTag(root.getChildAt(i), tag)?.let { return it }
-            }
-        }
-        return null
+    /** Device refresh tests use the supported V5 deep link; drawer traversal has a device test. */
+    private fun openDevices(controller: ActivityController<MainActivity>) {
+        controller.newIntent(Intent(controller.get(), MainActivity::class.java).putExtra("wherevercode.agent.extra.V5_ROUTE", "devices"))
+        idleMain()
     }
 
     private fun waitForText(activity: MainActivity, needle: String, timeoutMs: Long): Boolean {

@@ -1,0 +1,73 @@
+
+> Configure project :app
+Warning: Python version 3.11 may have fewer packages available. If you experience problems, try switching to version 3.8.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:extractDebugPythonBuildPackages UP-TO-DATE
+> Task :app:generateDebugPythonRequirements UP-TO-DATE
+> Task :app:mergeDebugPythonSources UP-TO-DATE
+> Task :app:generateDebugPythonProxies UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
+> Task :app:compileDebugKotlin
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+> Task :app:kaptDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestKotlin
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/brain/GitHostToolsTest.kt:152:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/brain/GitHostToolsTest.kt:194:26 Parameter 'gate' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/brain/ToolRegistryDispatchProjectTest.kt:86:35 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/mcp/AuthorizeProjectFolderE2ETest.kt:49:29 Type mismatch: inferred type is String? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:241:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:260:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:281:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:301:53 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/project/GitHostProjectPortTest.kt:321:26 Parameter 'body' is never used, could be renamed to _
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/DecompositionOrchestratorTest.kt:193:32 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/DecompositionStoreTest.kt:94:13 Variable 'task' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/PipelineStoreTest.kt:94:13 Variable 'task' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/TaskSchedulerMemberParallelTest.kt:63:49 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/task/TaskSchedulerTest.kt:65:49 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/transport/PairingClientTest.kt:121:21 Unsafe use of a nullable receiver of type String?
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/core/transport/PairingClientTest.kt:122:37 Type mismatch: inferred type is String? but String was expected
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/MainLayoutTest.kt:85:13 Variable 'root' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/WorkspaceEditTest.kt:29:31 Parameter 'session' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/flagship/V5NavigationTest.kt:11:42 Type mismatch: inferred type is String? but String was expected
+
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:generateDebugPythonMiscAssets
+> Task :app:generateDebugPythonRequirementsAssets
+> Task :app:generateDebugPythonSourceAssets UP-TO-DATE
+> Task :app:generateDebugPythonBuildAssets
+> Task :app:mergeDebugAssets
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 1m 12s
+39 actionable tasks: 17 executed, 22 up-to-date

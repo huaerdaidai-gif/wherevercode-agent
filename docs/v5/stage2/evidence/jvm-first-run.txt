@@ -1,0 +1,97 @@
+
+> Configure project :app
+Warning: Python version 3.11 may have fewer packages available. If you experience problems, try switching to version 3.8.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:extractDebugPythonBuildPackages UP-TO-DATE
+> Task :app:generateDebugPythonRequirements
+> Task :app:mergeDebugPythonSources UP-TO-DATE
+> Task :app:generateDebugPythonProxies
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
+
+> Task :app:compileDebugKotlin
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:1595:41 No cast needed
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:3441:82 Parameter 'projectName' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:8229:75 There is more than one label with such a name in this scope
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9005:75 There is more than one label with such a name in this scope
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9142:87 'versionCode: Int' is deprecated. Deprecated in Java
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9320:54 Unnecessary safe call on a non-null receiver of type BrainBootstrap.BrainComponents?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9447:17 Name shadowed: signedIn
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9451:36 Unnecessary safe call on a non-null receiver of type BrainConfig?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/MainActivity.kt:9474:36 Condition 'currentBrainId != null' is always 'true'
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/brain/siwc/BrainBootstrap.kt:1213:17 Name shadowed: tokenStore
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1499:40 Variable 'progressTicker' initializer is redundant
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1520:43 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1536:43 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1543:43 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1556:31 Unnecessary safe call on a non-null receiver of type Job?
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1804:61 Unnecessary non-null assertion (!!) on a non-null receiver of type TurnStatus
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:1955:9 Parameter 'comps' is never used
+w: file:///workspace/wherevercode-agent/android/app/src/main/java/wherevercode/agent/ui/ChatViewModel.kt:2109:9 Parameter 'comps' is never used
+
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+> Task :app:kaptDebugUnitTestKotlin
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///workspace/wherevercode-agent/android/app/src/test/java/wherevercode/agent/ui/flagship/V5NavigationTest.kt:11:42 Type mismatch: inferred type is String? but String was expected
+
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:generateDebugPythonMiscAssets
+> Task :app:generateDebugPythonRequirementsAssets
+> Task :app:generateDebugPythonSourceAssets UP-TO-DATE
+> Task :app:generateDebugPythonBuildAssets
+> Task :app:mergeDebugAssets
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:processDebugJavaRes
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest
+
+wherevercode.agent.brain.PersistentMemoryStoreTest > failed commit does not change published memory FAILED
+    java.lang.AssertionError at PersistentMemoryStoreTest.kt:59
+
+2805 tests completed, 1 failed, 1 skipped
+
+> Task :app:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///workspace/wherevercode-agent/android/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 3m 8s
+39 actionable tasks: 20 executed, 19 up-to-date

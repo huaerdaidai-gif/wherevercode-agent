@@ -1,0 +1,21 @@
+
+wherevercode.agent.ui.FlagshipNavTest:
+Error in fourParentsAndAllSeventyRoutesAreReachableInMainActivity(wherevercode.agent.ui.FlagshipNavTest):
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at wherevercode.agent.ui.FlagshipNavTest.fourParentsAndAllSeventyRoutesAreReachableInMainActivity(FlagshipNavTest.kt:31)
+
+
+Time: 48.293
+There was 1 failure:
+1) fourParentsAndAllSeventyRoutesAreReachableInMainActivity(wherevercode.agent.ui.FlagshipNavTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at wherevercode.agent.ui.FlagshipNavTest.fourParentsAndAllSeventyRoutesAreReachableInMainActivity(FlagshipNavTest.kt:31)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
