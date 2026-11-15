@@ -276,6 +276,7 @@ import wherevercode.agent.ui.ChatAttachment
 import wherevercode.agent.ui.ChatAttachmentKind
 import wherevercode.agent.ui.ChatAttachments
 import wherevercode.agent.ui.ConsoleScreenController
+import wherevercode.agent.ui.ChannelHomeController
 import wherevercode.agent.ui.TeamChannelController
 import wherevercode.agent.ui.TeamChannelSnapshot
 import wherevercode.agent.ui.ConsoleSnapshot
@@ -382,6 +383,7 @@ class MainActivity : AppCompatActivity() {
     private var mcpPluginsRefreshRunning = false
 
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天 + 只读扇出。 */
+    private lateinit var channelHomeController: ChannelHomeController
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
     private var teamChannelFeed: McpChannelEventFeed? = null
@@ -1269,7 +1271,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * V5 导航整改最终定稿（2026-11-15）：抽屉入口点按——入口 id 是注册表 id。
-     * 一级入口只有三项：对话、项目、控制。
+     * 一级入口固定四项：对话、项目、频道、控制。
      * 底部 ＋ 新对话按钮触发 nav_new_chat → 新建对话。
      * 底部账号头像触发 nav_workbench → 进入设置页面。
      * 会话列表行触发 session:<id> → 打开对应会话。
@@ -1524,6 +1526,8 @@ class MainActivity : AppCompatActivity() {
             onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
             onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onRefresh = { refreshConsole() },
+            onOpenTools = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
+            onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
         )
         screenConsole = consoleController.root
         container.addView(screenConsole)
@@ -1548,6 +1552,7 @@ class MainActivity : AppCompatActivity() {
                 agentStore.getAgent(agentId)?.let { openAgentSession(it) }
             },
             onPost = { text -> postTeamChannelMessage(text) },
+            onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
             onMarkRead = { markTeamChannelRead() },
             onNewRound = {
                 teamChannelRoundsUsed = 0
@@ -1559,6 +1564,13 @@ class MainActivity : AppCompatActivity() {
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
         screenTeamChannel.visibility = View.GONE
+        channelHomeController = ChannelHomeController(
+            this,
+            onOpenChannel = { showEntry(DrawerController.ID_TEAM_CHANNEL) },
+            onOpenAgent = { agentId -> agentStore.getAgent(agentId)?.let { openAgentSession(it) } },
+            onManageAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
+        )
+        container.addView(channelHomeController.root)
         screenChat.visibility = View.VISIBLE
         screenProjects.visibility = View.GONE
         screenTasks.visibility = View.GONE
@@ -1643,7 +1655,8 @@ class MainActivity : AppCompatActivity() {
         screenConsole.visibility = if (screen == EntryScreen.CONSOLE) View.VISIBLE else View.GONE
         screenMcpPlugins.visibility = if (screen == EntryScreen.MCP_PLUGINS) View.VISIBLE else View.GONE
         screenTeamChannel.visibility =
-            if (screen == EntryScreen.TEAM_CHANNEL || screen == EntryScreen.CHANNELS) View.VISIBLE else View.GONE
+            if (screen == EntryScreen.TEAM_CHANNEL) View.VISIBLE else View.GONE
+        channelHomeController.root.visibility = if (screen == EntryScreen.CHANNELS) View.VISIBLE else View.GONE
         // 离开控制台即停自动刷新（不空转耗电）；进入时由 CONSOLE 分支起 ticker。
         if (screen != EntryScreen.CONSOLE) stopConsoleTicker()
         // 离开频道即停 WS 订阅与兜底轮询（不空转耗电）；进入时由 TEAM_CHANNEL 分支重起。
@@ -1684,8 +1697,7 @@ class MainActivity : AppCompatActivity() {
                 refreshTeamChannel()
                 startTeamChannelFeed()
             }
-            // 频道一级入口：当前直接进入已有真实团队频道页（消息/文件/任务）。
-            // 频道列表 / 私聊双分区首页尚未实现——见 HANDOFF.md「未完成」。
+            // 频道首页复用同一频道快照；详情与私聊复用现有消息和会话系统。
             EntryScreen.CHANNELS -> {
                 refreshTeamChannel()
                 startTeamChannelFeed()
@@ -4698,6 +4710,14 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     private fun bindProjects() {
+        val projectNavigation = UiKit.horizontal(this)
+        listOf("任务" to DrawerController.ID_TASKS, "成果" to DrawerController.ID_RESULTS).forEach { (label, target) ->
+            projectNavigation.addView(UiKit.text(this, label, 14f, R.color.accent).apply {
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                setOnClickListener { showEntry(target) }
+            })
+        }
+        (screenProjects as LinearLayout).addView(projectNavigation, 1)
         projectController = ProjectScreenController(
             context = this,
             rootLabel = screenProjects.findViewById(R.id.projectRoot),
@@ -5586,6 +5606,7 @@ class MainActivity : AppCompatActivity() {
                 if (!::teamChannelController.isInitialized) return@runOnUiThread
                 if (snapshot != null) {
                     teamChannelController.render(snapshot)
+                    channelHomeController.render(snapshot)
                     // 刷新后：用户正看着频道页，刚渲染的消息即视为已读，
                     // 把服务端标记推到最新一条，别处（另一台设备 /
                     // MCP onlyUnread）不再重复通知。后台线程、失败静默，
@@ -5735,11 +5756,13 @@ class MainActivity : AppCompatActivity() {
     /** 往频道发一条消息（后台线程；成功计一轮，失败把原因写进提示）。 */
     private fun postTeamChannelMessage(text: String) {
         val (host, channelId) = teamChannelEndpoint() ?: run {
+            teamChannelController.postResult(text, false)
             teamChannelNotice = "频道还没配好，发不出去。"
             refreshTeamChannel()
             return
         }
         Thread {
+            var success = false
             try {
                 val transport = PlatformChannelMcpTransport(
                     tokenProvider = { platformCredentialStore.loadPlatformToken() },
@@ -5748,11 +5771,16 @@ class MainActivity : AppCompatActivity() {
                 runBlocking { transport.postMessage(channelId, text) }
                 teamChannelRoundsUsed++
                 teamChannelNotice = null
+                success = true
             } catch (e: Exception) {
                 teamChannelNotice =
                     "发帖失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
             }
-            runOnUiThread { refreshTeamChannel() }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                teamChannelController.postResult(text, success)
+                refreshTeamChannel()
+            }
         }.start()
     }
 

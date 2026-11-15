@@ -39,8 +39,8 @@ class V5RuntimeInstrumentation : Instrumentation() {
             open("nav_channels")
             capture("04-channels")
             // A configured channel can be opened without inventing server data.
-            find { it.tag == "channel_open_existing" }?.let { click(it) }
-            find { it.tag == "channel_tab_files" }?.let { click(it) }
+            clickTag("channel_open_existing")
+            clickTag("channel_tab_files")
             capture("05-channel-files-unconfigured")
             open("nav_control")
             capture("06-control")

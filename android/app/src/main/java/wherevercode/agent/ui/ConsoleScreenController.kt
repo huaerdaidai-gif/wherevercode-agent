@@ -49,6 +49,8 @@ class ConsoleScreenController(
     private val onOpenDevices: () -> Unit,
     private val onOpenAgents: () -> Unit,
     private val onRefresh: () -> Unit,
+    private val onOpenTools: (() -> Unit)? = null,
+    private val onOpenMcp: (() -> Unit)? = null,
 ) {
     val root: ScrollView = ScrollView(context).apply {
         visibility = View.GONE
@@ -119,6 +121,12 @@ class ConsoleScreenController(
             management.addView(UiKit.text(context, label, 13f, R.color.accent, bold = true).apply {
                 tag = viewTag
                 setPadding(dp(12), dp(12), dp(12), dp(12))
+                setOnClickListener { action() }
+            })
+        }
+        listOf("工具与连接" to onOpenTools, "MCP / 插件" to onOpenMcp).forEach { (label, action) ->
+            if (action != null) management.addView(UiKit.text(context, label, 13f, R.color.accent).apply {
+                setPadding(dp(10), dp(12), dp(10), dp(12))
                 setOnClickListener { action() }
             })
         }

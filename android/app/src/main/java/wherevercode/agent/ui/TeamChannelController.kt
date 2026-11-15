@@ -1,5 +1,8 @@
 package wherevercode.agent.ui
 
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.text.InputType
 import android.view.View
@@ -74,6 +77,7 @@ class TeamChannelController(
     private val onNewRound: () -> Unit,
     private val onStartFanout: (question: String) -> Unit,
     private val onRefresh: () -> Unit,
+    private val onOpenTasks: () -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -116,6 +120,18 @@ class TeamChannelController(
     }
 
     private var snapshot: TeamChannelSnapshot? = null
+    private var section = "messages"
+    private var pendingText: String? = null
+    private lateinit var inputBar: LinearLayout
+
+    /** Clear only the successfully sent draft; failures retain text for an explicit retry. */
+    fun postResult(text: String, success: Boolean) {
+        if (pendingText != text) return
+        pendingText = null
+        messageInput.isEnabled = true
+        if (success && messageInput.text.toString().trim() == text) messageInput.setText("")
+    }
+
 
     init {
         root.addView(
@@ -140,10 +156,23 @@ class TeamChannelController(
         root.addView(roundLine)
         noticeLine.setPadding(dp(16), 0, dp(16), dp(6))
         root.addView(noticeLine)
+        val tabs = UiKit.horizontal(context)
+        listOf("messages" to "消息", "files" to "文件", "tasks" to "任务").forEach { (id, label) ->
+            tabs.addView(UiKit.text(context, label, 15f, R.color.accent, bold = true).apply {
+                tag = "channel_tab_$id"
+                setPadding(dp(18), dp(12), dp(18), dp(12))
+                setOnClickListener {
+                    section = id
+                    snapshot?.let { render(it) }
+                }
+            })
+        }
+        root.addView(tabs)
         scrollView.addView(content)
         content.addView(bodyContainer)
         root.addView(scrollView)
-        root.addView(buildInputBar())
+        inputBar = buildInputBar()
+        root.addView(inputBar)
     }
 
     private fun buildInputBar(): LinearLayout {
@@ -184,13 +213,19 @@ class TeamChannelController(
     private fun sendMessage() {
         val snap = snapshot ?: return
         val text = messageInput.text.toString().trim()
+        if (pendingText != null) return
+        if (!snap.configured) {
+            noticeLine.text = snap.setupHint
+            return
+        }
         val error = TeamChatRules.validatePost(text, snap.roundsUsed)
         if (error != null) {
             noticeLine.text = error
             return
         }
         noticeLine.text = ""
-        messageInput.setText("")
+        pendingText = text
+        messageInput.isEnabled = false
         onPost(text)
     }
 
@@ -222,6 +257,21 @@ class TeamChannelController(
         }
         noticeLine.text = snapshot.notice.orEmpty()
         bodyContainer.removeAllViews()
+        inputBar.visibility = if (section == "messages") View.VISIBLE else View.GONE
+        if (section == "files") {
+            bodyContainer.addView(note("频道文件"))
+            bodyContainer.addView(note("附件上传、项目文件、网盘引用、预览和下载暂不可用。"))
+            bodyContainer.addView(note("当前没有可验证的频道文件记录。"))
+            return
+        }
+        if (section == "tasks") {
+            bodyContainer.addView(note("频道任务关联暂不可用。下方可查看现有任务，不代表任务已关联到本频道。"))
+            bodyContainer.addView(UiKit.text(context, "查看现有任务", 15f, R.color.accent).apply {
+                setPadding(dp(12), dp(14), dp(12), dp(14))
+                setOnClickListener { onOpenTasks() }
+            })
+            return
+        }
         if (!snapshot.configured) {
             bodyContainer.addView(note(snapshot.setupHint))
             return
@@ -277,6 +327,10 @@ class TeamChannelController(
                     setOnClickListener {
                         if (!member.isLocalApp) onOpenChatWithAgent(member.agentId)
                     }
+                    setOnLongClickListener {
+                        if (!member.isLocalApp) mention(member.displayName)
+                        !member.isLocalApp
+                    }
                 },
             )
         }
@@ -316,7 +370,26 @@ class TeamChannelController(
     }
 
     private fun messageRow(message: TeamThreadMessage): LinearLayout {
-        val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(10)) }
+        val col = UiKit.vertical(context).apply {
+            setPadding(0, 0, 0, dp(10))
+            setOnLongClickListener {
+                val canMention = snapshot?.members.orEmpty().any {
+                    !it.isLocalApp && it.displayName == message.senderName
+                }
+                val actions = if (canMention) arrayOf("复制", "@${message.senderName}", "发送时间")
+                    else arrayOf("复制", "发送时间")
+                AlertDialog.Builder(context).setItems(actions) { _, index ->
+                    when (actions[index]) {
+                        "复制" -> (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                            .setPrimaryClip(ClipData.newPlainText("频道消息", message.text))
+                        "发送时间" -> AlertDialog.Builder(context).setMessage(formatTime(message.createdAtSeconds))
+                            .setPositiveButton("关闭", null).show()
+                        else -> mention(message.senderName)
+                    }
+                }.show()
+                true
+            }
+        }
         val time = formatTime(message.createdAtSeconds)
         col.addView(
             UiKit.text(context, "${message.senderName} · $time", 11f, R.color.text_tertiary, bold = true),
@@ -406,10 +479,16 @@ class TeamChannelController(
             setPadding(0, dp(4), 0, dp(4))
         }
 
+    private fun mention(name: String) {
+        if (pendingText != null) return
+        messageInput.text.insert(messageInput.selectionStart.coerceAtLeast(0), "@$name ")
+        messageInput.requestFocus()
+    }
+
     private fun formatTime(createdAtSeconds: Double): String {
-        if (createdAtSeconds <= 0) return ""
+        if (!createdAtSeconds.isFinite() || createdAtSeconds <= 0) return "时间未知"
         return try {
-            SimpleDateFormat("HH:mm", Locale.getDefault())
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss XXX", Locale.getDefault())
                 .format(Date((createdAtSeconds * 1000).toLong()))
         } catch (_: Exception) {
             ""
