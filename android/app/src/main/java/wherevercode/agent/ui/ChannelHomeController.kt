@@ -63,9 +63,9 @@ class ChannelHomeController(
         body.removeAllViews()
         val current = snapshot
         if (privateChats) {
-            body.addView(note("与你的 Agent 对话。用户之间的私聊暂不可用。"))
+            body.addView(note("私聊服务尚未接入。下方为已有设备和云端 Agent 对话入口。"))
             val members = current?.members.orEmpty().filter {
-                !it.isLocalApp && it.agentId != "app" && it.displayName.contains(query, ignoreCase = true)
+                !it.isLocalApp && !it.isPlatformAgent && it.agentId != "app" && it.displayName.contains(query, ignoreCase = true)
             }
             if (members.isEmpty()) body.addView(note("没有匹配的 Agent。"))
             members.forEach { member ->
