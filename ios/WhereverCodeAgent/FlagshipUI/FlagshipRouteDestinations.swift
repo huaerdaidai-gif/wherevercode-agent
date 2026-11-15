@@ -2819,47 +2819,51 @@ public struct ChannelDetailWorkspaceView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 30)
                 } else {
-                    ForEach(activeTasks) { t in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(t.title)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                                Spacer()
-                                Text(t.state.rawValue)
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange.opacity(0.15), in: Capsule())
-                                    .foregroundStyle(.orange)
-                            }
-
-                            Text(t.description.isEmpty ? "无详细任务描述" : t.description)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-
-                            HStack {
-                                Text("优先级: \(t.priority.rawValue) · ID: \(String(t.id.prefix(8)))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Button("查看详情") {
-                                    onNavigateRoute("taskdetail")
-                                }
-                                .font(.caption2)
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                        .padding(12)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
+                    ForEach(activeTasks, id: \.id) { t in
+                        channelTaskCard(t)
                     }
                 }
             }
             .padding(16)
         }
+    }
+
+    private func channelTaskCard(_ t: LocalTask) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(t.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                Spacer()
+                Text(t.state)
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15), in: Capsule())
+                    .foregroundStyle(.orange)
+            }
+
+            Text((t.description?.isEmpty ?? true) ? "无详细任务描述" : (t.description ?? ""))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack {
+                Text("优先级: P\(t.priority) · ID: \(String(t.id.prefix(8)))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("查看详情") {
+                    onNavigateRoute("taskdetail")
+                }
+                .font(.caption2)
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(12)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
     }
 
     private func loadWorkspaceData() {
@@ -3284,14 +3288,16 @@ public struct LinkTaskPickerSheet: View {
 
     public var body: some View {
         NavigationStack {
-            List(tasks) { task in
-                Button {
-                    onSelect(task)
-                    dismiss()
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(task.title).font(.headline)
-                        Text("状态: \(task.state.rawValue) · 优先级: \(task.priority.rawValue)").font(.caption).foregroundStyle(.secondary)
+            List {
+                ForEach(tasks, id: \.id) { task in
+                    Button {
+                        onSelect(task)
+                        dismiss()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(task.title).font(.headline)
+                            Text("状态: \(task.state) · 优先级: P\(task.priority)").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
