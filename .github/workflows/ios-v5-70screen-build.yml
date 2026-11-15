@@ -6,6 +6,7 @@ on:
       - feat/v5-ios-70screen-4drawer-assembly
       - feat/v5-ios-1.5-build6-import-20261115
       - feat/v5-ios-1.5-build6-assembly-20261115
+      - feat/v5-ios-ui-navigation-overhaul-20261115
   workflow_dispatch:
 
 jobs:

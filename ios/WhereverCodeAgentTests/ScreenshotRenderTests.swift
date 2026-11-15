@@ -169,17 +169,49 @@ final class ScreenshotRenderTests: XCTestCase {
                 .environmentObject(state)
         )
         attach(homeImage, name: "flagship-00-claude-home")
+        attach(homeImage, name: "flagship-delivery-02-chat-home")
 
         let drawerImage = await snapshot(
             FlagshipDrawerView(
                 isOpen: .constant(true),
-                selectedParent: .constant(.workbench),
-                expandedGroup: .constant("任务"),
-                capabilities: AppFlagshipCapabilities(appState: state),
-                onSelectRoute: { _ in }
+                selectedMenu: .constant(.chat),
+                onSelectConversation: { _ in },
+                onOpenSettings: {},
+                onNewChat: {}
             )
         )
-        attach(drawerImage, name: "flagship-01-four-parent-drawer")
+        attach(drawerImage, name: "flagship-01-three-item-drawer")
+        attach(drawerImage, name: "flagship-delivery-01-drawer")
+
+        let projectsImage = await snapshot(
+            NavigationStack {
+                ProjectsHomeView(appState: state, onOpenDrawer: {}, onNavigateRoute: { _ in })
+            }
+            .environmentObject(state)
+        )
+        attach(projectsImage, name: "flagship-delivery-03-projects-home")
+
+        let controlImage = await snapshot(
+            NavigationStack {
+                ControlHomeView(appState: state, onOpenDrawer: {}, onNavigateRoute: { _ in })
+            }
+            .environmentObject(state)
+        )
+        attach(controlImage, name: "flagship-delivery-04-control-home")
+
+        let settingsImage = await snapshot(
+            NavigationStack {
+                AccountSettingsView(
+                    appState: state,
+                    chatModel: state.chat,
+                    capabilities: AppFlagshipCapabilities(appState: state),
+                    onNavigateRoute: { _ in },
+                    onDismiss: {}
+                )
+            }
+            .environmentObject(state)
+        )
+        attach(settingsImage, name: "flagship-delivery-05-account-settings")
 
         for routeId in ["compose", "approvals", "files", "editor", "diff", "terminal", "mcp", "models", "dashboard", "audit", "memory"] {
             if let route = FlagshipRoutes.route(for: routeId) {

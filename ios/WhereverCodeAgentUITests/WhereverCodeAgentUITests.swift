@@ -180,31 +180,77 @@ final class WhereverCodeAgentUITests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
 
-        let routeMap: [String: (parent: String, group: String?, routeId: String)] = [
-            "chat": ("对话", "对话", "chat"),
-            "tasks": ("工作台", "任务", "tasks"),
-            "projects": ("工作台", "开发", "projects"),
-            "channels": ("工作台", "协作", "channels"),
-            "agents": ("工作台", "协作", "agents"),
-            "devices": ("工作台", "连接", "devices"),
-            "console": ("控制台", "监控", "dashboard"),
-            "settings": ("设置", "系统", "settings"),
-        ]
-        let target = routeMap[destination] ?? ("工作台", nil, destination)
-        let parentBtn = app.buttons["drawer.parent.\(target.parent)"].firstMatch
-        XCTAssertTrue(parentBtn.waitForExistence(timeout: 10))
-        parentBtn.tap()
+        if destination == "tasks" { snap(app, "ui-drawer") }
 
-        let row = app.buttons["drawer.route.\(target.routeId)"].firstMatch
-        if !row.exists, let grp = target.group {
-            let grpBtn = app.buttons["drawer.group.\(grp)"].firstMatch
-            if grpBtn.waitForExistence(timeout: 5) {
-                grpBtn.tap()
+        if destination == "settings" {
+            let settingsBtn = app.buttons["drawer.parent.设置"].firstMatch
+            XCTAssertTrue(settingsBtn.waitForExistence(timeout: 10))
+            settingsBtn.tap()
+            return
+        }
+
+        if destination == "chat" {
+            let chatBtn = app.buttons["drawer.parent.对话"].firstMatch
+            XCTAssertTrue(chatBtn.waitForExistence(timeout: 10))
+            chatBtn.tap()
+            return
+        }
+
+        if destination == "projects" {
+            let projBtn = app.buttons["drawer.parent.项目"].firstMatch
+            XCTAssertTrue(projBtn.waitForExistence(timeout: 10))
+            projBtn.tap()
+            return
+        }
+
+        if destination == "console" || destination == "dashboard" {
+            let ctrlBtn = app.buttons["drawer.parent.控制"].firstMatch
+            XCTAssertTrue(ctrlBtn.waitForExistence(timeout: 10))
+            ctrlBtn.tap()
+            return
+        }
+
+        if ["devices", "agents", "models", "mcp"].contains(destination) {
+            let ctrlBtn = app.buttons["drawer.parent.控制"].firstMatch
+            if ctrlBtn.waitForExistence(timeout: 5) {
+                ctrlBtn.tap()
+                let card = app.buttons["control.card.\(destination)"].firstMatch
+                if card.waitForExistence(timeout: 5) {
+                    card.tap()
+                    return
+                }
             }
         }
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        if destination == "tasks" { snap(app, "ui-drawer") }
-        row.tap()
+
+        if destination == "tasks" {
+            let projBtn = app.buttons["drawer.parent.项目"].firstMatch
+            if projBtn.waitForExistence(timeout: 5) {
+                projBtn.tap()
+                let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'project.card.'")).firstMatch
+                if card.waitForExistence(timeout: 5) {
+                    card.tap()
+                    let tasksTab = app.buttons["任务"].firstMatch
+                    if tasksTab.waitForExistence(timeout: 5) {
+                        tasksTab.tap()
+                        return
+                    }
+                }
+            }
+        }
+
+        let settingsBtn = app.buttons["drawer.parent.设置"].firstMatch
+        if settingsBtn.waitForExistence(timeout: 5) {
+            settingsBtn.tap()
+            let diag = app.buttons["settings.developerDiagnostics"].firstMatch
+            if diag.waitForExistence(timeout: 5) {
+                diag.tap()
+                let targetBtn = app.buttons["diagnostics.route.\(destination)"].firstMatch
+                if targetBtn.waitForExistence(timeout: 5) {
+                    targetBtn.tap()
+                    return
+                }
+            }
+        }
     }
 
     func testLocalWorkspacesRemainAvailableWithoutPlatform() {

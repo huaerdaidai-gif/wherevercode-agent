@@ -13,12 +13,14 @@ final class FlagshipRoutesParityTests: XCTestCase {
         XCTAssertEqual(uniqueIds.count, 70, "所有 route_id 必须全局唯一")
     }
 
-    func testFourDrawerParentsStrictlyEnforced() {
-        let parents = FlagshipDrawerParent.allCases.map(\.rawValue)
-        XCTAssertEqual(parents, ["对话", "工作台", "控制台", "设置"], "一级抽屉必须严格固定为：对话、工作台、控制台、设置")
+    func testDrawerPrimaryMenuAndRouteDomainsEnforced() {
+        let menus = FlagshipDrawerMenu.allCases.map(\.rawValue)
+        XCTAssertEqual(menus, ["对话", "项目", "控制"], "左侧抽屉一级菜单严格只有：对话、项目、控制")
+        let domains = FlagshipDrawerParent.allCases.map(\.rawValue)
+        XCTAssertEqual(domains, ["对话", "项目", "控制", "设置"], "功能领域严格划分为：对话、项目、控制、设置")
         XCTAssertEqual(FlagshipRoutes.routes(for: .chat).count, 5)
-        XCTAssertEqual(FlagshipRoutes.routes(for: .workbench).count, 39)
-        XCTAssertEqual(FlagshipRoutes.routes(for: .console).count, 17)
+        XCTAssertEqual(FlagshipRoutes.routes(for: .projects).count, 39)
+        XCTAssertEqual(FlagshipRoutes.routes(for: .control).count, 17)
         XCTAssertEqual(FlagshipRoutes.routes(for: .settings).count, 9)
     }
 

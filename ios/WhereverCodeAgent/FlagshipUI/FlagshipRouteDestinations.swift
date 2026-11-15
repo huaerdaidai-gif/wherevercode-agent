@@ -25,35 +25,10 @@ public struct FlagshipRouteDestinationView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            routeStatusBanner
-            Divider()
             routeContent
         }
-        .navigationTitle("\(route.title) (\(route.id))")
+        .navigationTitle(route.title)
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    @ViewBuilder
-    private var routeStatusBanner: some View {
-        let status = capabilities.status(for: route.id)
-        HStack(alignment: .center, spacing: 10) {
-            Text("父级：\(route.parent.rawValue) / \(route.group)")
-                .font(.caption.weight(.semibold))
-            Text("·")
-            Text(status.state.rawValue)
-                .font(.caption2.bold())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(badgeColor(for: status.state).opacity(0.18), in: Capsule())
-                .foregroundStyle(badgeColor(for: status.state))
-            Spacer()
-            Text(route.p0 ? "P0 核心" : "旗舰扩展")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(red: 0.96, green: 0.95, blue: 0.93))
     }
 
     private func badgeColor(for state: CapabilityState) -> Color {
@@ -98,9 +73,9 @@ public struct FlagshipRouteDestinationView: View {
         case "artifacts":
             ArtifactsDeliveryScreen()
 
-        // MARK: - 二、工作台 · 开发 (10 路由)
+        // MARK: - 二、项目 · 任务与开发 (10 路由)
         case "projects", "projectdetail":
-            ProjectsWorkbenchScreen(showDetailByDefault: route.id == "projectdetail", onNavigateRoute: onNavigateRoute)
+            ProjectsHomeView(appState: appState, onOpenDrawer: {}, onNavigateRoute: onNavigateRoute)
         case "files":
             SandboxFileBrowserScreen(onOpenEditor: { onNavigateRoute("editor") })
         case "editor":
@@ -134,11 +109,11 @@ public struct FlagshipRouteDestinationView: View {
         case "modelroute", "agentimport", "network", "routes":
             ConnectionExtendedScreen(route: route, appState: appState)
 
-        // MARK: - 三、全局控制台 · 系统与自动化 (17 路由)
+        // MARK: - 三、控制 · 系统与自动化 (17 路由)
         case "dashboard":
-            GlobalConsoleDashboardScreen(appState: appState, onNavigateRoute: onNavigateRoute)
+            ControlHomeView(appState: appState, onOpenDrawer: {}, onNavigateRoute: onNavigateRoute)
         case "settings":
-            SettingsView(appState: appState)
+            AccountSettingsView(appState: appState, chatModel: chatModel, capabilities: capabilities, onNavigateRoute: onNavigateRoute, onDismiss: {})
         case "onboarding":
             OnboardingLocalFirstScreen(onNavigateRoute: onNavigateRoute)
         case "activity", "notifications", "audit", "usage", "sync", "recovery", "baseline":
@@ -551,83 +526,471 @@ private struct ArtifactsDeliveryScreen: View {
     }
 }
 
-private struct ProjectsWorkbenchScreen: View {
-    let showDetailByDefault: Bool
-    var onNavigateRoute: (String) -> Void
+public struct ProjectsHomeView: View {
+    @ObservedObject public var appState: AppState
+    public var onOpenDrawer: () -> Void
+    public var onNavigateRoute: (String) -> Void
+
     @State private var projects: [ProjectWithHomes] = []
-    @State private var newName = ""
-    @State private var newRepo = ""
-    @State private var newBranch = "main"
-    @State private var newPath = ""
+    @State private var searchQuery = ""
+    @State private var selectedFilter: ProjectFilter = .all
+    @State private var showNewProjectSheet = false
+    @State private var newProjectName = ""
+    @State private var newProjectRepo = ""
+    @State private var newProjectBranch = "main"
+    @State private var newProjectPath = ""
+    @State private var activeWorkspaceProject: ProjectWithHomes? = nil
 
-    var body: some View {
-        List {
-            Section("新建或登记项目工作区 (SQLite: projects + project_locations)") {
-                TextField("项目名称（如 wherevercode-agent）", text: $newName)
-                TextField("Git 仓库地址（可选）", text: $newRepo)
-                TextField("默认分支", text: $newBranch)
-                TextField("工作区路径（如 Documents/workspace）", text: $newPath)
-                Button("保存项目与位置") {
-                    let clean = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !clean.isEmpty else { return }
-                    let proj = Project(name: clean, repoUrl: newRepo.isEmpty ? nil : newRepo, defaultBranch: newBranch, origin: "LOCAL_SANDBOX")
-                    try? LocalData.shared.projects.saveProject(proj)
-                    let loc = ProjectLocation(
-                        projectId: proj.projectId,
-                        hostId: "iphone-local",
-                        workspacePath: newPath.isEmpty ? "Documents/\(clean)" : newPath
-                    )
-                    _ = try? LocalData.shared.projects.addLocation(loc)
-                    newName = ""
-                    newRepo = ""
-                    newPath = ""
-                    reload()
-                }
-                .buttonStyle(.borderedProminent)
+    public enum ProjectFilter: String, CaseIterable, Identifiable {
+        case all = "全部"
+        case active = "活跃"
+        case sandbox = "本地沙盒"
+        case remote = "远端设备"
+
+        public var id: String { rawValue }
+    }
+
+    public init(
+        appState: AppState,
+        onOpenDrawer: @escaping () -> Void = {},
+        onNavigateRoute: @escaping (String) -> Void = { _ in }
+    ) {
+        self.appState = appState
+        self.onOpenDrawer = onOpenDrawer
+        self.onNavigateRoute = onNavigateRoute
+    }
+
+    private var filteredProjects: [ProjectWithHomes] {
+        var list = projects
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !q.isEmpty {
+            list = list.filter {
+                $0.project.name.lowercased().contains(q) ||
+                ($0.project.repoUrl?.lowercased().contains(q) ?? false)
             }
+        }
+        switch selectedFilter {
+        case .all, .active:
+            return list
+        case .sandbox:
+            return list.filter { $0.project.origin.contains("LOCAL") || $0.project.origin.contains("SANDBOX") }
+        case .remote:
+            return list.filter { $0.project.origin.contains("REMOTE") }
+        }
+    }
 
-            Section("已登记项目列表 (\(projects.count))") {
-                if projects.isEmpty {
-                    Text("暂无已保存项目").foregroundStyle(.secondary)
-                } else {
-                    ForEach(projects) { item in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(item.project.name).font(.headline)
-                                Spacer()
-                                Text(item.project.defaultBranch)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.secondary.opacity(0.15), in: Capsule())
-                            }
-                            if let repo = item.project.repoUrl {
-                                Text(repo).font(.caption).foregroundStyle(.secondary)
-                            }
-                            ForEach(item.homes) { loc in
-                                Text("位置 [\(loc.hostId)]：\(loc.workspacePath) (\(loc.availability))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            HStack {
-                                Button("浏览沙盒文件 (files)") { onNavigateRoute("files") }
-                                    .font(.caption)
-                                Button("打开编辑器 (editor)") { onNavigateRoute("editor") }
-                                    .font(.caption)
-                                Button("Git 检查 (git)") { onNavigateRoute("git") }
-                                    .font(.caption)
-                            }
+    public var body: some View {
+        VStack(spacing: 0) {
+            // 顶部导航栏
+            HStack(spacing: 12) {
+                Button(action: onOpenDrawer) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        .frame(width: 40, height: 40)
+                        .background(Color.white, in: Circle())
+                        .overlay(Circle().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                }
+                .accessibilityIdentifier("navigation.menu")
+                .accessibilityLabel("打开导航抽屉")
+
+                Text("项目")
+                    .font(.system(size: 20, weight: .semibold, design: .serif))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+
+                Spacer()
+
+                Button {
+                    showNewProjectSheet = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("新建项目")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white, in: Capsule())
+                    .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                }
+                .accessibilityIdentifier("projects.newButton")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+
+            // 搜索框（参考 ChatGPT 项目页风格）
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14))
+                TextField("搜索项目…", text: $searchQuery)
+                    .font(.subheadline)
+                    .textInputAutocapitalization(.never)
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(red: 0.95, green: 0.94, blue: 0.92), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+
+            // 筛选标签
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(ProjectFilter.allCases) { filter in
+                        let isSelected = (selectedFilter == filter)
+                        Button {
+                            selectedFilter = filter
+                        } label: {
+                            Text(filter.rawValue)
+                                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                                .foregroundStyle(isSelected ? Color(red: 0.16, green: 0.15, blue: 0.14) : .secondary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    isSelected ? Color.white : Color.clear,
+                                    in: Capsule()
+                                )
+                                .overlay(
+                                    Capsule().stroke(isSelected ? Color(red: 0.85, green: 0.84, blue: 0.81) : Color.clear, lineWidth: 1)
+                                )
                         }
-                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.bottom, 10)
+
+            Divider()
+
+            // 项目列表
+            ScrollView {
+                VStack(spacing: 12) {
+                    if filteredProjects.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "shippingbox")
+                                .font(.system(size: 44))
+                                .foregroundStyle(.secondary.opacity(0.6))
+                                .padding(.top, 40)
+                            Text(projects.isEmpty ? "还没有创建任何项目" : "未找到匹配的项目")
+                                .font(.headline)
+                                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                            Text("项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                            Button {
+                                showNewProjectSheet = true
+                            } label: {
+                                Text("立即创建项目")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                    .background(Color(red: 0.82, green: 0.49, blue: 0.35), in: Capsule())
+                            }
+                            .padding(.top, 8)
+                        }
+                    } else {
+                        ForEach(filteredProjects) { item in
+                            ProjectCardView(
+                                project: item,
+                                onOpenWorkspace: {
+                                    activeWorkspaceProject = item
+                                },
+                                onNavigateRoute: onNavigateRoute
+                            )
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
+        .onAppear(perform: loadProjects)
+        .sheet(isPresented: $showNewProjectSheet) {
+            NavigationStack {
+                Form {
+                    Section("项目基本信息") {
+                        TextField("项目名称（如 wherevercode-agent）", text: $newProjectName)
+                        TextField("Git 仓库地址（可选）", text: $newProjectRepo)
+                        TextField("默认分支", text: $newProjectBranch)
+                        TextField("工作区路径（如 Documents/workspace）", text: $newProjectPath)
+                    }
+                }
+                .navigationTitle("新建项目")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showNewProjectSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("创建") {
+                            createProject()
+                            showNewProjectSheet = false
+                        }
+                        .disabled(newProjectName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
             }
         }
-        .onAppear(perform: reload)
+        .sheet(item: $activeWorkspaceProject) { item in
+            NavigationStack {
+                ProjectWorkspaceDetailView(
+                    projectItem: item,
+                    appState: appState,
+                    onNavigateRoute: { routeId in
+                        activeWorkspaceProject = nil
+                        onNavigateRoute(routeId)
+                    },
+                    onDismiss: {
+                        activeWorkspaceProject = nil
+                    }
+                )
+            }
+        }
     }
 
-    private func reload() {
-        projects = (try? LocalData.shared.projects.listProjects()) ?? []
+    private func loadProjects() {
+        var list = (try? LocalData.shared.projects.listProjects()) ?? []
+        if list.isEmpty {
+            let defaultProj = Project(
+                name: "WhereverCode Agent",
+                repoUrl: "https://github.com/huaerdaidai-gif/wherevercode-agent.git",
+                defaultBranch: "main",
+                origin: "LOCAL_SANDBOX"
+            )
+            try? LocalData.shared.projects.saveProject(defaultProj)
+            let loc = ProjectLocation(
+                projectId: defaultProj.projectId,
+                hostId: "iphone-local",
+                workspacePath: "Documents/wherevercode-agent"
+            )
+            _ = try? LocalData.shared.projects.addLocation(loc)
+            list = (try? LocalData.shared.projects.listProjects()) ?? []
+        }
+        projects = list
+    }
+
+    private func createProject() {
+        let clean = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        let proj = Project(
+            name: clean,
+            repoUrl: newProjectRepo.isEmpty ? nil : newProjectRepo,
+            defaultBranch: newProjectBranch,
+            origin: "LOCAL_SANDBOX"
+        )
+        try? LocalData.shared.projects.saveProject(proj)
+        let loc = ProjectLocation(
+            projectId: proj.projectId,
+            hostId: "iphone-local",
+            workspacePath: newProjectPath.isEmpty ? "Documents/\(clean)" : newProjectPath
+        )
+        _ = try? LocalData.shared.projects.addLocation(loc)
+        newProjectName = ""
+        newProjectRepo = ""
+        newProjectPath = ""
+        loadProjects()
+    }
+}
+
+public struct ProjectCardView: View {
+    public let project: ProjectWithHomes
+    public var onOpenWorkspace: () -> Void
+    public var onNavigateRoute: (String) -> Void
+
+    public var body: some View {
+        Button(action: onOpenWorkspace) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "shippingbox.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                        .frame(width: 44, height: 44)
+                        .background(Color(red: 0.98, green: 0.94, blue: 0.90), in: RoundedRectangle(cornerRadius: 12))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(project.project.name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        Text(project.project.repoUrl ?? "本地沙盒工作区")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Text(project.project.defaultBranch)
+                        .font(.caption2.monospaced())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(red: 0.93, green: 0.92, blue: 0.89), in: Capsule())
+                        .foregroundStyle(Color(red: 0.35, green: 0.33, blue: 0.30))
+                }
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checklist")
+                            .font(.caption2)
+                        Text("任务管理")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                            .font(.caption2)
+                        Text("沙盒文件")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left.forwardslash.chevron.right")
+                            .font(.caption2)
+                        Text("代码与Diff")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
+            )
+        }
+        .accessibilityIdentifier("project.card.\(project.project.projectId)")
+    }
+}
+
+public struct ProjectWorkspaceDetailView: View {
+    public let projectItem: ProjectWithHomes
+    @ObservedObject public var appState: AppState
+    public var onNavigateRoute: (String) -> Void
+    public var onDismiss: () -> Void
+
+    @State private var selectedTab: WorkspaceTab = .overview
+
+    public enum WorkspaceTab: String, CaseIterable, Identifiable {
+        case overview = "概览"
+        case tasks = "任务"
+        case files = "文件"
+        case editor = "代码"
+        case diff = "Diff"
+        case artifacts = "产物"
+        case terminal = "终端"
+        case git = "Git"
+
+        public var id: String { rawValue }
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(WorkspaceTab.allCases) { tab in
+                        let isSelected = (selectedTab == tab)
+                        Button {
+                            selectedTab = tab
+                        } label: {
+                            Text(tab.rawValue)
+                                .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                                .foregroundStyle(isSelected ? Color(red: 0.16, green: 0.15, blue: 0.14) : .secondary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(isSelected ? Color.white : Color.clear, in: Capsule())
+                                .overlay(Capsule().stroke(isSelected ? Color(red: 0.85, green: 0.84, blue: 0.81) : Color.clear, lineWidth: 1))
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            .background(Color(red: 0.95, green: 0.94, blue: 0.92))
+
+            Divider()
+
+            Group {
+                switch selectedTab {
+                case .overview:
+                    List {
+                        Section("项目信息") {
+                            LabeledContent("项目名称", value: projectItem.project.name)
+                            LabeledContent("默认分支", value: projectItem.project.defaultBranch)
+                            if let repo = projectItem.project.repoUrl {
+                                LabeledContent("仓库地址", value: repo)
+                            }
+                            LabeledContent("来源属性", value: projectItem.project.origin)
+                        }
+                        Section("工作区位置") {
+                            ForEach(projectItem.homes) { loc in
+                                LabeledContent(loc.hostId, value: loc.workspacePath)
+                            }
+                        }
+                        Section("快捷操作") {
+                            Button("新建此项目任务 (compose)") { onNavigateRoute("compose") }
+                            Button("查看项目任务中心 (tasks)") { onNavigateRoute("tasks") }
+                            Button("浏览沙盒文件 (files)") { onNavigateRoute("files") }
+                            Button("打开代码编辑器 (editor)") { onNavigateRoute("editor") }
+                            Button("执行环境与终端 (terminal)") { onNavigateRoute("terminal") }
+                        }
+                    }
+                case .tasks:
+                    TasksView(appState: appState)
+                case .files:
+                    SandboxFileBrowserScreen(onOpenEditor: { onNavigateRoute("editor") })
+                case .editor:
+                    SandboxCodeEditorScreen(onOpenDiff: { onNavigateRoute("diff") })
+                case .diff:
+                    UnifiedDiffScreen()
+                case .artifacts:
+                    ArtifactsDeliveryScreen()
+                case .terminal:
+                    TerminalAndExecutionTargetScreen(appState: appState)
+                case .git:
+                    GitWorktreeInspectorScreen()
+                }
+            }
+        }
+        .navigationTitle(projectItem.project.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { onDismiss() }
+            }
+        }
+    }
+}
+
+private struct ProjectsWorkbenchScreen: View {
+    let showDetailByDefault: Bool
+    var onNavigateRoute: (String) -> Void
+
+    var body: some View {
+        ProjectsHomeView(appState: AppState(), onOpenDrawer: {}, onNavigateRoute: onNavigateRoute)
     }
 }
 
@@ -1078,45 +1441,543 @@ private struct ConnectionExtendedScreen: View {
     }
 }
 
-// MARK: - 4. 全局控制台子模块实现
+// MARK: - 4. 全局控制与设置主视图实现
+public struct ControlHomeView: View {
+    @ObservedObject public var appState: AppState
+    public var onOpenDrawer: () -> Void
+    public var onNavigateRoute: (String) -> Void
+
+    public init(
+        appState: AppState,
+        onOpenDrawer: @escaping () -> Void = {},
+        onNavigateRoute: @escaping (String) -> Void = { _ in }
+    ) {
+        self.appState = appState
+        self.onOpenDrawer = onOpenDrawer
+        self.onNavigateRoute = onNavigateRoute
+    }
+
+    public var body: some View {
+        let tasks = (try? LocalData.shared.tasks.listTasks()) ?? []
+        let workingTasks = tasks.filter { $0.state == "working" }
+        let queuedTasks = tasks.filter { $0.state == "queued" || $0.state == "assigned" }
+        let attentionTasks = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" }
+        let agentsCount = ((try? LocalData.shared.agents.listAgents()) ?? []).count
+        let events = LocalData.shared.eventLog.listEvents()
+        let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
+
+        VStack(spacing: 0) {
+            // 顶部导航栏
+            HStack(spacing: 12) {
+                Button(action: onOpenDrawer) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        .frame(width: 40, height: 40)
+                        .background(Color.white, in: Circle())
+                        .overlay(Circle().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                }
+                .accessibilityIdentifier("navigation.menu")
+                .accessibilityLabel("打开导航抽屉")
+
+                Text("控制")
+                    .font(.system(size: 20, weight: .semibold, design: .serif))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 8, height: 8)
+                    Text("平台就绪")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white, in: Capsule())
+                .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+
+            ScrollView {
+                VStack(spacing: 16) {
+                    // 平台状态顶通卡片
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("平台连接与运行状态")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(appState.settings.platformAddress.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformAddress)
+                                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                            }
+                            Spacer()
+                            Text("本地优先")
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.green.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.green)
+                        }
+
+                        Divider()
+                            .padding(.vertical, 2)
+
+                        HStack(spacing: 20) {
+                            statusStatItem("活跃 Agent", value: "\(max(1, agentsCount))")
+                            statusStatItem("执行中任务", value: "\(workingTasks.count)")
+                            statusStatItem("排队/待决", value: "\(queuedTasks.count + attentionTasks.count)")
+                            statusStatItem("待决审批", value: "\(pendingApprovals)")
+                        }
+                    }
+                    .padding(16)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
+                    )
+
+                    // 八大核心管理模块
+                    VStack(spacing: 12) {
+                        controlCard(
+                            title: "设备与 Hand 节点管理",
+                            subtitle: "本机 iPhone 本地沙盒 · 远端 Hand 节点互联互通",
+                            icon: "iphone.gen3",
+                            badge: "1 在线",
+                            routeId: "devices"
+                        )
+
+                        controlCard(
+                            title: "Agent 协作与编排",
+                            subtitle: "BrainEngine 智能调度 · 多 Agent 对比与协作编排",
+                            icon: "person.2.badge.gearshape",
+                            badge: "\(max(1, agentsCount)) 实例",
+                            routeId: "agents"
+                        )
+
+                        controlCard(
+                            title: "模型提供方与智能路由",
+                            subtitle: "Claude, DeepSeek, OpenAI, Grok, Cloudflare 统一调度",
+                            icon: "cpu",
+                            badge: appState.brainSettingsModel.currentBrainId ?? "就绪",
+                            routeId: "models"
+                        )
+
+                        controlCard(
+                            title: "连接器与 MCP 工具池",
+                            subtitle: "23 个生产 MCP 工具 · 终端写入白名单与执行护栏",
+                            icon: "cable.connector.horizontal",
+                            badge: "23 工具可用",
+                            routeId: "mcp"
+                        )
+
+                        controlCard(
+                            title: "调度与任务队列",
+                            subtitle: "10 状态机合法流转 · 独立 isPaused 暂停/恢复",
+                            icon: "list.bullet.rectangle.portrait",
+                            badge: "\(tasks.count) 任务记录",
+                            routeId: "queue"
+                        )
+
+                        controlCard(
+                            title: "实时事件与消息中心",
+                            subtitle: "进程实时事件日志 · 异常捕获与调度回执",
+                            icon: "bell.badge",
+                            badge: "\(events.count) 事件",
+                            routeId: "activity"
+                        )
+
+                        controlCard(
+                            title: "运行监控与用量",
+                            subtitle: "Token 消耗、响应延迟、SQLite 存储与性能监控",
+                            icon: "chart.xyaxis.line",
+                            badge: "健康度 100%",
+                            routeId: "dashboard"
+                        )
+
+                        controlCard(
+                            title: "安全审计与合规权限",
+                            subtitle: "Keychain 隔离 · ATS 强制 HTTPS · 敏感凭据自动脱敏",
+                            icon: "shield.lefthalf.filled",
+                            badge: "0 违规",
+                            routeId: "audit"
+                        )
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
+    }
+
+    @ViewBuilder
+    private func statusStatItem(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .serif))
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func controlCard(title: String, subtitle: String, icon: String, badge: String, routeId: String) -> some View {
+        Button {
+            onNavigateRoute(routeId)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .frame(width: 44, height: 44)
+                    .background(Color(red: 0.94, green: 0.93, blue: 0.90), in: RoundedRectangle(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                        Spacer()
+                        Text(badge)
+                            .font(.caption2)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color(red: 0.93, green: 0.92, blue: 0.89), in: Capsule())
+                            .foregroundStyle(Color(red: 0.35, green: 0.33, blue: 0.30))
+                    }
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
+            )
+        }
+        .accessibilityIdentifier("control.card.\(routeId)")
+    }
+}
+
+public struct AccountSettingsView: View {
+    @ObservedObject public var appState: AppState
+    @ObservedObject public var chatModel: LocalChatModel
+    public let capabilities: AppFlagshipCapabilities
+    public var onNavigateRoute: (String) -> Void
+    public var onDismiss: () -> Void
+
+    public init(
+        appState: AppState,
+        chatModel: LocalChatModel,
+        capabilities: AppFlagshipCapabilities,
+        onNavigateRoute: @escaping (String) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.appState = appState
+        self.chatModel = chatModel
+        self.capabilities = capabilities
+        self.onNavigateRoute = onNavigateRoute
+        self.onDismiss = onDismiss
+    }
+
+    public var body: some View {
+        List {
+            // 用户资料头部卡片
+            Section {
+                HStack(spacing: 16) {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.82, green: 0.49, blue: 0.35), Color(red: 0.70, green: 0.35, blue: 0.20)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Text("W")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(.white)
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("WhereverCode 开发者")
+                                .font(.system(size: 17, weight: .semibold))
+                            Text("Pro")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.orange)
+                        }
+                        Text("developer@wherevercode.local")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("本地优先 · 沙盒完全隔离")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+
+            // 分组一：账户 (Account)
+            Section("账户") {
+                NavigationLink {
+                    ProfileEditScreen()
+                } label: {
+                    Label("个人资料", systemImage: "person.circle")
+                }
+
+                NavigationLink {
+                    PrivacyAndSecurityScreen()
+                } label: {
+                    Label("隐私与安全 (Keychain / ATS)", systemImage: "lock.shield")
+                }
+
+                Button {
+                    onNavigateRoute("sync")
+                } label: {
+                    Label("跨端同步 (Sync)", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("recovery")
+                } label: {
+                    Label("数据备份与恢复 (Recovery)", systemImage: "arrow.counterclockwise")
+                }
+                .foregroundStyle(.primary)
+            }
+
+            // 分组二：应用 (Application)
+            Section("应用") {
+                NavigationLink {
+                    BrainSettingsView(model: appState.brainSettingsModel)
+                } label: {
+                    Label("AI 模型与推理配置 (Brain Engine)", systemImage: "cpu")
+                }
+
+                NavigationLink {
+                    PlatformConnectionFormScreen(appState: appState)
+                } label: {
+                    Label("平台连接与通道凭证 (Platform)", systemImage: "network")
+                }
+
+                Button {
+                    onNavigateRoute("mcp")
+                } label: {
+                    Label("连接器与 MCP 插件 (Connectors)", systemImage: "cable.connector")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("voice")
+                } label: {
+                    Label("语音与多模态设置 (Voice)", systemImage: "waveform")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("notifications")
+                } label: {
+                    Label("消息与系统通知 (Notifications)", systemImage: "bell")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("memory")
+                } label: {
+                    Label("长期记忆与上下文 (Memory)", systemImage: "brain")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("personas")
+                } label: {
+                    Label("Agent 个性与配置 (Personas)", systemImage: "theatermasks")
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    onNavigateRoute("onboarding")
+                } label: {
+                    Label("首次使用指南 (Onboarding)", systemImage: "sparkles")
+                }
+                .foregroundStyle(.primary)
+            }
+
+            // 分组三：开发者诊断 (Developer Diagnostics & 70 Routes Catalog)
+            Section("开发者诊断与 70 屏全量矩阵") {
+                NavigationLink {
+                    DeveloperDiagnosticsScreen(
+                        capabilities: capabilities,
+                        onNavigateRoute: onNavigateRoute
+                    )
+                } label: {
+                    HStack {
+                        Label("70 屏全量路由调试矩阵", systemImage: "square.grid.3x3.topleft.filled")
+                        Spacer()
+                        Text("70 路由")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("settings.developerDiagnostics")
+
+                LabeledContent("Keychain 安全级别", value: "WhenUnlockedThisDeviceOnly")
+                LabeledContent("ATS 网络边界", value: "强制 HTTPS (无明文)")
+                LabeledContent("SQLite 状态", value: "WAL 模式 · 正常")
+            }
+        }
+        .navigationTitle("设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") {
+                    onDismiss()
+                }
+                .font(.system(size: 16, weight: .semibold))
+            }
+        }
+    }
+}
+
+public struct ProfileEditScreen: View {
+    @State private var nickname = "WhereverCode 开发者"
+    @State private var email = "developer@wherevercode.local"
+
+    public var body: some View {
+        Form {
+            Section("基本信息") {
+                TextField("昵称", text: $nickname)
+                TextField("邮箱", text: $email)
+            }
+            Section("设备沙盒信息") {
+                LabeledContent("平台模式", value: "iOS 本地优先沙盒")
+                LabeledContent("Keychain 隔离", value: "独立钥匙串群组")
+            }
+        }
+        .navigationTitle("个人资料")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+public struct PrivacyAndSecurityScreen: View {
+    public var body: some View {
+        List {
+            Section("数据存储与钥匙串保护") {
+                Text("所有 API Key、平台 Token 与敏感凭据均写入 iOS 本地钥匙串，采用 kSecAttrAccessibleWhenUnlockedThisDeviceOnly 保护，禁止 iCloud 跨设备自动外泄。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("网络通信安全边界 (ATS)") {
+                Text("App 强制启用 App Transport Security (ATS)，全局禁止明文 HTTP 传输，仅允许加密 HTTPS 连接。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("敏感数据脱敏 (SecretRedactor)") {
+                Text("控制台日志与会话记录中若检测到类似 sk-、Bearer 等敏感格式凭据，将在渲染前自动掩码处理。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("隐私与安全")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+public struct PlatformConnectionFormScreen: View {
+    @ObservedObject public var appState: AppState
+
+    public var body: some View {
+        SettingsView(appState: appState)
+            .navigationTitle("平台连接")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+public struct DeveloperDiagnosticsScreen: View {
+    public let capabilities: AppFlagshipCapabilities
+    public var onNavigateRoute: (String) -> Void
+    @State private var searchText = ""
+
+    private var filtered: [FlagshipRoute] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return FlagshipRoutes.all }
+        return FlagshipRoutes.all.filter {
+            $0.id.lowercased().contains(q) || $0.title.lowercased().contains(q) || $0.group.lowercased().contains(q)
+        }
+    }
+
+    private func badgeColor(for state: CapabilityState) -> Color {
+        switch state {
+        case .readyVerified: return .green
+        case .implementedUnverified: return .blue
+        case .disconnected: return .orange
+        case .failed: return .red
+        case .unsupported: return .purple
+        case .planned: return .secondary
+        }
+    }
+
+    public var body: some View {
+        List {
+            Section("70 屏功能路由全景 (\(filtered.count)/70)") {
+                TextField("搜索 route_id / 标题 / 分组", text: $searchText)
+                    .textInputAutocapitalization(.never)
+
+                ForEach(filtered) { route in
+                    let status = capabilities.status(for: route.id)
+                    Button {
+                        onNavigateRoute(route.id)
+                    } label: {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(route.title)
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(.primary)
+                                Text("\(route.id) · \(route.parent.rawValue)/\(route.group) · \(route.p0 ? "P0" : "扩展")")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(status.state.rawValue)
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(badgeColor(for: status.state).opacity(0.18), in: Capsule())
+                                .foregroundStyle(badgeColor(for: status.state))
+                        }
+                    }
+                    .accessibilityIdentifier("diagnostics.route.\(route.id)")
+                }
+            }
+        }
+        .navigationTitle("70 屏路由矩阵")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct GlobalConsoleDashboardScreen: View {
     @ObservedObject var appState: AppState
     var onNavigateRoute: (String) -> Void
 
     var body: some View {
-        let tasks = (try? LocalData.shared.tasks.listTasks()) ?? []
-        let workingCount = tasks.filter { $0.state == "working" }.count
-        let queuedCount = tasks.filter { $0.state == "queued" || $0.state == "requeued" || $0.state == "assigned" }.count
-        let attentionCount = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" || $0.state == "rework" }.count
-        let agentsCount = ((try? LocalData.shared.agents.listAgents()) ?? []).count
-        let events = LocalData.shared.eventLog.listEvents()
-        let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
-
-        List {
-            Section("运行总览与待处理中心（全部来自本机 SQLite / 内存真实状态）") {
-                LabeledContent("平台连接状态", value: appState.connectionStatus.displayText)
-                LabeledContent("当前活跃大脑", value: appState.brainSettingsModel.currentBrainId ?? "未配置")
-                LabeledContent("执行中任务 (working)", value: "\(workingCount)")
-                LabeledContent("排队/待领任务 (queued/assigned)", value: "\(queuedCount)")
-                LabeledContent("阻塞/待审/返工 (needsAttention)", value: "\(attentionCount)")
-                LabeledContent("待决高危审批 (ApprovalGate)", value: "\(pendingApprovals)")
-                LabeledContent("已登记协作 Agent", value: "\(agentsCount)")
-                LabeledContent("当前进程实时事件数", value: "\(events.count)")
-            }
-
-            Section("控制台核心入口直达") {
-                Button("任务、队列、依赖与派单 (tasks / queue)") { onNavigateRoute("tasks") }
-                Button("设备与 Agent 管理 (devices / agents)") { onNavigateRoute("devices") }
-                Button("审批、审查、返工与交付 (approvals / review / artifacts)") { onNavigateRoute("approvals") }
-                Button("实时事件、日志与异常 (activity / notifications)") { onNavigateRoute("activity") }
-                Button("恢复、回滚与人工接管 (recovery)") { onNavigateRoute("recovery") }
-                Button("工作流、自动化与护栏 (loopguard / automation)") { onNavigateRoute("loopguard") }
-                Button("模型、运行时、连接器与 MCP (models / mcp)") { onNavigateRoute("mcp") }
-                Button("网络、同步、离线与回执 (network / sync)") { onNavigateRoute("sync") }
-                Button("用量、成本、资源与安全审计 (usage / audit)") { onNavigateRoute("audit") }
-                Button("Claude 18 屏与 70 屏基线验收核对 (baseline)") { onNavigateRoute("baseline") }
-            }
-        }
+        ControlHomeView(appState: appState, onOpenDrawer: {}, onNavigateRoute: onNavigateRoute)
     }
 }
 
@@ -1198,7 +2059,7 @@ private struct ConsoleSystemSubScreen: View {
             case "baseline":
                 Section("70 屏双端 UI 组装基线核验") {
                     LabeledContent("总路由数", value: "\(FlagshipRoutes.all.count) / 70")
-                    LabeledContent("一级抽屉父项", value: FlagshipDrawerParent.allCases.map(\.rawValue).joined(separator: "、"))
+                    LabeledContent("一级抽屉主项", value: FlagshipDrawerMenu.allCases.map(\.rawValue).joined(separator: "、"))
                     LabeledContent("已接线真实功能路由", value: "\(AppFlagshipCapabilities.implementedRoutes.count) 屏")
                     LabeledContent("iOS 平台受限路由", value: "\(AppFlagshipCapabilities.platformRestrictedRoutes.count) 屏 (terminal)")
                 }

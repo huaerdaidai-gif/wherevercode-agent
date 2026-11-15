@@ -312,9 +312,65 @@ public final class LocalChatModel: ObservableObject {
         stopSending()
     }
 
+    public func appendSystemNotice(_ notice: String) {
+        do {
+            if conversationID == nil {
+                let conv = try data.conversations.createConversation(brainId: selectedBrain, title: "系统控制")
+                conversationID = conv.id
+            }
+            guard let cid = conversationID else { return }
+            let msg = ConversationMessage(
+                conversationId: cid,
+                role: "assistant",
+                content: notice,
+                source: "codex_control"
+            )
+            try data.conversations.appendMessage(msg)
+            reload()
+        } catch {}
+    }
+
     public func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
+
+        // 自然语言任务控制：暂停、停止、继续
+        if text == "暂停" || text == "暂停任务" {
+            draft = ""
+            if let working = (try? data.tasks.listTasks())?.first(where: { $0.state == "working" }) {
+                _ = try? data.tasks.setPaused(taskId: working.taskId, isPaused: true)
+                eventLog.append(conversationId: conversationID ?? "conv", kind: "TASK_PAUSED", detail: "任务已通过自然语言暂停。")
+                appendSystemNotice("已暂停任务「\(working.title)」。可通过自然语言输入「继续」恢复执行，或输入「停止」取消任务。")
+            } else {
+                appendSystemNotice("当前没有正在执行中的任务。")
+            }
+            return
+        }
+
+        if text == "继续" || text == "继续执行" || text == "恢复" {
+            draft = ""
+            if let paused = (try? data.tasks.listTasks())?.first(where: { $0.isPaused }) {
+                _ = try? data.tasks.setPaused(taskId: paused.taskId, isPaused: false)
+                eventLog.append(conversationId: conversationID ?? "conv", kind: "TASK_RESUMED", detail: "任务已通过自然语言恢复。")
+                appendSystemNotice("已恢复任务「\(paused.title)」的执行。")
+            } else {
+                appendSystemNotice("当前没有已暂停的任务。")
+            }
+            return
+        }
+
+        if text == "停止" || text == "停止任务" || text == "取消任务" {
+            draft = ""
+            stopSending()
+            if let working = (try? data.tasks.listTasks())?.first(where: { $0.state == "working" }) {
+                _ = try? data.tasks.transition(taskId: working.taskId, to: "cancelled", note: "用户自然语言终止")
+                appendSystemNotice("已终止任务「\(working.title)」。")
+            } else {
+                appendSystemNotice("当前生成与任务已全部停止。")
+            }
+            return
+        }
+
         guard !selectedBrain.isEmpty else {
             error = "请在模型与连接中配置并选择模型"
             return
@@ -338,6 +394,24 @@ public final class LocalChatModel: ObservableObject {
             }
             guard let id = conversationID else { return }
             draft = ""
+
+            // 自然语言发起真实 Agent 任务：检测编程、修复、测试、执行等意图并在本地账本建单
+            let isTaskIntent = text.contains("任务") || text.contains("实现") || text.contains("编写") || text.contains("修复") || text.contains("测试") || text.contains("开发")
+            var activeTaskId: String? = nil
+            if isTaskIntent {
+                let taskTitle = String(text.prefix(32))
+                if let task = try? data.tasks.createTask(
+                    title: taskTitle,
+                    description: text,
+                    priority: 0,
+                    brainId: selectedBrain
+                ) {
+                    activeTaskId = task.taskId
+                    _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "自然语言发起 Agent 任务")
+                    eventLog.append(conversationId: id, kind: "TASK_DISPATCH", detail: "已在本机 SQLite 登记任务 \(task.taskId)")
+                }
+            }
+
             let engine = appState.makeBrainEngine(
                 conversations: data.conversations,
                 tools: ChatUnavailableTools(),
@@ -358,6 +432,10 @@ public final class LocalChatModel: ObservableObject {
                 }
                 reload()
             }
+
+            if let tid = activeTaskId {
+                _ = try? data.tasks.transition(taskId: tid, to: "completed", note: "Agent 任务轮次完成")
+            }
         } catch is CancellationError {
             self.error = "回复已停止"
         } catch {
@@ -369,6 +447,87 @@ public final class LocalChatModel: ObservableObject {
     public func send(userText: String) async {
         draft = userText
         await send()
+    }
+}
+
+public struct AgentTaskInlineCard: View {
+    public let taskId: String
+    @ObservedObject private var localData: LocalData = .shared
+    public var onNavigateRoute: (String) -> Void
+
+    public init(taskId: String, onNavigateRoute: @escaping (String) -> Void) {
+        self.taskId = taskId
+        self.onNavigateRoute = onNavigateRoute
+    }
+
+    public var body: some View {
+        let task = (try? localData.tasks.listTasks())?.first(where: { $0.taskId == taskId })
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(.caption)
+                    .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                Text(task?.title ?? "Agent 执行任务")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                Spacer()
+                Text(task?.state ?? "working")
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.15), in: Capsule())
+                    .foregroundStyle(.orange)
+            }
+
+            if let t = task {
+                Text("状态：\(t.state) · 优先级：P\(t.priority) · 独立暂停位：\(t.isPaused ? "已暂停" : "运行中")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    if let t = task {
+                        _ = try? localData.tasks.setPaused(taskId: t.taskId, isPaused: !t.isPaused)
+                    }
+                } label: {
+                    Text(task?.isPaused == true ? "继续执行" : "暂停任务")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(red: 0.92, green: 0.91, blue: 0.88), in: Capsule())
+                        .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                }
+
+                Button {
+                    onNavigateRoute("tasks")
+                } label: {
+                    Text("任务中心")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(red: 0.92, green: 0.91, blue: 0.88), in: Capsule())
+                        .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                }
+
+                Button {
+                    onNavigateRoute("artifacts")
+                } label: {
+                    Text("交付成果")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(red: 0.92, green: 0.91, blue: 0.88), in: Capsule())
+                        .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
+        )
     }
 }
 
@@ -508,15 +667,9 @@ public struct LocalChatHomeView: View {
                                     .font(.system(size: 27, weight: .regular, design: .serif))
                                     .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
 
-                                Text(connectionSummaryText)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 24)
-
                                 HStack(spacing: 10) {
                                     suggestion("检查项目并修复问题", icon: "wrench.and.screwdriver")
-                                    suggestion("解释这段代码", icon: "doc.text.magnifyingglass")
+                                    suggestion("编写新功能模块", icon: "doc.text.magnifyingglass")
                                 }
                                 .padding(.top, 8)
                             }
@@ -544,6 +697,10 @@ public struct LocalChatHomeView: View {
                                             RoundedRectangle(cornerRadius: 16)
                                                 .stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1)
                                         )
+
+                                    if let tid = message.taskId {
+                                        AgentTaskInlineCard(taskId: tid, onNavigateRoute: onSelectRoute)
+                                    }
                                 }
                                 .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                                 .id(message.id)
