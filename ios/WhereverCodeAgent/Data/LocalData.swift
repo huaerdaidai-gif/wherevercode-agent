@@ -605,8 +605,20 @@ public final class LocalChatModel: ObservableObject {
             let outgoing = text + attachmentContext()
             attachedFiles = []
 
-            // 自然语言发起真实 Agent 任务：检测编程、修复、测试、执行等意图并在本地账本建单
-            let isTaskIntent = text.contains("任务") || text.contains("实现") || text.contains("编写") || text.contains("修复") || text.contains("测试") || text.contains("开发")
+            // 意图分析：精准区分普通问候闲聊与实际工程执行任务
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowerText = trimmedText.lowercased()
+            let isGreetingOrSmallTalk = lowerText == "在吗" || lowerText == "你好" || lowerText == "在不在" ||
+                                        lowerText == "hi" || lowerText == "hello" || lowerText.hasPrefix("你好") ||
+                                        lowerText == "在吗？" || lowerText == "在吗?" || lowerText == "你是谁" || lowerText == "你能做什么"
+
+            let isTaskIntent = !isGreetingOrSmallTalk && (
+                text.contains("任务") || text.contains("实现") || text.contains("编写") ||
+                text.contains("修复") || text.contains("测试") || text.contains("开发") ||
+                text.contains("运行") || text.contains("执行") || text.contains("构建") ||
+                text.contains("代码") || text.contains("写") || text.contains("改")
+            )
+
             var activeTaskId: String? = nil
             if isTaskIntent {
                 let taskTitle = String(text.prefix(32))
@@ -624,14 +636,63 @@ public final class LocalChatModel: ObservableObject {
                 }
             }
 
-            if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl {
-                // 单兵 Agent 真实远端执行
+            if isGreetingOrSmallTalk {
+                // 普通问候与闲聊：走系统大脑自然语言直接回复，绝不触发未授权或信封不全的远端命令
+                let userMsg = ConversationMessage(conversationId: id, role: "user", content: outgoing, source: "user", taskId: nil)
+                try? data.conversations.appendMessage(userMsg)
+                reload()
+
+                let engine = appState.makeBrainEngine(
+                    conversations: data.conversations,
+                    tools: ChatUnavailableTools(),
+                    eventLog: eventLog,
+                    approvalGate: DenyApprovalGate()
+                )
+                var replied = false
+                do {
+                    for try await event in engine.chat(
+                        conversationId: id,
+                        userText: outgoing,
+                        brainIdOverride: selectedBrain,
+                        allowFailover: true
+                    ) {
+                        try Task.checkCancellation()
+                        switch event {
+                        case .textDelta(let delta):
+                            streaming += delta
+                            replied = true
+                        case .error(let info):
+                            error = info.message
+                        default: break
+                        }
+                    }
+                } catch {
+                    if !replied {
+                        let greeting = "在的！WhereverCode 随时待命。您可以直接向我下达开发、修复或调试任务，我将通过已配对的设备与 Agent 为您执行。"
+                        self.streaming = greeting
+                        let assistantMsg = ConversationMessage(
+                            conversationId: id,
+                            role: "assistant",
+                            content: greeting,
+                            source: selectedAgent?.displayName ?? "WhereverCode",
+                            taskId: nil
+                        )
+                        try? data.conversations.appendMessage(assistantMsg)
+                    }
+                }
+            } else if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl, isTaskIntent {
+                // 单兵 Agent 明确执行工程任务
                 let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
                 let parts = clean.split(separator: ":")
                 let host = String(parts[0])
                 let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
                 let targetDev = agent.deviceId ?? "MacBook-Air"
-                let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+
+                // 确保工作目录绝对非空且经过合法授权
+                let rawFolder = (agent.deviceFolder?.isEmpty == false) ? agent.deviceFolder! :
+                                ((try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.deviceFolder?.isEmpty == false })?.deviceFolder ?? "")
+                let folder = !rawFolder.isEmpty ? rawFolder : (targetDev.contains("Android") || targetDev.contains("Termux") || targetDev.contains("x") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
+
                 let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
 
                 let userMsg = ConversationMessage(conversationId: id, role: "user", content: outgoing, source: "user", taskId: activeTaskId)
@@ -669,8 +730,12 @@ public final class LocalChatModel: ObservableObject {
                     let parts = clean.split(separator: ":")
                     let host = String(parts[0])
                     let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-                    let folder = dev.deviceFolder ?? "/Users/a1234/v5-codex-work"
-                    toolRegistry = HandCrossDeviceToolRegistry(host: host, port: port, targetDeviceId: dev.deviceId ?? dev.agentId, agentId: "codex", defaultFolder: folder)
+                    let rawFolder = (dev.deviceFolder?.isEmpty == false) ? dev.deviceFolder! : ""
+                    let folder = !rawFolder.isEmpty ? rawFolder : (dev.deviceId?.contains("Android") == true || dev.deviceId?.contains("x") == true ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
+                    let boundAgentId = (try? data.agents.listAgents())?.first(where: { $0.deviceId == dev.deviceId && $0.agentId != dev.agentId })?.agentId ?? "codex"
+                    let realAgentId = boundAgentId.contains(":") ? String(boundAgentId.split(separator: ":").last!) : boundAgentId
+
+                    toolRegistry = HandCrossDeviceToolRegistry(host: host, port: port, targetDeviceId: dev.deviceId ?? dev.agentId, agentId: realAgentId, defaultFolder: folder)
                 } else {
                     toolRegistry = ChatUnavailableTools()
                 }

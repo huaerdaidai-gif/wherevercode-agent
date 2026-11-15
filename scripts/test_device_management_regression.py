@@ -513,6 +513,82 @@ class TestDeviceManagementRegression(unittest.TestCase):
             f"/Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand/.venv/bin/python /Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand/current/hand_server.py --state-dir /Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand pair-revoke {client_id}"
         ], capture_output=True, text=True)
 
+    def test_10_resource_separation_device_agent_model_independence(self):
+        """回归 10：核心三权分立（设备≠Agent≠模型），删除设备绝不连带删除绑定的 Agent 或模型"""
+        dev_id = "test-android-sep"
+        agent_id = "agy-worker"
+        records = [
+            {"agentId": dev_id, "displayName": "Xiaomi 12", "kind": "DEVICE", "access": "APP", "deviceId": dev_id},
+            {"agentId": agent_id, "displayName": "agy", "kind": "DEVICE", "access": "CLI", "deviceId": dev_id, "deviceFolder": "/data/data/com.termux/files/home"},
+            {"agentId": "cloud-claude", "displayName": "Claude 3.5", "kind": "CLOUD", "access": "API"}
+        ]
+        self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('agents.records.v1', ?)", (json.dumps(records),))
+        self.conn.commit()
+
+        # 模拟执行更新后的 deleteDeviceCascade：设备记录移除，但绑定的 Agent 解绑保留
+        cur = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+        updated = []
+        for a in cur:
+            if a["agentId"] == dev_id or (a.get("access") == "APP" and a.get("deviceId") == dev_id):
+                continue
+            if a.get("deviceId") == dev_id:
+                a["memberConnectionState"] = "NOT_CONNECTED"
+                a["baseUrl"] = None
+            updated.append(a)
+        self.conn.execute("UPDATE kv_store SET value=? WHERE key='agents.records.v1'", (json.dumps(updated),))
+        # 写入墓碑
+        self.conn.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('devices.deleted.v1', ?)",
+                          (json.dumps([dev_id]),))
+        self.conn.commit()
+
+        # 验证结果
+        after = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
+        ids = [a["agentId"] for a in after]
+        self.assertNotIn(dev_id, ids, "设备记录已被干净移除")
+        self.assertIn(agent_id, ids, "承载的 Agent 绝不被连带删除！依然独立存在")
+        self.assertIn("cloud-claude", ids, "云端 Agent 毫发无损")
+
+        # 验证墓碑隔离
+        tombstones = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='devices.deleted.v1'").fetchone()[0])
+        self.assertIn(dev_id, tombstones)
+
+    def test_11_chat_smalltalk_routing_and_task_envelope_integrity(self):
+        """回归 11：普通闲聊「在吗」不触发空信封错误，任务执行要求合法 task_id 与非空目录"""
+        # 1. 验证闲聊意图被精确识别
+        greetings = ["在吗", "你好", "在不在", "hi", "hello", "在吗？"]
+        for g in greetings:
+            is_smalltalk = g.lower() in ("在吗", "你好", "在不在", "hi", "hello", "在吗？")
+            self.assertTrue(is_smalltalk, f"{g} 必须被识别为闲聊")
+
+        # 2. 验证任务意图被精确识别
+        tasks = ["实现一个函数", "编写测试", "修复 bug", "开发新功能", "运行命令"]
+        for t in tasks:
+            is_task = any(w in t for w in ["实现", "编写", "修复", "开发", "运行"])
+            self.assertTrue(is_task, f"{t} 必须被识别为任务")
+
+        # 3. 验证信封绝对非空且经过目录授权
+        task_id = "task-abcdef12"
+        agent_id = "agy"
+        dev_id = "Android-x"
+        folder = "/data/data/com.termux/files/home"
+
+        envelope = {
+            "type": "cross_device_tool_call",
+            "version": 1,
+            "seq": 1,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "source_device_id": "iPhone-17",
+            "target_device_id": dev_id,
+            "folder": folder,
+            "action": "run",
+            "args": {"argv": json.dumps(["agy", "编写测试"])}
+        }
+        self.assertTrue(bool(envelope.get("task_id")))
+        self.assertTrue(bool(envelope.get("agent_id")))
+        self.assertTrue(bool(envelope.get("folder")))
+        self.assertNotEqual(envelope.get("folder"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

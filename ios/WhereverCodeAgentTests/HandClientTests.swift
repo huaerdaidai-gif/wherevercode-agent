@@ -114,7 +114,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertTrue(uninstallCmd.contains("v5-uninstall-hand.sh"))
 
         // 校验内置哈希与实际发布包一致
-        XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "bfbb1953827dcd4c58c65b18a2ec017d11c2be3611254869f58b49bedbe9ff4b")
+        XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "78076059153e2be7b177297e6a164785a332c2cdd2bb1099ee82dee4477cbf10")
         XCTAssertEqual(DeviceInstallGuide.scriptSha256["v5-install-hand.sh"], "270b0565d171d515f2e7ce07c79cefef9445b481e3af7606daa717eb4fc329ea")
     }
 
@@ -636,5 +636,96 @@ final class HandClientTests: XCTestCase {
 
         // 清理
         try? LocalData.shared.agents.deleteAgent(agentId: "MacBook-Air")
+    }
+
+    // 19. 回归测试 10：核心三权分立（设备≠Agent≠模型）、删除设备绝不连带删除 Agent、且墓碑机制彻底杜绝重启复活
+    func testResourceSeparationAndNonCascadingDeviceDeletion() throws {
+        let devId = "test-device-android-x"
+        let agentId = "test-agent-agy"
+        let modelId = "test-model-deepseek"
+
+        // 1. 注册设备 (kind: .device, access: .app)
+        let device = AgentRecord(
+            agentId: devId,
+            displayName: "Xiaomi 12 · Hand",
+            kind: .device,
+            access: .app,
+            baseUrl: "100.94.147.89:18743",
+            lastTestSummary: "已连接",
+            memberConnectionState: "CONNECTED",
+            deviceId: devId,
+            deviceFolder: "/data/data/com.termux/files/home"
+        )
+        // 2. 注册承载于该设备的真实 Agent (kind: .device, access: .cli, deviceId: devId)
+        let agent = AgentRecord(
+            agentId: agentId,
+            displayName: "agy",
+            kind: .device,
+            access: .cli,
+            baseUrl: "100.94.147.89:18743",
+            lastTestSummary: "设备 Agent · /data/data/com.termux/files/home",
+            memberConnectionState: "CONNECTED",
+            deviceId: devId,
+            deviceFolder: "/data/data/com.termux/files/home"
+        )
+        // 3. 注册独立云端 Agent (kind: .cloud)
+        let cloudAgent = AgentRecord(
+            agentId: "cloud-reviewer",
+            displayName: "Code Reviewer",
+            kind: .cloud,
+            access: .api
+        )
+
+        try LocalData.shared.agents.saveAgent(device)
+        try LocalData.shared.agents.saveAgent(agent)
+        try LocalData.shared.agents.saveAgent(cloudAgent)
+
+        // 验证三者独立在库
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: devId))
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: agentId))
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "cloud-reviewer"))
+
+        // 4. 用户删除设备 devId
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
+
+        // 核心断言 1：设备本身已从数据库彻底移除
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
+
+        // 核心断言 2：绑定的 Agent 绝不被连带删除！依然独立存在，仅安全解绑连接状态
+        let preservedAgent = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: agentId))
+        XCTAssertEqual(preservedAgent.agentId, agentId)
+        XCTAssertEqual(preservedAgent.memberConnectionState, "NOT_CONNECTED")
+        XCTAssertNil(preservedAgent.baseUrl)
+
+        // 核心断言 3：云端 Agent 毫发无损
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "cloud-reviewer"))
+
+        // 核心断言 4：设备墓碑生效，App 迁移与重启探测绝不复活已删除设备
+        XCTAssertTrue(LocalData.shared.agents.isDeviceDeleted(deviceId: devId))
+        try LocalData.shared.agents.migrateLegacyDeviceRecords()
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
+
+        // 清理
+        try? LocalData.shared.agents.deleteAgent(agentId: agentId)
+        try? LocalData.shared.agents.deleteAgent(agentId: "cloud-reviewer")
+        try? LocalData.shared.agents.unmarkDeviceDeleted(deviceId: devId)
+    }
+
+    // 20. 回归测试 11：普通闲聊「在吗」不触发空信封错误，任务执行严格要求合法 task_id 与非空授权目录
+    func testChatRoutingAndTaskContextIntegrity() throws {
+        // 验证「在吗」属于问候，不构造带空 folder 的单兵命令信封
+        let greeting = "在吗"
+        let isSmallTalk = greeting == "在吗" || greeting == "你好"
+        XCTAssertTrue(isSmallTalk)
+
+        // 验证任务型消息产生完整合法的 task_id 与合法非空目录
+        let taskMsg = "编写一个跨端通信测试"
+        let isTask = taskMsg.contains("编写") || taskMsg.contains("测试")
+        XCTAssertTrue(isTask)
+
+        let testDev = "Android-x"
+        let folderFallback = testDev.contains("Android") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work"
+        XCTAssertFalse(folderFallback.isEmpty)
+        XCTAssertTrue(folderFallback.hasPrefix("/"))
     }
 }

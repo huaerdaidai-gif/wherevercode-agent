@@ -1361,6 +1361,7 @@ private struct CollaborationAndAgentsScreen: View {
     @State private var newAgentName = ""
     @State private var newAgentKind: AgentKind = .cloud
     @State private var newAgentAccess: AgentAccess = .cli
+    @State private var newAgentDeviceId = ""
     @State private var newAgentEndpoint = ""
     @State private var bannerMsg: String? = nil
     @State private var testingAgentId: String? = nil
@@ -1392,7 +1393,15 @@ private struct CollaborationAndAgentsScreen: View {
                 Picker("类型", selection: $newAgentKind) {
                     Text("云端 Agent").tag(AgentKind.cloud)
                     Text("设备 Agent").tag(AgentKind.device)
-                    Text("本地模型").tag(AgentKind.localModel)
+                }
+                if newAgentKind == .device {
+                    let registeredDevices = (try? LocalData.shared.agents.listAgents())?.filter { $0.kind == .device && $0.access == .app } ?? []
+                    Picker("绑定执行设备", selection: $newAgentDeviceId) {
+                        Text("未绑定设备").tag("")
+                        ForEach(registeredDevices) { dev in
+                            Text(dev.displayName).tag(dev.deviceId ?? dev.agentId)
+                        }
+                    }
                 }
                 Picker("接入方式", selection: $newAgentAccess) {
                     ForEach(AgentAccess.allCases, id: \.self) { a in
@@ -1407,7 +1416,7 @@ private struct CollaborationAndAgentsScreen: View {
                     let rawId = newAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
                     let finalId = rawId.isEmpty ? "agent-\(UUID().uuidString.prefix(6).lowercased())" : rawId
                     guard !cleanName.isEmpty || !rawId.isEmpty else { return }
-                    let rec = AgentRecord(
+                    var rec = AgentRecord(
                         agentId: finalId,
                         displayName: cleanName.isEmpty ? finalId : cleanName,
                         kind: newAgentKind,
@@ -1416,9 +1425,13 @@ private struct CollaborationAndAgentsScreen: View {
                         lastTestSummary: "本地已登记",
                         memberConnectionState: "NOT_CONNECTED"
                     )
+                    if newAgentKind == .device && !newAgentDeviceId.isEmpty {
+                        rec.deviceId = newAgentDeviceId
+                    }
                     try? LocalData.shared.agents.saveAgent(rec)
                     newAgentId = ""
                     newAgentName = ""
+                    newAgentDeviceId = ""
                     newAgentEndpoint = ""
                     reload()
                     bannerMsg = "已添加 Agent「\(rec.displayName)」。"
@@ -1526,8 +1539,8 @@ private struct CollaborationAndAgentsScreen: View {
 
     private func reload() {
         let all = (try? LocalData.shared.agents.listAgents()) ?? []
-        // 过滤掉纯设备记录，确保 Agent 列表中只有纯正智能体，不与设备混淆
-        agents = all.filter { !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) }
+        // 过滤掉纯设备记录与模型记录，确保 Agent 列表中只有纯正智能体，不与设备和模型混淆
+        agents = all.filter { !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.kind != .localModel }
     }
 }
 

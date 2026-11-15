@@ -3694,6 +3694,11 @@ def adapter_folder(entry: dict, device_id: str) -> str:
     by_device = entry.get("folders_by_device", {}) or {}
     folders = by_device.get(dev) or by_device.get(device_id) or []
     folder = folders[0] if folders else ((entry.get("folders", []) or [""])[0])
+    if not folder:
+        # 默认工作目录：优先家目录下的 workspace 或家目录本身
+        home = os.path.expanduser("~")
+        ws = os.path.join(home, "workspace")
+        folder = ws if os.path.isdir(ws) else home
     if folder:
         if folder.startswith("/Users/example-user/"):
             home = os.path.expanduser("~")

@@ -138,6 +138,31 @@ public final class AgentRegistryStore {
         try kv.getJSON(storageKey, as: [AgentRecord].self) ?? []
     }
 
+    private let deletedDevicesKey = "devices.deleted.v1"
+
+    public func markDeviceDeleted(deviceId: String) throws {
+        var deleted = (try? kv.getJSON(deletedDevicesKey, as: [String].self)) ?? []
+        if !deleted.contains(deviceId) {
+            deleted.append(deviceId)
+            try kv.setJSON(deletedDevicesKey, deleted)
+        }
+    }
+
+    public func isDeviceDeleted(deviceId: String) -> Bool {
+        let deleted = (try? kv.getJSON(deletedDevicesKey, as: [String].self)) ?? []
+        return deleted.contains(deviceId)
+    }
+
+    public func unmarkDeviceDeleted(deviceId: String) throws {
+        var deleted = (try? kv.getJSON(deletedDevicesKey, as: [String].self)) ?? []
+        deleted.removeAll { $0 == deviceId }
+        try kv.setJSON(deletedDevicesKey, deleted)
+    }
+
+    public func deletedDeviceIds() -> [String] {
+        (try? kv.getJSON(deletedDevicesKey, as: [String].self)) ?? []
+    }
+
     public func getAgent(agentId: String) throws -> AgentRecord? {
         try listAgents().first { $0.agentId == agentId }
     }
@@ -147,6 +172,10 @@ public final class AgentRegistryStore {
         let timestamp = Int64(Date().timeIntervalSince1970)
         if record.createdAtEpochSeconds == 0 { record.createdAtEpochSeconds = timestamp }
         record.updatedAtEpochSeconds = timestamp
+        if record.kind == .device {
+            let devId = record.deviceId ?? record.agentId
+            try? unmarkDeviceDeleted(deviceId: devId)
+        }
         var agents = try listAgents()
         if let index = agents.firstIndex(where: { $0.agentId == record.agentId }) {
             agents[index] = record
@@ -162,23 +191,39 @@ public final class AgentRegistryStore {
         try kv.setJSON(storageKey, agents)
     }
 
-    /// 级联删除指定设备及其所属子 Agent：
-    /// 严格只清理 kind == .device 且与该设备绑定的记录，绝不触碰云端 Agent (kind == .cloud)、本地模型 (kind == .localModel)、项目与模型配置。
+    /// 安全删除指定设备并写入墓碑（保证重启与局域网探测绝不复活）；
+    /// 严格遵循核心原则：删除设备绝不连带删除任何云端/自定义 Agent 或模型！
+    /// 仅清理该设备本身记录，并对关联的子 Agent 安全解绑（保留其配置与生命周期）。
     public func deleteDeviceCascade(deviceId: String) throws {
+        try markDeviceDeleted(deviceId: deviceId)
         var agents = try listAgents()
+        for i in 0..<agents.count {
+            // 对绑定该设备的 Agent 安全解绑，绝不误删 Agent 实体！
+            if agents[i].deviceId == deviceId && agents[i].agentId != deviceId {
+                agents[i].memberConnectionState = "NOT_CONNECTED"
+                agents[i].lastTestSummary = "宿主设备已移除（未连接）"
+                agents[i].baseUrl = nil
+            }
+        }
+        // 清理设备自身的宿主记录
         agents.removeAll { ag in
             guard ag.kind == .device else { return false }
-            return ag.agentId == deviceId || ag.deviceId == deviceId || ag.agentId.hasPrefix("\(deviceId):")
+            return ag.agentId == deviceId || (ag.access == .app && ag.deviceId == deviceId)
         }
         try kv.setJSON(storageKey, agents)
     }
 
     /// 安全迁移历史设备记录：
-    /// 1. 稳定身份规范化：补全缺失的 deviceId 字段；
-    /// 2. 识别历史演示模板设备并清晰标注，绝不盲目按设备名称猜测合并；
-    /// 3. 严格保护云端 Agent、本地模型不受任何影响。
+    /// 1. 墓碑拦截：已删除设备绝对不复活；
+    /// 2. 稳定身份规范化：补全缺失的 deviceId 字段；
+    /// 3. 识别历史演示模板设备并清晰标注，绝不盲目按设备名称猜测合并；
+    /// 4. 严格保护云端 Agent、本地模型不受任何影响。
     public func migrateLegacyDeviceRecords() throws {
+        let deleted = deletedDeviceIds()
         var agents = try listAgents()
+        if !deleted.isEmpty {
+            agents.removeAll { deleted.contains($0.agentId) || ($0.deviceId != nil && deleted.contains($0.deviceId!)) }
+        }
         var modified = false
         for i in 0..<agents.count {
             guard agents[i].kind == .device else { continue }
@@ -197,7 +242,7 @@ public final class AgentRegistryStore {
                 }
             }
         }
-        if modified {
+        if modified || !deleted.isEmpty {
             try kv.setJSON(storageKey, agents)
         }
     }

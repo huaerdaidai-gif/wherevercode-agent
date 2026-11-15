@@ -169,6 +169,8 @@ public struct DevicesView: View {
                     .foregroundStyle(AgentUI.secondary)
             }
             ForEach(devices, id: \.agentId) { device in
+                let devId = device.deviceId ?? device.agentId
+                let hostedCount = (try? LocalData.shared.agents.listAgents())?.filter { $0.deviceId == devId && $0.agentId != devId }.count ?? 0
                 Button {
                     selectedDevice = device
                 } label: {
@@ -184,6 +186,13 @@ public struct DevicesView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.primary)
                                 statusBadge(for: device.memberConnectionState)
+                                Spacer()
+                                Text("\(hostedCount) 个 Agent")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.12), in: Capsule())
                             }
                             Text("\(device.baseUrl ?? "未填地址") · \(device.lastTestSummary ?? "待验证")")
                                 .font(.caption)
@@ -281,7 +290,8 @@ public struct DevicesView: View {
 
             let peers = await HandClient.shared.discoverLanDevices(knownHosts: probeHosts)
             await MainActor.run {
-                self.syncDiscoveredPeersWithRegisteredDevices(peers)
+                let activePeers = peers.filter { !LocalData.shared.agents.isDeviceDeleted(deviceId: $0.deviceId) }
+                self.syncDiscoveredPeersWithRegisteredDevices(activePeers)
                 self.isScanning = false
             }
         }
@@ -696,16 +706,17 @@ private struct AddDeviceSheet: View {
                         // 自动发现并注册该设备上的真实 Agent (kind: .device, access: .cli)
                         for ag in hello.agents where ag.available {
                             let agentId = "\(hello.deviceId):\(ag.agentId)"
+                            let realFolder = ag.folder.isEmpty ? selectedFolder : ag.folder
                             let agentRec = AgentRecord(
                                 agentId: agentId,
                                 displayName: "\(ag.displayName) (\(cleanName))",
                                 kind: .device,
                                 access: .cli,
                                 baseUrl: fullHost,
-                                lastTestSummary: "设备 Agent · \(ag.folder)",
+                                lastTestSummary: "设备 Agent · \(realFolder)",
                                 memberConnectionState: "CONNECTED",
                                 deviceId: hello.deviceId,
-                                deviceFolder: ag.folder
+                                deviceFolder: realFolder
                             )
                             try? LocalData.shared.agents.saveAgent(agentRec)
                         }
@@ -929,7 +940,7 @@ private struct DeviceDetailSheet: View {
                 }
 
                 if let hello = remoteHello {
-                    Section("远程 Agent 能力（\(hello.agents.count) 个）") {
+                    Section {
                         ForEach(hello.agents) { ag in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -942,6 +953,15 @@ private struct DeviceDetailSheet: View {
                                     .foregroundStyle(ag.available ? .green : .secondary)
                             }
                         }
+                        Button("进入 Agent 管理配置 / 调度 Agent") {
+                            dismiss()
+                            onNavigateRoute("agents")
+                        }
+                        .font(.caption)
+                    } header: {
+                        Text("承载 Agent（只读关联信息 · \(hello.agents.count) 个）")
+                    } footer: {
+                        Text("设备仅作为执行宿主，点此卡片只管理设备连接本身；要修改、配置或增删 Agent，请前往 Agent 管理。")
                     }
                 }
 
@@ -985,25 +1005,6 @@ private struct DeviceDetailSheet: View {
                         Text(fileOpResult)
                             .font(.caption)
                             .foregroundStyle(.blue)
-                    }
-                }
-
-                Section("远程控制指令测试") {
-                    HStack(spacing: 12) {
-                        Button("测试暂停") {
-                            sendControlAction("pause")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("测试恢复") {
-                            sendControlAction("resume")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("测试停止") {
-                            sendControlAction("stop")
-                        }
-                        .buttonStyle(.bordered)
                     }
                 }
 
