@@ -1,3 +1,4 @@
+# blob=63722b56407dbeef72ec8e9cf85537058cb240c1 size=2640
 package wherevercode.agent.brain
 
 import java.io.File
@@ -28,7 +29,7 @@ class InFlightControlSafetyTest {
                     return true
                 }
             }
-            val result = tools.execute(Action("write", "write_file", mapOf("path" to "must-not-exist.txt", "content" to "unsafe"), idempotencyKey = "approval-control-race"),
+            val result = tools.executeControlled(Action("write", "write_file", mapOf("path" to "must-not-exist.txt", "content" to "unsafe"), idempotencyKey = "approval-control-race"),
                 ToolContext("task", "local", gate, workspace, "local", ""),
                 stopped = { turn.snapshot() == TurnControlState.STOPPED },
                 paused = { turn.snapshot() == TurnControlState.PAUSED })
@@ -51,3 +52,4 @@ class InFlightControlSafetyTest {
         assertEquals(TurnControlState.STOPPED, controller.snapshot())
     }
 }
+
