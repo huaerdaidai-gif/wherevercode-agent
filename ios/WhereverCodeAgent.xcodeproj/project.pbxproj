@@ -74,6 +74,7 @@
 			47FFE0ECCF7C83A806454DF9,
 			00600EE2EA71EC2F6623B155,
 			AF29026DEB46CEBD6478E0B0,
+			DA000000000000000000D301,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
 		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
@@ -207,6 +208,8 @@
 			DA0000000000000000000070,
 			DA0000000000000000000038,
 			DA000000000000000000003A,
+			DA000000000000000000D102,
+			DA000000000000000000D202,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		6D2652F5D197BA7CCF479CE7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatView.swift; sourceTree = "<group>"; };
 		6E49E94E4D6DA0B155C63BBD = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
@@ -276,6 +279,7 @@
 			7F749415C58C7FDDBBA14398,
 			844C8F533FE271C19FE543DF,
 			7667F7CA498D0ED82757FFC2,
+			DA000000000000000000D302,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
@@ -288,6 +292,8 @@
 			2FAFA8646A910CE4490E1BBD,
 			90A876B7A773B795F59F07C2,
 			C938E01FDB5D371FF097BED0,
+			DA000000000000000000D101,
+			DA000000000000000000D201,
 		); name = Services; path = Services; sourceTree = "<group>"; };
 		BB35B5B26176D7E09841F13F = {isa = PBXBuildFile; fileRef = 2FAFA8646A910CE4490E1BBD; };
 		BEB0DA9A7B8738232918BE47 = {isa = PBXGroup; children = (
@@ -351,6 +357,12 @@
 		A1B2C3D4E5F6000000000032 = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000031; };
 		A1B2C3D4E5F6000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotRenderTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000004 = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000003; };
+		DA000000000000000000D101 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInstallGuide.swift; sourceTree = "<group>"; };
+		DA000000000000000000D102 = {isa = PBXBuildFile; fileRef = DA000000000000000000D101; };
+		DA000000000000000000D201 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandClient.swift; sourceTree = "<group>"; };
+		DA000000000000000000D202 = {isa = PBXBuildFile; fileRef = DA000000000000000000D201; };
+		DA000000000000000000D301 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandClientTests.swift; sourceTree = "<group>"; };
+		DA000000000000000000D302 = {isa = PBXBuildFile; fileRef = DA000000000000000000D301; };
 		A1B2C3D4E5F6000000000010 = {isa = PBXGroup; children = (
 			A1B2C3D4E5F6000000000011,
 		); name = WhereverCodeAgentUITests; path = WhereverCodeAgentUITests; sourceTree = "<group>"; };

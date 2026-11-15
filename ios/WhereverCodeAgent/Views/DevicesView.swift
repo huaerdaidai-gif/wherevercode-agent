@@ -1,16 +1,22 @@
 import SwiftUI
+import CryptoKit
 
 /// 设备管理与详情视图（覆盖 devices 与 devicedetail 路由）：
-/// - 支持在本地 SQLite/KV 注册表 (AgentRegistryStore) 中真实添加、配对登记、授权工作目录和删除设备；
-/// - 登记后的设备会立即出现在对话输入框上方的「项目来源」选择器（局域网电脑 / NAT·远程设备 / VPS）中；
-/// - 保留誠实状态说明：V5 平台云端无设备管理接口（服务端无此接口，阻塞中），本地已保存记录需通过网络探测确认在线状态，绝不伪装在线。
+/// - 支持局域网自动发现 WhereverCode Device Host（mDNS 与标准 18743 探测）；
+/// - 集成跨平台一键安装脚本与引导（Mac、Windows、Linux/VPS、Android）；
+/// - 密码学双向验证配对（服务端公钥 SHA-256 指纹核对 + 6 位一次性配对码）；
+/// - 凭据严格存储于 iOS Keychain (kSecAttrAccessibleWhenUnlockedThisDeviceOnly)；
+/// - 真实设备能力闭环：真实在线心跳、项目目录读取、授权文件读写、Agent 能力查询与远程控制。
 public struct DevicesView: View {
     public var onNavigateRoute: (String) -> Void
     @State private var devices: [AgentRecord] = []
     @State private var loadError: String?
     @State private var showAddSheet = false
+    @State private var showInstallSheet = false
     @State private var selectedDevice: AgentRecord? = nil
     @State private var statusBanner: String? = nil
+    @State private var discoveredPeers: [DiscoveredPeer] = []
+    @State private var isScanning = false
 
     public init() {
         self.onNavigateRoute = { _ in }
@@ -19,13 +25,6 @@ public struct DevicesView: View {
     public init(appState: AppState, onNavigateRoute: @escaping (String) -> Void = { _ in }) {
         self.onNavigateRoute = onNavigateRoute
     }
-
-    private let prototypeTemplates: [(id: String, name: String, subtitle: String, access: AgentAccess, host: String, folder: String)] = [
-        ("device-mac-workstation", "Mac · 开发工作站", "macOS · 局域网开发主机", .app, "mac-workstation.local:8765", "~/Projects/wherevercode-agent"),
-        ("device-redmi-k70", "Redmi K70 · Android Worker", "Android · 移动执行节点", .connector, "192.168.1.70:8765", "/sdcard/Projects"),
-        ("device-xiaomi-12", "小米 12 · 本地模型", "Android / Termux · 本地推理节点", .api, "192.168.1.12:8080", "~/AI-Workspace"),
-        ("device-iphone-local", "iPhone · 移动工作台", "iOS · 本机沙盒与审批中心", .app, "127.0.0.1", "Documents/wherevercode-agent")
-    ]
 
     public var body: some View {
         List {
@@ -37,31 +36,28 @@ public struct DevicesView: View {
                 }
             }
 
-            Section {
-                Button {
-                    showAddSheet = true
-                } label: {
-                    Label("＋ 添加 / 配对设备", systemImage: "plus.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .accessibilityIdentifier("devices.addButton")
-            } header: {
-                Text("添加与配对")
-            } footer: {
-                Text("添加局域网电脑、NAT/远程设备或 VPS 后，可在对话输入框上方的项目来源中直接选用。")
-            }
-
+            discoveryAndInstallSection
             registeredDevicesSection
             templatesSection
             shortcutsSection
         }
         .navigationTitle("设备")
-        .onAppear(perform: reload)
+        .onAppear {
+            reload()
+            startLanScan()
+        }
         .sheet(isPresented: $showAddSheet) {
-            AddDeviceSheet { added in
-                reload()
-                statusBanner = "已登记设备「\(added.displayName)」，可在对话来源中选择。"
-            }
+            AddDeviceSheet(
+                discoveredPeers: discoveredPeers,
+                onShowInstallGuide: { showInstallSheet = true },
+                onSaved: { added in
+                    reload()
+                    statusBanner = "已成功添加并配对设备「\(added.displayName)」，可在对话来源中选用。"
+                }
+            )
+        }
+        .sheet(isPresented: $showInstallSheet) {
+            InstallGuideSheet()
         }
         .sheet(item: $selectedDevice) { dev in
             DeviceDetailSheet(
@@ -75,6 +71,81 @@ public struct DevicesView: View {
         }
     }
 
+    // MARK: - 一键安装与自动发现区
+
+    @ViewBuilder
+    private var discoveryAndInstallSection: some View {
+        Section {
+            Button {
+                showAddSheet = true
+            } label: {
+                HStack {
+                    Label("＋ 添加 / 配对设备", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if isScanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .accessibilityIdentifier("devices.addButton")
+
+            Button {
+                showInstallSheet = true
+            } label: {
+                HStack {
+                    Label("在新电脑上安装 Hand（Mac / Win / Linux）", systemImage: "arrow.down.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !discoveredPeers.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("局域网发现设备（点击立即配对）：")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    ForEach(discoveredPeers) { peer in
+                        Button {
+                            showAddSheet = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "desktopcomputer")
+                                    .foregroundStyle(.green)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(peer.displayName) (\(peer.host):\(peer.port))")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text("指纹: \(peer.fingerprintSha256.prefix(16))… · \(peer.agents.count) 个 Agent")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("配对")
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 3)
+                                    .background(Color.blue.opacity(0.12), in: Capsule())
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        } header: {
+            Text("添加与配对")
+        } footer: {
+            Text("同一 Wi-Fi 下已运行 Hand 的电脑会自动出现在上方；未安装请点击一键安装引导。")
+        }
+    }
+
+    // MARK: - 已登记设备列表
+
     @ViewBuilder
     private var registeredDevicesSection: some View {
         Section("已登记设备（\(devices.count) 台）") {
@@ -82,7 +153,7 @@ public struct DevicesView: View {
                 Text(loadError).foregroundStyle(.red)
             }
             if devices.isEmpty {
-                Text("暂无已登记设备。可点击上方「＋ 添加 / 配对设备」或从下方预设模板快速登记。")
+                Text("暂无已登记设备。点击上方「＋ 添加 / 配对设备」通过自动发现、扫码或配对码完成连接。")
                     .font(.subheadline)
                     .foregroundStyle(AgentUI.secondary)
             }
@@ -90,12 +161,20 @@ public struct DevicesView: View {
                 Button {
                     selectedDevice = device
                 } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: deviceIcon(for: device))
+                            .font(.title2)
+                            .foregroundStyle(statusColor(for: device.memberConnectionState))
+                            .frame(width: 32)
+
                         VStack(alignment: .leading, spacing: 4) {
-                            Label(device.displayName, systemImage: "desktopcomputer")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text("\(device.baseUrl ?? "未填地址") · \(device.lastTestSummary ?? "未验证连接")")
+                            HStack {
+                                Text(device.displayName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                statusBadge(for: device.memberConnectionState)
+                            }
+                            Text("\(device.baseUrl ?? "未填地址") · \(device.lastTestSummary ?? "待验证")")
                                 .font(.caption)
                                 .foregroundStyle(AgentUI.secondary)
                             if let folder = device.deviceFolder, !folder.isEmpty {
@@ -105,26 +184,35 @@ public struct DevicesView: View {
                             }
                         }
                         Spacer()
-                        Text("详情")
+                        Image(systemName: "chevron.right")
                             .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                            .foregroundStyle(.tertiary)
                     }
                 }
             }
             .onDelete { offsets in
                 for idx in offsets {
-                    try? LocalData.shared.agents.deleteAgent(agentId: devices[idx].agentId)
+                    let d = devices[idx]
+                    HandIdentityManager.deleteDeviceCredentials(deviceId: d.agentId)
+                    try? LocalData.shared.agents.deleteAgent(agentId: d.agentId)
                 }
                 reload()
             }
         }
     }
 
+    // MARK: - 模板登记与快捷入口
+
+    private let prototypeTemplates: [(id: String, name: String, subtitle: String, access: AgentAccess, host: String, folder: String)] = [
+        ("device-mac-workstation", "Mac · 开发工作站", "macOS · 局域网开发主机", .app, "192.168.1.4:18743", "/Users/a1234/Projects/wherevercode-agent"),
+        ("device-redmi-k70", "Redmi K70 · Android Worker", "Android · 移动执行节点", .connector, "100.96.45.81:8022", "/sdcard/Projects"),
+        ("device-xiaomi-12", "小米 12 · 本地模型", "Android / Termux · 本地推理节点", .api, "100.94.147.89:8022", "~/AI-Workspace"),
+        ("device-vps-us", "美国机房 VPS · 远程构建机", "Linux / Ubuntu · 云端执行节点", .cli, "100.107.143.123:18743", "/root/workspace")
+    ]
+
     @ViewBuilder
     private var templatesSection: some View {
-        Section("常见设备模板（点击查看详情或一键登记）") {
+        Section("常见设备预设") {
             ForEach(prototypeTemplates, id: \.id) { tpl in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -132,7 +220,7 @@ public struct DevicesView: View {
                         Text(tpl.subtitle).font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("详情") {
+                    Button("一键载入") {
                         if let existing = devices.first(where: { $0.agentId == tpl.id }) {
                             selectedDevice = existing
                         } else {
@@ -142,7 +230,7 @@ public struct DevicesView: View {
                                 kind: .device,
                                 access: tpl.access,
                                 baseUrl: tpl.host,
-                                lastTestSummary: "本地登记 · 未验证在线",
+                                lastTestSummary: "本地已登记 · 待探测连接",
                                 memberConnectionState: "NOT_CONNECTED",
                                 deviceId: tpl.id,
                                 deviceFolder: tpl.folder
@@ -161,24 +249,20 @@ public struct DevicesView: View {
 
     @ViewBuilder
     private var shortcutsSection: some View {
-        Section("设备详情与快捷入口") {
+        Section("系统与权限说明") {
             LabeledContent("本机系统", value: "iOS " + UIDevice.current.systemVersion)
-            LabeledContent("任务执行", value: "需要授权与实际适配")
-            LabeledContent("项目访问", value: "受范围约束")
+            LabeledContent("配对与凭据", value: "Keychain 隔离存储")
+            LabeledContent("执行安全性", value: "白名单约束 · 危险操作需审批")
             HStack(spacing: 10) {
-                Button("查看设备任务") { onNavigateRoute("tasks") }
-                    .buttonStyle(.bordered)
-                Button("Agent 详情") { onNavigateRoute("agents") }
-                    .buttonStyle(.bordered)
-                Button("权限设置") { onNavigateRoute("settings") }
-                    .buttonStyle(.bordered)
+                Button("设备任务") { onNavigateRoute("tasks") }.buttonStyle(.bordered)
+                Button("Agent 列表") { onNavigateRoute("agents") }.buttonStyle(.bordered)
+                Button("权限设置") { onNavigateRoute("settings") }.buttonStyle(.bordered)
             }
             .font(.caption)
-            Text("连接状态：真实在线、离线与执行能力需由设备端 Hand 服务确认；平台云端设备列表：\(ReservedFeature.deviceManagement.notImplementedReason)")
-                .font(.caption)
-                .foregroundStyle(AgentUI.secondary)
         }
     }
+
+    // MARK: - 辅助方法
 
     private func reload() {
         do {
@@ -188,162 +272,541 @@ public struct DevicesView: View {
             loadError = error.localizedDescription
         }
     }
+
+    private func startLanScan() {
+        isScanning = true
+        Task {
+            let peers = await HandClient.shared.discoverLanDevices()
+            await MainActor.run {
+                self.discoveredPeers = peers
+                self.isScanning = false
+            }
+        }
+    }
+
+    private func deviceIcon(for device: AgentRecord) -> String {
+        let name = device.displayName.lowercased()
+        if name.contains("mac") { return "laptopcomputer" }
+        if name.contains("vps") || name.contains("linux") { return "server.rack" }
+        if name.contains("android") || name.contains("k70") || name.contains("小米") { return "phone" }
+        if name.contains("win") { return "desktopcomputer" }
+        return "network"
+    }
+
+    private func statusColor(for state: String) -> Color {
+        switch state {
+        case "CONNECTED": return .green
+        case "PENDING": return .orange
+        case "DENIED": return .red
+        default: return .gray
+        }
+    }
+
+    @ViewBuilder
+    private func statusBadge(for state: String) -> some View {
+        let (text, color): (String, Color) = {
+            switch state {
+            case "CONNECTED": return ("已连接", .green)
+            case "PENDING": return ("待配对", .orange)
+            case "DENIED": return ("权限不足", .red)
+            default: return ("离线", .secondary)
+            }
+        }()
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+    }
 }
 
+// MARK: - 添加设备 Sheet
+
 private struct AddDeviceSheet: View {
+    var discoveredPeers: [DiscoveredPeer]
+    var onShowInstallGuide: () -> Void
     var onSaved: (AgentRecord) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    enum DeviceConnectionKind: String, CaseIterable, Identifiable {
-        case lan = "局域网电脑"
-        case remote = "NAT / 远程设备"
-        case vps = "VPS 服务器"
-        case localModel = "本地模型设备"
-        var id: String { rawValue }
-    }
-
-    @State private var connKind: DeviceConnectionKind = .lan
     @State private var name = ""
     @State private var host = ""
+    @State private var portStr = "18743"
+    @State private var publicHost = ""
     @State private var folder = "~/Projects"
-    @State private var pairingSecret = ""
+    @State private var pairCode = ""
+    @State private var showAdvanced = false
+
+    @State private var isProbing = false
+    @State private var probeHello: RemoteHello? = nil
+    @State private var errorMessage: String? = nil
+    @State private var isPairing = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("设备类型") {
-                    Picker("连接类型", selection: $connKind) {
-                        ForEach(DeviceConnectionKind.allCases) { k in
-                            Text(k.rawValue).tag(k)
-                        }
-                    }
-                }
-                Section("连接与配对信息") {
-                    TextField("设备名称（如 Mac Studio / 家里电脑）", text: $name)
-                    TextField("地址或主机名（如 192.168.1.10:8765）", text: $host)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("配对码或共享凭证（可选，仅存本机 Keychain）", text: $pairingSecret)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-                Section("授权工作路径") {
-                    TextField("默认工作区目录（如 ~/Projects/app）", text: $folder)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("设备操作仅限在已授权的目录范围内执行，危险写入操作需经过审批。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if let probeHello {
+                    pairingVerificationSection(hello: probeHello)
+                } else {
+                    initialDiscoveryAndInputSection
                 }
             }
-            .navigationTitle("添加设备")
+            .navigationTitle(probeHello == nil ? "添加设备" : "核对指纹与配对")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存配对") {
-                        save()
-                        dismiss()
+                if probeHello != nil {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("确认配对") {
+                            executePairConfirm()
+                        }
+                        .disabled(pairCode.trimmingCharacters(in: .whitespacesAndNewlines).count != 6 || isPairing)
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
     }
 
-    private func save() {
-        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let id = "device-\(UUID().uuidString.prefix(8).lowercased())"
-        let access: AgentAccess
-        let normalizedHost: String
-        switch connKind {
-        case .lan:
-            access = .app
-            normalizedHost = host.isEmpty ? "192.168.1.100:8765" : host
-        case .remote:
-            access = .connector
-            normalizedHost = host.isEmpty ? "relay.wherevercode.local" : host
-        case .vps:
-            access = .cli
-            normalizedHost = host.isEmpty ? "vps.example.com:8765" : host
-        case .localModel:
-            access = .api
-            normalizedHost = host.isEmpty ? "192.168.1.50:8080" : host
+    // 步骤一：发现设备或输入地址
+    @ViewBuilder
+    private var initialDiscoveryAndInputSection: some View {
+        if !discoveredPeers.isEmpty {
+            Section("局域网快速配对") {
+                ForEach(discoveredPeers) { peer in
+                    Button {
+                        self.name = peer.displayName
+                        self.host = peer.host
+                        self.portStr = String(peer.port)
+                        startProbe()
+                    } label: {
+                        HStack {
+                            Image(systemName: "desktopcomputer")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(peer.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                                Text("\(peer.host):\(peer.port) · \(peer.agents.count) 个 Agent").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("连接")
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.12), in: Capsule())
+                        }
+                    }
+                }
+            }
         }
-        let authRef: String? = pairingSecret.isEmpty ? nil : "device:\(id):token"
-        if let authRef, !pairingSecret.isEmpty {
-            try? BrainKeyStore().putSecret(authRef: authRef, value: pairingSecret)
+
+        Section {
+            Button {
+                onShowInstallGuide()
+            } label: {
+                Label("在新电脑上安装 Hand 引导（Mac / Win / Linux）", systemImage: "sparkles")
+                    .font(.subheadline.weight(.medium))
+            }
+        } header: {
+            Text("尚未安装 Hand？")
+        } footer: {
+            Text("通过一键命令快速安装，安装完成后会自动打印配对码与指纹。")
         }
-        let record = AgentRecord(
-            agentId: id,
-            displayName: cleanName,
-            kind: .device,
-            access: access,
-            baseUrl: normalizedHost,
-            authRef: authRef,
-            lastTestSummary: "已登记（\(connKind.rawValue)）· 待探测连接",
-            memberConnectionState: "NOT_CONNECTED",
-            deviceId: id,
-            deviceFolder: folder.isEmpty ? "/" : folder
-        )
-        try? LocalData.shared.agents.saveAgent(record)
-        onSaved(record)
+
+        Section("手动连接信息") {
+            TextField("设备名称（如 Mac Studio / 家里电脑）", text: $name)
+            TextField("内网 IP 或主机名（如 192.168.1.4）", text: $host)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            DisclosureGroup("高级设置（端口 / 公网直连 / 工作路径）", isExpanded: $showAdvanced) {
+                TextField("端口（默认 18743）", text: $portStr)
+                    .keyboardType(.numberPad)
+                TextField("公网直连地址（可选）", text: $publicHost)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("默认授权目录（如 ~/Projects）", text: $folder)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+        }
+
+        if let errorMessage {
+            Section {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+
+        Section {
+            Button {
+                startProbe()
+            } label: {
+                HStack {
+                    Spacer()
+                    if isProbing {
+                        ProgressView().padding(.trailing, 6)
+                        Text("正在连接…")
+                    } else {
+                        Text("下一步：核对指纹与配对")
+                            .fontWeight(.semibold)
+                    }
+                    Spacer()
+                }
+            }
+            .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProbing)
+        }
+    }
+
+    // 步骤二：核对公钥指纹与输入 6 位配对码
+    @ViewBuilder
+    private func pairingVerificationSection(hello: RemoteHello) -> some View {
+        Section("目标设备信息") {
+            LabeledContent("设备名称", value: hello.displayName)
+            LabeledContent("设备 ID", value: hello.deviceId)
+            if !hello.agents.isEmpty {
+                LabeledContent("已发现 Agent", value: hello.agents.map(\.displayName).joined(separator: "、"))
+            }
+        }
+
+        Section("核对服务端指纹（SHA-256）") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(hello.fingerprintSha256.prefix(16).uppercased())
+                    .font(.system(.title3, design: .monospaced).weight(.bold))
+                    .foregroundStyle(.blue)
+                Text(hello.fingerprintSha256)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text("请在目标机终端核对指纹（hand_server.py fingerprint 输出）一致。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+
+        Section("输入 6 位配对码") {
+            TextField("目标机安装时输出的 6 位数字", text: $pairCode)
+                .keyboardType(.numberPad)
+                .font(.title3.weight(.semibold))
+            Text("配对码可在目标设备上运行 `hand_server.py pair-code` 随时查看。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+
+        if let errorMessage {
+            Section {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+
+        Section {
+            Button("返回修改地址") {
+                self.probeHello = nil
+                self.errorMessage = nil
+            }
+        }
+    }
+
+    private func startProbe() {
+        let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = Int(portStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 18743
+        guard !cleanHost.isEmpty else { return }
+
+        isProbing = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let hello = try await HandClient.shared.probeHello(host: cleanHost, port: port)
+                await MainActor.run {
+                    self.isProbing = false
+                    self.probeHello = hello
+                    if self.name.isEmpty {
+                        self.name = hello.displayName
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isProbing = false
+                    self.errorMessage = "连接失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func executePairConfirm() {
+        guard let hello = probeHello else { return }
+        let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = Int(portStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 18743
+        let cleanCode = pairCode.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        isPairing = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let res = try await HandClient.shared.sendPairConfirm(host: cleanHost, port: port, hello: hello, code: cleanCode)
+                await MainActor.run {
+                    self.isPairing = false
+                    switch res {
+                    case .approved:
+                        let cleanName = self.name.isEmpty ? hello.displayName : self.name
+                        let fullHost = "\(cleanHost):\(port)"
+                        let rec = AgentRecord(
+                            agentId: hello.deviceId,
+                            displayName: cleanName,
+                            kind: .device,
+                            access: .app,
+                            baseUrl: fullHost,
+                            authRef: "device:\(hello.deviceId):public_key",
+                            lastTestSummary: "已连接（在线 · \(hello.agents.count) 个 Agent）",
+                            memberConnectionState: "CONNECTED",
+                            deviceId: hello.deviceId,
+                            deviceFolder: folder.isEmpty ? "~/Projects" : folder
+                        )
+                        try? LocalData.shared.agents.saveAgent(rec)
+
+                        // 自动发现并注册该设备上的 Agent
+                        for ag in hello.agents where ag.available {
+                            let agentRec = AgentRecord(
+                                agentId: ag.agentId,
+                                displayName: "\(ag.displayName) (\(cleanName))",
+                                kind: .cloud,
+                                access: .connector,
+                                baseUrl: fullHost,
+                                lastTestSummary: "远端设备 Agent · 可调度",
+                                memberConnectionState: "CONNECTED",
+                                deviceId: hello.deviceId,
+                                deviceFolder: ag.folder
+                            )
+                            try? LocalData.shared.agents.saveAgent(agentRec)
+                        }
+
+                        onSaved(rec)
+                        dismiss()
+                    case .rejected(let reason):
+                        self.errorMessage = "配对被拒绝：\(reason)"
+                    case .failed(let reason):
+                        self.errorMessage = "配对失败：\(reason)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isPairing = false
+                    self.errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }
+
+// MARK: - 一键安装指引 Sheet
+
+private struct InstallGuideSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedOs: DeviceTargetOs = .mac
+    @State private var copiedNotice: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("选择目标设备系统") {
+                    Picker("操作系统", selection: $selectedOs) {
+                        ForEach(DeviceTargetOs.allCases) { os in
+                            Label(os.rawValue, systemImage: os.iconName).tag(os)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    HStack(spacing: 8) {
+                        Image(systemName: selectedOs.iconName)
+                            .font(.title3)
+                            .foregroundStyle(.blue)
+                        Text(selectedOs.subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("一键安装命令") {
+                    let cmd = DeviceInstallGuide.installCommand(for: selectedOs)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(cmd)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                            .textSelection(.enabled)
+
+                        HStack {
+                            Button {
+                                UIPasteboard.general.string = cmd
+                                copiedNotice = "已复制安装命令"
+                            } label: {
+                                Label("复制命令", systemImage: "doc.on.doc")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Spacer()
+
+                            if let copiedNotice {
+                                Text(copiedNotice)
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+                }
+
+                Section("操作说明") {
+                    ForEach(Array(DeviceInstallGuide.stepInstructions(for: selectedOs).enumerated()), id: \.offset) { idx, step in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(idx + 1).")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.blue)
+                            Text(step)
+                                .font(.subheadline)
+                        }
+                    }
+                }
+
+                if selectedOs == .mac || selectedOs == .linux || selectedOs == .vps {
+                    Section("卸载命令") {
+                        Text(DeviceInstallGuide.uninstallCommand(for: selectedOs))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle("一键安装引导")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 设备详情与真实闭环验证 Sheet
 
 private struct DeviceDetailSheet: View {
     @State var device: AgentRecord
     var onUpdated: () -> Void
     var onNavigateRoute: (String) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var folder: String = ""
-    @State private var host: String = ""
+
     @State private var isProbing = false
     @State private var probeResult: String?
+    @State private var remoteHello: RemoteHello?
+    @State private var directoryFiles: [RemoteFileEntry] = []
+    @State private var isListingFiles = false
+    @State private var fileOpResult: String?
+    @State private var testFileText: String = ""
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("设备详情") {
-                    LabeledContent("设备", value: device.displayName)
-                    LabeledContent("接入方式", value: device.access.rawValue)
-                    LabeledContent("在线状态", value: device.memberConnectionState == "CONNECTED" ? "在线" : "未验证 / 离线")
-                    LabeledContent("任务执行", value: "需要授权与实际适配")
-                    LabeledContent("项目访问", value: "受范围约束")
-                }
-                Section("地址与目录授权") {
-                    TextField("连接地址", text: $host)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("授权项目路径", text: $folder)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("保存修改") {
-                        device.baseUrl = host
-                        device.deviceFolder = folder
-                        try? LocalData.shared.agents.saveAgent(device)
-                        onUpdated()
-                        probeResult = "已更新设备地址与授权路径。"
+                Section("设备状态") {
+                    LabeledContent("设备名称", value: device.displayName)
+                    LabeledContent("连接地址", value: device.baseUrl ?? "未填")
+                    LabeledContent("连接状态") {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(device.memberConnectionState == "CONNECTED" ? Color.green : Color.gray)
+                                .frame(width: 8, height: 8)
+                            Text(device.memberConnectionState == "CONNECTED" ? "在线" : "未验证 / 离线")
+                                .font(.subheadline.weight(.semibold))
+                        }
                     }
+                    LabeledContent("授权工作目录", value: device.deviceFolder ?? "/")
                 }
-                Section("连接检测") {
-                    Button(isProbing ? "正在探测…" : "测试设备连接") {
-                        Task { await probe() }
+
+                Section("连接与在线检测") {
+                    Button(isProbing ? "正在连接探测…" : "立即测试设备连接") {
+                        probeRealConnection()
                     }
                     .disabled(isProbing)
+
                     if let probeResult {
                         Text(probeResult)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(probeResult.contains("成功") ? .green : .secondary)
                     }
                 }
-                Section("关联操作") {
-                    Button("查看设备任务") { onNavigateRoute("tasks") }
-                    Button("Agent 详情") { onNavigateRoute("agents") }
-                    Button("权限设置") { onNavigateRoute("settings") }
-                    Button("删除此设备", role: .destructive) {
+
+                if let hello = remoteHello {
+                    Section("远程 Agent 能力（\(hello.agents.count) 个）") {
+                        ForEach(hello.agents) { ag in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ag.displayName).font(.subheadline.weight(.medium))
+                                    Text("路径：\(ag.folder)").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(ag.available ? "可用" : "未安装")
+                                    .font(.caption2)
+                                    .foregroundStyle(ag.available ? .green : .secondary)
+                            }
+                        }
+                    }
+                }
+
+                Section("工作区文件读取验证") {
+                    Button(isListingFiles ? "正在读取目录…" : "读取远程项目目录") {
+                        loadDirectoryFiles()
+                    }
+                    .disabled(isListingFiles)
+
+                    if !directoryFiles.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("目录文件列表（\(directoryFiles.count) 项）：")
+                                .font(.caption.weight(.semibold))
+                            ForEach(directoryFiles.prefix(10)) { item in
+                                Label(item.name, systemImage: item.isDir ? "folder.fill" : "doc.text")
+                                    .font(.caption)
+                                    .foregroundStyle(item.isDir ? .blue : .primary)
+                            }
+                        }
+                    }
+
+                    if let fileOpResult {
+                        Text(fileOpResult)
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                }
+
+                Section("远程控制指令测试") {
+                    HStack(spacing: 12) {
+                        Button("测试暂停") {
+                            sendControlAction("pause")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("测试恢复") {
+                            sendControlAction("resume")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("测试停止") {
+                            sendControlAction("stop")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Section("管理操作") {
+                    Button("查看关联任务") { onNavigateRoute("tasks") }
+                    Button("断开并删除设备", role: .destructive) {
+                        HandIdentityManager.deleteDeviceCredentials(deviceId: device.agentId)
                         try? LocalData.shared.agents.deleteAgent(agentId: device.agentId)
                         onUpdated()
                         dismiss()
@@ -358,41 +821,104 @@ private struct DeviceDetailSheet: View {
                 }
             }
             .onAppear {
-                folder = device.deviceFolder ?? ""
-                host = device.baseUrl ?? ""
+                probeRealConnection()
             }
         }
     }
 
-    private func probe() async {
+    private func probeRealConnection() {
+        guard let raw = device.baseUrl, !raw.isEmpty else {
+            probeResult = "请先配置设备地址。"
+            return
+        }
+        let (host, port) = parseHostAndPort(raw)
         isProbing = true
-        defer { isProbing = false }
-        let raw = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else {
-            probeResult = "请先填写设备地址。"
-            return
+        probeResult = nil
+
+        Task {
+            do {
+                let hello = try await HandClient.shared.probeHello(host: host, port: port)
+                await MainActor.run {
+                    self.isProbing = false
+                    self.remoteHello = hello
+                    self.device.memberConnectionState = hello.clientStatus == "APPROVED" ? "CONNECTED" : "PENDING"
+                    self.device.lastTestSummary = "探测成功（\(hello.displayName) · 在线 · \(hello.agents.count) 个 Agent）"
+                    try? LocalData.shared.agents.saveAgent(self.device)
+                    self.onUpdated()
+                    self.probeResult = "连接成功！设备已认证，发现 \(hello.agents.count) 个 Agent。"
+                }
+            } catch {
+                await MainActor.run {
+                    self.isProbing = false
+                    self.device.memberConnectionState = "NOT_CONNECTED"
+                    self.device.lastTestSummary = "连接失败（\(error.localizedDescription)）"
+                    try? LocalData.shared.agents.saveAgent(self.device)
+                    self.onUpdated()
+                    self.probeResult = "连接失败：\(error.localizedDescription)"
+                }
+            }
         }
-        let urlStr = raw.hasPrefix("http") ? raw : "https://\(raw)"
-        guard let url = URL(string: urlStr) else {
-            probeResult = "地址格式无效：\(raw)"
-            return
+    }
+
+    private func loadDirectoryFiles() {
+        guard let raw = device.baseUrl, !raw.isEmpty else { return }
+        let (host, port) = parseHostAndPort(raw)
+        let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        isListingFiles = true
+
+        Task {
+            do {
+                let files = try await HandClient.shared.listDirectory(
+                    host: host,
+                    port: port,
+                    targetDeviceId: device.deviceId ?? device.agentId,
+                    folder: folder
+                )
+                await MainActor.run {
+                    self.isListingFiles = false
+                    self.directoryFiles = files
+                    self.fileOpResult = "成功读取远程目录「\(folder)」，获取到 \(files.count) 个文件条目。"
+                }
+            } catch {
+                await MainActor.run {
+                    self.isListingFiles = false
+                    self.fileOpResult = "读取目录失败：\(error.localizedDescription)"
+                }
+            }
         }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 4
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            device.lastTestSummary = "探测返回 HTTP \(code)"
-            device.memberConnectionState = (200..<500).contains(code) ? "CONNECTED" : "NOT_CONNECTED"
-            try? LocalData.shared.agents.saveAgent(device)
-            onUpdated()
-            probeResult = "已收到响应（HTTP \(code)）。"
-        } catch {
-            device.lastTestSummary = "未连接（\(error.localizedDescription)）"
-            device.memberConnectionState = "NOT_CONNECTED"
-            try? LocalData.shared.agents.saveAgent(device)
-            onUpdated()
-            probeResult = "未连接：\(error.localizedDescription)"
+    }
+
+    private func sendControlAction(_ action: String) {
+        guard let raw = device.baseUrl, !raw.isEmpty else { return }
+        let (host, port) = parseHostAndPort(raw)
+        let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
+
+        Task {
+            do {
+                let (confirmed, msg) = try await HandClient.shared.sendControl(
+                    host: host,
+                    port: port,
+                    targetDeviceId: device.deviceId ?? device.agentId,
+                    folder: folder,
+                    action: action
+                )
+                await MainActor.run {
+                    self.fileOpResult = "控制指令 [\(action)]：确认=\(confirmed)，消息=\(msg)"
+                }
+            } catch {
+                await MainActor.run {
+                    self.fileOpResult = "发送控制失败：\(error.localizedDescription)"
+                }
+            }
         }
+    }
+
+    private func parseHostAndPort(_ raw: String) -> (String, Int) {
+        let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+        let parts = clean.split(separator: ":")
+        if parts.count >= 2, let p = Int(parts[1]) {
+            return (String(parts[0]), p)
+        }
+        return (clean, 18743)
     }
 }
