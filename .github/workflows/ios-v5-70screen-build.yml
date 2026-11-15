@@ -75,8 +75,10 @@ jobs:
           mkdir -p Payload
           cp -R $APP Payload/
           zip -qry wherevercode-agent-ios-1.5-6-unsigned.ipa Payload
-          shasum -a 256 wherevercode-agent-ios-1.5-6-unsigned.ipa | tee wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256
+          SHA=$(shasum -a 256 wherevercode-agent-ios-1.5-6-unsigned.ipa | tee wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256)
           echo "commit=$GITHUB_SHA run=$GITHUB_RUN_ID" >> wherevercode-agent-ios-1.5-6-unsigned.ipa.sha256
+          echo "::notice::IPA_SHA256=$SHA (version=$V build=$B commit=$GITHUB_SHA run=$GITHUB_RUN_ID)"
+          grep -E "Test Case '.*' (passed|failed)|Executed [0-9]+ tests|\*\* TEST SUCCEEDED \*\*" ci-logs/xcodebuild-test.log | tail -25 | while IFS= read -r l; do echo "::notice::$l"; done
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
