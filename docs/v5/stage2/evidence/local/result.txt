@@ -1,0 +1,2 @@
+PASS: UI memory add/confirm/persist/delete; UI skill create/Room/zero evidence/delete; exact route search.
+No model, cloud sync or automation execution claimed.

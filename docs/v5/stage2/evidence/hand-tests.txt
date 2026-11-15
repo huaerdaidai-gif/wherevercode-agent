@@ -1,0 +1,29 @@
+test_authorization_uses_requested_args_folder_and_echoes_it (server.test_hand_server.BundledHandAuthorizationTest.test_authorization_uses_requested_args_folder_and_echoes_it) ... ok
+test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized (server.test_hand_server.BundledHandAuthorizationTest.test_dispatch_does_not_treat_unapproved_envelope_folder_as_authorized) ... ok
+test_source_and_bundled_dispatch_authorization_accept_and_reject_matrix (server.test_hand_server.BundledHandAuthorizationTest.test_source_and_bundled_dispatch_authorization_accept_and_reject_matrix)
+Exercise the same authenticated _dispatch path shipped by both copies. ... ok
+test_bundled_runner_drains_stdout_after_process_exit (server.test_hand_server.BundledHandOutputTest.test_bundled_runner_drains_stdout_after_process_exit) ... ok
+test_authorize_project_folder_rejects_missing_directory (server.test_hand_server.HandServerTest.test_authorize_project_folder_rejects_missing_directory) ... ok
+test_authorize_project_folder_requires_existing_absolute_dir_and_is_idempotent (server.test_hand_server.HandServerTest.test_authorize_project_folder_requires_existing_absolute_dir_and_is_idempotent) ... ok
+test_change_goal_bumps_version_and_stale_snapshot_rejected (server.test_hand_server.HandServerTest.test_change_goal_bumps_version_and_stale_snapshot_rejected) ... ok
+test_control_pause_resume_stop (server.test_hand_server.HandServerTest.test_control_pause_resume_stop) ... ok
+test_credential_verify_roundtrip (server.test_hand_server.HandServerTest.test_credential_verify_roundtrip) ... ok
+test_exited_agent_stdout_is_drained (server.test_hand_server.HandServerTest.test_exited_agent_stdout_is_drained) ... ok
+test_fake_agent_run_streams_progress_and_result (server.test_hand_server.HandServerTest.test_fake_agent_run_streams_progress_and_result) ... ok
+test_fingerprint_matches_public_key (server.test_hand_server.HandServerTest.test_fingerprint_matches_public_key) ... ok
+test_git_repos_for_folder_missing_folder_empty (server.test_hand_server.HandServerTest.test_git_repos_for_folder_missing_folder_empty) ... ok
+test_hello_agents_include_git_repos (server.test_hand_server.HandServerTest.test_hello_agents_include_git_repos) ... ok
+test_hello_agents_non_git_folder_repos_empty (server.test_hand_server.HandServerTest.test_hello_agents_non_git_folder_repos_empty) ... ok
+test_hello_returns_agents_and_pending (server.test_hand_server.HandServerTest.test_hello_returns_agents_and_pending) ... ok
+test_list_read_write (server.test_hand_server.HandServerTest.test_list_read_write) ... ok
+test_path_traversal_rejected (server.test_hand_server.HandServerTest.test_path_traversal_rejected) ... ok
+test_rfc7748_vector (server.test_hand_server.HandServerTest.test_rfc7748_vector) ... ok
+test_seal_open_roundtrip_and_tamper (server.test_hand_server.HandServerTest.test_seal_open_roundtrip_and_tamper) ... ok
+test_signing_key_deterministic (server.test_hand_server.HandServerTest.test_signing_key_deterministic) ... ok
+test_unapproved_client_sealed_call_rejected (server.test_hand_server.HandServerTest.test_unapproved_client_sealed_call_rejected) ... ok
+test_unauthorized_folder_rejected (server.test_hand_server.HandServerTest.test_unauthorized_folder_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 9.860s
+
+OK

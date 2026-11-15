@@ -1,0 +1,29 @@
+{
+  "source_commit": "03c3178a5832b4b0b932ec924e1bb3a69b7d14af",
+  "package": "wherevercode.agent.ci",
+  "abi": "x86_64",
+  "build_type": "debug, not production",
+  "artifacts": [
+    {
+      "file": "artifacts/stage2/WhereverCode-V5-stage2-x86_64-debug.apk",
+      "sha256": "849dd3e896d789e1ea7089a443a9ae15b0a109d9be2a11749ede612ad6377519",
+      "bytes": 26616950
+    },
+    {
+      "file": "artifacts/stage2/WhereverCode-V5-stage2-native-tests.apk",
+      "sha256": "81c2147bd33583db7d7c2de40124ba4bc9e1a8e9094bbe56c57116a326b6e429",
+      "bytes": 458645,
+      "source_commit": "f0f16289cee4074e81460d0b36a2515e27822a37"
+    }
+  ],
+  "ci_arm64": {
+    "source_commit": "03c3178a5832b4b0b932ec924e1bb3a69b7d14af",
+    "run_id": 43660719563,
+    "file": "artifacts/stage2/WhereverCode-V5-stage2-arm64-debug.apk",
+    "sha256": "bad8958e09292d587db7f520a15f6adb8dfa5d533641f45674225d7113596b2f",
+    "bytes": 25845147,
+    "native_device_verified": false
+  },
+  "first_native_test_apk_sha256": "1b782a73a514394970e2b22c14c0505ceb24351e22c654dee77b72c1134c4851",
+  "test_only_rebuild": "Only AndroidTest rebuilt after visibility/commit-await fix. Installed app APK SHA-256 unchanged."
+}

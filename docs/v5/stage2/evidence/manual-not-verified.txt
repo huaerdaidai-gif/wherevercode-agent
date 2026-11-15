@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/tmp/wc-tools/stage2-manual.py", line 34, in <module>
+    root=dump('search-empty',lambda r:any(n.get('class')=='android.widget.EditText' for n in nodes(r)))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/wc-tools/stage2-manual.py", line 22, in dump
+    raise RuntimeError('UI not ready: '+name)
+RuntimeError: UI not ready: search-empty

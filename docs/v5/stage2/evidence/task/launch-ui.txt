@@ -1,0 +1,8 @@
+android.widget.TextView: ☰
+android.widget.TextView: ✳
+android.widget.TextView: 今天想做什么？
+android.widget.TextView: ＋
+android.widget.TextView: 团队 ⌄
+android.widget.TextView: 未连接
+android.widget.TextView: 任务
+android.widget.EditText: 输入消息…

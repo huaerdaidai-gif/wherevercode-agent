@@ -1,0 +1,7 @@
+[
+  {
+    "class": "wherevercode.agent.brain.siwc.KeystoreSiwcTokenStoreTest",
+    "name": "round-trip through the real BrainKeyStore",
+    "message": null
+  }
+]

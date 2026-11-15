@@ -1,0 +1,10 @@
+{
+  "branch": "feat/v5-ios-1.5-build6-import-20261115",
+  "reference_sha": "062fb33962d5b9093f0d96476697ac9c61b2c062",
+  "route_count": 70,
+  "id_title_parent_differences": [],
+  "source": "contracts/route_acceptance.csv (read-only Git snapshot; not latest branch acceptance)",
+  "latest_observed_sha": "6aeaadaee74fecd79b4372edc01c418f9a66b328",
+  "latest_id_title_parent_differences": [],
+  "latest_route_count": 70
+}
