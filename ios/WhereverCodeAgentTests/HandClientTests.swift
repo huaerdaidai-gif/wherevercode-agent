@@ -115,7 +115,7 @@ final class HandClientTests: XCTestCase {
 
         // 校验内置哈希与实际发布包一致
         XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "bfbb1953827dcd4c58c65b18a2ec017d11c2be3611254869f58b49bedbe9ff4b")
-        XCTAssertEqual(DeviceInstallGuide.scriptSha256["v5-install-hand.sh"], "3072654f1c35094666a9fc7a3bd1a09f7a2cfaedbd08d94715abdd7d7dc15caa")
+        XCTAssertEqual(DeviceInstallGuide.scriptSha256["v5-install-hand.sh"], "270b0565d171d515f2e7ce07c79cefef9445b481e3af7606daa717eb4fc329ea")
     }
 
     // 5. 验证 Keychain 凭据隔离与未明文保存

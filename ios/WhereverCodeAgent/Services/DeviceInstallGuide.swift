@@ -34,7 +34,7 @@ public enum DeviceTargetOs: String, CaseIterable, Identifiable, Sendable {
         case .linux: return "Ubuntu / Debian / CentOS · systemd 用户服务"
         case .windows: return "Windows 10/11 / Server · PowerShell 脚本"
         case .vps: return "云端 VPS / 远程 Linux 主机"
-        case .android: return "移动端执行节点 · WhereverCode Agent APK"
+        case .android: return "移动端算力节点 · Termux 执行宿主 / Tailscale 专网"
         case .ios: return "本机沙盒与审批中心"
         case .cloud: return "API / Bot / MCP 适配器，无需安装 Hand"
         }
@@ -48,9 +48,9 @@ public struct DeviceInstallGuide: Sendable {
     public static let trustedBaseUrl = "https://raw.githubusercontent.com/huaerdaidai-gif/wherevercode-agent/main/android/app/src/main/assets/install"
 
     public static let scriptSha256: [String: String] = [
-        "v5-install-hand.sh": "3072654f1c35094666a9fc7a3bd1a09f7a2cfaedbd08d94715abdd7d7dc15caa",
+        "v5-install-hand.sh": "270b0565d171d515f2e7ce07c79cefef9445b481e3af7606daa717eb4fc329ea",
         "v5-install-hand.ps1": "9c04cca0744a0804e882c7279a1873254fb642018a86e071d6b2563cf3a15909",
-        "v5-uninstall-hand.sh": "652a08d9ff7f334bce2dcd91a8ac0f24ad1e9f59a165d0ad0fd9a0fb8cd8dc03",
+        "v5-uninstall-hand.sh": "8b99bc20e7f09a86863cdc804cfeecf5aec46321b165eec0abfb2a296dcfaaed",
         "hand_server.py": "bfbb1953827dcd4c58c65b18a2ec017d11c2be3611254869f58b49bedbe9ff4b"
     ]
 
@@ -62,7 +62,7 @@ public struct DeviceInstallGuide: Sendable {
         case .windows:
             return "powershell -ExecutionPolicy Bypass -Command \"$url='\(trustedBaseUrl)/v5-install-hand.ps1'; $file='v5-install-hand.ps1'; Invoke-WebRequest -Uri $url -OutFile $file; .\\$file -Version '\(defaultVersion)' -Port \(port)\""
         case .android:
-            return "在 Android 手机上安装并打开 wherevercode-agent APK，进入「设置 → 设备服务」开启 Hand 服务即可。"
+            return "pkg install -y curl python python-cryptography && curl -fsSL \(trustedBaseUrl)/v5-install-hand.sh | sh -s -- --version \(defaultVersion) --port \(port)"
         case .ios:
             return "iOS 作为控制端和审批中心，在沙盒内运行，无需安装 Hand 服务端。"
         case .cloud:
@@ -73,7 +73,7 @@ public struct DeviceInstallGuide: Sendable {
     /// 本地已下载安装包时的执行命令
     public static func localRunCommand(for os: DeviceTargetOs, port: Int = defaultPort) -> String {
         switch os {
-        case .mac, .linux, .vps:
+        case .mac, .linux, .vps, .android:
             return "sh v5-install-hand.sh --version \(defaultVersion) --port \(port)"
         case .windows:
             return "powershell -ExecutionPolicy Bypass -File .\\v5-install-hand.ps1 -Version \(defaultVersion) -Port \(port)"
@@ -85,7 +85,7 @@ public struct DeviceInstallGuide: Sendable {
     /// 卸载命令
     public static func uninstallCommand(for os: DeviceTargetOs) -> String {
         switch os {
-        case .mac, .linux, .vps:
+        case .mac, .linux, .vps, .android:
             return "curl -fsSL \(trustedBaseUrl)/v5-uninstall-hand.sh | sh"
         case .windows:
             return "powershell -ExecutionPolicy Bypass -Command \"Write-Host '停止服务并清理 ~/.wherevercode/v5-hand'\""
@@ -119,9 +119,11 @@ public struct DeviceInstallGuide: Sendable {
             ]
         case .android:
             return [
-                "在目标 Android 设备上安装 WhereverCode Agent 最新 Release APK。",
-                "同一局域网下，iPhone 会自动通过 mDNS 扫描到该 Android 设备。",
-                "点击设备卡片，核对屏幕显示的指纹与 6 位配对码即可秒级完成配对。"
+                "在 Android 手机（如 Redmi K70 / 小米）上安装并打开 Termux 终端应用。",
+                "在 Termux 中粘贴并运行上方的一键安装命令。",
+                "脚本会自动申请唤醒锁 (termux-wake-lock) 防止休眠，并启动 Hand 18743 服务。",
+                "安装完成后，终端会打印设备指纹、6 位配对码以及 Tailscale 专网 / 局域网 IP。",
+                "回到 iPhone，输入终端显示的 Tailscale 专网 IP（如 100.x.x.x）或局域网 IP 及配对码即可秒级完成连接。"
             ]
         case .ios, .cloud:
             return [

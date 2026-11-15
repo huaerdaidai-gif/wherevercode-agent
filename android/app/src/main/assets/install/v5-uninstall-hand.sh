@@ -87,6 +87,8 @@ echo "已备份 Agent 与授权映射：${BACKUP}（重装后可对照恢复；�
 for link in "$HOME/.local/bin/wherevercode-hand"; do
   if [ -L "$link" ] && [ "$(readlink "$link")" = "$HOST_DIR/wherevercode-hand" ]; then rm -f "$link"; fi
 done
+[ -f "$HOME/.termux/boot/25-wherevercode-v5-hand" ] && rm -f "$HOME/.termux/boot/25-wherevercode-v5-hand"
+command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null || true
 # server_key.json（设备身份）与 audit.jsonl（日志）也删掉：卸载即干净断开，
 # 重装是新身份、须重新配对（与上方备份说明一致）。
 for path in "$HOST_DIR/wherevercode-hand" "$HOST_DIR/.wherevercode-v5-hand-state" \

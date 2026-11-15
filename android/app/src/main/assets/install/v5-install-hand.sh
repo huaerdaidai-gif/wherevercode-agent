@@ -284,6 +284,11 @@ fi
 
 # --- 后台服务注册与启动 ---
 SERVICE="none"
+IS_TERMUX=0
+if [ -n "${TERMUX_VERSION:-}" ] || [ -d "/data/data/com.termux" ] || [ "${PREFIX:-}" = "/data/data/com.termux/files/usr" ]; then
+  IS_TERMUX=1
+fi
+
 case "$(uname -s)" in
 Darwin)
   mkdir -p "$HOME/Library/LaunchAgents"
@@ -300,7 +305,26 @@ EOF2
   launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
   SERVICE="launchd";;
 Linux)
-  if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  if [ "$IS_TERMUX" = 1 ]; then
+    if command -v termux-wake-lock >/dev/null 2>&1; then
+      termux-wake-lock
+      echo "已申请 Termux 唤醒锁 (termux-wake-lock)，防止手机锁屏休眠断网。"
+    fi
+    if [ -d "$HOME/.termux" ]; then
+      mkdir -p "$HOME/.termux/boot"
+      cat > "$HOME/.termux/boot/25-wherevercode-v5-hand" <<EOF2
+#!/data/data/com.termux/files/usr/bin/sh
+termux-wake-lock 2>/dev/null || true
+nohup "$HOST_DIR/wherevercode-hand" serve >>"$HOST_DIR/v5-hand.log" 2>&1 &
+echo \$! > "$HOST_DIR/hand.pid"
+EOF2
+      chmod 700 "$HOME/.termux/boot/25-wherevercode-v5-hand"
+      echo "已注册 Termux Boot 自启动脚本（~/.termux/boot/25-wherevercode-v5-hand）。"
+    fi
+    nohup "$HOST_DIR/wherevercode-hand" serve >>"$HOST_DIR/v5-hand.log" 2>&1 &
+    echo $! > "$HOST_DIR/hand.pid"; chmod 600 "$HOST_DIR/hand.pid"
+    SERVICE="termux-nohup"
+  elif command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
     UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"; mkdir -p "$UNIT_DIR"
     cat > "$UNIT_DIR/wherevercode-v5-hand.service" <<EOF2
 [Unit]
@@ -343,4 +367,10 @@ FINGERPRINT=$("$HAND_PYTHON" "$HOST_DIR/current/hand_server.py" --state-dir "$HO
 PAIR_CODE=$("$HAND_PYTHON" "$HOST_DIR/current/hand_server.py" --state-dir "$HOST_DIR" pair-code --raw 2>/dev/null | tr -d ' \n\r')
 echo "V5_HAND_INSTALLED device_id=${DEVICE_ID} fingerprint=${FINGERPRINT} pair_code=${PAIR_CODE} port=${PORT} version=${VERSION} state_dir=${HOST_DIR} python=${HAND_PYTHON} service=${SERVICE}"
 echo "V5 Hand 已安装并启动（${SERVICE}）。App 里核对指纹一致、填入配对码 ${PAIR_CODE}（5 分钟有效，一次性）后确认配对。"
+
+TS_IP=$(tailscale ip -4 2>/dev/null || ifconfig tun0 2>/dev/null | grep 'inet ' | awk '{print $2}' || true)
+LAN_IP=$(ifconfig wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' || true)
+[ -n "$TS_IP" ] && echo "► Tailscale 专网直连: ${TS_IP}:${PORT} (推荐，支持跨Wi-Fi与5G远程连接)"
+[ -n "$LAN_IP" ] && echo "► 局域网 Wi-Fi 直连: ${LAN_IP}:${PORT} (限同Wi-Fi下使用)"
+
 echo "管理命令：运行 wherevercode-hand pair-code 查看状态，或 --rotate 刷新新码。"

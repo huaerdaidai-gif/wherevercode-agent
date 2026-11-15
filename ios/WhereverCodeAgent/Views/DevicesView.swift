@@ -347,7 +347,7 @@ public struct DevicesView: View {
         let name = device.displayName.lowercased()
         if name.contains("mac") { return "laptopcomputer" }
         if name.contains("vps") || name.contains("linux") { return "server.rack" }
-        if name.contains("android") || name.contains("k70") || name.contains("小米") { return "phone" }
+        if name.contains("android") || name.contains("k70") || name.contains("小米") || name.contains("termux") { return "phone" }
         if name.contains("win") { return "desktopcomputer" }
         return "network"
     }
@@ -480,12 +480,12 @@ private struct AddDeviceSheet: View {
         } header: {
             Text("尚未安装 Hand？")
         } footer: {
-            Text("通过一键命令快速安装，安装完成后会自动打印配对码与指纹。")
+            Text("支持输入局域网 IP、Tailscale 专网 IP (100.x.x.x) 或 Tailscale MagicDNS 域名。")
         }
 
         Section("手动连接信息") {
-            TextField("设备名称（如 Mac Studio / 家里电脑）", text: $name)
-            TextField("内网 IP 或主机名（如 192.168.1.4）", text: $host)
+            TextField("设备名称（如 Mac Studio / K70-Termux）", text: $name)
+            TextField("IP 或 Tailscale 主机名（如 100.x.x.x / 192.168.1.4）", text: $host)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
 
