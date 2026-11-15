@@ -38,9 +38,19 @@ class FlagshipNavTest {
                 ?: device.findObject(By.text("跳过"))
             if (skip != null) { skip.click(); device.waitForIdle(); continue }
             device.waitForIdle()
+            // The home shell exists UNDER the onboarding overlay, so
+            // buttonMenu alone is not proof the home is usable (this
+            // gap produced "10 screenshots all the welcome page" while
+            // CI stayed green). Break only when every onboarding
+            // marker is GONE as well.
+            val onboardingStillUp = listOf(
+                "开始使用 →", "稍后再看", "跳过，先体验基础功能", "跳过",
+                "选择你的使用方向", "解锁手机执行能力", "准备完成",
+            ).any { device.hasObject(By.text(it)) }
             if (device.currentPackageName == context.packageName &&
                 device.hasObject(By.res(context.packageName, "buttonMenu")) &&
-                !device.hasObject(By.res("com.android.permissioncontroller", "permission_deny_button"))) break
+                !device.hasObject(By.res("com.android.permissioncontroller", "permission_deny_button")) &&
+                !onboardingStillUp) break
             Thread.sleep(500)
         }
         assertTrue(

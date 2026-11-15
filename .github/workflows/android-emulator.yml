@@ -51,7 +51,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -la /dev/kvm
       - name: Build app and instrumentation APKs
-        run: gradle -p android :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+        # androidAbis=x86_64: the acceptance emulator is an x86_64 image;
+        # the default arm64-v8a APK cannot run on it.
+        run: gradle -p android -PandroidAbis=x86_64 :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - name: Run on API 34 emulator (KVM)
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -77,9 +79,20 @@ jobs:
             adb pull /sdcard/final-screen.png emulator-evidence/ || true
             adb pull /sdcard/Android/data/wherevercode.agent.ci/files/issue8-native-evidence emulator-evidence/ || true
             adb pull /sdcard/Android/data/wherevercode.agent.ci/files/unified-ui-evidence emulator-evidence/ || true
+            # page-capture 证据写应用内部存储（filesDir）——API 30+ 的
+            # FUSE 拒绝 shell 直读 /sdcard/Android/data（adb pull 会失败），
+            # 用 run-as tar 流式取回（debug 包可 run-as，各 API 版本通用）。
+            mkdir -p emulator-evidence/page-capture
+            adb exec-out run-as wherevercode.agent.ci tar -c files/page-capture 2>/dev/null | tar -x -C emulator-evidence/page-capture --strip-components=2 || true
+            ls -la emulator-evidence/page-capture/ || true
             adb logcat -d > emulator-evidence/logcat.txt || true
             adb shell dumpsys activity processes > emulator-evidence/processes.txt || true
             grep -q "OK (" emulator-evidence/instrumentation.txt
+      - name: Verify page-capture evidence (anti fake-green)
+        # Fails the job when a page screenshot is missing, not a real PNG,
+        # byte-identical to another page, or when the onboarding overlay
+        # was never confirmed dismissed (the old "10x welcome page" mode).
+        run: python3 scripts/verify_page_capture.py emulator-evidence
       - name: Upload emulator evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
