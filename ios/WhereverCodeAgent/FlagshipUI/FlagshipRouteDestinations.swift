@@ -1532,7 +1532,7 @@ public struct ControlHomeView: View {
                     Text("平台连接与运行状态")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(appState.settings.platformAddress.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformAddress)
+                    Text(appState.settings.platformBaseURLString.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformBaseURLString)
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                 }
