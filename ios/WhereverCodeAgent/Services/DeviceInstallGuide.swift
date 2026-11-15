@@ -51,7 +51,7 @@ public struct DeviceInstallGuide: Sendable {
         "v5-install-hand.sh": "3072654f1c35094666a9fc7a3bd1a09f7a2cfaedbd08d94715abdd7d7dc15caa",
         "v5-install-hand.ps1": "9c04cca0744a0804e882c7279a1873254fb642018a86e071d6b2563cf3a15909",
         "v5-uninstall-hand.sh": "652a08d9ff7f334bce2dcd91a8ac0f24ad1e9f59a165d0ad0fd9a0fb8cd8dc03",
-        "hand_server.py": "f5357dd8a6535afa59a9435f8a43dcb0ab4cfbd0d71b2113f4097b2ceebf7458"
+        "hand_server.py": "bfbb1953827dcd4c58c65b18a2ec017d11c2be3611254869f58b49bedbe9ff4b"
     ]
 
     /// 生成一键安装命令

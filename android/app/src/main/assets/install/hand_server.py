@@ -1764,6 +1764,24 @@ class HandServer:
     def _handle_device_admin(self, conn, session_key, client_id, envelope) -> None:
         seq = int(envelope.get("seq", 1))
         action = str(envelope.get("action", ""))
+        if action in ("unpair", "revoke"):
+            if envelope.get("confirmed") is not True:
+                self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
+                            "取消配对需要确认（confirmed 缺失）")
+                return
+            now = int(time.time())
+            with self.state.lock:
+                clients = self.state.load_json("paired_clients.json", {})
+                entry = clients.get(client_id)
+                if isinstance(entry, dict):
+                    entry["status"] = "REVOKED"
+                    entry["revoked_at"] = now
+                    clients[client_id] = entry
+                    self.state.save_json("paired_clients.json", clients)
+            self.state.audit({"event": "pair_revoked", "client": client_id, "via": "client_admin_unpair"})
+            self._send(conn, session_key, envelope, "wherevercode_device_admin_reply",
+                       {"unpaired": True, "status": "REVOKED"}, seq + 1)
+            return
         if action == "rotate_pair_code":
             if envelope.get("confirmed") is not True:
                 self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
@@ -1776,7 +1794,7 @@ class HandServer:
             return
         if action != "update_hand":
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
-                        "不支持的管理操作：只允许 update_hand / rotate_pair_code")
+                        "不支持的管理操作：只允许 update_hand / rotate_pair_code / unpair / revoke")
             return
         if envelope.get("confirmed") is not True:
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,

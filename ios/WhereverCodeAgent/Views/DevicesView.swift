@@ -16,6 +16,7 @@ public struct DevicesView: View {
     @State private var selectedDevice: AgentRecord? = nil
     @State private var statusBanner: String? = nil
     @State private var discoveredPeers: [DiscoveredPeer] = []
+    @State private var selectedDiscoveredPeer: DiscoveredPeer? = nil
     @State private var isScanning = false
 
     public init() {
@@ -49,12 +50,14 @@ public struct DevicesView: View {
             reload()
             startLanScan()
         }
-        .sheet(isPresented: $showAddSheet) {
+        .sheet(isPresented: $showAddSheet, onDismiss: { selectedDiscoveredPeer = nil }) {
             AddDeviceSheet(
                 discoveredPeers: discoveredPeers,
+                initialPeer: selectedDiscoveredPeer,
                 onShowInstallGuide: { showInstallSheet = true },
                 onSaved: { added in
                     reload()
+                    startLanScan()
                     statusBanner = "已成功添加并配对设备「\(added.displayName)」，可在对话来源中选用。"
                 }
             )
@@ -65,7 +68,10 @@ public struct DevicesView: View {
         .sheet(item: $selectedDevice) { dev in
             DeviceDetailSheet(
                 device: dev,
-                onUpdated: { reload() },
+                onUpdated: {
+                    reload()
+                    startLanScan()
+                },
                 onNavigateRoute: { r in
                     selectedDevice = nil
                     onNavigateRoute(r)
@@ -80,6 +86,7 @@ public struct DevicesView: View {
     private var discoveryAndInstallSection: some View {
         Section {
             Button {
+                selectedDiscoveredPeer = nil
                 showAddSheet = true
             } label: {
                 HStack {
@@ -110,11 +117,12 @@ public struct DevicesView: View {
 
             if !discoveredPeers.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("局域网发现设备（点击立即配对）：")
+                    Text("局域网发现新设备（点击立即接入）：")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     ForEach(discoveredPeers) { peer in
                         Button {
+                            selectedDiscoveredPeer = peer
                             showAddSheet = true
                         } label: {
                             HStack {
@@ -129,7 +137,7 @@ public struct DevicesView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Text("配对")
+                                Text(peer.clientStatus == "APPROVED" ? "接入" : "配对")
                                     .font(.caption.weight(.medium))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 3)
@@ -143,7 +151,7 @@ public struct DevicesView: View {
         } header: {
             Text("添加与配对")
         } footer: {
-            Text("同一 Wi-Fi 下已运行 Hand 的电脑会自动出现在上方；未安装请点击一键安装引导。")
+            Text("同一 Wi-Fi 下已运行 Hand 的未登记设备会自动出现在上方；已登记设备会自动同步地址与在线状态。")
         }
     }
 
@@ -196,20 +204,21 @@ public struct DevicesView: View {
             .onDelete { offsets in
                 for idx in offsets {
                     let d = devices[idx]
-                    deleteDeviceCascade(deviceId: d.agentId)
+                    deleteDeviceCascade(deviceId: d.deviceId ?? d.agentId, baseUrl: d.baseUrl)
                 }
             }
         }
     }
 
-    private func deleteDeviceCascade(deviceId: String) {
-        HandIdentityManager.deleteDeviceCredentials(deviceId: deviceId)
-        if let all = try? LocalData.shared.agents.listAgents() {
-            for a in all where a.deviceId == deviceId {
-                try? LocalData.shared.agents.deleteAgent(agentId: a.agentId)
+    private func deleteDeviceCascade(deviceId: String, baseUrl: String? = nil) {
+        if let raw = baseUrl, !raw.isEmpty {
+            let (host, port) = parseHostAndPort(raw)
+            Task {
+                _ = try? await HandClient.shared.unpairDevice(host: host, port: port, targetDeviceId: deviceId)
             }
         }
-        try? LocalData.shared.agents.deleteAgent(agentId: deviceId)
+        HandIdentityManager.deleteDeviceCredentials(deviceId: deviceId)
+        try? LocalData.shared.agents.deleteDeviceCascade(deviceId: deviceId)
         reload()
     }
 
@@ -232,6 +241,7 @@ public struct DevicesView: View {
 
     private func reload() {
         do {
+            try? LocalData.shared.agents.migrateLegacyDeviceRecords()
             devices = try LocalData.shared.agents.listAgents().filter { $0.kind == .device }
             loadError = nil
         } catch {
@@ -242,12 +252,78 @@ public struct DevicesView: View {
     private func startLanScan() {
         isScanning = true
         Task {
-            let peers = await HandClient.shared.discoverLanDevices()
+            let registeredHosts = devices.compactMap { $0.baseUrl }.map { raw -> String in
+                let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+                return String(clean.split(separator: ":").first ?? "")
+            }.filter { !$0.isEmpty }
+
+            var probeHosts = ["192.168.1.4", "100.75.41.0", "127.0.0.1"]
+            for h in registeredHosts {
+                if !probeHosts.contains(h) { probeHosts.append(h) }
+            }
+
+            let peers = await HandClient.shared.discoverLanDevices(knownHosts: probeHosts)
             await MainActor.run {
-                self.discoveredPeers = peers
+                self.syncDiscoveredPeersWithRegisteredDevices(peers)
                 self.isScanning = false
             }
         }
+    }
+
+    private func syncDiscoveredPeersWithRegisteredDevices(_ peers: [DiscoveredPeer]) {
+        var unlinkedPeers: [DiscoveredPeer] = []
+        var didUpdateRegistered = false
+
+        for peer in peers {
+            if let idx = devices.firstIndex(where: { HandClient.isSameDevice(record: $0, peer: peer) }) {
+                // 已登记设备：精确同步最新 IP 地址与在线配对状态
+                var dev = devices[idx]
+                let targetBaseUrl = "\(peer.host):\(peer.port)"
+                let ipChanged = dev.baseUrl != targetBaseUrl
+                dev.baseUrl = targetBaseUrl
+                dev.deviceId = peer.deviceId
+
+                if peer.clientStatus == "APPROVED" {
+                    dev.memberConnectionState = "CONNECTED"
+                    dev.lastTestSummary = "已连接（局域网在线 · \(peer.agents.count) 个 Agent）"
+                } else if peer.clientStatus == "PENDING" {
+                    dev.memberConnectionState = "PENDING"
+                    dev.lastTestSummary = "待配对（已发现 · 未完成配对）"
+                } else if peer.clientStatus == "REVOKED" || peer.clientStatus == "DENIED" {
+                    dev.memberConnectionState = "DENIED"
+                    dev.lastTestSummary = "权限已撤销"
+                }
+
+                try? LocalData.shared.agents.saveAgent(dev)
+                didUpdateRegistered = true
+
+                // IP 发生变化时，级联同步所属子 Agent 的 baseUrl 与连接状态
+                if ipChanged, let all = try? LocalData.shared.agents.listAgents() {
+                    for var child in all where child.kind == .device && child.deviceId == dev.deviceId && child.agentId != dev.agentId {
+                        child.baseUrl = targetBaseUrl
+                        child.memberConnectionState = dev.memberConnectionState
+                        try? LocalData.shared.agents.saveAgent(child)
+                    }
+                }
+            } else {
+                // 仅未在已登记列表中出现的设备才作为新发现展示，彻底杜绝已连接设备重复出现在发现配对区
+                unlinkedPeers.append(peer)
+            }
+        }
+
+        self.discoveredPeers = unlinkedPeers
+        if didUpdateRegistered {
+            reload()
+        }
+    }
+
+    private func parseHostAndPort(_ raw: String) -> (String, Int) {
+        let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+        let parts = clean.split(separator: ":")
+        if parts.count >= 2, let p = Int(parts[1]) {
+            return (String(parts[0]), p)
+        }
+        return (clean, 18743)
     }
 
     private func deviceIcon(for device: AgentRecord) -> String {
@@ -291,6 +367,7 @@ public struct DevicesView: View {
 
 private struct AddDeviceSheet: View {
     var discoveredPeers: [DiscoveredPeer]
+    var initialPeer: DiscoveredPeer? = nil
     var onShowInstallGuide: () -> Void
     var onSaved: (AgentRecord) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -332,6 +409,14 @@ private struct AddDeviceSheet: View {
                         }
                         .disabled(isPairing || (hello.clientStatus != "APPROVED" && pairCode.trimmingCharacters(in: .whitespacesAndNewlines).count != 6))
                     }
+                }
+            }
+            .onAppear {
+                if let peer = initialPeer {
+                    self.name = peer.displayName
+                    self.host = peer.host
+                    self.portStr = String(peer.port)
+                    startProbe()
                 }
             }
         }
@@ -779,7 +864,6 @@ private struct DeviceDetailSheet: View {
             Form {
                 Section("设备状态") {
                     LabeledContent("设备名称", value: device.displayName)
-                    LabeledContent("连接地址", value: device.baseUrl ?? "未填")
                     LabeledContent("连接状态") {
                         HStack(spacing: 6) {
                             Circle()
@@ -792,16 +876,34 @@ private struct DeviceDetailSheet: View {
                     LabeledContent("授权工作目录", value: device.deviceFolder ?? "/")
                 }
 
-                Section("连接与在线检测") {
-                    Button(isProbing ? "正在连接探测…" : "立即测试设备连接") {
+                Section("连接地址与配置") {
+                    HStack {
+                        Text("地址")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, alignment: .leading)
+                        TextField("如 192.168.1.4:18743", text: Binding(
+                            get: { device.baseUrl ?? "" },
+                            set: { val in
+                                device.baseUrl = val.trimmingCharacters(in: .whitespacesAndNewlines)
+                                try? LocalData.shared.agents.saveAgent(device)
+                                onUpdated()
+                            }
+                        ))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                    }
+
+                    Button(isProbing ? "正在连接探测…" : "测试连接并更新状态") {
                         probeRealConnection()
                     }
-                    .disabled(isProbing)
+                    .disabled(isProbing || (device.baseUrl?.isEmpty ?? true))
 
                     if let probeResult {
                         Text(probeResult)
                             .font(.caption)
-                            .foregroundStyle(probeResult.contains("成功") ? .green : .secondary)
+                            .foregroundStyle(probeResult.contains("成功") ? .green : .red)
                     }
                 }
 
@@ -886,15 +988,13 @@ private struct DeviceDetailSheet: View {
 
                 Section("管理操作") {
                     Button("查看关联任务") { onNavigateRoute("tasks") }
-                    Button("断开并删除设备", role: .destructive) {
-                        HandIdentityManager.deleteDeviceCredentials(deviceId: device.agentId)
-                        if let all = try? LocalData.shared.agents.listAgents() {
-                            for a in all where a.deviceId == device.agentId {
-                                try? LocalData.shared.agents.deleteAgent(agentId: a.agentId)
-                            }
+                    if isLocallyAuthorized {
+                        Button("取消配对并撤销凭据", role: .destructive) {
+                            unpairAndRevokeDevice()
                         }
-                        try? LocalData.shared.agents.deleteAgent(agentId: device.agentId)
-                        onUpdated()
+                    }
+                    Button("断开并删除设备", role: .destructive) {
+                        deleteDeviceCascade(device: device)
                         dismiss()
                     }
                 }
@@ -912,6 +1012,53 @@ private struct DeviceDetailSheet: View {
         }
     }
 
+    private var isLocallyAuthorized: Bool {
+        let devId = device.deviceId ?? device.agentId
+        return HandIdentityManager.getPeerPublicKey(deviceId: devId) != nil || device.authRef != nil
+    }
+
+    private func unpairAndRevokeDevice() {
+        let devId = device.deviceId ?? device.agentId
+        if let raw = device.baseUrl, !raw.isEmpty {
+            let (host, port) = parseHostAndPort(raw)
+            Task {
+                _ = try? await HandClient.shared.unpairDevice(host: host, port: port, targetDeviceId: devId)
+            }
+        }
+        HandIdentityManager.deleteDeviceCredentials(deviceId: devId)
+        device.memberConnectionState = "NOT_CONNECTED"
+        device.authRef = nil
+        device.lastTestSummary = "已取消配对，本地与远端凭据均已安全撤销"
+        try? LocalData.shared.agents.saveAgent(device)
+        if let all = try? LocalData.shared.agents.listAgents() {
+            for var child in all where child.kind == .device && child.deviceId == devId && child.agentId != devId {
+                child.memberConnectionState = "NOT_CONNECTED"
+                try? LocalData.shared.agents.saveAgent(child)
+            }
+        }
+        onUpdated()
+        probeResult = "已成功取消配对，Keychain 凭据已安全撤销。"
+    }
+
+    private func deleteDeviceCascade(device: AgentRecord) {
+        let devId = device.deviceId ?? device.agentId
+        if let raw = device.baseUrl, !raw.isEmpty {
+            let (host, port) = parseHostAndPort(raw)
+            Task {
+                _ = try? await HandClient.shared.unpairDevice(host: host, port: port, targetDeviceId: devId)
+            }
+        }
+        HandIdentityManager.deleteDeviceCredentials(deviceId: devId)
+        if device.agentId != devId {
+            HandIdentityManager.deleteDeviceCredentials(deviceId: device.agentId)
+        }
+        try? LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
+        if device.agentId != devId {
+            try? LocalData.shared.agents.deleteAgent(agentId: device.agentId)
+        }
+        onUpdated()
+    }
+
     private func probeRealConnection() {
         guard let raw = device.baseUrl, !raw.isEmpty else {
             probeResult = "请先配置设备地址。"
@@ -927,20 +1074,37 @@ private struct DeviceDetailSheet: View {
                 await MainActor.run {
                     self.isProbing = false
                     self.remoteHello = hello
+                    self.device.deviceId = hello.deviceId
                     self.device.memberConnectionState = hello.clientStatus == "APPROVED" ? "CONNECTED" : "PENDING"
                     self.device.lastTestSummary = "探测成功（\(hello.displayName) · 在线 · \(hello.agents.count) 个 Agent）"
                     try? LocalData.shared.agents.saveAgent(self.device)
+                    // 同步属于该设备的所有子 Agent 地址与连接状态
+                    if let all = try? LocalData.shared.agents.listAgents() {
+                        for var child in all where child.kind == .device && child.deviceId == hello.deviceId && child.agentId != self.device.agentId {
+                            child.baseUrl = "\(host):\(port)"
+                            child.memberConnectionState = self.device.memberConnectionState
+                            try? LocalData.shared.agents.saveAgent(child)
+                        }
+                    }
                     self.onUpdated()
-                    self.probeResult = "连接成功！设备已认证，发现 \(hello.agents.count) 个 Agent。"
+                    self.probeResult = "连接成功！\(hello.displayName) 在线，发现 \(hello.agents.count) 个 Agent。"
                 }
             } catch {
                 await MainActor.run {
                     self.isProbing = false
                     self.device.memberConnectionState = "NOT_CONNECTED"
-                    self.device.lastTestSummary = "连接失败（\(error.localizedDescription)）"
+                    let errStr: String
+                    if host.hasSuffix(".local") {
+                        errStr = "DNS 解析失败：mDNS 主机名「\(host)」无法解析，建议在上方改用局域网 IP 直连（如 192.168.1.4:18743）"
+                    } else if error.localizedDescription.contains("timed out") || error.localizedDescription.contains("超时") {
+                        errStr = "连接超时：目标机（\(host):\(port)）未响应，请确认 Hand 服务已启动"
+                    } else {
+                        errStr = "连接失败（\(error.localizedDescription)）"
+                    }
+                    self.device.lastTestSummary = errStr
                     try? LocalData.shared.agents.saveAgent(self.device)
                     self.onUpdated()
-                    self.probeResult = "连接失败：\(error.localizedDescription)"
+                    self.probeResult = errStr
                 }
             }
         }

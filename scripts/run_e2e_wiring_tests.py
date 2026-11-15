@@ -218,5 +218,28 @@ sys.exit(0 if res.wasSuccessful() else 1)
             res = subprocess.run(["python3", "-c", runner_code], cwd=os.path.dirname(hand_test), env=env, capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, f"Hand server protocol test failed: {res.stderr}")
 
+    def test_09_device_management_deduplication_and_safe_migration(self):
+        """验证 9：设备管理发现去重、动态地址更新与历史记录安全迁移"""
+        # 1. 验证 DevicesView 包含发现去重与地址同步逻辑
+        with open(os.path.join(APP_DIR, "Views", "DevicesView.swift"), encoding="utf-8") as f:
+            devices_view = f.read()
+        self.assertIn("syncDiscoveredPeersWithRegisteredDevices", devices_view)
+        self.assertIn("isSameDevice", devices_view)
+        self.assertIn("unpairAndRevokeDevice", devices_view)
+        self.assertIn("deleteDeviceCascade", devices_view)
+        self.assertIn("migrateLegacyDeviceRecords", devices_view)
+
+        # 2. 验证 HandClient 包含 unpairDevice 与 isSameDevice
+        with open(os.path.join(APP_DIR, "Services", "HandClient.swift"), encoding="utf-8") as f:
+            hand_client = f.read()
+        self.assertIn("func unpairDevice(", hand_client)
+        self.assertIn("static func isSameDevice(", hand_client)
+
+        # 3. 验证 AgentRegistryStore 包含 deleteDeviceCascade 与 migrateLegacyDeviceRecords
+        with open(os.path.join(APP_DIR, "Data", "AgentRegistryStore.swift"), encoding="utf-8") as f:
+            store = f.read()
+        self.assertIn("func deleteDeviceCascade(deviceId: String)", store)
+        self.assertIn("func migrateLegacyDeviceRecords()", store)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

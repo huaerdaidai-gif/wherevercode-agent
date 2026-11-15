@@ -114,7 +114,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertTrue(uninstallCmd.contains("v5-uninstall-hand.sh"))
 
         // 校验内置哈希与实际发布包一致
-        XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "f5357dd8a6535afa59a9435f8a43dcb0ab4cfbd0d71b2113f4097b2ceebf7458")
+        XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "bfbb1953827dcd4c58c65b18a2ec017d11c2be3611254869f58b49bedbe9ff4b")
         XCTAssertEqual(DeviceInstallGuide.scriptSha256["v5-install-hand.sh"], "3072654f1c35094666a9fc7a3bd1a09f7a2cfaedbd08d94715abdd7d7dc15caa")
     }
 
@@ -221,14 +221,259 @@ final class HandClientTests: XCTestCase {
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex"))
 
-        // 模拟级联删除
-        let all = try LocalData.shared.agents.listAgents()
-        for a in all where a.deviceId == testDevId {
-            try LocalData.shared.agents.deleteAgent(agentId: a.agentId)
-        }
-        try LocalData.shared.agents.deleteAgent(agentId: testDevId)
+        // 使用 AgentRegistryStore.deleteDeviceCascade
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: testDevId)
 
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex"))
+    }
+
+    // 10. 回归测试 1：重复发现去重与配对状态同步
+    func testLanDiscoveryDeduplicationAndPairingSync() throws {
+        let deviceId = "test-macbook-air"
+        let registeredDev = AgentRecord(
+            agentId: deviceId,
+            displayName: "MacBook-Air",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.4:18743",
+            authRef: "device:\(deviceId):public_key",
+            lastTestSummary: "已连接",
+            memberConnectionState: "CONNECTED",
+            deviceId: deviceId
+        )
+        try LocalData.shared.agents.saveAgent(registeredDev)
+
+        // 构造发现的同一设备 Peer
+        let discoveredPeer = DiscoveredPeer(
+            deviceId: deviceId,
+            displayName: "MacBook-Air",
+            host: "192.168.1.4",
+            port: 18743,
+            fingerprintSha256: "abcdef1234567890",
+            agents: [],
+            clientStatus: "APPROVED"
+        )
+
+        // 验证身份精确匹配（不依赖 display name 猜测）
+        XCTAssertTrue(HandClient.isSameDevice(record: registeredDev, peer: discoveredPeer))
+
+        // 构造不同 deviceId 的设备，确保不误判
+        let otherPeer = DiscoveredPeer(
+            deviceId: "other-mac-device",
+            displayName: "MacBook-Air", // 同名但不同 deviceId
+            host: "192.168.1.99",
+            port: 18743,
+            fingerprintSha256: "9876543210fedcba",
+            agents: [],
+            clientStatus: "PENDING"
+        )
+        XCTAssertFalse(HandClient.isSameDevice(record: registeredDev, peer: otherPeer))
+
+        // 清理
+        try LocalData.shared.agents.deleteAgent(agentId: deviceId)
+    }
+
+    // 11. 回归测试 2：IP 变化动态更新与所属 Agent 同步
+    func testIpChangeUpdatesBaseUrlAndChildAgents() throws {
+        let deviceId = "dynamic-ip-mac"
+        let dev = AgentRecord(
+            agentId: deviceId,
+            displayName: "Dynamic Mac",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.4:18743",
+            deviceId: deviceId
+        )
+        let childAgent = AgentRecord(
+            agentId: "\(deviceId):codex",
+            displayName: "Codex",
+            kind: .device,
+            access: .cli,
+            baseUrl: "192.168.1.4:18743",
+            deviceId: deviceId
+        )
+        try LocalData.shared.agents.saveAgent(dev)
+        try LocalData.shared.agents.saveAgent(childAgent)
+
+        // 模拟 DHCP IP 发生变化，发现位于 192.168.1.108
+        let newPeer = DiscoveredPeer(
+            deviceId: deviceId,
+            displayName: "Dynamic Mac",
+            host: "192.168.1.108",
+            port: 18743,
+            fingerprintSha256: "fingerprint-123",
+            agents: [],
+            clientStatus: "APPROVED"
+        )
+
+        var updatedDev = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: deviceId))
+        let newBaseUrl = "\(newPeer.host):\(newPeer.port)"
+        updatedDev.baseUrl = newBaseUrl
+        updatedDev.memberConnectionState = "CONNECTED"
+        try LocalData.shared.agents.saveAgent(updatedDev)
+
+        // 级联同步子 Agent
+        let all = try LocalData.shared.agents.listAgents()
+        for var child in all where child.kind == .device && child.deviceId == deviceId && child.agentId != deviceId {
+            child.baseUrl = newBaseUrl
+            child.memberConnectionState = updatedDev.memberConnectionState
+            try LocalData.shared.agents.saveAgent(child)
+        }
+
+        let refetchedDev = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: deviceId))
+        let refetchedChild = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "\(deviceId):codex"))
+        XCTAssertEqual(refetchedDev.baseUrl, "192.168.1.108:18743")
+        XCTAssertEqual(refetchedChild.baseUrl, "192.168.1.108:18743")
+        XCTAssertEqual(refetchedDev.memberConnectionState, "CONNECTED")
+        XCTAssertEqual(refetchedChild.memberConnectionState, "CONNECTED")
+
+        // 清理
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: deviceId)
+    }
+
+    // 12. 回归测试 3：设备删除级联、凭据撤销且绝不误删非设备实体
+    func testDeviceDeleteCascadeAndCredentialRevocation() throws {
+        let devId = "delete-test-mac"
+        let cloudAgentId = "cloud-claude-protected"
+
+        // 预设云端 Agent
+        let cloudAgent = AgentRecord(
+            agentId: cloudAgentId,
+            displayName: "Claude Sonnet",
+            kind: .cloud,
+            access: .api
+        )
+        try LocalData.shared.agents.saveAgent(cloudAgent)
+
+        // 预设待删设备及子 Agent
+        let dev = AgentRecord(agentId: devId, displayName: "Delete Mac", kind: .device, access: .app, deviceId: devId)
+        let childAgent = AgentRecord(agentId: "\(devId):codex", displayName: "Codex", kind: .device, access: .cli, deviceId: devId)
+        try LocalData.shared.agents.saveAgent(dev)
+        try LocalData.shared.agents.saveAgent(childAgent)
+
+        // 预设 Keychain 凭据
+        let dummyKey = Data(repeating: 0x99, count: 32)
+        try HandIdentityManager.savePeerPublicKey(deviceId: devId, publicKey: dummyKey)
+        XCTAssertNotNil(HandIdentityManager.getPeerPublicKey(deviceId: devId))
+
+        // 执行安全级联删除
+        HandIdentityManager.deleteDeviceCredentials(deviceId: devId)
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
+
+        // 验证设备与子 Agent 已被清除
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: "\(devId):codex"))
+        XCTAssertNil(HandIdentityManager.getPeerPublicKey(deviceId: devId))
+
+        // 验证云端 Agent 毫发无损
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: cloudAgentId))
+
+        // 清理云端 Agent
+        try LocalData.shared.agents.deleteAgent(agentId: cloudAgentId)
+    }
+
+    // 13. 回归测试 4：取消配对后重新配对闭环
+    func testDeviceUnpairAndRePairing() throws {
+        let devId = "repair-test-mac"
+        var dev = AgentRecord(
+            agentId: devId,
+            displayName: "Re-Pair Mac",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.4:18743",
+            authRef: "device:\(devId):public_key",
+            memberConnectionState: "CONNECTED",
+            deviceId: devId
+        )
+        try LocalData.shared.agents.saveAgent(dev)
+        let key1 = Data(repeating: 0x11, count: 32)
+        try HandIdentityManager.savePeerPublicKey(deviceId: devId, publicKey: key1)
+
+        // 1. 取消配对：清空 Keychain 凭据并重置连接态
+        HandIdentityManager.deleteDeviceCredentials(deviceId: devId)
+        dev.memberConnectionState = "NOT_CONNECTED"
+        dev.authRef = nil
+        try LocalData.shared.agents.saveAgent(dev)
+
+        XCTAssertNil(HandIdentityManager.getPeerPublicKey(deviceId: devId))
+        var fetched = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: devId))
+        XCTAssertEqual(fetched.memberConnectionState, "NOT_CONNECTED")
+        XCTAssertNil(fetched.authRef)
+
+        // 2. 重新配对：存入新凭据并更新为 CONNECTED
+        let key2 = Data(repeating: 0x22, count: 32)
+        try HandIdentityManager.savePeerPublicKey(deviceId: devId, publicKey: key2)
+        fetched.authRef = "device:\(devId):public_key"
+        fetched.memberConnectionState = "CONNECTED"
+        try LocalData.shared.agents.saveAgent(fetched)
+
+        let rePaired = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: devId))
+        XCTAssertEqual(rePaired.memberConnectionState, "CONNECTED")
+        XCTAssertEqual(HandIdentityManager.getPeerPublicKey(deviceId: devId), key2)
+
+        // 清理
+        HandIdentityManager.deleteDeviceCredentials(deviceId: devId)
+        try LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
+    }
+
+    // 14. 回归测试 5：旧记录安全迁移不按名称猜测合并且不误删其他实体
+    func testSafeLegacyMigrationDoesNotMergeByNameOrDeleteAgents() throws {
+        // 构造历史演示模板设备记录
+        let legacyMac = AgentRecord(
+            agentId: "device-mac-workstation",
+            displayName: "Mac · 开发工作站",
+            kind: .device,
+            access: .app,
+            baseUrl: "mac-workstation.local:8765",
+            lastTestSummary: "本地登记 · 未验证在线",
+            memberConnectionState: "NOT_CONNECTED",
+            deviceId: nil // 历史缺失 deviceId
+        )
+        // 构造用户真实连接的 MacBook-Air
+        let realMac = AgentRecord(
+            agentId: "MacBook-Air",
+            displayName: "MacBook-Air",
+            kind: .device,
+            access: .app,
+            baseUrl: "192.168.1.4:18743",
+            lastTestSummary: "已连接",
+            memberConnectionState: "CONNECTED",
+            deviceId: "MacBook-Air"
+        )
+        // 构造云端 Agent
+        let cloudAgent = AgentRecord(
+            agentId: "cloud-deepseek",
+            displayName: "DeepSeek R1",
+            kind: .cloud,
+            access: .api
+        )
+
+        try LocalData.shared.agents.saveAgent(legacyMac)
+        try LocalData.shared.agents.saveAgent(realMac)
+        try LocalData.shared.agents.saveAgent(cloudAgent)
+
+        // 执行迁移
+        try LocalData.shared.agents.migrateLegacyDeviceRecords()
+
+        let afterLegacy = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "device-mac-workstation"))
+        let afterReal = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "MacBook-Air"))
+        let afterCloud = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "cloud-deepseek"))
+
+        // 验证 deviceId 规范化
+        XCTAssertEqual(afterLegacy.deviceId, "device-mac-workstation")
+        // 验证状态诚实标注
+        XCTAssertTrue(afterLegacy.lastTestSummary?.contains("演示模板设备") == true)
+        // 验证两台 Mac 独立共存，绝不根据包含 "Mac" 按名字猜测合并
+        XCTAssertNotEqual(afterLegacy.agentId, afterReal.agentId)
+        XCTAssertEqual(afterReal.memberConnectionState, "CONNECTED")
+        XCTAssertEqual(afterReal.baseUrl, "192.168.1.4:18743")
+        // 验证云端 Agent 完好无损
+        XCTAssertEqual(afterCloud.kind, .cloud)
+
+        // 清理
+        try LocalData.shared.agents.deleteAgent(agentId: "device-mac-workstation")
+        try LocalData.shared.agents.deleteAgent(agentId: "MacBook-Air")
+        try LocalData.shared.agents.deleteAgent(agentId: "cloud-deepseek")
     }
 }

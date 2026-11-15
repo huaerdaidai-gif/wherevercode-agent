@@ -1010,13 +1010,99 @@ public actor HandClient {
         return args?["output"] as? String ?? "执行完成"
     }
 
-    /// 局域网快速发现（并发探测常见网段与 mDNS 辅助）
+    /// 判断已登记设备记录与发现的对端是否为同一物理设备（基于稳定 deviceId、公钥引用或地址精确匹配，严禁按设备名称猜测合并）
+    public static func isSameDevice(record: AgentRecord, peer: DiscoveredPeer) -> Bool {
+        if let dId = record.deviceId, !dId.isEmpty, dId == peer.deviceId {
+            return true
+        }
+        if record.agentId == peer.deviceId {
+            return true
+        }
+        if let authRef = record.authRef, authRef == "device:\(peer.deviceId):public_key" {
+            return true
+        }
+        if let raw = record.baseUrl {
+            let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+            let host = String(clean.split(separator: ":").first ?? "")
+            if !host.isEmpty && (host == peer.host || (host == "localhost" && peer.host == "127.0.0.1")) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// 向远端 Hand 请求取消本设备的配对授权并使凭据失效
+    public func unpairDevice(
+        host: String,
+        port: Int = 18743,
+        targetDeviceId: String
+    ) async throws -> Bool {
+        return try await Task.detached {
+            let (ownId, ownPriv) = try HandIdentityManager.getOrCreateDeviceIdentity()
+            guard let peerPubData = HandIdentityManager.getPeerPublicKey(deviceId: targetDeviceId) else {
+                return true // 本地未存对端公钥，直接返回成功
+            }
+            let peerCurvePub = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerPubData)
+
+            let sock = PosixTcpSocket()
+            try sock.connect(host: host, port: port, timeoutSeconds: 3.0)
+            defer { sock.close() }
+
+            // 1. Hello
+            let helloObj: [String: Any] = [
+                "type": "wherevercode_hello",
+                "version": 1,
+                "device_id": ownId,
+                "public_key_b64": ownPriv.publicKey.rawRepresentation.base64EncodedString()
+            ]
+            try sock.writeFrame(try JSONSerialization.data(withJSONObject: helloObj))
+            let hData = try sock.readFrame()
+            guard let hJson = try? JSONSerialization.jsonObject(with: hData) as? [String: Any],
+                  let status = hJson["client_status"] as? String, status == "APPROVED" else {
+                return true
+            }
+
+            // 2. 派生会话密钥
+            let sessionKey = try HandCrypto.deriveSessionKey(ownPrivate: ownPriv, peerPublic: peerCurvePub)
+
+            // 3. 发送取消配对管理指令
+            let adminEnv: [String: Any] = [
+                "type": "wherevercode_device_admin",
+                "version": 1,
+                "seq": 1,
+                "action": "unpair",
+                "confirmed": true
+            ]
+            let sealed = try HandCrypto.seal(sessionKey: sessionKey, plaintext: try JSONSerialization.data(withJSONObject: adminEnv))
+            try sock.writeFrame(sealed)
+
+            let replySealed = try sock.readFrame()
+            let replyPlain = try HandCrypto.open(sessionKey: sessionKey, sealedData: replySealed)
+            guard let replyJson = try? JSONSerialization.jsonObject(with: replyPlain) as? [String: Any],
+                  let type = replyJson["type"] as? String, type == "wherevercode_device_admin_reply",
+                  let args = replyJson["args"] as? [String: Any],
+                  args["unpaired"] as? Bool == true else {
+                return false
+            }
+            return true
+        }.value
+    }
+
+    /// 局域网快速发现（并发探测常见网段与已登记设备地址，严格去重与地址更新）
     public func discoverLanDevices(knownHosts: [String] = ["192.168.1.4", "100.75.41.0", "127.0.0.1"]) async -> [DiscoveredPeer] {
+        var uniqueHosts: [String] = []
+        for h in knownHosts {
+            let clean = h.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty && !uniqueHosts.contains(clean) {
+                uniqueHosts.append(clean)
+            }
+        }
+
         var results: [DiscoveredPeer] = []
         await withTaskGroup(of: DiscoveredPeer?.self) { group in
-            for host in knownHosts {
+            for host in uniqueHosts {
                 group.addTask {
-                    guard let hello = try? await self.probeHello(host: host, port: 18743, timeoutSeconds: 1.5) else {
+                    guard let hello = try? await self.probeHello(host: host, port: 18743, timeoutSeconds: 2.0) else {
                         return nil
                     }
                     return DiscoveredPeer(
@@ -1031,8 +1117,17 @@ public actor HandClient {
                 }
             }
             for await item in group {
-                if let peer = item, !results.contains(where: { $0.deviceId == peer.deviceId }) {
-                    results.append(peer)
+                if let peer = item {
+                    if let existingIdx = results.firstIndex(where: { $0.deviceId == peer.deviceId }) {
+                        // 同一设备多个 IP 响应时，优先保留 APPROVED 或非 loopback 地址
+                        if results[existingIdx].clientStatus != "APPROVED" && peer.clientStatus == "APPROVED" {
+                            results[existingIdx] = peer
+                        } else if results[existingIdx].host == "127.0.0.1" && peer.host != "127.0.0.1" {
+                            results[existingIdx] = peer
+                        }
+                    } else {
+                        results.append(peer)
+                    }
                 }
             }
         }

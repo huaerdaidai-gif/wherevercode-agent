@@ -162,6 +162,46 @@ public final class AgentRegistryStore {
         try kv.setJSON(storageKey, agents)
     }
 
+    /// 级联删除指定设备及其所属子 Agent：
+    /// 严格只清理 kind == .device 且与该设备绑定的记录，绝不触碰云端 Agent (kind == .cloud)、本地模型 (kind == .localModel)、项目与模型配置。
+    public func deleteDeviceCascade(deviceId: String) throws {
+        var agents = try listAgents()
+        agents.removeAll { ag in
+            guard ag.kind == .device else { return false }
+            return ag.agentId == deviceId || ag.deviceId == deviceId || ag.agentId.hasPrefix("\(deviceId):")
+        }
+        try kv.setJSON(storageKey, agents)
+    }
+
+    /// 安全迁移历史设备记录：
+    /// 1. 稳定身份规范化：补全缺失的 deviceId 字段；
+    /// 2. 识别历史演示模板设备并清晰标注，绝不盲目按设备名称猜测合并；
+    /// 3. 严格保护云端 Agent、本地模型不受任何影响。
+    public func migrateLegacyDeviceRecords() throws {
+        var agents = try listAgents()
+        var modified = false
+        for i in 0..<agents.count {
+            guard agents[i].kind == .device else { continue }
+            // 稳定身份回填
+            if agents[i].deviceId == nil || agents[i].deviceId?.isEmpty == true {
+                agents[i].deviceId = agents[i].agentId
+                modified = true
+            }
+            // 历史模板设备诚实状态标注
+            let aid = agents[i].agentId
+            let isPrototype = aid == "device-mac-workstation" || aid == "device-redmi-k70" || aid == "device-xiaomi-12" || aid == "device-iphone-local"
+            if isPrototype && agents[i].authRef == nil && agents[i].memberConnectionState == "NOT_CONNECTED" {
+                if agents[i].lastTestSummary == nil || agents[i].lastTestSummary == "本地登记 · 未验证在线" {
+                    agents[i].lastTestSummary = "演示模板设备 · 点击可配置真实地址或删除"
+                    modified = true
+                }
+            }
+        }
+        if modified {
+            try kv.setJSON(storageKey, agents)
+        }
+    }
+
     /// The Agent switch (Android AgentToggle): takes effect
     /// immediately, no restart.
     public func setEnabled(agentId: String, enabled: Bool) throws {
