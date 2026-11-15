@@ -477,6 +477,34 @@ class ProjectScreenControllerTest {
         assertTrue(h.deleted.isEmpty())
         assertTrue(h.store.listProjects().any { it.projectId == "wherevercode-agent" })
     }
+
+    @Test
+    fun `list filter matches by home kind`() {
+        // 2026-11-16（照 iOS 项目页四档筛选）：纯判定，不靠名字编造。
+        val local = ProjectLocation.createLocal("p1", "my-project")
+        val github = ProjectLocation.createGithub("p2", "o", "r")
+        val f = ProjectScreenController.ProjectFilter::class.java
+        assertEquals(4, f.enumConstants.size)
+        assertTrue(ProjectScreenController.matchesFilter(null, ProjectScreenController.ProjectFilter.ALL))
+        assertFalse(ProjectScreenController.matchesFilter(null, ProjectScreenController.ProjectFilter.ACTIVE))
+        assertFalse(ProjectScreenController.matchesFilter(null, ProjectScreenController.ProjectFilter.SANDBOX))
+        assertFalse(ProjectScreenController.matchesFilter(null, ProjectScreenController.ProjectFilter.REMOTE))
+        assertTrue(ProjectScreenController.matchesFilter(local, ProjectScreenController.ProjectFilter.ACTIVE))
+        assertTrue(ProjectScreenController.matchesFilter(local, ProjectScreenController.ProjectFilter.SANDBOX))
+        assertFalse(ProjectScreenController.matchesFilter(local, ProjectScreenController.ProjectFilter.REMOTE))
+        assertTrue(ProjectScreenController.matchesFilter(github, ProjectScreenController.ProjectFilter.ACTIVE))
+        assertFalse(ProjectScreenController.matchesFilter(github, ProjectScreenController.ProjectFilter.SANDBOX))
+        assertTrue(ProjectScreenController.matchesFilter(github, ProjectScreenController.ProjectFilter.REMOTE))
+    }
+
+    @Test
+    fun `list query matches name or repo url case insensitively`() {
+        val p = project("p1", "WhereverCode Agent", repoUrl = "https://github.com/o/r")
+        assertTrue(ProjectScreenController.matchesQuery(p, ""))
+        assertTrue(ProjectScreenController.matchesQuery(p, "wherevercode"))
+        assertTrue(ProjectScreenController.matchesQuery(p, "GITHUB.COM"))
+        assertFalse(ProjectScreenController.matchesQuery(p, "不存在的词"))
+    }
 }
 
 /** 递归收一个 View 下全部 TextView 的文字（Harness 与用例共用，故放文件级）。 */

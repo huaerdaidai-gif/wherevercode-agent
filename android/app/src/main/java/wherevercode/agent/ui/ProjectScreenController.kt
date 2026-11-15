@@ -88,6 +88,10 @@ class ProjectScreenController(
      * 删的是当前选中项目时，选中态与聊天绑定一起清，不留野绑定。
      */
     private val onDeleteProject: (Project) -> Unit = {},
+    /** 列表搜索框（2026-11-16 照 iOS 项目页）：只过滤项目列表，与文件树搜索分开。 */
+    private val listSearchInput: EditText? = null,
+    /** 列表筛选 chip 容器（全部/活跃/本地沙盒/远端设备）；chip 由本类构建渲染。 */
+    private val filterChips: LinearLayout? = null,
 ) {
     companion object {
         /** 大文件首档：只读前 512 KB；点“加载更多”后读前 2 MB。 */
@@ -109,6 +113,34 @@ class ProjectScreenController(
             actions += "删除项目"
             return actions
         }
+
+        /** 项目列表筛选四档（2026-11-16 照 iOS 项目页），按项目当前家的位置种类判定。 */
+        enum class ProjectFilter(val label: String) {
+            ALL("全部"),
+            ACTIVE("活跃"),
+            SANDBOX("本地沙盒"),
+            REMOTE("远端设备"),
+        }
+
+        /**
+         * 纯判定（单测覆盖）：未指定家只进「全部」；「活跃」= 已指定家
+         * （有真实可达位置）；「本地沙盒」= 本机家；「远端设备」= 非本机家
+         * （设备上的文件夹与 git 仓库家）。不按名字或时间编造“活跃”。
+         */
+        fun matchesFilter(home: ProjectLocation?, filter: ProjectFilter): Boolean = when (filter) {
+            ProjectFilter.ALL -> true
+            ProjectFilter.ACTIVE -> home != null
+            ProjectFilter.SANDBOX -> home?.homeKind == ProjectHomeKind.LOCAL
+            ProjectFilter.REMOTE -> home != null && home.homeKind != ProjectHomeKind.LOCAL
+        }
+
+        /** 纯判定（单测覆盖）：列表搜索按项目名或仓库地址包含匹配（忽略大小写）。 */
+        fun matchesQuery(project: Project, query: String): Boolean {
+            val q = query.trim()
+            if (q.isEmpty()) return true
+            return project.name.contains(q, ignoreCase = true) ||
+                (project.repoUrl?.contains(q, ignoreCase = true) == true)
+        }
     }
 
     private val browser = WorkspaceBrowser(
@@ -125,6 +157,11 @@ class ProjectScreenController(
     private var readLimit: Int = READ_TIER_SMALL
     private var treeLimit: Int = TREE_PAGE_SIZE
     private var searchQuery: String = ""
+    /** 项目列表搜索词（只作用于列表；与文件树 searchQuery 分开）。 */
+    private var listQuery: String = ""
+    /** 项目列表当前筛选档（默认全部，列表行为与从前一致）。 */
+    private var listFilter: ProjectFilter = ProjectFilter.ALL
+    private val chipViews = mutableListOf<Pair<ProjectFilter, TextView>>()
     private var editing: Boolean = false
     /** 代码查看器是否从项目列表打开（任务详情链接）：是则返回时回列表，否则回文件树。 */
     private var codeOpenedFromList: Boolean = false
@@ -144,6 +181,18 @@ class ProjectScreenController(
             treeLimit += TREE_PAGE_SIZE
             render()
         }
+        // 列表搜索 + 筛选 chip（2026-11-16）：只在列表态生效；树态下
+        // 这两个控件随列表面板一起隐藏，监听里再按面板可见性兜底，
+        // 绝不把用户从文件树里拽回列表。
+        listSearchInput?.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                listQuery = s?.toString().orEmpty()
+                if (projectListPane.visibility == View.VISIBLE) showProjectList()
+            }
+        })
+        buildFilterChips()
         buttonCodeEdit.setOnClickListener { startEdit() }
         buttonCodeSave.setOnClickListener { saveEdit() }
         buttonCodeUndo.setOnClickListener { undoEdit() }
@@ -191,16 +240,67 @@ class ProjectScreenController(
         }
         rootLabel.text = if (projects.isEmpty()) "还没有项目" else "${projects.size} 个项目"
         projectList.removeAllViews()
-        projectListEmpty.visibility = if (projects.isEmpty()) View.VISIBLE else View.GONE
+        // 列表搜索 + 筛选（2026-11-16）：默认（空词 + 全部档）与从前
+        // 行为完全一致；过滤后为空时如实给“没有匹配”，不冒充无项目。
+        val visibleProjects = projects.filter { project ->
+            matchesQuery(project, listQuery) && matchesFilter(homeOf(project), listFilter)
+        }
+        projectListEmpty.visibility = if (visibleProjects.isEmpty()) View.VISIBLE else View.GONE
         if (projects.isEmpty()) {
             projectListEmpty.text =
                 "还没有项目。\n打开一个文件夹就能加项目：本机工作区里的文件夹，或已配对设备上的文件夹；也可以粘一个 GitHub / GitLab / Gitee 仓库地址登记位置，经 API 读。\n局域网 NAS 与网盘同步文件夹不用单独选：NAS 挂在设备上就是远程设备文件夹，同步下来的就是本机文件夹。"
+        } else if (visibleProjects.isEmpty()) {
+            projectListEmpty.text = "没有匹配的项目。换个关键词或筛选试试。"
         }
-        projects.forEach { project ->
+        visibleProjects.forEach { project ->
             projectList.addView(projectRow(project))
         }
         buttonAddProject.setOnClickListener { onOpenFolder() }
     }
+
+    /** 筛选 chip 行（照 iOS 项目页四档）：选中白底描边、未选透明灰字。 */
+    private fun buildFilterChips() {
+        val container = filterChips ?: return
+        container.removeAllViews()
+        chipViews.clear()
+        ProjectFilter.values().forEach { filter ->
+            val chip = UiKit.text(context, filter.label, 13f, R.color.text_secondary).apply {
+                tag = "project_filter_${filter.name.lowercase()}"
+                gravity = Gravity.CENTER
+                setPadding(UiKit.dp(context, 12), UiKit.dp(context, 6), UiKit.dp(context, 12), UiKit.dp(context, 6))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = UiKit.dp(context, 8) }
+                setOnClickListener {
+                    listFilter = filter
+                    refreshFilterChips()
+                    if (projectListPane.visibility == View.VISIBLE) showProjectList()
+                }
+            }
+            chipViews += filter to chip
+            container.addView(chip)
+        }
+        refreshFilterChips()
+    }
+
+    private fun refreshFilterChips() {
+        chipViews.forEach { (filter, chip) ->
+            val selected = filter == listFilter
+            if (selected) {
+                chip.background = UiKit.rounded(context, R.color.bg, 999, R.color.divider, 1)
+                chip.setTextColor(UiKit.color(context, R.color.text_primary))
+                chip.paint.isFakeBoldText = true
+            } else {
+                chip.background = null
+                chip.setTextColor(UiKit.color(context, R.color.text_secondary))
+                chip.paint.isFakeBoldText = false
+            }
+        }
+    }
+
+    /** 当前列表筛选档（测试口径）。 */
+    fun currentListFilter(): ProjectFilter = listFilter
 
     /** 本机工作区文件树（原来的项目页视图；从项目列表点“本机工作区”进来）。 */
     fun showWorkspace() {
@@ -278,10 +378,11 @@ class ProjectScreenController(
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-            // 选中态：对勾 + 高亮底；未选中时底清掉、不留残影。
+            ).apply { bottomMargin = UiKit.dp(context, 8) }
+            // 卡片形态（2026-11-16 照 iOS 项目页）：未选中是白卡片底，
+            // 选中态仍是对勾 + 高亮底（点选口径不变）。
             if (selected) setBackgroundResource(R.drawable.bg_nav_selected)
-            else setBackgroundResource(0)
+            else setBackgroundResource(R.drawable.bg_card)
             // 点行 = 选定/取消选定（直接在列表上做开关）；打开走“进入”。
             setOnClickListener { onToggleSelectProject(project) }
             setOnLongClickListener { showProjectManage(project); true }

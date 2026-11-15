@@ -40,6 +40,22 @@
                 android:textSize="10sp" />
         </LinearLayout>
 
+        <!-- 新建项目 pill（2026-11-16 照 iOS 项目页）：与底部「打开文件夹」
+             同一入口同一流程（来源收成一个的口径不变），只是把入口
+             提到标题行，看得见、点得到。 -->
+        <TextView
+            android:id="@+id/buttonNewProject"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="＋ 新建项目"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
+
         <ImageView
             android:id="@+id/buttonProjectRefresh"
             android:layout_width="40dp"
@@ -78,6 +94,36 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical">
+
+            <!-- 列表搜索 + 筛选 chip（2026-11-16 照 iOS 项目页）：只作用于
+                 项目列表，与上方文件树搜索（projectSearch）互不干扰；
+                 chip 由 ProjectScreenController 按项目家的位置种类过滤。 -->
+            <EditText
+                android:id="@+id/projectListSearch"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_input"
+                android:hint="搜索项目…"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_tertiary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:id="@+id/projectFilterChips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/projectListEmpty"

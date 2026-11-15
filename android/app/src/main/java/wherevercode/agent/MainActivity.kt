@@ -5194,9 +5194,16 @@ class MainActivity : AppCompatActivity() {
                     note("已删除当前选中项目“${project.name}”，聊天绑定已清除。")
                 }
             },
+            // 列表搜索 + 筛选 chip（2026-11-16 照 iOS 项目页）。
+            listSearchInput = screenProjects.findViewById(R.id.projectListSearch),
+            filterChips = screenProjects.findViewById(R.id.projectFilterChips),
         )
         screenProjects.findViewById<View>(R.id.buttonProjectRefresh).setOnClickListener {
             projectController.refresh()
+        }
+        // 标题行「＋ 新建项目」与底部「打开文件夹」同一入口同一流程。
+        screenProjects.findViewById<View>(R.id.buttonNewProject).setOnClickListener {
+            showOpenFolderEntry()
         }
         screenProjects.findViewById<View>(R.id.buttonCodeBack).setOnClickListener {
             projectController.closeCode()
