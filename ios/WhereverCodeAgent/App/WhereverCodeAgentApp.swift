@@ -107,7 +107,9 @@ public final class AppState: ObservableObject {
         BrainBootstrap.buildEngine(
             configStore: brainConfigStore, registry: brainRegistry,
             conversations: conversations, tools: tools,
-            eventLog: eventLog, approvalGate: approvalGate)
+            eventLog: eventLog, approvalGate: approvalGate,
+            memory: LocalData.shared.memoryStore,
+            skillStore: LocalData.shared.skillStore)
     }
 
     public func goToSettings() {

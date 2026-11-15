@@ -1,6 +1,15 @@
 import Foundation
 import Combine
 
+public enum SkillMemory {
+    /// Project id of the global (project-independent) skill scope.
+    public static let globalProjectId = ""
+
+    public static func projectIdOrGlobal(_ projectId: String?) -> String {
+        projectId ?? globalProjectId
+    }
+}
+
 public struct SkillDescriptor: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public var name: String
