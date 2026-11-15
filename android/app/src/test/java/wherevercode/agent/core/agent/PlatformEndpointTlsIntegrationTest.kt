@@ -10,6 +10,8 @@ import java.security.KeyFactory
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.PrivateKey
+import java.security.Provider
+import java.security.Security
 import java.security.cert.CertificateException
 import java.security.cert.CertificateExpiredException
 import java.security.cert.CertificateFactory
@@ -55,6 +57,23 @@ import org.junit.Test
  * [TrustManagerFactory] over the same store, which is exactly the
  * "no pin configured" production wiring (the production client installs
  * no factory of its own in that case). Both are restored in [tearDown].
+ *
+ * Shared-JVM provider hygiene: Gradle runs the whole unit-test suite in
+ * one JVM, and every Robolectric test class that ran earlier in that JVM
+ * leaves the Conscrypt JCE provider registered at position 1 (plus BC at
+ * the end). From then on `SSLContext.getInstance("TLS")` — used by this
+ * class's servers and factories and by the production pinning code —
+ * silently resolves to Conscrypt instead of SunJSSE, and Conscrypt's
+ * handshake dies on JDK 17 with an InaccessibleObjectException (it
+ * reflectively opens `java.net.InetAddress.holder()`), so each loopback
+ * server closes the connection right after the handshake and every
+ * positive scenario fails with "Unexpected end of file from server"
+ * while the rejection scenarios still pass on any handshake failure.
+ * [installTestTrust] therefore removes the Conscrypt provider for the
+ * duration of this class (the JDK reference TLS stack is what a JVM
+ * run of this class means to exercise; on Android the platform TLS
+ * stack is unaffected) and [restoreTrust] re-inserts it at its
+ * original position so later test classes see the JVM as they left it.
  */
 class PlatformEndpointTlsIntegrationTest {
 
@@ -65,6 +84,8 @@ class PlatformEndpointTlsIntegrationTest {
 
         private lateinit var caCert: X509Certificate
         private var previousDefaultFactory: SSLSocketFactory? = null
+        private var removedConscrypt: Provider? = null
+        private var removedConscryptPosition: Int = -1
 
         private fun resourceText(name: String): String {
             val path = "$RESOURCE_DIR/$name"
@@ -118,6 +139,15 @@ class PlatformEndpointTlsIntegrationTest {
         @BeforeClass
         @JvmStatic
         fun installTestTrust() {
+            // Must run before any SSLContext is created in this class:
+            // drop the Robolectric-inserted Conscrypt provider (see the
+            // class doc) so every TLS context below — and the production
+            // pinning factory exercised by these tests — uses SunJSSE.
+            Security.getProvider("Conscrypt")?.let { conscrypt ->
+                removedConscryptPosition = Security.getProviders().indexOf(conscrypt) + 1
+                removedConscrypt = conscrypt
+                Security.removeProvider("Conscrypt")
+            }
             caCert = loadCert("tls-ca-cert.pem")
             // (a) javax.net.ssl.trustStore: read by TrustManagerFactory.init(null),
             // which is what PlatformEndpointPinning.pinnedTrustManager uses for
@@ -142,6 +172,18 @@ class PlatformEndpointTlsIntegrationTest {
             System.clearProperty("javax.net.ssl.trustStore")
             System.clearProperty("javax.net.ssl.trustStorePassword")
             System.clearProperty("javax.net.ssl.trustStoreType")
+            // Put the Conscrypt provider back where installTestTrust
+            // found it, so Robolectric classes running later in this JVM
+            // observe the same provider list as if this class had not
+            // touched it.
+            removedConscrypt?.let { conscrypt ->
+                if (Security.getProvider("Conscrypt") == null) {
+                    val position = if (removedConscryptPosition > 0) removedConscryptPosition else 1
+                    Security.insertProviderAt(conscrypt, position)
+                }
+                removedConscrypt = null
+                removedConscryptPosition = -1
+            }
         }
     }
 
