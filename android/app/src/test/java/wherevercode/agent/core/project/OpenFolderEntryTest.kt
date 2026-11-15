@@ -1,6 +1,7 @@
 package wherevercode.agent.core.project
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -64,5 +65,23 @@ class OpenFolderEntryTest {
         assertTrue(git.description.contains("Hugging Face"))
         assertTrue(git.description.contains("Git URL"))
         assertTrue(git.description.contains("不拉代码"))
+    }
+
+    @Test
+    fun `every option maps to an available registered project source`() {
+        val options = openFolderEntryOptions()
+        assertEquals(
+            listOf("local_folder", "device_folder", "git_host"),
+            options.map { it.sourceId },
+        )
+        for (option in options) {
+            val source = ProjectSourceRegistry.find(option.sourceId)
+            assertNotNull("未注册的来源：${option.sourceId}", source)
+            assertTrue(source!!.available)
+            // 标题唯一事实来源是注册表：选项名必须等于注册表条目标题
+            assertEquals(source.title, option.name)
+        }
+        // 尚不可用的自定义来源不进单子
+        assertTrue(options.none { it.sourceId == "custom" })
     }
 }

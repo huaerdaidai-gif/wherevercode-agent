@@ -7,8 +7,11 @@ package wherevercode.agent.core.project
  * 注册表加一项，不改打开流程、不写死厂商名单（Git 托管只登记类型，
  * 具体厂商由地址本身决定）。对话绑定项目只认项目 id，不认来源类型。
  *
- * 本轮只建注册表与自检测试；「打开文件夹」对话框的接线待下一轮
- * （现行三项标题被 OpenFolderEntryTest 逐字断言，不在本轮改名）。
+ * 接线（2026-11-15）：「打开文件夹」单子（[openFolderEntryOptions]）的
+ * 三项标题直接取本注册表 local_folder / device_folder / git_host 的
+ * title；标题以现行 UX 文案为准（device_folder=「远程设备上的文件夹」、
+ * git_host=「git 仓库地址」）。drive_sync / nas_mount 本质是文件夹，
+ * 分别归本机/设备文件夹，不单列选项；custom 不可用，不进单子。
  */
 data class ProjectSource(
     /** 稳定 id，不改名。 */
@@ -29,11 +32,11 @@ object ProjectSourceRegistry {
             "本机工作区里的文件夹；挂载、同步下来的也是文件夹。",
         ),
         ProjectSource(
-            "device_folder", "已配对设备文件夹", true,
+            "device_folder", "远程设备上的文件夹", true,
             "连一台已配对设备，再打开上面的文件夹。",
         ),
         ProjectSource(
-            "git_host", "Git 托管地址", true,
+            "git_host", "git 仓库地址", true,
             "粘 Git 托管仓库地址登记位置，经 API 读，不拉代码；厂商可扩展，不写死名单。",
         ),
         ProjectSource(

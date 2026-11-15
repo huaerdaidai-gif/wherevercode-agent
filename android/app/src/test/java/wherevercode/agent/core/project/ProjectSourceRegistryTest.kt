@@ -9,7 +9,8 @@ import org.junit.Test
 
 /**
  * 项目来源注册表（70 屏补漏，2026-11-15）：来源类型可扩展、不写死厂商；
- * 入口仍只有一个「打开文件夹」。本轮只验注册表本身，接线待下一轮。
+ * 入口仍只有一个「打开文件夹」。已接线：「打开文件夹」单子三项标题
+ * 取本注册表对应条目的 title（见 OpenFolderEntryTest 的一致性测试）。
  */
 class ProjectSourceRegistryTest {
 
@@ -53,5 +54,12 @@ class ProjectSourceRegistryTest {
         // 同 id 重复注册被拒，不产生重复项
         assertFalse(ProjectSourceRegistry.register(source))
         assertNull(ProjectSourceRegistry.find("no_such_source"))
+    }
+
+    @Test
+    fun `flow source titles match open folder ux wording`() {
+        assertEquals("本机文件夹", ProjectSourceRegistry.find("local_folder")!!.title)
+        assertEquals("远程设备上的文件夹", ProjectSourceRegistry.find("device_folder")!!.title)
+        assertEquals("git 仓库地址", ProjectSourceRegistry.find("git_host")!!.title)
     }
 }
