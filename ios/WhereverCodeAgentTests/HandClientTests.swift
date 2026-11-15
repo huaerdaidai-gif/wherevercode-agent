@@ -185,10 +185,12 @@ final class HandClientTests: XCTestCase {
             folder: "/Users/a1234/v5-codex-work"
         )
 
-        let validAction = BrainAction(tool: "list_files", args: ["path": ""], idempotencyKey: "test-idempotency-1")
+        let validArgs: [String: String] = ["path": ""]
+        let validAction = BrainAction(tool: "list_files", args: validArgs, idempotencyKey: "test-idempotency-1")
         XCTAssertNil(registry.validateOnly(validAction, context))
 
-        let unknownAction = BrainAction(tool: "delete_everything", args: [:], idempotencyKey: "test-idempotency-2")
+        let unknownArgs: [String: String] = [:]
+        let unknownAction = BrainAction(tool: "delete_everything", args: unknownArgs, idempotencyKey: "test-idempotency-2")
         let outcome = registry.validateOnly(unknownAction, context)
         XCTAssertNotNil(outcome)
         XCTAssertFalse(outcome!.ok)
