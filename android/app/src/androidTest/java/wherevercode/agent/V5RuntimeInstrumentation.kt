@@ -22,6 +22,11 @@ class V5RuntimeInstrumentation : Instrumentation() {
 
     override fun onStart() {
         try {
+            // RFC 7748 public vector: also exercises the crypto class on Android's libcore.
+            fun hex(value: String) = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            check(wherevercode.agent.core.security.DeviceKeys.publicKeyFromPrivate(
+                hex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"),
+            ).contentEquals(hex("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")))
             activity = startActivitySync(Intent(Intent.ACTION_MAIN).apply {
                 setClassName(targetContext.packageName, "wherevercode.agent.MainActivity")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
