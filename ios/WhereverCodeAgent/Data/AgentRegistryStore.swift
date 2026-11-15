@@ -76,7 +76,13 @@ public struct AgentRecord: Equatable, Codable, Identifiable, Sendable {
         kind: AgentKind = .cloud,
         access: AgentAccess = .api,
         brainKind: String = "MODEL_API",
-        adapterId: String = "model-api-generic"
+        adapterId: String = "model-api-generic",
+        baseUrl: String? = nil,
+        authRef: String? = nil,
+        lastTestSummary: String? = nil,
+        memberConnectionState: String = "NOT_CONNECTED",
+        deviceId: String? = nil,
+        deviceFolder: String? = nil
     ) {
         self.agentId = agentId
         self.displayName = displayName
@@ -84,6 +90,12 @@ public struct AgentRecord: Equatable, Codable, Identifiable, Sendable {
         self.access = access
         self.brainKind = brainKind
         self.adapterId = adapterId
+        self.baseUrl = baseUrl
+        self.authRef = authRef
+        self.lastTestSummary = lastTestSummary
+        self.memberConnectionState = memberConnectionState
+        self.deviceId = deviceId
+        self.deviceFolder = deviceFolder
     }
 }
 

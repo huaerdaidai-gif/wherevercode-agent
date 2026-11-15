@@ -51,101 +51,9 @@ public struct DevicesView: View {
                 Text("添加局域网电脑、NAT/远程设备或 VPS 后，可在对话输入框上方的项目来源中直接选用。")
             }
 
-            Section("已登记设备（\(devices.count) 台）") {
-                if let loadError {
-                    Text(loadError).foregroundStyle(.red)
-                }
-                if devices.isEmpty {
-                    Text("暂无已登记设备。可点击上方「＋ 添加 / 配对设备」或从下方预设模板快速登记。")
-                        .font(.subheadline)
-                        .foregroundStyle(AgentUI.secondary)
-                }
-                ForEach(devices, id: \.agentId) { device in
-                    Button {
-                        selectedDevice = device
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label(device.displayName, systemImage: "desktopcomputer")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                Text("\(device.baseUrl ?? "未填地址") · \(device.lastTestSummary ?? "未验证连接")")
-                                    .font(.caption)
-                                    .foregroundStyle(AgentUI.secondary)
-                                if let folder = device.deviceFolder, !folder.isEmpty {
-                                    Text("授权路径：\(folder)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text("详情")
-                                .font(.caption)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Color.secondary.opacity(0.12), in: Capsule())
-                        }
-                    }
-                }
-                .onDelete { offsets in
-                    for idx in offsets {
-                        try? LocalData.shared.agents.deleteAgent(agentId: devices[idx].agentId)
-                    }
-                    reload()
-                }
-            }
-
-            Section("常见设备模板（点击查看详情或一键登记）") {
-                ForEach(prototypeTemplates, id: \.id) { tpl in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(tpl.name).font(.subheadline)
-                            Text(tpl.subtitle).font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("详情") {
-                            if let existing = devices.first(where: { $0.agentId == tpl.id }) {
-                                selectedDevice = existing
-                            } else {
-                                let rec = AgentRecord(
-                                    agentId: tpl.id,
-                                    displayName: tpl.name,
-                                    kind: .device,
-                                    access: tpl.access,
-                                    baseUrl: tpl.host,
-                                    lastTestSummary: "本地登记 · 未验证在线",
-                                    memberConnectionState: "NOT_CONNECTED",
-                                    deviceId: tpl.id,
-                                    deviceFolder: tpl.folder
-                                )
-                                try? LocalData.shared.agents.saveAgent(rec)
-                                reload()
-                                selectedDevice = rec
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-            }
-
-            Section("设备详情与快捷入口") {
-                LabeledContent("本机系统", value: "iOS " + UIDevice.current.systemVersion)
-                LabeledContent("任务执行", value: "需要授权与实际适配")
-                LabeledContent("项目访问", value: "受范围约束")
-                HStack(spacing: 10) {
-                    Button("查看设备任务") { onNavigateRoute("tasks") }
-                        .buttonStyle(.bordered)
-                    Button("Agent 详情") { onNavigateRoute("agents") }
-                        .buttonStyle(.bordered)
-                    Button("权限设置") { onNavigateRoute("settings") }
-                        .buttonStyle(.bordered)
-                }
-                .font(.caption)
-                Text("连接状态：真实在线、离线与执行能力需由设备端 Hand 服务确认；平台云端设备列表：\(ReservedFeature.deviceManagement.notImplementedReason)")
-                    .font(.caption)
-                    .foregroundStyle(AgentUI.secondary)
-            }
+            registeredDevicesSection
+            templatesSection
+            shortcutsSection
         }
         .navigationTitle("设备")
         .onAppear(perform: reload)
@@ -164,6 +72,111 @@ public struct DevicesView: View {
                     onNavigateRoute(r)
                 }
             )
+        }
+    }
+
+    @ViewBuilder
+    private var registeredDevicesSection: some View {
+        Section("已登记设备（\(devices.count) 台）") {
+            if let loadError {
+                Text(loadError).foregroundStyle(.red)
+            }
+            if devices.isEmpty {
+                Text("暂无已登记设备。可点击上方「＋ 添加 / 配对设备」或从下方预设模板快速登记。")
+                    .font(.subheadline)
+                    .foregroundStyle(AgentUI.secondary)
+            }
+            ForEach(devices, id: \.agentId) { device in
+                Button {
+                    selectedDevice = device
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(device.displayName, systemImage: "desktopcomputer")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("\(device.baseUrl ?? "未填地址") · \(device.lastTestSummary ?? "未验证连接")")
+                                .font(.caption)
+                                .foregroundStyle(AgentUI.secondary)
+                            if let folder = device.deviceFolder, !folder.isEmpty {
+                                Text("授权路径：\(folder)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text("详情")
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
+                }
+            }
+            .onDelete { offsets in
+                for idx in offsets {
+                    try? LocalData.shared.agents.deleteAgent(agentId: devices[idx].agentId)
+                }
+                reload()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var templatesSection: some View {
+        Section("常见设备模板（点击查看详情或一键登记）") {
+            ForEach(prototypeTemplates, id: \.id) { tpl in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tpl.name).font(.subheadline)
+                        Text(tpl.subtitle).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("详情") {
+                        if let existing = devices.first(where: { $0.agentId == tpl.id }) {
+                            selectedDevice = existing
+                        } else {
+                            let rec = AgentRecord(
+                                agentId: tpl.id,
+                                displayName: tpl.name,
+                                kind: .device,
+                                access: tpl.access,
+                                baseUrl: tpl.host,
+                                lastTestSummary: "本地登记 · 未验证在线",
+                                memberConnectionState: "NOT_CONNECTED",
+                                deviceId: tpl.id,
+                                deviceFolder: tpl.folder
+                            )
+                            try? LocalData.shared.agents.saveAgent(rec)
+                            reload()
+                            selectedDevice = rec
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var shortcutsSection: some View {
+        Section("设备详情与快捷入口") {
+            LabeledContent("本机系统", value: "iOS " + UIDevice.current.systemVersion)
+            LabeledContent("任务执行", value: "需要授权与实际适配")
+            LabeledContent("项目访问", value: "受范围约束")
+            HStack(spacing: 10) {
+                Button("查看设备任务") { onNavigateRoute("tasks") }
+                    .buttonStyle(.bordered)
+                Button("Agent 详情") { onNavigateRoute("agents") }
+                    .buttonStyle(.bordered)
+                Button("权限设置") { onNavigateRoute("settings") }
+                    .buttonStyle(.bordered)
+            }
+            .font(.caption)
+            Text("连接状态：真实在线、离线与执行能力需由设备端 Hand 服务确认；平台云端设备列表：\(ReservedFeature.deviceManagement.notImplementedReason)")
+                .font(.caption)
+                .foregroundStyle(AgentUI.secondary)
         }
     }
 
