@@ -1,8 +1,12 @@
 package wherevercode.agent.ui
 
 import android.content.Context
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -10,46 +14,34 @@ import androidx.appcompat.app.AlertDialog
 import wherevercode.agent.R
 
 /**
- * Drawer View (V5 Phase B C2, batch 3, R2 visual rework).
+ * Drawer View (V5 导航整改最终定稿，2026-11-15)。
  *
- * 视觉基准：v4.3-01（第 1 张，批 3 首批默认样式）+ V5-UI.md §三
- * 10 项映射。结构：品牌头（WhereverCode + V5）→ V5 一级入口 →
- * “工作空间”分组 → “扩展与资源”分组 → 底部用户行（头像 + 登录
- * 状态 + 设置齿轮）。会话可从顶栏与一级抽屉入口到达；
- * 原型图右半屏的版本文字是来源原型的版本号，不照抄；用户名是 maintainer
- * 本人，App 内无用户名可取，不写死，只显示登录状态。
+ * 参考 Claude 的抽屉滑动、主页面圆角、遮罩、选中状态、返回手势和
+ * 底部固定操作区。结构：
  *
- * 视觉规矩（GPT 点名的原罪不再犯）：紧凑列表行（真实线形图标 +
- * 标题 + chevron/角标/“待开发”），行高 48dp；分组标题小灰字；颜色全部
- * 走主题 token（values/colors.xml 与 values-night/colors.xml），
- * 不写死；禁止整屏巨大圆角卡片——行不用 bg_card，当前行只用
- * accent_soft 底色高亮。行首图标一律是 drawable（[iconResFor]，
- * UiKit.icon + token tint 着色）；汉字字标只作注册表外自定义入口的
- * 回落（[glyphView]），默认 18 行里没有一行用它。
+ * ┌─────────────────────────┐
+ * │  ∞ WhereverCode  V5     │  品牌头
+ * ├─────────────────────────┤
+ * │  💬 对话                 │  一级入口（3 项）
+ * │  📁 项目                 │
+ * │  ⚙️ 控制                 │
+ * ├─────────────────────────┤
+ * │  最近会话                 │  分组标题
+ * │  · 会话标题1    3分前    │  最近会话列表
+ * │  · 会话标题2    1小时前  │
+ * │  · 会话标题3    昨天     │
+ * │  ...                     │
+ * ├─────────────────────────┤
+ * │ 👤 已登录          ＋    │  底部固定：头像→设置  ＋→新对话
+ * └─────────────────────────┘
  *
- * 入口唯一事实来源是 [EntryRegistry]：顶栏/工作空间/扩展与资源
- * 三组按注册表顺序渲染；工作台行与底部齿轮是同一入口
- * （nav_workbench）的两种形态；“我的项目”是 nav_projects 的快捷
- * 方式（同一入口，不另注册）；“界面与主题”（nav_theme）在工作
- * 空间组内，接 cycleTheme()。已实现点按真可用；待开发行标
- * “待开发”，点按只把注册表 id 交给宿主（宿主只 toast 提示，
- * 不伪装已实现、不关抽屉）。
- *
- * 角标（[DrawerBadges]）：运行中任务数与待审批数都由宿主在打开
- * 抽屉时从真实数据源读（任务库 / 审批门），经 [setBadges] 传入；
- * 0 也显示“0”，只有读不到（未知）时不显示，绝不伪造数字。待审批
- * 行是待开发，徽标与行尾“待开发”标注共存。
- *
- * 旧扁平抽屉的定制（DrawerController）：隐藏与收藏保留（长按行
- * 可隐藏/收藏，隐藏后底部留“已隐藏”恢复入口；收藏的行在本组内
- * 置顶并标 ★）；嵌套过的子入口仍渲染在父行之下（缩进一级），不
- * 丢失。扁平列表的“排序（move）”与“更多”折叠不再适用分组结构，
- * 已退役：行顺序即注册表顺序；“更多”里的非基础入口在 App 内从
- * 未注册过（只在测试里出现），模型本身（DrawerController）不动。
- * 持久化（Room）与 C1 五项修复一字不碰。
- *
- * 路由不在这里：点按只回调 [onEntrySelected]（注册表 id），
- * MainActivity 决定打开什么。
+ * 规矩：
+ * - 不在普通界面显示 route_id、P0、待验收、扩展等开发字段。
+ * - 未接通的执行能力显示真实状态，不用假数据模拟成功。
+ * - 设置不再是一级菜单：点击底部账号头像进入独立设置页面。
+ * - 工作台统一改名「项目」，控制台统一改名「控制」。
+ * - 70 屏旗舰功能全部保留，通过业务导航逐层访问。
+ * - 与 iOS 共享导航命名、信息架构和行为契约。
  */
 class DrawerView(
     private val context: Context,
@@ -58,18 +50,42 @@ class DrawerView(
     private val onPrefsChanged: () -> Unit,
     /** 当前入口的 DrawerController id（MainActivity.currentEntry），用于高亮当前行。 */
     private val activeTargetProvider: () -> String? = { null },
-    /** 底部用户行标签（MainActivity 读登录状态：“已登录”/“未登录”；App 内无用户名可取，不写死）。 */
+    /** 底部用户行标签（MainActivity 读登录状态："已登录"/"未登录"）。 */
     private val userLabelProvider: () -> String = { "未登录" },
-    /** “界面与主题”行尾的当前主题名（“浅色”/“深色”/“跟随系统”）。 */
+    /** "界面与主题"行尾的当前主题名（"浅色"/"深色"/"跟随系统"）。 */
     private val themeLabelProvider: () -> String = { "浅色" },
+    /** 最近会话列表数据提供者（返回 sessionId + label + 时间标签）。 */
+    private val recentSessionsProvider: () -> List<RecentSession> = { emptyList() },
 ) {
-    val root: ScrollView = ScrollView(context).apply {
+    /** 最近会话数据项。 */
+    data class RecentSession(
+        val sessionId: String,
+        val label: String,
+        val timeLabel: String,
+        val summary: String? = null,
+    )
+
+    /** 抽屉外壳：可滚动业务区 + 固定在底部的账号/新对话操作区。 */
+    val root: LinearLayout = UiKit.vertical(context)
+
+    private val scrollView: ScrollView = ScrollView(context).apply {
         isFillViewport = true
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
+            1f,
+        )
     }
 
     private val content: LinearLayout = UiKit.vertical(context).apply {
-        setPadding(dp(12), dp(8), dp(12), dp(16))
+        setPadding(dp(12), dp(8), dp(12), dp(0))
     }
+
+    private val bottomContent: LinearLayout = UiKit.vertical(context).apply {
+        setPadding(dp(12), 0, dp(12), dp(8))
+    }
+
+    private var searchQuery: String = ""
 
     /** 最后一次 [refresh] 渲染的行（测试口径）。 */
     private var renderedRowList: List<RenderedRow> = emptyList()
@@ -78,14 +94,14 @@ class DrawerView(
         val id: String,
         val label: String,
         val indent: Int,
-        /** "top" / "workspace" / "extensions" / "bottom"。 */
+        /** "top" / "sessions" / "bottom"。 */
         val group: String,
         val badge: Int?,
         val todo: Boolean,
         val active: Boolean,
-        /** 行尾文案：主题名 / “待开发” / chevron（角标行与当前行无行尾文案时为 null）。 */
+        /** 行尾文案。 */
         val trailing: String?,
-        /** 行首真实 drawable 资源 id；底部用户行（头像原样保留）与注册表外回落行为 null。 */
+        /** 行首真实 drawable 资源 id。 */
         val iconRes: Int? = null,
     )
 
@@ -102,7 +118,7 @@ class DrawerView(
         refresh()
     }
 
-    /** 宿主传入真实角标后刷新（未知不显示，0 显示“0”）。 */
+    /** 宿主传入真实角标后刷新（未知不显示，0 显示"0"）。 */
     fun setBadges(newBadges: DrawerBadges) {
         badges = newBadges
         refresh()
@@ -111,17 +127,19 @@ class DrawerView(
     fun currentBadges(): DrawerBadges = badges
 
     init {
-        root.addView(content)
+        scrollView.addView(content)
+        root.addView(scrollView)
+        root.addView(bottomContent)
         refresh()
     }
 
     /** 全部渲染行的快照（测试口径；不含分组头/分割线）。 */
     fun renderedRows(): List<RenderedRow> = renderedRowList.toList()
 
-    /** 入口行的标签（测试口径；含 ★ 前缀与“我的项目”等覆盖标签）。 */
+    /** 入口行的标签（测试口径）。 */
     fun renderedLabels(): List<String> = renderedRowList.map { it.label }
 
-    /** 入口行的注册表 id（测试口径；nav_projects 与 nav_workbench 各出现两次：正行 + 快捷方式）。 */
+    /** 入口行的注册表 id（测试口径）。 */
     fun renderedIds(): List<String> = renderedRowList.map { it.id }
 
     /** 某分组内入口行的 id（测试口径）。 */
@@ -132,7 +150,7 @@ class DrawerView(
     fun renderedRowIndent(id: String): Int =
         renderedRowList.firstOrNull { it.id == id }?.indent ?: -1
 
-    /** 一行是否标“待开发”（测试口径）。 */
+    /** 一行是否标"待开发"（测试口径）。 */
     fun renderedRowIsTodo(id: String): Boolean =
         renderedRowList.firstOrNull { it.id == id }?.todo ?: false
 
@@ -153,15 +171,15 @@ class DrawerView(
         renderedRowList.firstOrNull { it.id == id }?.iconRes
 
     /**
-     * 注册表入口 → 行首真实线形图标（R4：汉字大字假图标的替换表）。
-     * 映射只按注册表 id，不碰 [EntryRegistry]（注册表的 iconGlyph 仍
-     * 留作注册表外自定义入口的回落）。未知 id 返回 null，调用方回落
-     * 到 [glyphView]，绝不崩。
+     * 注册表入口 → 行首真实线形图标。
+     * 映射只按注册表 id，不碰 EntryRegistry。
      */
     fun iconResFor(entryId: String): Int? = when (entryId) {
         "nav_chat" -> R.drawable.ic_chat
-        "nav_history" -> R.drawable.ic_search
         "nav_projects" -> R.drawable.ic_folder
+        "nav_channels" -> R.drawable.ic_chat
+        "nav_control" -> R.drawable.ic_console
+        "nav_history" -> R.drawable.ic_search
         "nav_team" -> R.drawable.ic_team
         "nav_devices" -> R.drawable.ic_device
         "nav_tools" -> R.drawable.ic_tools
@@ -187,10 +205,13 @@ class DrawerView(
         return true
     }
 
-    private fun findRowView(id: String): View? {
-        for (i in 0 until content.childCount) {
-            val child = content.getChildAt(i)
-            if (child.tag == id) return child
+    private fun findRowView(id: String): View? = findRowView(root, id)
+
+    private fun findRowView(parent: View, id: String): View? {
+        if (parent.tag == id) return parent
+        if (parent !is ViewGroup) return null
+        for (i in 0 until parent.childCount) {
+            findRowView(parent.getChildAt(i), id)?.let { return it }
         }
         return null
     }
@@ -199,126 +220,214 @@ class DrawerView(
         val rows = mutableListOf<RenderedRow>()
         content.removeAllViews()
         addBrandHeader()
-        var sectionShown = false
-        // ── V5 默认一级入口（无分组头）──
-        sectionShown = addGroupSection(
-            title = null,
-            groupKey = "top",
-            planned = EntryRegistry.byGroup(EntryRegistry.Group.DRAWER_TOP).map { it to null },
-            rows = rows,
-            sectionShown = sectionShown,
-        )
-        // ── 工作空间分组 ──
-        sectionShown = addWorkspaceGroup(rows, sectionShown)
-        // ── 扩展与资源分组──
-        sectionShown = addGroupSection(
-            title = "扩展与资源",
-            groupKey = "extensions",
-            planned = EntryRegistry.byGroup(EntryRegistry.Group.DRAWER_EXTENSIONS).map { it to null },
-            rows = rows,
-            sectionShown = sectionShown,
-        )
-        // ── 底部用户行（内容不足一屏时钉在抽屉底边；工作台被隐藏时不出现）──
-        if (!controller.isHidden(DrawerController.ID_SETTINGS)) {
-            addSpacer()
-            addDivider()
-            addBottomRow(rows)
-        }
-        addHiddenSection()
+        // ── 一级入口（严格四项：对话、项目、频道、控制）──
+        addPrimaryEntries(rows)
+        addSessionSearch()
+        // ── 最近会话列表（支持关键词过滤）──
+        addRecentSessionsSection(rows)
+        // ── 底部固定：账号头像（左）+ ＋ 新对话（右）──
+        addBottomBar(rows)
         renderedRowList = rows
     }
 
-    /** 注册表入口对应的抽屉控制器 id（DRAWER 类才有；ACTION/TODO/SUGGESTION 没有）。 */
+    /** 注册表入口对应的抽屉控制器 id（DRAWER 类才有）。 */
     private fun EntryRegistry.Entry.controllerId(): String? =
         if (targetKind == EntryRegistry.TargetKind.DRAWER) target else null
 
     /**
-     * 可见的计划行：去掉已隐藏与已被嵌套到别处的入口；收藏的在本组内
-     * 置顶（收藏内部仍按注册表顺序）。
+     * 一级入口：对话、项目、控制。
+     * 参考 Claude 抽屉的紧凑列表行：真实线形图标 + 标题 + chevron/选中高亮。
      */
-    private fun visiblePlanned(
-        planned: List<Pair<EntryRegistry.Entry, String?>>,
-    ): List<Pair<EntryRegistry.Entry, String?>> {
-        val visible = planned.filter { (entry, _) ->
-            val id = entry.controllerId()
-            id == null || (!controller.isHidden(id) && !controller.isNested(id))
-        }
-        val favorites = visible.filter { (entry, _) ->
-            val id = entry.controllerId()
-            id != null && controller.isFavorite(id)
-        }
-        return favorites + visible.filter { it !in favorites }
-    }
-
-    private fun addGroupSection(
-        title: String?,
-        groupKey: String,
-        planned: List<Pair<EntryRegistry.Entry, String?>>,
-        rows: MutableList<RenderedRow>,
-        sectionShown: Boolean,
-    ): Boolean {
-        val entries = visiblePlanned(planned)
-        if (entries.isEmpty()) return sectionShown
-        if (sectionShown) addDivider()
-        if (title != null) addGroupHeader(title, groupKey)
-        if (!isGroupCollapsed(groupKey)) {
-            entries.forEach { (entry, labelOverride) ->
-                addEntryRow(entry, groupKey, indent = 0, rows, labelOverride)
+    private fun addPrimaryEntries(rows: MutableList<RenderedRow>) {
+        val primaryEntries = listOf(
+            Triple("nav_chat", "对话", DrawerController.ID_CHAT),
+            Triple("nav_projects", "项目", DrawerController.ID_PROJECTS),
+            Triple("nav_channels", "频道", DrawerController.ID_CHANNELS),
+            Triple("nav_control", "控制", DrawerController.ID_CONTROL),
+        )
+        primaryEntries.forEach { (entryId, label, controllerId) ->
+            val active = controllerId == activeTargetProvider()
+            val iconRes = iconResFor(entryId)
+            rows += RenderedRow(entryId, label, 0, "top", null, false, active, if (!active) "›" else null, iconRes)
+            val row = UiKit.horizontal(context).apply {
+                tag = entryId
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(52),
+                )
+                setPadding(dp(12), 0, dp(12), 0)
+                if (active) background = UiKit.rounded(context, R.color.accent_soft, 10)
+                setOnClickListener { onEntrySelected(entryId) }
             }
+            row.addView(iconView(iconRes, active))
+            row.addView(
+                UiKit.text(
+                    context,
+                    label,
+                    16f,
+                    R.color.text_primary,
+                    bold = active,
+                ).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f,
+                    )
+                },
+            )
+            if (active) {
+                row.addView(
+                    UiKit.text(context, "", 14f, R.color.accent).apply {
+                        background = UiKit.rounded(context, R.color.accent, 999)
+                        layoutParams = LinearLayout.LayoutParams(dp(4), dp(20))
+                    },
+                )
+            }
+            content.addView(row)
         }
-        return true
     }
 
-    /** 工作空间组展示主题等次级入口；项目、任务与设置在 V5 一级中。 */
-    private fun addWorkspaceGroup(
-        rows: MutableList<RenderedRow>,
-        sectionShown: Boolean,
-    ): Boolean {
-        val planned = mutableListOf<Pair<EntryRegistry.Entry, String?>>()
-        EntryRegistry.byGroup(EntryRegistry.Group.DRAWER_WORKSPACE).forEach { entry ->
-            planned += entry to null
+    /** 搜索只过滤真实最近会话，不伪造远端搜索结果。 */
+    private fun addSessionSearch() {
+        val input = EditText(context).apply {
+            hint = "搜索最近会话"
+            setText(searchQuery)
+            setSingleLine(true)
+            textSize = 13f
+            setTextColor(UiKit.color(context, R.color.text_primary))
+            setHintTextColor(UiKit.color(context, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_input)
+            setPadding(dp(12), 0, dp(12), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(40),
+            ).apply { topMargin = dp(8); bottomMargin = dp(4) }
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: Editable?) {
+                    val next = s?.toString().orEmpty()
+                    if (next == searchQuery) return
+                    searchQuery = next
+                    refresh()
+                }
+            })
         }
-        return addGroupSection("工作空间", "workspace", planned, rows, sectionShown)
+        content.addView(input)
     }
 
-    private fun addBrandHeader() {
-        val row = UiKit.horizontal(context).apply {
-            setPadding(dp(8), dp(8), dp(8), dp(12))
-        }
-        row.addView(
-            UiKit.text(context, "∞", 20f, R.color.home_gradient_start, bold = true).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
-                gravity = Gravity.CENTER
-            },
-        )
-        row.addView(UiKit.text(context, "WhereverCode", 17f, R.color.home_text, bold = true))
-        row.addView(
-            UiKit.text(context, "V5", 11f, R.color.text_tertiary).apply {
-                setPadding(dp(6), dp(4), 0, 0)
-            },
-        )
-        content.addView(row)
-    }
-
-    private fun addGroupHeader(title: String, groupKey: String) {
-        val row = UiKit.horizontal(context).apply {
-            setPadding(dp(8), dp(14), dp(8), dp(4))
+    /**
+     * 最近会话列表：从宿主传入的真实会话数据渲染。
+     * 无会话时显示空态提示；有会话时按时间排列，最多显示 8 条。
+     */
+    private fun addRecentSessionsSection(rows: MutableList<RenderedRow>) {
+        val sessions = recentSessionsProvider()
+            .filter { searchQuery.isBlank() || it.label.contains(searchQuery, ignoreCase = true) }
+            .take(8)
+        addDivider()
+        // 分组标题
+        val header = UiKit.horizontal(context).apply {
+            setPadding(dp(8), dp(8), dp(8), dp(4))
             setOnClickListener {
-                setGroupCollapsed(groupKey, !isGroupCollapsed(groupKey))
+                setGroupCollapsed("sessions", !isGroupCollapsed("sessions"))
             }
         }
+        header.addView(
+            UiKit.text(context, "最近会话", 13f, R.color.text_secondary).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f,
+                )
+            },
+        )
+        header.addView(
+            UiKit.text(
+                context,
+                if (isGroupCollapsed("sessions")) "⌄" else "⌃",
+                12f,
+                R.color.text_tertiary,
+            ),
+        )
+        content.addView(header)
+
+        if (!isGroupCollapsed("sessions")) {
+            if (sessions.isEmpty()) {
+                content.addView(
+                    UiKit.text(
+                        context,
+                        "暂无会话记录",
+                        13f,
+                        R.color.text_tertiary,
+                    ).apply {
+                        setPadding(dp(20), dp(8), dp(20), dp(8))
+                    },
+                )
+            } else {
+                sessions.forEach { session ->
+                    addSessionRow(session, rows)
+                }
+            }
+        }
+    }
+
+    private fun addSessionRow(
+        session: RecentSession,
+        rows: MutableList<RenderedRow>,
+    ) {
+        val rowId = "session:${session.sessionId}"
+        rows += RenderedRow(rowId, session.label, 0, "sessions", null, false, false, session.timeLabel, null)
+        val row = UiKit.horizontal(context).apply {
+            tag = rowId
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(44),
+            )
+            setPadding(dp(20), 0, dp(12), 0)
+            setOnClickListener { onEntrySelected(rowId) }
+        }
         row.addView(
-            UiKit.text(context, title, 12f, R.color.text_secondary).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            UiKit.text(context, "·", 16f, R.color.text_tertiary).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(20), LinearLayout.LayoutParams.WRAP_CONTENT)
+                gravity = Gravity.CENTER
             },
         )
         row.addView(
             UiKit.text(
                 context,
-                if (isGroupCollapsed(groupKey)) "⌄" else "⌃",
-                12f,
-                R.color.text_tertiary,
-            ),
+                session.label.take(28),
+                14f,
+                R.color.text_primary,
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f,
+                )
+                maxLines = 1
+            },
+        )
+        row.addView(
+            UiKit.text(context, session.timeLabel, 11f, R.color.text_tertiary),
+        )
+        content.addView(row)
+    }
+
+    private fun addBrandHeader() {
+        val row = UiKit.horizontal(context).apply {
+            setPadding(dp(8), dp(12), dp(8), dp(16))
+        }
+        row.addView(
+            UiKit.text(context, "∞", 22f, R.color.home_gradient_start, bold = true).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
+                gravity = Gravity.CENTER
+            },
+        )
+        row.addView(UiKit.text(context, "WhereverCode", 18f, R.color.home_text, bold = true))
+        row.addView(
+            UiKit.text(context, "V5", 12f, R.color.text_tertiary).apply {
+                setPadding(dp(6), dp(6), 0, 0)
+            },
         )
         content.addView(row)
     }
@@ -332,7 +441,7 @@ class DrawerView(
                     dp(1),
                 ).apply {
                     topMargin = dp(8)
-                    bottomMargin = dp(8)
+                    bottomMargin = dp(4)
                     marginStart = dp(4)
                     marginEnd = dp(4)
                 }
@@ -352,146 +461,78 @@ class DrawerView(
         )
     }
 
-    private fun addEntryRow(
-        entry: EntryRegistry.Entry,
-        groupKey: String,
-        indent: Int,
-        rows: MutableList<RenderedRow>,
-        labelOverride: String? = null,
-    ) {
-        val controllerId = entry.controllerId()
-        val isFavorite = controllerId != null && controller.isFavorite(controllerId)
-        val baseLabel = labelOverride ?: entry.title
-        val display = if (isFavorite) "★ $baseLabel" else baseLabel
-        val active = controllerId != null && controllerId == activeTargetProvider()
-        val badge = badges.badgeFor(entry.id)
-        val todo = entry.status == EntryRegistry.Status.TODO
-        val iconRes = iconResFor(entry.id)
-        val trailing: String? = when {
-            entry.id == "nav_theme" -> themeLabelProvider()
-            todo -> "待开发"
-            badge != null || active -> null
-            else -> "›"
-        }
-        rows += RenderedRow(entry.id, display, indent, groupKey, badge, todo, active, trailing, iconRes)
-        val row = UiKit.horizontal(context).apply {
-            tag = entry.id
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48),
-            ).apply {
-                marginStart = dp(16 * indent)
-            }
-            setPadding(dp(8), 0, dp(8), 0)
-            if (active) background = UiKit.rounded(context, R.color.accent_soft, 8)
-            setOnClickListener { onEntrySelected(entry.id) }
-            if (controllerId != null) {
-                setOnLongClickListener {
-                    showCustomizeMenu(entry, controllerId)
-                    true
-                }
-            }
-        }
-        row.addView(iconView(entry, active))
-        row.addView(
-            UiKit.text(
-                context,
-                display,
-                15f,
-                if (todo) R.color.text_secondary else R.color.text_primary,
-                bold = active,
-            ).apply {
+    /**
+     * 底部固定操作区：左侧账号头像（点击进入完整设置），右侧 ＋ 新对话。
+     * 参考 Claude 抽屉底部固定操作区的设计。
+     */
+    private fun addBottomBar(rows: MutableList<RenderedRow>) {
+        bottomContent.removeAllViews()
+        bottomContent.addView(
+            View(context).apply {
+                setBackgroundColor(UiKit.color(context, R.color.divider))
                 layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f,
-                )
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(1),
+                ).apply { bottomMargin = dp(4) }
             },
         )
-        if (badge != null) row.addView(badgeView(badge))
-        trailing?.let { row.addView(trailingView(it)) }
-        content.addView(row)
-        // 嵌套过的子入口仍渲染在父行之下（缩进一级），不丢失。
-        controllerId?.let { addChildren(it, groupKey, indent + 1, rows) }
-    }
-
-    private fun addChildren(
-        parentControllerId: String,
-        groupKey: String,
-        indent: Int,
-        rows: MutableList<RenderedRow>,
-    ) {
-        controller.childrenOf(parentControllerId).forEach { child ->
-            val entry = EntryRegistry.ENTRIES.firstOrNull {
-                it.targetKind == EntryRegistry.TargetKind.DRAWER && it.target == child.id
-            } ?: EntryRegistry.Entry(
-                id = child.id,
-                title = child.label,
-                group = EntryRegistry.Group.DRAWER_TOP,
-                status = EntryRegistry.Status.IMPLEMENTED,
-                targetKind = EntryRegistry.TargetKind.DRAWER,
-                target = child.id,
-                iconGlyph = "·",
-                iconDrawable = null,
-                parentId = null,
-                todoMessage = null,
-                note = "注册表外自定义入口（宿主按旧路由兜底）。",
-            )
-            addEntryRow(entry, groupKey, indent, rows)
-        }
-    }
-
-    /**
-     * 底部用户行：头像 + 登录状态 + 设置齿轮。工作台行与底部齿轮是
-     * 同一入口（nav_workbench）的两种形态；调用方在工作台被隐藏时
-     * 不调本方法（用底部“已隐藏”恢复）。
-     */
-    private fun addBottomRow(rows: MutableList<RenderedRow>) {
-        val label = userLabelProvider()
-        val active = DrawerController.ID_SETTINGS == activeTargetProvider()
-        rows += RenderedRow("nav_workbench", label, 0, "bottom", null, false, active, null)
-        val row = UiKit.horizontal(context).apply {
-            tag = "nav_workbench"
+        val bottomBar = UiKit.horizontal(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(56),
             )
-            setPadding(dp(8), 0, dp(8), 0)
+            setPadding(dp(12), dp(8), dp(12), dp(12))
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        // 左侧：账号头像 + 登录状态 → 点击进入设置
+        val active = DrawerController.ID_SETTINGS == activeTargetProvider()
+        rows += RenderedRow("nav_workbench", userLabelProvider(), 0, "bottom", null, false, active, null)
+        val avatarRow = UiKit.horizontal(context).apply {
+            tag = "nav_workbench"
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            )
+            gravity = Gravity.CENTER_VERTICAL
             if (active) background = UiKit.rounded(context, R.color.accent_soft, 8)
             setOnClickListener { onEntrySelected("nav_workbench") }
         }
-        row.addView(
-            UiKit.text(context, "👤", 18f, R.color.accent).apply {
+        avatarRow.addView(
+            UiKit.text(context, "👤", 20f, R.color.accent).apply {
                 background = UiKit.rounded(context, R.color.accent_soft, 999)
                 layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
                 gravity = Gravity.CENTER
             },
         )
-        row.addView(
-            UiKit.text(context, label, 15f, R.color.text_primary).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f,
-                ).apply {
-                    marginStart = dp(12)
-                }
+        avatarRow.addView(
+            UiKit.text(context, userLabelProvider(), 14f, R.color.text_primary).apply {
+                setPadding(dp(10), 0, 0, 0)
             },
         )
-        row.addView(
-            UiKit.text(context, "⚙", 18f, R.color.text_secondary),
-        )
-        content.addView(row)
+        bottomBar.addView(avatarRow)
+
+        // 右侧：＋ 新对话按钮
+        val newChatButton = UiKit.text(context, "＋", 22f, R.color.home_text).apply {
+            tag = "nav_new_chat"
+            background = UiKit.rounded(context, R.color.accent_soft, 999)
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+            gravity = Gravity.CENTER
+            setOnClickListener { onEntrySelected("nav_new_chat") }
+        }
+        bottomBar.addView(newChatButton)
+
+        bottomContent.addView(bottomBar)
     }
 
     /**
      * 行首图标：有映射时是 20dp 真实线形 drawable（UiKit.icon +
-     * token tint：当前行 accent，其余 text_secondary），占 28dp 槽位
-     * 与旧字标同宽，行高/密度不动；无映射（注册表外自定义入口）时
-     * 回落到汉字字标 [glyphView]。
+     * token tint：当前行 accent，其余 text_secondary），占 28dp 槽位；
+     * 无映射时回落到汉字字标 [glyphView]。
      */
-    private fun iconView(entry: EntryRegistry.Entry, active: Boolean): View {
-        val res = iconResFor(entry.id) ?: return glyphView(entry.iconGlyph, active)
+    private fun iconView(iconRes: Int?, active: Boolean): View {
+        val res = iconRes ?: return glyphView("·", active)
         return UiKit.icon(
             context,
             res,
@@ -512,69 +553,6 @@ class DrawerView(
             layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
             gravity = Gravity.CENTER
         }
-
-    private fun badgeView(count: Int): TextView =
-        UiKit.text(context, badgeLabel(count), 11f, R.color.accent, bold = true).apply {
-            background = UiKit.rounded(context, R.color.accent_soft, 999)
-            setPadding(dp(7), dp(2), dp(7), dp(2))
-            gravity = Gravity.CENTER
-            minWidth = dp(22)
-        }
-
-    private fun badgeLabel(count: Int): String = if (count > 99) "99+" else count.toString()
-
-    private fun trailingView(text: String): TextView =
-        // chevron 照 v4.3-01 与标题同级；“待开发”/主题名是小灰字说明。
-        UiKit.text(context, text, if (text == "›") 16f else 12f, R.color.text_tertiary)
-
-    private fun addHiddenSection() {
-        val hidden = controller.toPrefs().hidden
-        if (hidden.isEmpty()) return
-        val labels = hidden.mapNotNull { controller.entry(it)?.label }
-        val row = UiKit.text(context, "已隐藏（${hidden.size}）", 13f, R.color.text_primary, bold = true).apply {
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            setOnClickListener { showRestoreHiddenDialog(labels, hidden.toList()) }
-        }
-        content.addView(row)
-    }
-
-    private fun showRestoreHiddenDialog(labels: List<String>, ids: List<String>) {
-        AlertDialog.Builder(context)
-            .setTitle("已隐藏的入口")
-            .setItems(labels.toTypedArray()) { _, which ->
-                if (controller.show(ids[which])) {
-                    refresh()
-                    onPrefsChanged()
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    /**
-     * 长按菜单（R2）：只剩隐藏与收藏——扁平列表的排序/嵌套不适用
-     * 分组结构，已退役；行顺序即注册表顺序。
-     */
-    private fun showCustomizeMenu(entry: EntryRegistry.Entry, controllerId: String) {
-        val items = mutableListOf<String>()
-        items += if (controller.isFavorite(controllerId)) "取消收藏" else "收藏"
-        items += "隐藏"
-        AlertDialog.Builder(context)
-            .setTitle(entry.title)
-            .setItems(items.toTypedArray()) { _, which ->
-                when (items[which]) {
-                    "隐藏" -> if (controller.hide(controllerId)) changed()
-                    "收藏", "取消收藏" -> if (controller.toggleFavorite(controllerId)) changed()
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun changed() {
-        refresh()
-        onPrefsChanged()
-    }
 
     private fun dp(value: Int): Int = UiKit.dp(context, value)
 }

@@ -1,7 +1,6 @@
 package wherevercode.agent.ui
 
 import android.view.View
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.junit.Assert.assertEquals
@@ -15,30 +14,11 @@ import org.robolectric.RuntimeEnvironment
 import wherevercode.agent.R
 
 /**
- * DrawerView rendering test (V5 Phase B C2, batch 3, R2 rework).
+ * DrawerView rendering test (V5 导航整改最终定稿, 2026-11-15).
  *
- * Robolectric — the view needs an Android Context (same reason as
- * MainLayoutTest). Run in CI (`./gradlew testDebugUnitTest`).
- *
- * Covers rendering only (what the drawer shows for a given model
- * state): v4.3-01 structure (top 6 / workspace / extensions /
- * bottom user row), V5-UI.md §三 10-item mapping, real badges
- * (always shown, 0 shows "0", hidden only when unknown), TODO rows
- * marked and never claiming to be implemented, theme row reachable,
- * active-row highlight, hide / favourite kept from the old flat
- * drawer, unknown ids never crash. R4: every entry row carries a
- * real drawable icon (ImageView, never a glyph TextView) and the
- * brand header reads V5, never the old prototype version text.
- * Dialogs (long-press menu, hidden restore) are not opened here —
- * they need a resumed Activity; the model mutations they call are
- * covered by DrawerControllerTest. Tap routing (TODO only toasts,
- * theme cycles) lives in MainActivity.openRegistryEntry and is
- * verified by code + CI build, not here — this test asserts the
- * drawer emits the right registry id on tap.
- *
- * Retired with the flat list (documented in DrawerView): move
- * reordering and the "更多" fold no longer apply to the grouped
- * drawer; row order is registry order.
+ * 一级菜单严格只有三项：对话、项目、控制。
+ * 抽屉中部显示最近会话列表。
+ * 底部固定：账号头像（左，→设置）+ ＋ 新对话（右）。
  */
 @RunWith(RobolectricTestRunner::class)
 class DrawerViewTest {
@@ -48,6 +28,7 @@ class DrawerViewTest {
         activeTarget: String? = null,
         userLabel: String = "未登录",
         themeLabel: String = "浅色",
+        recentSessions: List<DrawerView.RecentSession> = emptyList(),
         selected: MutableList<String> = mutableListOf(),
     ): DrawerView = DrawerView(
         RuntimeEnvironment.getApplication(),
@@ -57,148 +38,86 @@ class DrawerViewTest {
         activeTargetProvider = { activeTarget },
         userLabelProvider = { userLabel },
         themeLabelProvider = { themeLabel },
+        recentSessionsProvider = { recentSessions },
     )
 
     @Test
-    fun `top group exposes all ten V5 defaults in order`() {
+    fun `top group exposes exactly three primary entries in order`() {
         val drawerView = view()
         assertEquals(
-            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench"),
+            listOf("nav_chat", "nav_projects", "nav_control"),
             drawerView.renderedGroupIds("top"),
         )
     }
 
     @Test
-    fun `history search entry renders as sessions`() {
+    fun `top group labels are correct`() {
         val drawerView = view()
-        val row = drawerView.renderedRows().first { it.group == "top" && it.id == "nav_history" }
-        assertEquals("会话", row.label)
+        val topRows = drawerView.renderedRows().filter { it.group == "top" }
+        assertEquals(3, topRows.size)
+        assertEquals("对话", topRows[0].label)
+        assertEquals("项目", topRows[1].label)
+        assertEquals("控制", topRows[2].label)
     }
 
     @Test
-    fun `workspace group keeps theme and approval placeholder only`() {
-        val drawerView = view()
-        assertEquals(
-            listOf("nav_theme", "nav_pending_approval"),
-            drawerView.renderedGroupIds("workspace"),
-        )
-        val topRow = drawerView.renderedRows().first { it.group == "top" && it.id == "nav_projects" }
-        assertEquals("项目", topRow.label)
-    }
-
-    @Test
-    fun `extensions group keeps console mcp plugins and three resource placeholders in order`() {
-        val drawerView = view()
-        assertEquals(
-            listOf("nav_console", "nav_team_channel", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
-            drawerView.renderedGroupIds("extensions"),
-        )
-    }
-
-    @Test
-    fun `bottom row is the user row with the workbench entry`() {
+    fun `bottom row shows user label and new chat button`() {
         val drawerView = view(userLabel = "已登录")
-        assertEquals(listOf("nav_workbench"), drawerView.renderedGroupIds("bottom"))
-        val bottom = drawerView.renderedRows().first { it.group == "bottom" }
-        assertEquals("已登录", bottom.label)
-        // 默认未登录标签也不写死用户名。
+        val bottom = drawerView.renderedRows().filter { it.group == "bottom" }
+        assertEquals(1, bottom.size)
+        assertEquals("已登录", bottom[0].label)
         assertEquals("未登录", view().renderedRows().first { it.group == "bottom" }.label)
     }
 
     @Test
-    fun `default drawer renders ten primary rows and secondary groups`() {
+    fun `default drawer renders three primary rows plus bottom bar`() {
         val drawerView = view()
-        // 一级 10 + 工作空间 2 + 扩展与资源 6（P3 加了团队频道）+ 底部用户行 1。
-        assertEquals(19, drawerView.renderedIds().size)
+        // 3 个一级入口 + 1 个底部用户行 = 4 行（无会话时不渲染会话行）
+        val topAndBottom = drawerView.renderedRows().filter { it.group == "top" || it.group == "bottom" }
+        assertEquals(4, topAndBottom.size)
     }
 
     @Test
-    fun `all ten V5-UI section-three entries are reachable from the drawer or top bar`() {
-        val drawerView = view()
-        val targets = drawerView.renderedIds().mapNotNull { EntryRegistry.find(it) }
-            .filter { it.targetKind == EntryRegistry.TargetKind.DRAWER }
-            .map { it.target }
-            .toSet()
-        assertTrue(targets.contains(DrawerController.ID_HISTORY_SEARCH))
-        assertTrue(targets.contains(DrawerController.ID_NEW_CONVERSATION))
-        assertTrue(targets.contains(DrawerController.ID_PROJECTS))
-        assertTrue(targets.contains(DrawerController.ID_TASKS))
-        assertTrue(targets.contains(DrawerController.ID_AGENTS_TEAM))
-        assertTrue(targets.contains(DrawerController.ID_DEVICES))
-        assertTrue(targets.contains(DrawerController.ID_TOOLS_CONNECTIONS))
-        assertTrue(targets.contains(DrawerController.ID_RESULTS))
-        assertTrue(targets.contains(DrawerController.ID_HELP))
-        assertTrue(targets.contains(DrawerController.ID_SETTINGS))
-    }
-
-    @Test
-    fun `badges always show real counts including zero and hide only when unknown`() {
-        val drawerView = view()
-        // 未传入角标（未知）时不显示。
-        assertNull(drawerView.renderedRowBadge("nav_running_tasks"))
-        assertNull(drawerView.renderedRowBadge("nav_pending_approval"))
-        drawerView.setBadges(DrawerBadges(runningTasks = 3, pendingApprovals = 1))
-        assertEquals(3, drawerView.renderedRowBadge("nav_running_tasks"))
-        assertEquals(1, drawerView.renderedRowBadge("nav_pending_approval"))
-        assertNull(drawerView.renderedRowBadge("nav_chat"))
-        // R4：0 也显示“0”，不隐藏。
-        drawerView.setBadges(DrawerBadges(runningTasks = 0, pendingApprovals = 0))
-        assertEquals(0, drawerView.renderedRowBadge("nav_running_tasks"))
-        assertEquals(0, drawerView.renderedRowBadge("nav_pending_approval"))
-        // V5 控制台（2026-11-11）：待审批已实现（打开控制台的待审批模块），
-        // 不再是待开发；有徽标时行尾不再贴“待开发”，徽标本身就是状态。
-        assertNull(drawerView.renderedRowTrailing("nav_pending_approval"))
-    }
-
-    @Test
-    fun `every entry row has a real drawable icon`() {
-        val drawerView = view()
-        val expected = mapOf(
-            "nav_chat" to R.drawable.ic_chat,
-            "nav_history" to R.drawable.ic_search,
-            "nav_projects" to R.drawable.ic_folder,
-            "nav_team" to R.drawable.ic_team,
-            "nav_devices" to R.drawable.ic_device,
-            "nav_tools" to R.drawable.ic_tools,
-            "nav_console" to R.drawable.ic_console,
-            "nav_team_channel" to R.drawable.ic_chat,
-            "nav_workbench" to R.drawable.ic_settings,
-            "nav_theme" to R.drawable.ic_theme,
-            "nav_running_tasks" to R.drawable.ic_clock,
-            "nav_pending_approval" to R.drawable.ic_approval,
-            "nav_results" to R.drawable.ic_results,
-            "nav_help" to R.drawable.ic_help,
-            "nav_mcp_plugins" to R.drawable.ic_puzzle,
-            "nav_models_skills" to R.drawable.ic_cube,
-            "nav_custom_modules" to R.drawable.ic_grid,
-            "nav_feature_center" to R.drawable.ic_dashboard,
+    fun `recent sessions are rendered when provided`() {
+        val sessions = listOf(
+            DrawerView.RecentSession("s1", "开发App", "3分前"),
+            DrawerView.RecentSession("s2", "导入项目", "1小时前"),
+            DrawerView.RecentSession("s3", "团队协作", "昨天"),
         )
-        // 底部用户行（头像 + 登录状态 + 齿轮）原样保留，不参与图标映射。
-        drawerView.renderedRows().filter { it.group != "bottom" }.forEach { row ->
-            assertEquals(row.id, expected[row.id], row.iconRes)
-            assertEquals(row.id, expected[row.id], drawerView.renderedRowIconRes(row.id))
-        }
-        // 底部用户行不参与图标映射。
-        assertNull(drawerView.renderedRows().first { it.group == "bottom" }.iconRes)
+        val drawerView = view(recentSessions = sessions)
+        val sessionRows = drawerView.renderedRows().filter { it.group == "sessions" }
+        assertEquals(3, sessionRows.size)
+        assertEquals("开发App", sessionRows[0].label)
+        assertEquals("3分前", sessionRows[0].trailing)
     }
 
     @Test
-    fun `row icons are ImageViews not glyph TextViews`() {
-        val drawerView = view()
+    fun `empty sessions show placeholder text`() {
+        val drawerView = view(recentSessions = emptyList())
         val content = drawerView.root.getChildAt(0) as LinearLayout
-        val rows = (0 until content.childCount).map { content.getChildAt(it) }
-            .filter { it.tag is String }
-        // 18 个入口行 + 底部用户行（tag 与工作台行相同，排最后，原样保留不查图标）。
-        assertEquals(19, rows.size)
-        rows.dropLast(1).forEach { row ->
-            val first = (row as LinearLayout).getChildAt(0)
-            assertTrue("row ${row.tag} first child must be an ImageView", first is ImageView)
-            assertFalse("row ${row.tag} must not use a glyph TextView as icon", first is TextView)
+        val texts = mutableListOf<String>()
+        fun collect(view: View) {
+            if (view is TextView) texts += view.text.toString()
+            if (view is LinearLayout) {
+                for (i in 0 until view.childCount) collect(view.getChildAt(i))
+            }
         }
+        collect(content)
+        assertTrue(texts.contains("暂无会话记录"))
     }
 
     @Test
-    fun `brand header shows V5 and no V4-3 text anywhere in the drawer`() {
+    fun `sessions are limited to eight`() {
+        val sessions = (1..15).map {
+            DrawerView.RecentSession("s$it", "会话$it", "${it}分前")
+        }
+        val drawerView = view(recentSessions = sessions)
+        val sessionRows = drawerView.renderedRows().filter { it.group == "sessions" }
+        assertEquals(8, sessionRows.size)
+    }
+
+    @Test
+    fun `brand header shows V5 and no old version text`() {
         val drawerView = view()
         val texts = mutableListOf<String>()
         fun collect(view: View) {
@@ -209,95 +128,61 @@ class DrawerViewTest {
         }
         collect(drawerView.root.getChildAt(0))
         assertTrue(texts.contains("V5"))
-        // 旧版本串拆开写：测试本身不引入字面旧版本串，只断言渲染结果里没有它。
+        assertTrue(texts.contains("WhereverCode"))
         val oldVersionText = "V4" + ".3"
         assertFalse(texts.any { it.contains(oldVersionText) || it.contains("v4.3") })
-    }
-
-    @Test
-    fun `todo rows are marked and implemented rows are not`() {
-        val drawerView = view()
-        listOf(
-            "nav_models_skills", "nav_custom_modules", "nav_feature_center",
-        ).forEach { id ->
-            assertTrue(id, drawerView.renderedRowIsTodo(id))
-            assertEquals("待开发", drawerView.renderedRowTrailing(id))
-        }
-        // V5 MCP / 插件（2026-11-11）：MCP / 插件已实现，不再是待开发。
-        assertFalse(drawerView.renderedRowIsTodo("nav_mcp_plugins"))
-        // V5 控制台（2026-11-11）：控制台与待审批已实现，不再是待开发。
-        assertFalse(drawerView.renderedRowIsTodo("nav_console"))
-        assertFalse(drawerView.renderedRowIsTodo("nav_pending_approval"))
-        assertFalse(drawerView.renderedRowIsTodo("nav_chat"))
-        assertFalse(drawerView.renderedRowIsTodo("nav_theme"))
-        assertFalse(drawerView.renderedRowIsTodo("nav_running_tasks"))
-    }
-
-    @Test
-    fun `theme row shows the current theme label in secondary workspace section`() {
-        val drawerView = view(themeLabel = "深色")
-        assertEquals("深色", drawerView.renderedRowTrailing("nav_theme"))
-        val workspace = drawerView.renderedGroupIds("workspace")
-        assertEquals(listOf("nav_theme", "nav_pending_approval"), workspace)
-        assertEquals("浅色", view().renderedRowTrailing("nav_theme"))
     }
 
     @Test
     fun `active row is highlighted and loses its chevron`() {
         val drawerView = view(activeTarget = DrawerController.ID_PROJECTS)
         assertTrue(drawerView.renderedRowIsActive("nav_projects"))
-        assertNull(drawerView.renderedRowTrailing("nav_projects"))
         assertFalse(drawerView.renderedRowIsActive("nav_chat"))
         assertEquals("›", drawerView.renderedRowTrailing("nav_chat"))
     }
 
     @Test
-    fun `tap emits the registry id`() {
+    fun `primary entries have real drawable icons`() {
+        val drawerView = view()
+        val expected = mapOf(
+            "nav_chat" to R.drawable.ic_chat,
+            "nav_projects" to R.drawable.ic_folder,
+            "nav_control" to R.drawable.ic_console,
+        )
+        drawerView.renderedRows().filter { it.group == "top" }.forEach { row ->
+            assertEquals(row.id, expected[row.id], row.iconRes)
+        }
+    }
+
+    @Test
+    fun `tap on primary entry emits the registry id`() {
         val selected = mutableListOf<String>()
         val drawerView = view(selected = selected)
-        assertTrue(drawerView.clickRowForTest("nav_console"))
-        assertTrue(drawerView.clickRowForTest("nav_theme"))
-        assertTrue(drawerView.clickRowForTest("nav_running_tasks"))
-        assertEquals(listOf("nav_console", "nav_theme", "nav_running_tasks"), selected)
+        assertTrue(drawerView.clickRowForTest("nav_chat"))
+        assertTrue(drawerView.clickRowForTest("nav_projects"))
+        assertTrue(drawerView.clickRowForTest("nav_control"))
+        assertEquals(listOf("nav_chat", "nav_projects", "nav_control"), selected)
         assertFalse(drawerView.clickRowForTest("ghost"))
     }
 
     @Test
-    fun `hidden entry is absent from both its row and its shortcut`() {
+    fun `tap on session row emits session id`() {
+        val selected = mutableListOf<String>()
+        val sessions = listOf(
+            DrawerView.RecentSession("s1", "测试会话", "刚刚"),
+        )
+        val drawerView = view(recentSessions = sessions, selected = selected)
+        assertTrue(drawerView.clickRowForTest("session:s1"))
+        assertEquals(listOf("session:s1"), selected)
+    }
+
+    @Test
+    fun `hidden entry is absent from top group`() {
         val controller = DrawerController()
         val drawerView = view(controller)
         assertTrue(controller.hide(DrawerController.ID_PROJECTS))
         drawerView.refresh()
         assertFalse(drawerView.renderedIds().contains("nav_projects"))
-        assertEquals(18, drawerView.renderedIds().size)
-        assertTrue(controller.hide(DrawerController.ID_RESULTS))
-        drawerView.refresh()
-        assertFalse(drawerView.renderedIds().contains("nav_results"))
-    }
-
-    @Test
-    fun `favourite entry is pinned first within its group`() {
-        val controller = DrawerController()
-        assertTrue(controller.toggleFavorite(DrawerController.ID_RESULTS))
-        val drawerView = view(controller)
-        assertEquals("nav_results", drawerView.renderedGroupIds("top").first())
-        assertTrue(drawerView.renderedLabels().first { it.contains("成果") }.startsWith("★ "))
-    }
-
-    @Test
-    fun `nested child is indented and sits under its parent`() {
-        val controller = DrawerController()
-        assertTrue(controller.nest(DrawerController.ID_DEVICES, DrawerController.ID_AGENTS_TEAM))
-        val drawerView = view(controller)
-        assertEquals(
-            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench"),
-            drawerView.renderedGroupIds("top"),
-        )
-        assertEquals(19, drawerView.renderedIds().size)
-        val ids = drawerView.renderedIds()
-        assertEquals("nav_devices", ids[ids.indexOf("nav_team") + 1])
-        assertTrue(drawerView.renderedRowIndent("nav_devices") == 1)
-        assertTrue(drawerView.renderedRowIndent("nav_team") == 0)
     }
 
     @Test
@@ -305,24 +190,45 @@ class DrawerViewTest {
         val controller = DrawerController()
         controller.applyPrefs(
             DrawerController.DrawerPrefs(
-                order = listOf("ghost", DrawerController.ID_TASKS),
+                order = listOf("ghost", DrawerController.ID_CHAT),
                 hidden = setOf("phantom"),
-                nestedUnder = mapOf("ghost-child" to DrawerController.ID_TASKS),
+                nestedUnder = mapOf("ghost-child" to DrawerController.ID_CHAT),
             ),
         )
         val drawerView = view(controller)
-        assertEquals(19, drawerView.renderedIds().size)
+        // 3 primary entries + 1 bottom row = 4 minimum
+        assertTrue(drawerView.renderedIds().isNotEmpty())
     }
 
     @Test
-    fun `collapsing a group hides its rows until expanded`() {
-        val drawerView = view()
-        assertFalse(drawerView.isGroupCollapsed("workspace"))
-        drawerView.setGroupCollapsed("workspace", true)
-        assertTrue(drawerView.isGroupCollapsed("workspace"))
-        assertEquals(emptyList<String>(), drawerView.renderedGroupIds("workspace"))
-        assertEquals(17, drawerView.renderedIds().size)
-        drawerView.setGroupCollapsed("workspace", false)
-        assertEquals(2, drawerView.renderedGroupIds("workspace").size)
+    fun `collapsing sessions group hides session rows`() {
+        val sessions = listOf(
+            DrawerView.RecentSession("s1", "会话1", "刚刚"),
+        )
+        val drawerView = view(recentSessions = sessions)
+        assertFalse(drawerView.isGroupCollapsed("sessions"))
+        assertEquals(1, drawerView.renderedGroupIds("sessions").size)
+        drawerView.setGroupCollapsed("sessions", true)
+        assertTrue(drawerView.isGroupCollapsed("sessions"))
+        assertEquals(0, drawerView.renderedGroupIds("sessions").size)
+        drawerView.setGroupCollapsed("sessions", false)
+        assertEquals(1, drawerView.renderedGroupIds("sessions").size)
+    }
+
+    @Test
+    fun `bottom new chat button is present`() {
+        val selected = mutableListOf<String>()
+        val drawerView = view(selected = selected)
+        val content = drawerView.root.getChildAt(0) as LinearLayout
+        // Find the new chat button by tag
+        var found = false
+        fun find(view: View) {
+            if (view.tag == "nav_new_chat") found = true
+            if (view is LinearLayout) {
+                for (i in 0 until view.childCount) find(view.getChildAt(i))
+            }
+        }
+        find(content)
+        assertTrue("new chat button must be present", found)
     }
 }

@@ -590,8 +590,8 @@ class MainActivity : AppCompatActivity() {
      * [lastEntry]。旧的 Tab int 状态（currentTab/lastTab/settingsVisible）
      * 已删除，不留两种状态源（方案 §1.2）。
      */
-    private var currentEntry: String = DrawerController.ID_NEW_CONVERSATION
-    private var lastEntry: String = DrawerController.ID_NEW_CONVERSATION
+    private var currentEntry: String = DrawerController.ID_CHAT
+    private var lastEntry: String = DrawerController.ID_CHAT
     /** 阶段 3（U3/批 3a）：任务详情浮层（复用设置浮层的宿主模式）。 */
     private var taskDetailVisible = false
     private var taskDetailTaskId: String? = null
@@ -1130,7 +1130,7 @@ class MainActivity : AppCompatActivity() {
         // V5 C2（批 2，第 3 步）：旋转恢复当前抽屉入口（String）+ 是否在
         // 对话内；进程被杀后重开时 savedInstanceState 为空，自然落首页。
         val startEntry = savedInstanceState?.getString(KEY_ENTRY)
-            ?: DrawerController.ID_NEW_CONVERSATION
+            ?: DrawerController.ID_CHAT
         inConversation = savedInstanceState?.getBoolean(KEY_IN_CONVERSATION, false) ?: false
         pendingTaskDetailId = savedInstanceState?.getString(KEY_TASK_DETAIL)
         showEntry(startEntry)
@@ -1183,6 +1183,7 @@ class MainActivity : AppCompatActivity() {
             activeTargetProvider = { currentEntry },
             userLabelProvider = { drawerUserLabel() },
             themeLabelProvider = { currentThemeLabel() },
+            recentSessionsProvider = { recentSessionsForDrawer() },
         ).also { view ->
             drawerContainer.addView(view.root)
         }
@@ -1267,15 +1268,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * V5 Phase B C2（批 3，R2）：抽屉入口点按——入口 id 是注册表 id
-     * （见 [EntryRegistry]），不再是旧扁平抽屉的 10 项 id。
-     * 待开发：只 toast 提示，不关抽屉、不伪装已实现。已实现：对话
-     * （→新对话动作，建新对话再回首页）；“界面与主题”走
-     * [openRegistryEntry] 的 ACTION 分支调 cycleTheme()；其余按
-     * 注册表目标路由（见 showEntry）。注册表外的控制器 id（嵌套
-     * 的自定义入口）按旧路由兜底。
+     * V5 导航整改最终定稿（2026-11-15）：抽屉入口点按——入口 id 是注册表 id。
+     * 一级入口只有三项：对话、项目、控制。
+     * 底部 ＋ 新对话按钮触发 nav_new_chat → 新建对话。
+     * 底部账号头像触发 nav_workbench → 进入设置页面。
+     * 会话列表行触发 session:<id> → 打开对应会话。
      */
     private fun onDrawerEntrySelected(registryId: String) {
+        // 底部 ＋ 新对话按钮
+        if (registryId == "nav_new_chat") {
+            closeDrawer()
+            newConversationAndShow()
+            return
+        }
+        // 会话列表行点击
+        if (registryId.startsWith("session:")) {
+            val sessionId = registryId.removePrefix("session:")
+            closeDrawer()
+            openSessionById(sessionId)
+            return
+        }
         val entry = EntryRegistry.find(registryId)
         if (entry == null) {
             closeDrawer()
@@ -1290,9 +1302,10 @@ class MainActivity : AppCompatActivity() {
             toast(entry.todoMessage ?: "${entry.title}待开发")
             return
         }
+        // nav_chat 进入对话首页（不新建对话，只显示当前会话或首页）
         if (registryId == "nav_chat") {
             closeDrawer()
-            newConversationAndShow()
+            showEntry(DrawerController.ID_CHAT)
             return
         }
         closeDrawer()
@@ -1596,7 +1609,7 @@ class MainActivity : AppCompatActivity() {
         hideTaskDetail()
         val screen = DrawerRouter.screenFor(entryId)
         val entry = when (screen) {
-            EntryScreen.HOME -> DrawerController.ID_NEW_CONVERSATION
+            EntryScreen.HOME -> DrawerController.ID_CHAT
             EntryScreen.HISTORY -> DrawerController.ID_HISTORY_SEARCH
             EntryScreen.PROJECTS -> DrawerController.ID_PROJECTS
             EntryScreen.TASKS -> DrawerController.ID_TASKS
@@ -1606,9 +1619,10 @@ class MainActivity : AppCompatActivity() {
             EntryScreen.RESULTS -> DrawerController.ID_RESULTS
             EntryScreen.HELP -> DrawerController.ID_HELP
             EntryScreen.SETTINGS -> DrawerController.ID_SETTINGS
-            EntryScreen.CONSOLE -> DrawerController.ID_CONSOLE
+            EntryScreen.CONSOLE -> DrawerController.ID_CONTROL
             EntryScreen.MCP_PLUGINS -> DrawerController.ID_MCP_PLUGINS
             EntryScreen.TEAM_CHANNEL -> DrawerController.ID_TEAM_CHANNEL
+            EntryScreen.CHANNELS -> DrawerController.ID_CHANNELS
         }
         if (!isSettingsEntry(entry)) lastEntry = entry
         currentEntry = entry
@@ -1628,11 +1642,12 @@ class MainActivity : AppCompatActivity() {
         screenHelp.visibility = if (screen == EntryScreen.HELP) View.VISIBLE else View.GONE
         screenConsole.visibility = if (screen == EntryScreen.CONSOLE) View.VISIBLE else View.GONE
         screenMcpPlugins.visibility = if (screen == EntryScreen.MCP_PLUGINS) View.VISIBLE else View.GONE
-        screenTeamChannel.visibility = if (screen == EntryScreen.TEAM_CHANNEL) View.VISIBLE else View.GONE
+        screenTeamChannel.visibility =
+            if (screen == EntryScreen.TEAM_CHANNEL || screen == EntryScreen.CHANNELS) View.VISIBLE else View.GONE
         // 离开控制台即停自动刷新（不空转耗电）；进入时由 CONSOLE 分支起 ticker。
         if (screen != EntryScreen.CONSOLE) stopConsoleTicker()
         // 离开频道即停 WS 订阅与兜底轮询（不空转耗电）；进入时由 TEAM_CHANNEL 分支重起。
-        if (screen != EntryScreen.TEAM_CHANNEL) stopTeamChannelFeed()
+        if (screen != EntryScreen.TEAM_CHANNEL && screen != EntryScreen.CHANNELS) stopTeamChannelFeed()
         when (screen) {
             EntryScreen.HOME -> {
                 if (inConversation) {
@@ -1666,6 +1681,12 @@ class MainActivity : AppCompatActivity() {
             }
             EntryScreen.MCP_PLUGINS -> refreshMcpPlugins()
             EntryScreen.TEAM_CHANNEL -> {
+                refreshTeamChannel()
+                startTeamChannelFeed()
+            }
+            // 频道一级入口：当前直接进入已有真实团队频道页（消息/文件/任务）。
+            // 频道列表 / 私聊双分区首页尚未实现——见 HANDOFF.md「未完成」。
+            EntryScreen.CHANNELS -> {
                 refreshTeamChannel()
                 startTeamChannelFeed()
             }
@@ -11087,6 +11108,71 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 抽屉中部最近会话列表数据：从 SessionLedger 读真实会话，
+     * 按 updatedAt 降序取前 8 条。无会话或大脑未加载时返回空列表。
+     * 绝不用假数据模拟——无数据时抽屉显示"暂无会话记录"。
+     */
+    private fun recentSessionsForDrawer(): List<DrawerView.RecentSession> {
+        val components = brainComponents ?: return emptyList()
+        return try {
+            val sessions = components.sessionLedger.listSessions("user")
+            sessions.sortedByDescending { it.updatedAtEpochSeconds }.take(8).map { session ->
+                val title = if (session.name.startsWith("chat:")) {
+                    val conversationId = session.name.removePrefix("chat:")
+                    try {
+                        val messages = components.conversationStore.listMessages(conversationId)
+                        val first = messages.firstOrNull { it.role == "user" }
+                        first?.content?.trim()?.take(40)?.ifEmpty { "空会话" } ?: "空会话"
+                    } catch (_: Exception) {
+                        "暂时无法读取"
+                    }
+                } else {
+                    session.name.ifEmpty { "未命名会话" }
+                }
+                DrawerView.RecentSession(
+                    sessionId = session.sessionId,
+                    label = title,
+                    timeLabel = UiKit.shortTime(session.updatedAtEpochSeconds),
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 从抽屉会话列表点击打开指定会话。 */
+    private fun openSessionById(sessionId: String) {
+        val components = brainComponents
+        if (components == null) {
+            toast("大脑加载中，稍候再试。")
+            return
+        }
+        try {
+            val sessions = components.sessionLedger.listSessions("user")
+            val session = sessions.firstOrNull { it.sessionId == sessionId }
+            if (session != null) {
+                val label = if (session.name.startsWith("chat:")) {
+                    val conversationId = session.name.removePrefix("chat:")
+                    try {
+                        val messages = components.conversationStore.listMessages(conversationId)
+                        val first = messages.firstOrNull { it.role == "user" }
+                        first?.content?.trim()?.take(40)?.ifEmpty { "空会话" } ?: "空会话"
+                    } catch (_: Exception) {
+                        "会话"
+                    }
+                } else {
+                    session.name.ifEmpty { "会话" }
+                }
+                openSession(sessionId, label)
+            } else {
+                toast("会话不存在或已被删除。")
+            }
+        } catch (_: Exception) {
+            toast("打开会话失败，请重试。")
+        }
+    }
+
+    /**
      * 打开抽屉时刷新角标：运行中任务数读任务库（后台线程），待审批数
      * 读审批门（内存字段）。任一数读不到为 null——抽屉里不显示角标，
      * 绝不伪造数字。
@@ -11186,12 +11272,12 @@ class MainActivity : AppCompatActivity() {
             projectController.showProjectList()
             return
         }
-        if (currentEntry == DrawerController.ID_NEW_CONVERSATION && inConversation) {
+        if (currentEntry == DrawerController.ID_CHAT && inConversation) {
             backToSessionList()
             return
         }
-        if (currentEntry != DrawerController.ID_NEW_CONVERSATION) {
-            showEntry(DrawerController.ID_NEW_CONVERSATION)
+        if (currentEntry != DrawerController.ID_CHAT) {
+            showEntry(DrawerController.ID_CHAT)
             return
         }
         super.onBackPressed()

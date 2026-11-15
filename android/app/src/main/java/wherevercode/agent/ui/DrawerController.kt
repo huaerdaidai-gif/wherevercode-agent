@@ -1,23 +1,18 @@
 package wherevercode.agent.ui
 
 /**
- * V5 抽屉模型（Phase B C2，骨架）。
+ * V5 抽屉模型（导航整改最终定稿，2026-11-15）。
  *
- * 依据：V5-UI.md §三（唯一全局功能入口：左上可嵌套抽屉）。
- * 默认一级入口 10 项，顺序即 V5-UI.md §三所列顺序；允许隐藏、排序、
- * 收藏、嵌套；非基础能力折叠到“更多”，不默认铺开。
+ * 左侧抽屉一级菜单严格只有四项：对话、项目、频道、控制。
+ * 抽屉中部显示最近会话列表与搜索。
+ * 抽屉底部固定：左侧账号头像（点击进入完整设置），右侧 ＋ 新对话。
+ * 设置不再是一级菜单。工作台统一改名「项目」，控制台统一改名「控制」。
  *
- * 入口 id 用字符串：默认 10 项是固定常量，后续能力（例如 Matrix、
- * 工作流）以新 id 注册为非基础能力进“更多”，不用改模型。
+ * 旧的一级入口 id（new_conversation / history_search / tasks / agents_team
+ * 等）保留为路由常量，但不再出现在 DEFAULT_ORDER 中——它们从三个主入口
+ * 的子页面内逐层访问。70 屏旗舰功能全部保留，通过业务导航逐层访问。
  *
- * 纯 JVM 逻辑，不含 Android View，不接线进 MainActivity——接线是
- * C2-批 2 的事，且必须等 C1 首批落定后（C1 正在改 MainActivity，
- * 见实施计划 §C2 与 C1 的边界）。
- *
- * 本文件只写模型，不复用任何第三方代码；V5-UI.md §四的自由度
- * 5 档尚未实现（全树 grep 零命中），本模型不假装有自由度过滤——
- * “按自由度动态呈现”是 C5/Phase D 的事，首个 APK 只保留入口
- * （见 Phase 0 报告 §7.2 第 3 项）。
+ * 纯 JVM 逻辑，不含 Android View。与 iOS 共享导航命名、信息架构和行为契约。
  */
 class DrawerController {
 
@@ -25,7 +20,7 @@ class DrawerController {
     data class DrawerEntry(
         val id: String,
         val label: String,
-        /** 是否基础能力：false 的入口默认折叠到“更多”，不占一级位置。 */
+        /** 是否基础能力：false 的入口默认折叠到"更多"，不占一级位置。 */
         val isBasic: Boolean = true,
         /** 嵌套子入口（空 = 叶子）。子入口同样可再嵌套。 */
         val children: List<DrawerEntry> = emptyList(),
@@ -38,64 +33,83 @@ class DrawerController {
         val favorites: Set<String> = emptySet(),
         /** 子入口 id → 父入口 id。 */
         val nestedUnder: Map<String, String> = emptyMap(),
-        /** “更多”是否展开；默认折叠。 */
+        /** "更多"是否展开；默认折叠。 */
         val moreExpanded: Boolean = false,
     )
 
     companion object {
-        // 默认一级入口 id（V5-UI.md §三，顺序即所列顺序，不得擅自调换）。
-        const val ID_NEW_CONVERSATION = "new_conversation"
-        const val ID_HISTORY_SEARCH = "history_search"
+        // ══════════════════════════════════════════════════════════════
+        // V5 导航整改最终定稿：一级菜单严格只有三项
+        // ══════════════════════════════════════════════════════════════
+
+        /** 对话：自然语言 Agent 工作界面（参考 Claude/Codex）。 */
+        const val ID_CHAT = "chat"
+
+        /** 项目：真实项目列表（原 ID_PROJECTS，保留兼容）。 */
         const val ID_PROJECTS = "projects"
+
+        /** 频道：频道 / 私聊双分区，真实消息与文件协作入口。 */
+        const val ID_CHANNELS = "channels"
+
+        /** 控制：真实平台状态及 Agent/设备/模型/连接器/调度/监控/事件/权限审计。 */
+        const val ID_CONTROL = "control"
+
+        // ══════════════════════════════════════════════════════════════
+        // 旧入口 id（保留为路由常量，从三个主入口的子页面内逐层访问）
+        // ══════════════════════════════════════════════════════════════
+
+        /** 新对话动作（抽屉底部 ＋ 按钮触发，不再是一级入口）。 */
+        const val ID_NEW_CONVERSATION = "new_conversation"
+
+        /** 会话历史（从对话入口内访问）。 */
+        const val ID_HISTORY_SEARCH = "history_search"
+
+        /** 任务（从项目入口内访问）。 */
         const val ID_TASKS = "tasks"
+
+        /** Agent 与团队（从控制入口内访问）。 */
         const val ID_AGENTS_TEAM = "agents_team"
+
+        /** 设备（从控制入口内访问）。 */
         const val ID_DEVICES = "devices"
+
+        /** 工具与连接（从控制入口内访问）。 */
         const val ID_TOOLS_CONNECTIONS = "tools_connections"
+
+        /** 成果（从项目入口内访问）。 */
         const val ID_RESULTS = "results"
+
+        /** 帮助（从设置页内访问）。 */
         const val ID_HELP = "help"
+
+        /** 设置（抽屉底部账号头像点击进入，不再是一级入口）。 */
         const val ID_SETTINGS = "settings"
 
-        /**
-         * 控制台入口 id（V5 控制台，2026-11-11）。
-         * 不是默认一级入口：V5-UI.md §三的一级只有上面 10 项；控制台在
-         * 抽屉“扩展与资源”分组（EntryRegistry nav_console），按需展开的
-         * 专业工作台，不进 DEFAULT_ORDER、不占首页。
-         */
+        /** 控制台（已改名「控制」，ID_CONTROL；保留旧 id 兼容旧路由）。 */
         const val ID_CONSOLE = "console"
 
-        /**
-         * MCP / 插件入口 id（V5 MCP + 插件，2026-11-11）。
-         * 与控制台同级：抽屉“扩展与资源”分组（EntryRegistry
-         * nav_mcp_plugins），按需展开的扩展管理屏，不进 DEFAULT_ORDER。
-         */
+        /** MCP / 插件（从控制入口内访问）。 */
         const val ID_MCP_PLUGINS = "mcp_plugins"
 
-        /**
-         * 团队频道入口 id（P3，2026-11-11）。
-         * 与控制台同级：抽屉“扩展与资源”分组（EntryRegistry
-         * nav_team_channel），按需展开的有界团队聊天页，不进
-         * DEFAULT_ORDER、不占首页。
-         */
+        /** 团队频道详情（从「频道」首页进入，不再占一级菜单位置）。 */
         const val ID_TEAM_CHANNEL = "team_channel"
 
-        /** V5-UI.md §三默认一级入口顺序。 */
+        /** 一级菜单固定顺序：对话 → 项目 → 频道 → 控制。 */
         val DEFAULT_ORDER: List<String> = listOf(
-            ID_NEW_CONVERSATION,
-            ID_HISTORY_SEARCH,
+            ID_CHAT,
             ID_PROJECTS,
-            ID_TASKS,
-            ID_AGENTS_TEAM,
-            ID_DEVICES,
-            ID_TOOLS_CONNECTIONS,
-            ID_RESULTS,
-            ID_HELP,
-            ID_SETTINGS,
+            ID_CHANNELS,
+            ID_CONTROL,
         )
 
         private val DEFAULT_LABELS: Map<String, String> = mapOf(
+            ID_CHAT to "对话",
+            ID_PROJECTS to "项目",
+            ID_CHANNELS to "频道",
+            ID_CONTROL to "控制",
+            // 旧入口标签（保留兼容，不在一级显示）
             ID_NEW_CONVERSATION to "新对话",
             ID_HISTORY_SEARCH to "会话",
-            ID_PROJECTS to "项目",
             ID_TASKS to "任务",
             ID_AGENTS_TEAM to "Agent 与团队",
             ID_DEVICES to "设备",
@@ -103,9 +117,12 @@ class DrawerController {
             ID_RESULTS to "成果",
             ID_HELP to "帮助",
             ID_SETTINGS to "设置",
+            ID_CONSOLE to "控制",
+            ID_MCP_PLUGINS to "MCP / 插件",
+            ID_TEAM_CHANNEL to "团队频道",
         )
 
-        /** 默认 10 项入口（全为基础能力，全部平铺在一级）。 */
+        /** 默认 4 项入口（对话、项目、频道、控制）。 */
         fun defaultEntries(): List<DrawerEntry> =
             DEFAULT_ORDER.map { id ->
                 DrawerEntry(id = id, label = DEFAULT_LABELS.getValue(id))
@@ -264,7 +281,7 @@ class DrawerController {
         moreExpanded = prefs.moreExpanded
     }
 
-    /** 恢复默认：10 项默认顺序、无隐藏、无收藏、无嵌套、“更多”折叠。 */
+    /** 恢复默认：4 项固定顺序（对话/项目/频道/控制）。 */
     fun reset() {
         order = DEFAULT_ORDER.toMutableList()
         hidden.clear()

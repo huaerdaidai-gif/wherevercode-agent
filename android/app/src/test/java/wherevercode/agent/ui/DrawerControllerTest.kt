@@ -8,10 +8,10 @@ import org.junit.Assert.fail
 import wherevercode.agent.ui.DrawerController.DrawerEntry
 
 /**
- * 抽屉模型测试（Phase B C2，骨架）。
+ * 抽屉模型测试（V5 导航整改最终定稿，2026-11-15）。
  *
- * 依据：V5-UI.md §三——默认一级入口 10 项；可隐藏/排序/收藏/嵌套；
- * 非基础能力折叠到“更多”。
+ * 一级菜单严格只有三项：对话、项目、控制。
+ * 旧入口 id 保留为路由常量，但不再出现在 DEFAULT_ORDER 中。
  * 纯 JVM 测试，不依赖 Android。
  */
 class DrawerControllerTest {
@@ -20,16 +20,13 @@ class DrawerControllerTest {
         controller.visibleTopLevel().map { it.id }
 
     @Test
-    fun `default entries are exactly the ten V5 entries in order`() {
+    fun `default entries are exactly the three V5 primary entries in order`() {
         val entries = DrawerController.defaultEntries()
 
-        assertEquals(10, entries.size)
+        assertEquals(3, entries.size)
         assertEquals(DrawerController.DEFAULT_ORDER, entries.map { it.id })
         assertEquals(
-            listOf(
-                "新对话", "会话", "项目", "任务", "Agent 与团队",
-                "设备", "工具与连接", "成果", "帮助", "设置",
-            ),
+            listOf("对话", "项目", "控制"),
             entries.map { it.label },
         )
         assertTrue(entries.all { it.isBasic })
@@ -37,7 +34,7 @@ class DrawerControllerTest {
     }
 
     @Test
-    fun `visible top level defaults to all ten in order`() {
+    fun `visible top level defaults to all three in order`() {
         val controller = DrawerController()
 
         assertEquals(DrawerController.DEFAULT_ORDER, ids(controller))
@@ -51,8 +48,7 @@ class DrawerControllerTest {
 
         assertTrue(controller.hide(DrawerController.ID_PROJECTS))
         assertFalse(DrawerController.ID_PROJECTS in ids(controller))
-        assertEquals(9, controller.visibleTopLevel().size)
-        // 重复隐藏是无操作。
+        assertEquals(2, controller.visibleTopLevel().size)
         assertFalse(controller.hide(DrawerController.ID_PROJECTS))
 
         assertTrue(controller.show(DrawerController.ID_PROJECTS))
@@ -68,8 +64,8 @@ class DrawerControllerTest {
         assertFalse(controller.show("no_such_entry"))
         assertFalse(controller.toggleFavorite("no_such_entry"))
         assertFalse(controller.move("no_such_entry", 0))
-        assertFalse(controller.nest("no_such_entry", DrawerController.ID_SETTINGS))
-        assertFalse(controller.nest(DrawerController.ID_HELP, "no_such_entry"))
+        assertFalse(controller.nest("no_such_entry", DrawerController.ID_CONTROL))
+        assertFalse(controller.nest(DrawerController.ID_CHAT, "no_such_entry"))
         assertFalse(controller.unnest("no_such_entry"))
         assertEquals(DrawerController.DEFAULT_ORDER, ids(controller))
     }
@@ -78,32 +74,31 @@ class DrawerControllerTest {
     fun `move reorders top level and clamps out of range index`() {
         val controller = DrawerController()
 
-        assertTrue(controller.move(DrawerController.ID_SETTINGS, 0))
-        assertEquals(DrawerController.ID_SETTINGS, ids(controller).first())
-        assertEquals(10, ids(controller).size)
+        assertTrue(controller.move(DrawerController.ID_CONTROL, 0))
+        assertEquals(DrawerController.ID_CONTROL, ids(controller).first())
+        assertEquals(3, ids(controller).size)
 
-        assertTrue(controller.move(DrawerController.ID_NEW_CONVERSATION, 99))
-        assertEquals(DrawerController.ID_NEW_CONVERSATION, ids(controller).last())
+        assertTrue(controller.move(DrawerController.ID_CHAT, 99))
+        assertEquals(DrawerController.ID_CHAT, ids(controller).last())
 
-        assertTrue(controller.move(DrawerController.ID_NEW_CONVERSATION, -5))
-        assertEquals(DrawerController.ID_NEW_CONVERSATION, ids(controller).first())
+        assertTrue(controller.move(DrawerController.ID_CHAT, -5))
+        assertEquals(DrawerController.ID_CHAT, ids(controller).first())
     }
 
     @Test
     fun `favorite pins to front preserving custom order among favorites`() {
         val controller = DrawerController()
 
-        controller.toggleFavorite(DrawerController.ID_TASKS)
         controller.toggleFavorite(DrawerController.ID_PROJECTS)
+        controller.toggleFavorite(DrawerController.ID_CHAT)
 
         val visible = ids(controller)
-        assertEquals(DrawerController.ID_PROJECTS, visible[0])
-        assertEquals(DrawerController.ID_TASKS, visible[1])
-        assertEquals(10, visible.size)
+        assertEquals(DrawerController.ID_CHAT, visible[0])
+        assertEquals(DrawerController.ID_PROJECTS, visible[1])
+        assertEquals(3, visible.size)
 
-        // 取消收藏后恢复默认顺序。
-        controller.toggleFavorite(DrawerController.ID_TASKS)
         controller.toggleFavorite(DrawerController.ID_PROJECTS)
+        controller.toggleFavorite(DrawerController.ID_CHAT)
         assertEquals(DrawerController.DEFAULT_ORDER, ids(controller))
     }
 
@@ -111,66 +106,64 @@ class DrawerControllerTest {
     fun `favorite does not resurrect a hidden entry`() {
         val controller = DrawerController()
 
-        controller.hide(DrawerController.ID_DEVICES)
-        controller.toggleFavorite(DrawerController.ID_DEVICES)
+        controller.hide(DrawerController.ID_CONTROL)
+        controller.toggleFavorite(DrawerController.ID_CONTROL)
 
-        assertTrue(controller.isFavorite(DrawerController.ID_DEVICES))
-        assertFalse(DrawerController.ID_DEVICES in ids(controller))
+        assertTrue(controller.isFavorite(DrawerController.ID_CONTROL))
+        assertFalse(DrawerController.ID_CONTROL in ids(controller))
     }
 
     @Test
     fun `nest moves child out of top level into parent children`() {
         val controller = DrawerController()
 
-        assertTrue(controller.nest(DrawerController.ID_HELP, DrawerController.ID_SETTINGS))
-        assertFalse(DrawerController.ID_HELP in ids(controller))
+        assertTrue(controller.nest(DrawerController.ID_CONTROL, DrawerController.ID_PROJECTS))
+        assertFalse(DrawerController.ID_CONTROL in ids(controller))
         assertEquals(
-            listOf(DrawerController.ID_HELP),
-            controller.childrenOf(DrawerController.ID_SETTINGS).map { it.id },
+            listOf(DrawerController.ID_CONTROL),
+            controller.childrenOf(DrawerController.ID_PROJECTS).map { it.id },
         )
-        assertTrue(controller.isNested(DrawerController.ID_HELP))
-        assertEquals(9, controller.visibleTopLevel().size)
+        assertTrue(controller.isNested(DrawerController.ID_CONTROL))
+        assertEquals(2, controller.visibleTopLevel().size)
 
-        // 取消嵌套后回到一级末尾。
-        assertTrue(controller.unnest(DrawerController.ID_HELP))
-        assertFalse(controller.isNested(DrawerController.ID_HELP))
-        assertEquals(DrawerController.ID_HELP, ids(controller).last())
+        assertTrue(controller.unnest(DrawerController.ID_CONTROL))
+        assertFalse(controller.isNested(DrawerController.ID_CONTROL))
+        assertEquals(DrawerController.ID_CONTROL, ids(controller).last())
     }
 
     @Test
     fun `nest rejects self nesting and cycles`() {
         val controller = DrawerController()
 
-        assertFalse(controller.nest(DrawerController.ID_HELP, DrawerController.ID_HELP))
+        assertFalse(controller.nest(DrawerController.ID_CHAT, DrawerController.ID_CHAT))
 
-        assertTrue(controller.nest(DrawerController.ID_HELP, DrawerController.ID_SETTINGS))
-        // SETTINGS 已是 HELP 的父入口，再把 SETTINGS 嵌到 HELP 下会成环。
-        assertFalse(controller.nest(DrawerController.ID_SETTINGS, DrawerController.ID_HELP))
-        assertFalse(controller.isNested(DrawerController.ID_SETTINGS))
+        assertTrue(controller.nest(DrawerController.ID_CONTROL, DrawerController.ID_PROJECTS))
+        assertFalse(controller.nest(DrawerController.ID_PROJECTS, DrawerController.ID_CONTROL))
+        assertFalse(controller.isNested(DrawerController.ID_PROJECTS))
     }
 
     @Test
     fun `move of a nested entry is a no-op`() {
         val controller = DrawerController()
 
-        assertTrue(controller.nest(DrawerController.ID_HELP, DrawerController.ID_SETTINGS))
-        assertFalse(controller.move(DrawerController.ID_HELP, 0))
-        assertFalse(DrawerController.ID_HELP in ids(controller))
+        assertTrue(controller.nest(DrawerController.ID_CONTROL, DrawerController.ID_PROJECTS))
+        assertFalse(controller.move(DrawerController.ID_CONTROL, 0))
+        assertFalse(DrawerController.ID_CONTROL in ids(controller))
     }
 
     @Test
     fun `hiding a parent hides its children too`() {
         val controller = DrawerController()
 
-        controller.nest(DrawerController.ID_HELP, DrawerController.ID_SETTINGS)
-        controller.hide(DrawerController.ID_SETTINGS)
+        controller.nest(DrawerController.ID_CONTROL, DrawerController.ID_PROJECTS)
+        controller.hide(DrawerController.ID_PROJECTS)
 
-        assertTrue(controller.childrenOf(DrawerController.ID_SETTINGS).isEmpty())
-        assertTrue(controller.isNested(DrawerController.ID_HELP))
-        assertTrue(controller.show(DrawerController.ID_SETTINGS))
+        assertTrue(controller.childrenOf(DrawerController.ID_PROJECTS).isEmpty())
+        assertTrue(controller.isNested(DrawerController.ID_CONTROL))
+        assertTrue(controller.show(DrawerController.ID_PROJECTS))
         assertEquals(
-            listOf(DrawerController.ID_HELP),
-            controller.childrenOf(DrawerController.ID_SETTINGS).map { it.id },
+            listOf(DrawerController.ID_CONTROL),
+            controller.childrenOf(DrawerController.ID_PROJECTS).map { it.id },
         )
     }
 
@@ -184,7 +177,7 @@ class DrawerControllerTest {
 
         assertFalse("matrix" in ids(controller))
         assertEquals(listOf("matrix"), controller.moreEntries().map { it.id })
-        assertEquals(10, controller.visibleTopLevel().size)
+        assertEquals(3, controller.visibleTopLevel().size)
     }
 
     @Test
@@ -193,7 +186,7 @@ class DrawerControllerTest {
 
         try {
             controller.addCustomEntry(
-                DrawerEntry(id = DrawerController.ID_SETTINGS, label = "设置（重复）"),
+                DrawerEntry(id = DrawerController.ID_CHAT, label = "对话（重复）"),
             )
             fail("duplicate registration must throw")
         } catch (e: IllegalArgumentException) {
@@ -216,10 +209,10 @@ class DrawerControllerTest {
     @Test
     fun `prefs round trip preserves order hidden favorites and nesting`() {
         val controller = DrawerController()
-        controller.move(DrawerController.ID_SETTINGS, 0)
-        controller.hide(DrawerController.ID_DEVICES)
-        controller.toggleFavorite(DrawerController.ID_TASKS)
-        controller.nest(DrawerController.ID_HELP, DrawerController.ID_SETTINGS)
+        controller.move(DrawerController.ID_CONTROL, 0)
+        controller.hide(DrawerController.ID_PROJECTS)
+        controller.toggleFavorite(DrawerController.ID_CHAT)
+        controller.nest(DrawerController.ID_PROJECTS, DrawerController.ID_CONTROL)
         controller.setMoreExpanded(true)
 
         val prefs = controller.toPrefs()
@@ -237,7 +230,7 @@ class DrawerControllerTest {
             order = listOf("no_such_entry") + DrawerController.DEFAULT_ORDER,
             hidden = setOf("no_such_entry"),
             favorites = setOf("no_such_entry"),
-            nestedUnder = mapOf("no_such_entry" to DrawerController.ID_SETTINGS),
+            nestedUnder = mapOf("no_such_entry" to DrawerController.ID_CHAT),
         )
 
         controller.applyPrefs(prefs)
@@ -246,12 +239,12 @@ class DrawerControllerTest {
     }
 
     @Test
-    fun `reset restores the ten defaults`() {
+    fun `reset restores the three defaults`() {
         val controller = DrawerController()
-        controller.move(DrawerController.ID_SETTINGS, 0)
-        controller.hide(DrawerController.ID_DEVICES)
-        controller.toggleFavorite(DrawerController.ID_TASKS)
-        controller.nest(DrawerController.ID_HELP, DrawerController.ID_SETTINGS)
+        controller.move(DrawerController.ID_CONTROL, 0)
+        controller.hide(DrawerController.ID_PROJECTS)
+        controller.toggleFavorite(DrawerController.ID_CHAT)
+        controller.nest(DrawerController.ID_PROJECTS, DrawerController.ID_CONTROL)
         controller.setMoreExpanded(true)
 
         controller.reset()
@@ -259,7 +252,21 @@ class DrawerControllerTest {
         assertEquals(DrawerController.DEFAULT_ORDER, ids(controller))
         assertTrue(controller.moreEntries().isEmpty())
         assertFalse(controller.moreExpanded)
-        assertFalse(controller.isFavorite(DrawerController.ID_TASKS))
-        assertFalse(controller.isNested(DrawerController.ID_HELP))
+        assertFalse(controller.isFavorite(DrawerController.ID_CHAT))
+        assertFalse(controller.isNested(DrawerController.ID_PROJECTS))
+    }
+
+    @Test
+    fun `old entry ids are preserved as routing constants`() {
+        // 旧入口 id 保留为路由常量，不在 DEFAULT_ORDER 中。
+        assertTrue(DrawerController.ID_NEW_CONVERSATION !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_HISTORY_SEARCH !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_TASKS !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_AGENTS_TEAM !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_DEVICES !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_TOOLS_CONNECTIONS !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_RESULTS !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_HELP !in DrawerController.DEFAULT_ORDER)
+        assertTrue(DrawerController.ID_SETTINGS !in DrawerController.DEFAULT_ORDER)
     }
 }

@@ -1,42 +1,22 @@
 package wherevercode.agent.ui
 
 /**
- * 入口注册表（V5 C2-3-R1d，maintainer 2026-11-10 补充六：去重汇集）。
+ * 入口注册表（V5 导航整改最终定稿，2026-11-15）。
  *
- * 唯一事实来源：V5 原型图、v2 七图、V4.3 八张图里去重后的全部功能入口
- * 都登记在这里，一份，不重复造轮子。首页（问候建议 pill + 顶栏）与
- * 抽屉（R2）都从这份注册表取入口；抽屉不得另起一份注册表。
+ * 一级菜单严格只有三项：对话、项目、控制。
+ * 旧入口从三个主入口的子页面内逐层访问。
+ * 设置不再是一级菜单：点击抽屉底部账号头像进入独立设置页面。
+ * 工作台统一改名「项目」，控制台统一改名「控制」。
+ * 70 屏旗舰功能全部保留，通过业务导航逐层访问。
+ * 与 iOS 共享导航命名、信息架构和行为契约。
  *
- * 去重规则（maintainer 原话 + 补充六清单）：
- * - 同一功能在多张图出现多次只做一份：任务详情、控制台（六大页面）、
- *   执行权限 L0–L4、团队群聊、项目管理、工具与连接中心、Agent 与设备
- *   管理、团队拓扑、用量与成本、运行日志、项目文件与代码各一份。
+ * 去重规则：
+ * - 同一功能在多张图出现多次只做一份。
  * - 不单做、并进别处：智能工作简报并进控制台总览；自动交付与成果归档
- *   并进任务详情的交付页（与成果聚合共用）；我的工作台与功能管理/设置
- *   合并为一份设置/工作台（开关只留一套）。
- * - 底部五标签导航不要（V5 结构是极简首页 + 抽屉 + 按需工作台）；图里
- *   的 America VPS 只是设备列表里的一个节点，验收不依赖它。
- * - 会话从顶栏与 V5 一级抽屉入口均可到达。
- * - 工作台行与底部齿轮是同一入口（nav_workbench）的两个位置，不是两
- *   个入口；项目行与“我的项目”同理（同一 nav_projects 入口的快捷方式）。
- *
- * 状态规矩（Phase B C2 已有规矩）：已实现点按真可用；待开发点按只给
- * 提示（todoMessage），绝不伪装已实现。TODO 入口的 todoMessage 必须
- * 非空且含“待开发”。
- *
- * Agent 数据形状（补充六“不重复造轮子”）：团队管理功能后续批次落地时，
- * Agent 记录按老项目 agent_directory.py 的完整结构来，不重新定义。
- * 已只读核实（old wherevercode main，agent_directory.py，
- * sha 57eee083…，10,412 字节）：每条目字段为 id / name / kind
- * （device|cloud）/ access（cli|app|connector|webhook|api|manual）/
- * wake（cli|app|poll|realtime|api|manual）/ wake_label / capabilities
- * （默认 ['dev','review']）/ quota_rule / requires_repo / vendor /
- * runner / binary / binary_env / platform / dispatchable / known_limits；
- * 云端另有 add_hint，API 类另有 base_url；共 14 条（设备 8 条：
- * codex-cli、claude-code-cli、muse-code-cli、gemini-cli、codebuddy-cli、
- * agy、local-model、claude-desktop-code；云端 6 条：connector、webhook、
- * jules、manus、mistral、manual）。新 App 不照搬该文件的服务端
- * 派单逻辑，只复用字段形状。
+ *   并进任务详情的交付页。
+ * - 底部五标签导航不要（V5 结构是极简首页 + 抽屉 + 按需工作台）。
+ * - 会话从对话入口内访问。
+ * - 设置从抽屉底部账号头像进入，不在一级菜单。
  */
 object EntryRegistry {
 
@@ -116,50 +96,69 @@ object EntryRegistry {
         Entry("home_search", "会话", Group.HOME_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_HISTORY_SEARCH,
             "搜", "ic_search", null, null,
-            "会话也可从 V5 一级抽屉入口到达。"),
+            "会话也可从对话入口内访问。"),
         Entry("home_brain", "大脑", Group.HOME_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TOOLS_CONNECTIONS,
             "●", null, null, null, "点按进模型与连接（设置页工具与连接分节）。"),
         Entry("home_new", "新建", Group.HOME_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_NEW_CONVERSATION,
             "＋", null, null, null, null),
-        // ── V5 默认一级入口（V5-UI.md §三）──
-        Entry("nav_chat", "新对话", Group.DRAWER_TOP,
-            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_NEW_CONVERSATION,
-            "聊", null, null, null, null),
-        Entry("nav_history", "会话", Group.DRAWER_TOP,
-            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_HISTORY_SEARCH,
-            "搜", "ic_search", null, null, null),
+        // ══════════════════════════════════════════════════════════════
+        // V5 导航整改最终定稿：一级菜单严格只有四项
+        // ══════════════════════════════════════════════════════════════
+        // ── 对话：自然语言 Agent 工作界面（参考 Claude/Codex）──
+        Entry("nav_chat", "对话", Group.DRAWER_TOP,
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_CHAT,
+            "聊", null, null, null,
+            "对话是执行入口，不要求用户必须先进入任务中心创建正式任务。"),
+        // ── 项目：真实项目列表（参考 ChatGPT 项目页面布局）──
         Entry("nav_projects", "项目", Group.DRAWER_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_PROJECTS,
-            "项", null, null, null, "工作空间组的“我的项目”是同一入口的快捷方式。"),
-        Entry("nav_running_tasks", "任务", Group.DRAWER_TOP,
+            "项", null, null, null,
+            "进入项目后提供任务、代码、文件、Artifacts、审批、执行记录、交付结果等功能。"),
+        // ── 频道：频道 / 私聊双分区与真实消息协作 ──
+        Entry("nav_channels", "频道", Group.DRAWER_TOP,
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_CHANNELS,
+            "频", null, null, null,
+            "频道与私聊独立一级入口；频道内部收纳消息、文件与任务。"),
+        // ── 控制：真实平台状态及 Agent/设备/模型/连接器/调度/监控/事件/权限审计 ──
+        Entry("nav_control", "控制", Group.DRAWER_TOP,
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_CONTROL,
+            "控", null, null, null,
+            "控制功能不因 UI 极简而删减；控制台统一改名「控制」。"),
+        // ── 从对话入口内逐层访问的子入口 ──
+        Entry("nav_history", "会话", Group.DRAWER_WORKSPACE,
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_HISTORY_SEARCH,
+            "搜", "ic_search", null, null, "从对话入口内访问会话历史。"),
+        Entry("nav_running_tasks", "任务", Group.DRAWER_WORKSPACE,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TASKS,
-            "行", "ic_clock", null, null, "角标显示真实运行中的任务数。"),
-        Entry("nav_team", "团队（Agent / 成员）", Group.DRAWER_TOP,
+            "行", "ic_clock", null, null, "角标显示真实运行中的任务数；从项目入口内访问。"),
+        Entry("nav_results", "成果", Group.DRAWER_WORKSPACE,
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_RESULTS,
+            "果", null, null, null, "成果聚合从项目入口内访问。"),
+        // ── 从控制入口内逐层访问的子入口 ──
+        Entry("nav_team", "Agent 与团队", Group.DRAWER_WORKSPACE,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_AGENTS_TEAM,
             "团", null, null, null,
-            "Agent 数据形状按老项目 agent_directory.py（见本文件头注）。"),
-        Entry("nav_devices", "设备", Group.DRAWER_TOP,
+            "Agent 数据形状按老项目 agent_directory.py（见本文件头注）；从控制入口内访问。"),
+        Entry("nav_devices", "设备", Group.DRAWER_WORKSPACE,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_DEVICES,
-            "设", null, null, null, null),
-        Entry("nav_tools", "工具与连接", Group.DRAWER_TOP,
+            "设", null, null, null, "从控制入口内访问。"),
+        Entry("nav_tools", "工具与连接", Group.DRAWER_WORKSPACE,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TOOLS_CONNECTIONS,
-            "工", null, null, null, "工具中心（每项启用开关）待开发，当前进设置页的工具与连接分节。"),
-        Entry("nav_results", "成果", Group.DRAWER_TOP,
-            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_RESULTS,
-            "果", null, null, null, "成果聚合（批 3 B3-2）已实现；自动交付归档并进任务详情交付页，后续批次。"),
-        Entry("nav_help", "帮助", Group.DRAWER_TOP,
+            "工", null, null, null, "工具中心从控制入口内访问。"),
+        Entry("nav_help", "帮助", Group.DRAWER_WORKSPACE,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_HELP,
-            "？", null, null, null, "V5-UI.md §三默认一级入口。"),
-        Entry("nav_workbench", "设置", Group.DRAWER_TOP,
+            "？", null, null, null, "从设置页内访问。"),
+        Entry("nav_workbench", "设置", Group.DRAWER_WORKSPACE,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_SETTINGS,
-            "台", null, null, null, "底部设置按钮是同一入口的快捷方式。"),
+            "台", null, null, null,
+            "设置不再是一级菜单；点击抽屉底部账号头像进入独立设置页面。"),
         Entry("nav_console", "控制台", Group.DRAWER_EXTENSIONS,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_CONSOLE,
             "控", null, null, null,
-            "V5 控制台（2026-11-11）：按需展开的专业工作台，按 PROJECT.md §7 / V5-UI.md §三；" +
-            "六大页面一份；智能工作简报并进总览，不单做；用量与成本仍待开发（无真实用量数据）。"),
+            "V5 控制台（已改名「控制」一级入口）：六大页面一份；" +
+            "智能工作简报并进总览，不单做；用量与成本仍待开发（无真实用量数据）。"),
         Entry("nav_team_channel", "团队频道", Group.DRAWER_EXTENSIONS,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TEAM_CHANNEL,
             "频", null, null, null,
