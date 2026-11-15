@@ -31,27 +31,16 @@ class MainLayoutTest {
     fun `shell has v5 home chrome and inflates in light theme`() {
         val inflater = LayoutInflater.from(themed())
         val root = inflater.inflate(R.layout.activity_main, null)
-        // V5 C2-3-R4 (v4.3-01)：顶栏是品牌行——汉堡 / 紫色 ∞ 标志 /
-        // WhereverCode / V5 / 搜索 / 铃铛；抽屉宿主与遮罩在根 FrameLayout
-        // 里叠加。会话标题、大脑 pill 与新建已删（见 activity_main.xml）。
+        // 2026-11-16 照 iOS 首页顶栏：左只 ☰、中留空、右 搜索/新建；
+        // 品牌行（∞/WhereverCode/V5）与铃铛已删——品牌在抽屉头里，
+        // 铃铛原是点按只有“待开发”提示的死入口；iOS 顶栏同样无此二者。
         assertNotNull(root.findViewById<View>(R.id.buttonMenu))
-        assertNotNull(root.findViewById<View>(R.id.topBrandLogo))
-        assertNotNull(root.findViewById<View>(R.id.topBrandName))
-        assertNotNull(root.findViewById<View>(R.id.topBrandVersion))
-        assertEquals(
-            "∞",
-            root.findViewById<android.widget.TextView>(R.id.topBrandLogo).text.toString(),
-        )
-        assertEquals(
-            "WhereverCode",
-            root.findViewById<android.widget.TextView>(R.id.topBrandName).text.toString(),
-        )
-        assertEquals(
-            "V5",
-            root.findViewById<android.widget.TextView>(R.id.topBrandVersion).text.toString(),
-        )
         assertNotNull(root.findViewById<View>(R.id.buttonSearch))
-        assertNotNull(root.findViewById<View>(R.id.buttonBell))
+        assertNotNull(root.findViewById<View>(R.id.buttonNew))
+        assertIdAbsent("topBrandLogo")
+        assertIdAbsent("topBrandName")
+        assertIdAbsent("topBrandVersion")
+        assertIdAbsent("buttonBell")
         assertNotNull(root.findViewById<View>(R.id.drawerContainer))
         assertNotNull(root.findViewById<View>(R.id.drawerScrim))
         assertNotNull(root.findViewById<View>(R.id.screenContainer))
@@ -113,9 +102,14 @@ class MainLayoutTest {
             input.minHeight <= (36 * density + 0.5f).toInt(),
         )
         assertEquals(14f, input.textSize / density, 0.01f)
-        // V5 聊天清理 20261111：输入框 hint 改干净；设备/Agent 胶囊常驻
+        // 输入框 hint 与项目来源胶囊（2026-11-16 照 iOS）：hint 是
+        // “向 Agent 提问或分派任务”；输入框上方常驻来源胶囊，默认
+        // “本机 · App 沙盒 ⌄”，点按开项目绑定。设备/Agent 胶囊常驻
         // 输入框（默认“团队 ⌄”，文案随路由刷新），点按开选 Agent 对话框。
-        assertEquals("输入消息…", input.hint.toString())
+        assertEquals("向 Agent 提问或分派任务", input.hint.toString())
+        val capsule = chat.findViewById<android.widget.TextView>(R.id.sourceCapsule)
+        assertNotNull(capsule)
+        assertEquals("本机 · App 沙盒 ⌄", capsule.text.toString())
         assertEquals(
             "团队 ⌄",
             chat.findViewById<android.widget.TextView>(R.id.buttonAgentSelect).text.toString(),

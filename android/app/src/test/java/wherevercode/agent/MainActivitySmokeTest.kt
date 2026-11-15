@@ -38,15 +38,20 @@ class MainActivitySmokeTest {
             .visible()
         val activity = controller.get()
 
-        // V5 C2-3-R4 (v4.3-01)：顶栏是品牌行——汉堡 / ∞ / WhereverCode /
-        // V5 / 搜索 / 铃铛 + 抽屉宿主 / 遮罩是首页 chrome。大脑 pill 与
-        // 新建已删（大脑状态在设置页大脑分节，新对话走抽屉“对话”入口）。
+        // 2026-11-16 照 iOS 首页顶栏：汉堡 / 搜索 / 新建（✎）+ 抽屉
+        // 宿主 / 遮罩是首页 chrome。品牌行与铃铛已删（品牌在抽屉头，
+        // 铃铛是死入口）；大脑状态仍在输入框大脑胶囊与设置页。
         assertNotNull(activity.findViewById<View>(R.id.buttonMenu))
-        assertNotNull(activity.findViewById<View>(R.id.topBrandLogo))
-        assertNotNull(activity.findViewById<View>(R.id.topBrandName))
-        assertNotNull(activity.findViewById<View>(R.id.topBrandVersion))
         assertNotNull(activity.findViewById<View>(R.id.buttonSearch))
-        assertNotNull(activity.findViewById<View>(R.id.buttonBell))
+        assertNotNull(activity.findViewById<View>(R.id.buttonNew))
+        assertEquals(
+            0,
+            activity.resources.getIdentifier("topBrandLogo", "id", activity.packageName),
+        )
+        assertEquals(
+            0,
+            activity.resources.getIdentifier("buttonBell", "id", activity.packageName),
+        )
         assertNotNull(activity.findViewById<View>(R.id.drawerContainer))
         assertNotNull(activity.findViewById<View>(R.id.drawerScrim))
         // 设置清理 2（2026-11-11，Claude 标准）：聊天输入框里常驻当前大脑
@@ -69,12 +74,11 @@ class MainActivitySmokeTest {
         }
 
         // V5-UI：首屏保持轻量问候 + 四个建议 pill（点按填输入框；2026-11-15
-        // F1 修复后全部渲染，不再截断为两个）。用户名不写死：无登录用户名时
-        // 只显示“你好”。
+        // F1 修复后全部渲染，不再截断为两个）。问候文案 2026-11-16 与
+        // iOS 统一为“今天想做什么？”，不带真人实名（隐私口径不变）。
         val texts = collectTexts(activity.window.decorView)
         assertTrue(texts.contains("WhereverCode"))
-        assertTrue(texts.contains("你好"))
-        assertTrue(texts.contains("有什么想一起解决的？"))
+        assertTrue(texts.contains("今天想做什么？"))
         assertTrue(texts.contains("开发一个 App"))
         assertTrue(texts.contains("导入项目并交付"))
         assertTrue(texts.contains("组织多 Agent 团队"))
@@ -84,11 +88,11 @@ class MainActivitySmokeTest {
     }
 
     /**
-     * V5 C2-3-R4：铃铛只有图标、没有红点（App 内无真实通知）；点按只
-     * 给“通知中心待开发”提示，绝不编造通知数。
+     * 2026-11-16 照 iOS：输入框上方来源胶囊常驻，未绑定项目时显示
+     * “本机 · App 沙盒 ⌄”；顶栏新建钮存在且可点（点按开新对话）。
      */
     @Test
-    fun `bell shows notification center placeholder toast`() {
+    fun `source capsule shows local sandbox by default and new button exists`() {
         val controller = Robolectric.buildActivity(MainActivity::class.java)
             .create()
             .start()
@@ -96,9 +100,13 @@ class MainActivitySmokeTest {
             .visible()
         val activity = controller.get()
 
-        activity.findViewById<View>(R.id.buttonBell).performClick()
-
-        assertEquals("通知中心待开发", ShadowToast.getTextOfLatestToast())
+        val capsule = activity.findViewById<TextView>(R.id.sourceCapsule)
+        assertNotNull(capsule)
+        assertEquals("本机 · App 沙盒 ⌄", capsule.text.toString())
+        assertTrue(capsule.isClickable)
+        val newButton = activity.findViewById<View>(R.id.buttonNew)
+        assertNotNull(newButton)
+        assertTrue(newButton.isClickable)
 
         controller.pause().stop().destroy()
     }
