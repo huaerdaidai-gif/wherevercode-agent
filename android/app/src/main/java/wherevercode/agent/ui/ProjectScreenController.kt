@@ -93,6 +93,14 @@ class ProjectScreenController(
     /** 列表筛选 chip 容器（全部/活跃/本地沙盒/远端设备）；chip 由本类构建渲染。 */
     private val filterChips: LinearLayout? = null,
 ) {
+    /** 项目列表筛选四档（2026-11-16 照 iOS 项目页），按项目当前家的位置种类判定。 */
+    enum class ProjectFilter(val label: String) {
+        ALL("全部"),
+        ACTIVE("活跃"),
+        SANDBOX("本地沙盒"),
+        REMOTE("远端设备"),
+    }
+
     companion object {
         /** 大文件首档：只读前 512 KB；点“加载更多”后读前 2 MB。 */
         const val READ_TIER_SMALL: Int = 512 * 1024
@@ -112,14 +120,6 @@ class ProjectScreenController(
             actions += "改名…"
             actions += "删除项目"
             return actions
-        }
-
-        /** 项目列表筛选四档（2026-11-16 照 iOS 项目页），按项目当前家的位置种类判定。 */
-        enum class ProjectFilter(val label: String) {
-            ALL("全部"),
-            ACTIVE("活跃"),
-            SANDBOX("本地沙盒"),
-            REMOTE("远端设备"),
         }
 
         /**
