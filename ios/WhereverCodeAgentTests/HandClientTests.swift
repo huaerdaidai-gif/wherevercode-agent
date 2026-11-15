@@ -221,11 +221,19 @@ final class HandClientTests: XCTestCase {
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex"))
 
-        // 使用 AgentRegistryStore.deleteDeviceCascade
+        // 使用 AgentRegistryStore.deleteDeviceCascade（安全解绑，不连带删除 Agent）
         try LocalData.shared.agents.deleteDeviceCascade(deviceId: testDevId)
 
+        // 验证设备本身已删除
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
-        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex"))
+        // 核心原则：删除设备不得连带删除 Agent，Agent 独立保留并安全解绑
+        let survivingAgent = try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex")
+        XCTAssertNotNil(survivingAgent)
+        XCTAssertNil(survivingAgent?.deviceId)
+        XCTAssertEqual(survivingAgent?.memberConnectionState, "NOT_CONNECTED")
+
+        // 清理测试 Agent
+        try? LocalData.shared.agents.deleteAgent(agentId: "\(testDevId):codex")
     }
 
     // 10. 回归测试 1：重复发现去重与配对状态同步
@@ -373,15 +381,21 @@ final class HandClientTests: XCTestCase {
         HandIdentityManager.deleteDeviceCredentials(deviceId: devId)
         try LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
 
-        // 验证设备与子 Agent 已被清除
+        // 验证设备记录与密钥凭据已被清除
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
-        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: "\(devId):codex"))
         XCTAssertNil(HandIdentityManager.getPeerPublicKey(deviceId: devId))
+
+        // 核心原则：删除设备不得连带删除 Agent，Agent 依然保留且解除设备关联
+        let preservedAgent = try LocalData.shared.agents.getAgent(agentId: "\(devId):codex")
+        XCTAssertNotNil(preservedAgent)
+        XCTAssertNil(preservedAgent?.deviceId)
+        XCTAssertEqual(preservedAgent?.memberConnectionState, "NOT_CONNECTED")
 
         // 验证云端 Agent 毫发无损
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: cloudAgentId))
 
-        // 清理云端 Agent
+        // 清理测试 Agent
+        try? LocalData.shared.agents.deleteAgent(agentId: "\(devId):codex")
         try LocalData.shared.agents.deleteAgent(agentId: cloudAgentId)
     }
 
