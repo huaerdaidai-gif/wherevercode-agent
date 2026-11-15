@@ -1195,6 +1195,7 @@ class MainActivity : AppCompatActivity() {
             userLabelProvider = { drawerUserLabel() },
             themeLabelProvider = { currentThemeLabel() },
             recentSessionsProvider = { recentSessionsForDrawer() },
+            onCloseDrawer = { closeDrawer() },
         ).also { view ->
             drawerContainer.addView(view.root)
         }

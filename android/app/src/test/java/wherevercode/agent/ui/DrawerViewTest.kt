@@ -14,11 +14,13 @@ import org.robolectric.RuntimeEnvironment
 import wherevercode.agent.R
 
 /**
- * DrawerView rendering test (V5 导航整改最终定稿, 2026-11-15).
+ * DrawerView rendering test (V5 导航整改最终定稿, 2026-11-15;
+ * 2026-11-16 照 iOS 抽屉同序修订).
  *
- * 一级菜单严格只有四项：对话、项目、控制。
+ * 一级菜单严格只有四项：对话、项目、频道、控制。
  * 抽屉中部显示最近会话列表。
- * 底部固定：账号头像（左，→设置）+ ＋ 新对话（右）。
+ * 底部固定：账号行（左，→设置，带「设置与配置」副行）+ 「＋ 新对话」pill（右）。
+ * 抽屉最底部（账号行之下）：「全部功能（N 项全表）」功能中心行。
  */
 @RunWith(RobolectricTestRunner::class)
 class DrawerViewTest {
@@ -66,11 +68,35 @@ class DrawerViewTest {
         val drawerView = view()
         assertEquals(listOf("nav_feature_center"), drawerView.renderedGroupIds("center"))
         val row = drawerView.renderedRows().first { it.group == "center" }
-        assertEquals("全部功能", row.label)
+        // 与 iOS 抽屉同口径：标签带注册表实时条目数（项全表），不写死数字
+        assertEquals("全部功能（${EntryRegistry.ENTRIES.size} 项全表）", row.label)
         assertEquals("›", row.trailing)
         assertEquals(R.drawable.ic_dashboard, row.iconRes)
         // 一级入口仍严格四项，不被全部功能行污染
         assertEquals(4, drawerView.renderedGroupIds("top").size)
+    }
+
+    @Test
+    fun `feature center row renders below the bottom account row`() {
+        val drawerView = view()
+        val ids = drawerView.renderedIds()
+        assertTrue(ids.indexOf("nav_workbench") >= 0)
+        assertTrue(ids.indexOf("nav_workbench") < ids.indexOf("nav_feature_center"))
+    }
+
+    @Test
+    fun `bottom account row shows settings subtitle and new chat pill label`() {
+        val drawerView = view()
+        val texts = mutableListOf<String>()
+        fun collect(view: View) {
+            if (view is TextView) texts += view.text.toString()
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) collect(view.getChildAt(i))
+            }
+        }
+        collect(drawerView.root)
+        assertTrue(texts.contains("设置与配置"))
+        assertTrue(texts.contains("新对话"))
     }
 
     @Test

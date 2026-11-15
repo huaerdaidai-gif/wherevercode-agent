@@ -20,19 +20,22 @@ import wherevercode.agent.R
  * 底部固定操作区。结构：
  *
  * ┌─────────────────────────┐
- * │  ∞ WhereverCode  V5     │  品牌头
+ * │  ∞ WhereverCode  V5  ✕  │  品牌头（✕ 关闭抽屉）
  * ├─────────────────────────┤
- * │  💬 对话                 │  一级入口（3 项）
+ * │  💬 对话                 │  一级入口（严格四项）
  * │  📁 项目                 │
+ * │  #️⃣ 频道                 │
  * │  ⚙️ 控制                 │
  * ├─────────────────────────┤
- * │  最近会话                 │  分组标题
+ * │  最近会话                 │  分组标题（上方带会话搜索）
  * │  · 会话标题1    3分前    │  最近会话列表
  * │  · 会话标题2    1小时前  │
  * │  · 会话标题3    昨天     │
  * │  ...                     │
  * ├─────────────────────────┤
- * │ 👤 已登录          ＋    │  底部固定：头像→设置  ＋→新对话
+ * │ 👤 已登录/设置与配置     │  底部固定：账号行→设置
+ * │              ＋ 新对话   │  新对话 pill
+ * │  ▦ 全部功能（N 项全表） › │  抽屉最底部：功能中心
  * └─────────────────────────┘
  *
  * 规矩：
@@ -56,6 +59,8 @@ class DrawerView(
     private val themeLabelProvider: () -> String = { "浅色" },
     /** 最近会话列表数据提供者（返回 sessionId + label + 时间标签）。 */
     private val recentSessionsProvider: () -> List<RecentSession> = { emptyList() },
+    /** 品牌头 ✕ 的关闭动作（宿主负责真正的抽屉收起动画）。 */
+    private val onCloseDrawer: () -> Unit = {},
 ) {
     /** 最近会话数据项。 */
     data class RecentSession(
@@ -222,13 +227,13 @@ class DrawerView(
         addBrandHeader()
         // ── 一级入口（严格四项：对话、项目、频道、控制）──
         addPrimaryEntries(rows)
-        // ── 全部功能：集中列出全部注册表入口（70 屏补漏）──
-        addFeatureCenterEntry(rows)
         addSessionSearch()
         // ── 最近会话列表（支持关键词过滤）──
         addRecentSessionsSection(rows)
-        // ── 底部固定：账号头像（左）+ ＋ 新对话（右）──
+        // ── 底部固定：账号行（左）+ ＋ 新对话 pill（右）──
         addBottomBar(rows)
+        // ── 抽屉最底部：全部功能（与 iOS 抽屉同序，账号行之下）──
+        addFeatureCenterEntry(rows)
         renderedRowList = rows
     }
 
@@ -290,19 +295,22 @@ class DrawerView(
     }
 
     /**
-     * 「全部功能」行（一级入口之下）：点按打开功能中心列表，集中列出
-     * 全部注册表条目，保证每个功能都有可见入口（不靠隐藏手势）。
+     * 「全部功能」行（抽屉最底部，账号行之下，与 iOS 抽屉同序）：
+     * 点按打开功能中心列表，集中列出全部注册表条目，保证每个功能
+     * 都有可见入口（不靠隐藏手势）。标签带实时条目数，与 iOS 的
+     * 「全部功能（N 项全表）」同一口径，数字取注册表实数不写死。
      * group 用 "center"，不进 "top"（一级入口严格四项不变）。
      */
     private fun addFeatureCenterEntry(rows: MutableList<RenderedRow>) {
         val entryId = "nav_feature_center"
         val iconRes = iconResFor(entryId)
-        rows += RenderedRow(entryId, "全部功能", 0, "center", null, false, false, "›", iconRes)
+        val label = "全部功能（${EntryRegistry.ENTRIES.size} 项全表）"
+        rows += RenderedRow(entryId, label, 0, "center", null, false, false, "›", iconRes)
         val row = UiKit.horizontal(context).apply {
             tag = entryId
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(52),
+                dp(48),
             )
             setPadding(dp(12), 0, dp(12), 0)
             setOnClickListener { onEntrySelected(entryId) }
@@ -311,8 +319,8 @@ class DrawerView(
         row.addView(
             UiKit.text(
                 context,
-                "全部功能",
-                16f,
+                label,
+                15f,
                 R.color.text_primary,
             ).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -322,13 +330,13 @@ class DrawerView(
                 )
             },
         )
-        content.addView(row)
+        bottomContent.addView(row)
     }
 
     /** 搜索只过滤真实最近会话，不伪造远端搜索结果。 */
     private fun addSessionSearch() {
         val input = EditText(context).apply {
-            hint = "搜索最近会话"
+            hint = "搜索会话与消息"
             setText(searchQuery)
             setSingleLine(true)
             textSize = 13f
@@ -414,7 +422,7 @@ class DrawerView(
         rows: MutableList<RenderedRow>,
     ) {
         val rowId = "session:${session.sessionId}"
-        rows += RenderedRow(rowId, session.label, 0, "sessions", null, false, false, session.timeLabel, null)
+        rows += RenderedRow(rowId, session.label, 0, "sessions", null, false, false, session.timeLabel, R.drawable.ic_chat)
         val row = UiKit.horizontal(context).apply {
             tag = rowId
             layoutParams = LinearLayout.LayoutParams(
@@ -425,9 +433,8 @@ class DrawerView(
             setOnClickListener { onEntrySelected(rowId) }
         }
         row.addView(
-            UiKit.text(context, "·", 16f, R.color.text_tertiary).apply {
+            UiKit.icon(context, R.drawable.ic_chat, 16, R.color.text_tertiary).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(20), LinearLayout.LayoutParams.WRAP_CONTENT)
-                gravity = Gravity.CENTER
             },
         )
         row.addView(
@@ -465,6 +472,20 @@ class DrawerView(
         row.addView(
             UiKit.text(context, "V5", 12f, R.color.text_tertiary).apply {
                 setPadding(dp(6), dp(6), 0, 0)
+            },
+        )
+        row.addView(
+            View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+            },
+        )
+        row.addView(
+            UiKit.text(context, "✕", 15f, R.color.text_secondary).apply {
+                tag = "drawer_close"
+                gravity = Gravity.CENTER
+                background = UiKit.rounded(context, R.color.accent_soft, 999)
+                layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
+                setOnClickListener { onCloseDrawer() }
             },
         )
         content.addView(row)
@@ -544,21 +565,39 @@ class DrawerView(
                 gravity = Gravity.CENTER
             },
         )
-        avatarRow.addView(
-            UiKit.text(context, userLabelProvider(), 14f, R.color.text_primary).apply {
-                setPadding(dp(10), 0, 0, 0)
+        // 账号行两行：状态标题 + 「设置与配置」副行（与 iOS 抽屉底部账号行同构）。
+        val accountTexts = UiKit.vertical(context).apply {
+            setPadding(dp(10), 0, 0, 0)
+        }
+        accountTexts.addView(
+            UiKit.text(context, userLabelProvider(), 14f, R.color.text_primary),
+        )
+        accountTexts.addView(
+            UiKit.text(context, "设置与配置", 11f, R.color.text_tertiary).apply {
+                setPadding(0, dp(2), 0, 0)
             },
         )
+        avatarRow.addView(accountTexts)
         bottomBar.addView(avatarRow)
 
-        // 右侧：＋ 新对话按钮
-        val newChatButton = UiKit.text(context, "＋", 22f, R.color.home_text).apply {
+        // 右侧：「＋ 新对话」pill 按钮（与 iOS 抽屉同文案，不用裸符号圆钮）。
+        val newChatButton = UiKit.horizontal(context).apply {
             tag = "nav_new_chat"
             background = UiKit.rounded(context, R.color.accent_soft, 999)
-            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(36),
+            )
             gravity = Gravity.CENTER
+            setPadding(dp(14), 0, dp(14), 0)
             setOnClickListener { onEntrySelected("nav_new_chat") }
         }
+        newChatButton.addView(UiKit.text(context, "＋", 16f, R.color.home_text, bold = true))
+        newChatButton.addView(
+            UiKit.text(context, "新对话", 14f, R.color.home_text).apply {
+                setPadding(dp(4), 0, 0, 0)
+            },
+        )
         bottomBar.addView(newChatButton)
 
         bottomContent.addView(bottomBar)
