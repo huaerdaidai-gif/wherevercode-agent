@@ -429,6 +429,38 @@ public final class LocalChatModel: ObservableObject {
         open(forked)
     }
 
+    public func deleteConversation(_ conversation: Conversation) {
+        guard !isSending else {
+            error = "正在回复中，无法删除会话"
+            return
+        }
+        let id = conversation.id
+        _ = try? data.conversations.deleteConversation(id: id)
+        try? data.kv.set("chat.draft.\(id)", nil)
+        try? data.kv.set("chat.sessionConfig.\(id)", nil)
+        if conversationID == id {
+            conversationID = nil
+            data.chatPrefs.currentSessionId = nil
+            messages = []
+            streaming = ""
+            draft = ""
+            selectedBrain = defaultBrainId
+            if let defAid = defaultAgentId, !defAid.isEmpty {
+                selectedAgent = (try? data.agents.getAgent(id: defAid))
+            } else {
+                selectedAgent = nil
+            }
+        }
+        reload()
+    }
+
+    public func deleteConversations(at offsets: IndexSet, in list: [Conversation]) {
+        for index in offsets {
+            guard index < list.count else { continue }
+            deleteConversation(list[index])
+        }
+    }
+
     public func startSending() {
         guard currentTurn == nil, !isSending else { return }
         currentTurn = Task {
@@ -872,6 +904,24 @@ public struct LocalChatHomeView: View {
                 }
                 .accessibilityLabel("搜索会话")
 
+                if model.conversationID != nil {
+                    Button {
+                        if let convId = model.conversationID, let conv = model.history.first(where: { $0.id == convId }) {
+                            model.deleteConversation(conv)
+                        } else {
+                            model.newConversation()
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Color.red.opacity(0.8))
+                            .frame(width: 38, height: 38)
+                            .background(Color.white, in: Circle())
+                            .overlay(Circle().stroke(Color(red: 0.87, green: 0.86, blue: 0.84), lineWidth: 1))
+                    }
+                    .accessibilityLabel("删除当前会话")
+                }
+
                 Button {
                     model.newConversation()
                 } label: {
@@ -1021,16 +1071,52 @@ public struct LocalChatHomeView: View {
                             Text("暂无保存的本地会话").foregroundStyle(.secondary)
                         } else {
                             ForEach(filteredHistory) { conv in
-                                Button {
-                                    model.open(conv)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(conv.title.isEmpty ? conv.id : conv.title).font(.headline)
-                                        Text("大脑：\(conv.brainId ?? "未指定")")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                HStack {
+                                    Button {
+                                        model.open(conv)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(conv.title.isEmpty ? conv.id : conv.title)
+                                                .font(.headline)
+                                                .foregroundStyle(.primary)
+                                            Text("大脑：\(conv.brainId ?? "未指定")")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Button {
+                                        model.deleteConversation(conv)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(Color.red.opacity(0.8))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("删除会话")
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        model.deleteConversation(conv)
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
                                     }
                                 }
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        model.deleteConversation(conv)
+                                    } label: {
+                                        Label("删除会话", systemImage: "trash")
+                                    }
+                                    Button {
+                                        model.forkConversation(conv)
+                                    } label: {
+                                        Label("分叉会话", systemImage: "arrow.triangle.branch")
+                                    }
+                                }
+                            }
+                            .onDelete { offsets in
+                                model.deleteConversations(at: offsets, in: filteredHistory)
                             }
                         }
                     }

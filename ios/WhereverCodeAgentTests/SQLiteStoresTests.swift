@@ -20,6 +20,22 @@ final class SQLiteStoresTests: XCTestCase {
         XCTAssertEqual(events.count, 2)
     }
 
+    func testConversationDeletionCascade() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let convStore = try SQLiteConversationStore(db: db)
+
+        let conv = try convStore.createConversation(brainId: "deepseek", title: "待删除会话")
+        try convStore.appendMessage(ConversationMessage(conversationId: conv.id, role: "user", content: "消息1"))
+        try convStore.appendMessage(ConversationMessage(conversationId: conv.id, role: "assistant", content: "消息2"))
+        XCTAssertEqual(try convStore.listMessages(conversationId: conv.id).count, 2)
+        XCTAssertEqual(try convStore.listConversations().count, 1)
+
+        let deleted = try convStore.deleteConversation(id: conv.id)
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(try convStore.listConversations().count, 0)
+        XCTAssertEqual(try convStore.listMessages(conversationId: conv.id).count, 0)
+    }
+
     func testSecretRedactorMasksSensitiveTokens() {
         let raw = "Authorization: Bearer v5_secret_token_123456789 and sk-abcdefghijklmnop1234"
         let redacted = SecretRedactor.redact(raw)

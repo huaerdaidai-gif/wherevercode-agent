@@ -213,6 +213,7 @@ public struct FlagshipDrawerView: View {
     @Binding public var isOpen: Bool
     @Binding public var selectedMenu: FlagshipDrawerMenu
     public var onSelectConversation: (Conversation) -> Void
+    public var onDeleteConversation: ((Conversation) -> Void)?
     public var onOpenSettings: () -> Void
     public var onNewChat: () -> Void
     public var onOpenFeatureCenter: () -> Void
@@ -224,6 +225,7 @@ public struct FlagshipDrawerView: View {
         isOpen: Binding<Bool>,
         selectedMenu: Binding<FlagshipDrawerMenu>,
         onSelectConversation: @escaping (Conversation) -> Void,
+        onDeleteConversation: ((Conversation) -> Void)? = nil,
         onOpenSettings: @escaping () -> Void,
         onNewChat: @escaping () -> Void,
         onOpenFeatureCenter: @escaping () -> Void = {}
@@ -231,6 +233,7 @@ public struct FlagshipDrawerView: View {
         self._isOpen = isOpen
         self._selectedMenu = selectedMenu
         self.onSelectConversation = onSelectConversation
+        self.onDeleteConversation = onDeleteConversation
         self.onOpenSettings = onOpenSettings
         self.onNewChat = onNewChat
         self.onOpenFeatureCenter = onOpenFeatureCenter
@@ -354,25 +357,51 @@ public struct FlagshipDrawerView: View {
                             .padding(.vertical, 16)
                         } else {
                             ForEach(filteredConversations) { conv in
-                                Button {
-                                    onSelectConversation(conv)
-                                    withAnimation(.easeOut(duration: 0.2)) { isOpen = false }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "bubble.left")
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(.secondary)
-                                        Text(conv.title)
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                                            .lineLimit(1)
-                                        Spacer()
+                                HStack(spacing: 8) {
+                                    Button {
+                                        onSelectConversation(conv)
+                                        withAnimation(.easeOut(duration: 0.2)) { isOpen = false }
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "bubble.left")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(.secondary)
+                                            Text(conv.title)
+                                                .font(.system(size: 14))
+                                                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                                                .lineLimit(1)
+                                            Spacer()
+                                        }
                                     }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .background(Color.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                                    .accessibilityIdentifier("drawer.conversation.\(conv.id)")
+
+                                    if let onDelete = onDeleteConversation {
+                                        Button {
+                                            onDelete(conv)
+                                            loadRecentConversations()
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(Color.red.opacity(0.7))
+                                                .padding(6)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("删除会话")
+                                    }
                                 }
-                                .accessibilityIdentifier("drawer.conversation.\(conv.id)")
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                                .contextMenu {
+                                    if let onDelete = onDeleteConversation {
+                                        Button(role: .destructive) {
+                                            onDelete(conv)
+                                            loadRecentConversations()
+                                        } label: {
+                                            Label("删除会话", systemImage: "trash")
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -631,6 +660,9 @@ public struct FlagshipShellView: View {
                         chatModel.open(conv)
                         selectedMenu = .chat
                         activeRoute = nil
+                    },
+                    onDeleteConversation: { conv in
+                        chatModel.deleteConversation(conv)
                     },
                     onOpenSettings: {
                         isSettingsOpen = true
