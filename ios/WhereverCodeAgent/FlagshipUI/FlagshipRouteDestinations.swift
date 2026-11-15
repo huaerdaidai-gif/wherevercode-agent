@@ -529,7 +529,7 @@ private struct CodeReviewScreen: View {
 }
 
 private struct ArtifactsDeliveryScreen: View {
-    @ObservedObject var appState: AppState
+    @ObservedObject var appState: AppState = AppState()
     var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
         let completed = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "completed" || $0.result != nil }
@@ -1034,19 +1034,19 @@ public struct ProjectWorkspaceDetailView: View {
                         PrototypeRouteSections(routeId: "projectdetail", appState: appState, onNavigateRoute: onNavigateRoute)
                     }
                 case .tasks:
-                    TasksView(appState: appState)
+                    TasksView(appState: appState, onNavigateRoute: onNavigateRoute)
                 case .files:
-                    SandboxFileBrowserScreen(onOpenEditor: { onNavigateRoute("editor") })
+                    SandboxFileBrowserScreen(appState: appState, onOpenEditor: { onNavigateRoute("editor") }, onNavigateRoute: onNavigateRoute)
                 case .editor:
-                    SandboxCodeEditorScreen(onOpenDiff: { onNavigateRoute("diff") })
+                    SandboxCodeEditorScreen(appState: appState, onOpenDiff: { onNavigateRoute("diff") }, onNavigateRoute: onNavigateRoute)
                 case .diff:
-                    UnifiedDiffScreen()
+                    UnifiedDiffScreen(appState: appState, onNavigateRoute: onNavigateRoute)
                 case .artifacts:
-                    ArtifactsDeliveryScreen()
+                    ArtifactsDeliveryScreen(appState: appState, onNavigateRoute: onNavigateRoute)
                 case .terminal:
-                    TerminalAndExecutionTargetScreen(appState: appState)
+                    TerminalAndExecutionTargetScreen(appState: appState, onNavigateRoute: onNavigateRoute)
                 case .git:
-                    GitWorktreeInspectorScreen()
+                    GitWorktreeInspectorScreen(appState: appState, onNavigateRoute: onNavigateRoute)
                 }
             }
         }
@@ -2589,7 +2589,7 @@ public struct ChannelDetailWorkspaceView: View {
                     Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
                     Button("从消息创建任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
                     Button("发送演示消息") {
-                        let msg = V5ChannelMessage(senderId: "me", senderName: "我", isAgent: false, text: "收到。已将执行结果和审查卡片嵌入会话。", createdAtText: "刚刚")
+                        let msg = V5ChannelMessage(id: UUID().uuidString, senderId: "me", senderName: "我", isAgent: false, text: "收到。已将执行结果和审查卡片嵌入会话。", timestamp: "刚刚")
                         messages.append(msg)
                     }.buttonStyle(.bordered)
                 }
