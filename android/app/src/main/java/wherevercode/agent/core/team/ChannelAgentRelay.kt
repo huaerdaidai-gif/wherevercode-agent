@@ -80,10 +80,16 @@ class ChannelAgentRelay(
     private val timeoutMarginSeconds: Long = 30,
     /**
      * 2026-11-13 频道权限：这条消息的发送者有没有资格触发中转（见
-     * [ChannelSenderPolicy]）。默认放行只为兼容旧调用点/旧测试；生产接线
-     * （MainActivity）传入受信名单判定。不受信的 @ 一律不执行。
+     * [ChannelSenderPolicy]）。生产接线（MainActivity）传入受信名单判定。
+     * 不受信的 @ 一律不执行。
+     *
+     * 2026-11-15 安全加固二轮（任务 B）：默认值改为 fail-closed 的
+     * `{ false }`。此前默认 `{ true }` 时，新调用点忘传策略会静默全
+     * 放行——频道里任何人一句 @ 就能驱动用户设备上的 Agent；现在忘
+     * 传参最多是中转不工作（功能故障、看得见），绝不开放行。调用方
+     * 必须显式传入经核实的发送者策略（回归见 ChannelFailClosedTest）。
      */
-    private val isTrustedSender: (PlatformChannelMessage) -> Boolean = { true },
+    private val isTrustedSender: (PlatformChannelMessage) -> Boolean = { false },
 ) {
     /** 两组 id 共用一把锁（调用方传进来的集合本身也要同步访问，见下）。 */
     private val idLock = Any()
