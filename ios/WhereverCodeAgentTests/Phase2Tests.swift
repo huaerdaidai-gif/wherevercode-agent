@@ -449,9 +449,9 @@ final class P0DeviceAcceptanceTests: XCTestCase {
 final class EntryRegistryTests: XCTestCase {
     func testEntryRegistryValidatesWithNoErrors() {
         XCTAssertEqual(EntryRegistry.validate(), [])
-        XCTAssertEqual(EntryRegistry.ENTRIES.count, 83)
+        XCTAssertEqual(EntryRegistry.ENTRIES.count, 89)
         let uniqueIds = Set(EntryRegistry.ENTRIES.map { $0.id })
-        XCTAssertEqual(uniqueIds.count, 83)
+        XCTAssertEqual(uniqueIds.count, 89)
     }
 
     @MainActor

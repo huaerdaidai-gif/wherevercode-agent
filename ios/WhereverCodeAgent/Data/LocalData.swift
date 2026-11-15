@@ -768,12 +768,12 @@ public struct LocalChatHomeView: View {
 
                                 VStack(spacing: 8) {
                                     HStack(spacing: 8) {
-                                        suggestion("检查代码", icon: "magnifyingglass", route: nil)
-                                        suggestion("开始项目", icon: "folder", route: "projects")
+                                        suggestion("开发一个 App", icon: "sparkles", fillPrefix: "开发一个 App：")
+                                        suggestion("导入项目并交付", icon: "folder", fillPrefix: "导入项目并交付：")
                                     }
                                     HStack(spacing: 8) {
-                                        suggestion("自动化开发", icon: "bolt.horizontal", route: "automation")
-                                        suggestion("团队协作", icon: "person.2", route: "team")
+                                        suggestion("组织多 Agent 团队", icon: "person.2", fillPrefix: "组织多 Agent 团队：")
+                                        suggestion("自动化任务", icon: "bolt.horizontal", fillPrefix: "自动化任务：")
                                     }
                                 }
                                 .padding(.top, 8)
@@ -906,12 +906,16 @@ public struct LocalChatHomeView: View {
     }
 
     @ViewBuilder
-    private func suggestion(_ title: String, icon: String, route: String? = nil) -> some View {
+    private func suggestion(_ title: String, icon: String, route: String? = nil, fillPrefix: String? = nil) -> some View {
         Button {
-            if let route {
+            if let fillPrefix {
+                model.draft = fillPrefix
+                inputFocused = true
+            } else if let route {
                 onSelectRoute(route)
             } else {
-                model.draft = title
+                model.draft = "\(title)："
+                inputFocused = true
             }
         } label: {
             HStack(spacing: 6) {

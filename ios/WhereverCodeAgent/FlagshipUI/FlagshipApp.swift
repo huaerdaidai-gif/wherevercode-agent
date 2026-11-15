@@ -453,7 +453,7 @@ public struct FlagshipDrawerView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "square.grid.2x2")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("全部功能（83 项全表）")
+                    Text("全部功能（\(EntryRegistry.ENTRIES.count) 项全表）")
                         .font(.system(size: 13, weight: .medium))
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -677,7 +677,7 @@ public struct FlagshipShellView: View {
     }
 }
 
-/// 功能中心抽屉：集中呈现双端对齐的 83 项入口注册表全表
+/// 功能中心抽屉：集中呈现双端对齐的 89 项入口注册表全表
 public struct FeatureCenterSheet: View {
     public var onNavigateRoute: (String) -> Void
     public var onDismiss: () -> Void
@@ -782,7 +782,7 @@ public struct FeatureCenterSheet: View {
                 }
             }
         }
-        .navigationTitle("全部功能 (83 项)")
+        .navigationTitle("全部功能 (\(EntryRegistry.ENTRIES.count) 项)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
