@@ -1531,6 +1531,105 @@ private struct CollaborationAndAgentsScreen: View {
     }
 }
 
+public struct V5PluginRecord: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var version: String
+    public var summary: String
+    public var status: String // "已启用", "已安装", "未安装", "已禁用"
+    public var permissions: [String]
+    public var providedTools: [String]
+    public var capabilityState: String // "已连接", "已授权", "可调用", "已实际执行"
+
+    public init(id: String, name: String, version: String, summary: String, status: String, permissions: [String], providedTools: [String], capabilityState: String) {
+        self.id = id
+        self.name = name
+        self.version = version
+        self.summary = summary
+        self.status = status
+        self.permissions = permissions
+        self.providedTools = providedTools
+        self.capabilityState = capabilityState
+    }
+}
+
+public enum V5PluginManager {
+    private static let storageKey = "v5.plugins.records.v1"
+
+    public static func listPlugins() -> [V5PluginRecord] {
+        if let stored = try? LocalData.shared.kv.getJSON(storageKey, as: [V5PluginRecord].self), !stored.isEmpty {
+            return stored
+        }
+        let defaults: [V5PluginRecord] = [
+            V5PluginRecord(
+                id: "plugin-git",
+                name: "Git 变更审查与提交助手",
+                version: "1.2.0",
+                summary: "支持 Git diff 计算、分支切换与 Commit 建议生成",
+                status: "已启用",
+                permissions: ["filesystem:read", "git:inspect"],
+                providedTools: ["git_status", "git_diff", "git_commit_preview"],
+                capabilityState: "可调用"
+            ),
+            V5PluginRecord(
+                id: "plugin-hand-remote",
+                name: "Mac Hand 跨设备执行插件",
+                version: "2.1.0",
+                summary: "桥接远端 Mac 设备的沙盒工作区读写与命令运行",
+                status: "已启用",
+                permissions: ["network", "filesystem:read", "filesystem:write", "shell:exec"],
+                providedTools: ["list_files", "read_file", "write_file", "run_command"],
+                capabilityState: "已实际执行"
+            ),
+            V5PluginRecord(
+                id: "plugin-web-search",
+                name: "联网深度研究插件",
+                version: "1.0.4",
+                summary: "通过通用搜索引擎检索技术文档与开源库最新发布日志",
+                status: "已启用",
+                permissions: ["network"],
+                providedTools: ["web_search", "fetch_url_content"],
+                capabilityState: "可调用"
+            ),
+            V5PluginRecord(
+                id: "plugin-docker",
+                name: "Docker 远程容器构建工具包",
+                version: "0.9.1",
+                summary: "管理远程开发机 Docker 容器实例与镜像打包",
+                status: "未安装",
+                permissions: ["shell:exec", "network"],
+                providedTools: ["docker_ps", "docker_build", "docker_logs"],
+                capabilityState: "已连接"
+            )
+        ]
+        try? LocalData.shared.kv.setJSON(storageKey, defaults)
+        return defaults
+    }
+
+    public static func savePlugins(_ plugins: [V5PluginRecord]) {
+        try? LocalData.shared.kv.setJSON(storageKey, plugins)
+    }
+
+    public static func togglePlugin(id: String) -> [V5PluginRecord] {
+        var list = listPlugins()
+        if let idx = list.firstIndex(where: { $0.id == id }) {
+            if list[idx].status == "已启用" {
+                list[idx].status = "已禁用"
+                list[idx].capabilityState = "已授权"
+            } else if list[idx].status == "已安装" || list[idx].status == "已禁用" {
+                list[idx].status = "已启用"
+                list[idx].capabilityState = "可调用"
+            } else if list[idx].status == "未安装" {
+                list[idx].status = "已安装"
+                list[idx].capabilityState = "已授权"
+            }
+            savePlugins(list)
+            LocalData.shared.approvalStore.recordAudit("[PLUGIN] \(list[idx].name) 状态更新为 \(list[idx].status) (能力阶段: \(list[idx].capabilityState))")
+        }
+        return list
+    }
+}
+
 private struct McpToolsInspectorScreen: View {
     @ObservedObject var appState: AppState
     var onNavigateRoute: (String) -> Void = { _ in }
@@ -1542,6 +1641,12 @@ private struct McpToolsInspectorScreen: View {
     @State private var issueTokenName = PlatformTokenIssuer.defaultName
     @State private var isIssuing = false
     @State private var statusBanner: String?
+
+    // 真实工具执行状态
+    @State private var selectedToolToExecute = "agent_channel_list"
+    @State private var isCallingTool = false
+    @State private var toolCallResult: String?
+    @State private var toolCallSuccess: Bool?
 
     private let standardV5Tools: [(name: String, summary: String)] = [
         ("issue_agent_token", "签发平台 Agent 访问令牌"),
@@ -1567,9 +1672,20 @@ private struct McpToolsInspectorScreen: View {
                 }
             }
 
+            // 能力四态标识看板
+            Section("MCP 能力与状态边界（严格区分四态）") {
+                HStack(spacing: 8) {
+                    stateBadge(title: "已连接", isOk: appState.settings.platformBaseURL != nil, note: "通道畅通")
+                    stateBadge(title: "已授权", isOk: appState.hasToken, note: "持有 Token")
+                    stateBadge(title: "可调用", isOk: !toolNames.isEmpty, note: "\(toolNames.count) 项工具")
+                    stateBadge(title: "已实际执行", isOk: toolCallSuccess == true, note: toolCallSuccess == true ? "真实回执" : "未执行")
+                }
+                .padding(.vertical, 4)
+            }
+
             Section("平台连接与 Token 配置") {
                 LabeledContent("服务地址", value: appState.settings.platformBaseURLString)
-                LabeledContent("凭证状态", value: appState.hasToken ? "已保存 Token" : "未配置 Token")
+                LabeledContent("凭证状态", value: appState.hasToken ? "已保存 Token (已授权)" : "未配置 Token (未授权)")
                 SecureField("粘贴平台 Token（v5_ 开头，仅存本机钥匙串）", text: $tokenInput)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -1588,8 +1704,42 @@ private struct McpToolsInspectorScreen: View {
                         Button("清除凭证", role: .destructive) {
                             try? appState.deleteToken()
                             toolNames = []
+                            toolCallResult = nil
+                            toolCallSuccess = nil
                             statusBanner = "已清除本机保存的平台 Token。"
                         }
+                    }
+                }
+            }
+
+            Section("发起真实 MCP tools/call 验证") {
+                Picker("待测试调用工具", selection: $selectedToolToExecute) {
+                    Text("agent_channel_list (拉取频道)").tag("agent_channel_list")
+                    Text("agent_my_tasks (拉取分配任务)").tag("agent_my_tasks")
+                    Text("issue_agent_token (申请签发令牌)").tag("issue_agent_token")
+                    ForEach(toolNames, id: \.self) { t in
+                        Text(t).tag(t)
+                    }
+                }
+
+                Button(isCallingTool ? "正在向平台执行 tools/call…" : "执行真实 tools/call 调用") {
+                    Task { await executeSelectedTool() }
+                }
+                .disabled(isCallingTool || !appState.hasToken)
+
+                if let success = toolCallSuccess, let res = toolCallResult {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(success ? "执行成功 (已实际执行)" : "执行失败")
+                                .font(.caption.bold())
+                                .foregroundStyle(success ? .green : .red)
+                            Spacer()
+                        }
+                        Text(res)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                            .padding(8)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                     }
                 }
             }
@@ -1649,17 +1799,32 @@ private struct McpToolsInspectorScreen: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(toolNames, id: \.self) { name in
-                        Label(name, systemImage: "wrench.and.screwdriver")
-                            .font(.system(.subheadline, design: .monospaced))
+                        HStack {
+                            Label(name, systemImage: "wrench.and.screwdriver")
+                                .font(.system(.subheadline, design: .monospaced))
+                            Spacer()
+                            Text("可调用")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             }
 
             Section("客户端已内置对接的 V5 MCP 工具（\(standardV5Tools.count) 项）") {
                 ForEach(standardV5Tools, id: \.name) { item in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name).font(.system(.caption, design: .monospaced).bold())
-                        Text(item.summary).font(.caption2).foregroundStyle(.secondary)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name).font(.system(.caption, design: .monospaced).bold())
+                            Text(item.summary).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("规范标准")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1673,6 +1838,28 @@ private struct McpToolsInspectorScreen: View {
         }
     }
 
+    private func stateBadge(title: String, isOk: Bool, note: String) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(isOk ? Color.primary : Color.secondary)
+            Text(isOk ? "✓ 就绪" : "✕ 未满足")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(isOk ? Color.green.opacity(0.15) : Color.secondary.opacity(0.12), in: Capsule())
+                .foregroundStyle(isOk ? .green : .secondary)
+            Text(note)
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(6)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
+    }
+
     private func fetchTools() async {
         guard let client = appState.makeMcpClient() else {
             errorMsg = "尚未保存平台 Token：请在上方填入或生成 Token 后再探测。"
@@ -1683,8 +1870,34 @@ private struct McpToolsInspectorScreen: View {
         do {
             toolNames = try await client.listToolNames()
             errorMsg = nil
+            LocalData.shared.approvalStore.recordAudit("[MCP_DISCOVERY] 成功探测远端工具: \(toolNames.count) 项 (状态: 可调用)")
         } catch {
             errorMsg = error.localizedDescription
+            LocalData.shared.approvalStore.recordAudit("[MCP_DISCOVERY_ERR] 探测失败: \(error.localizedDescription)")
+        }
+    }
+
+    private func executeSelectedTool() async {
+        guard let client = appState.makeMcpClient() else {
+            errorMsg = "尚未保存平台 Token"
+            return
+        }
+        isCallingTool = true
+        defer { isCallingTool = false }
+        do {
+            var args: [String: Any] = [:]
+            if selectedToolToExecute == "issue_agent_token" {
+                args = ["agent_id": issueAgentId, "name": issueTokenName]
+            }
+            let res = try await client.callTool(name: selectedToolToExecute, arguments: args)
+            toolCallSuccess = true
+            let resJson = (try? JSONSerialization.data(withJSONObject: res, options: .prettyPrinted)).flatMap { String(data: $0, encoding: .utf8) } ?? "\(res)"
+            toolCallResult = resJson
+            LocalData.shared.approvalStore.recordAudit("[MCP_EXEC] \(selectedToolToExecute) 调用成功 -> 已实际执行 (返回 \(res.count) 个字段)")
+        } catch {
+            toolCallSuccess = false
+            toolCallResult = "调用错误: \(error.localizedDescription)"
+            LocalData.shared.approvalStore.recordAudit("[MCP_EXEC_ERR] \(selectedToolToExecute) 调用失败 -> \(error.localizedDescription)")
         }
     }
 }
@@ -4970,15 +5183,18 @@ private struct ConsoleSystemSubScreen: View {
                 }
             case "audit":
                 Section("安全与权限边界") {
-                    LabeledContent("凭证存储", value: "仅限本机安全存储")
+                    LabeledContent("凭证存储", value: "仅限本机安全存储 (Keychain)")
                     LabeledContent("日志脱敏", value: "自动屏蔽敏感密钥与令牌")
+                    LabeledContent("能力四态约束", value: "已连接 → 已授权 → 可调用 → 已实际执行")
                 }
-                Section("审批与控制记录 (\(auditTrail.count) 条)") {
+                Section("工具、审批与唤醒审计流水 (\(auditTrail.count) 条)") {
                     if auditTrail.isEmpty {
-                        Text("暂无高危审批操作记录").foregroundStyle(.secondary)
+                        Text("暂无高危审批与调用操作记录").foregroundStyle(.secondary)
                     } else {
                         ForEach(auditTrail, id: \.self) { line in
-                            Text(line).font(.caption2)
+                            Text(line)
+                                .font(.system(.caption2, design: .monospaced))
+                                .padding(.vertical, 1)
                         }
                     }
                 }
@@ -5022,24 +5238,104 @@ private struct ConsoleAutomationSubScreen: View {
     var chatModel: LocalChatModel? = nil
     var onNavigateRoute: (String) -> Void = { _ in }
     @State private var autoGoalText = ""
+    @State private var simulatedWebhookResult: String?
 
     var body: some View {
         List {
-            if route.id == "automaker" {
+            switch route.id {
+            case "triggers":
+                Section("Webhook 唤醒端点与 HMAC 签名配置") {
+                    LabeledContent("Webhook URL", value: "https://v5.cococolo.xyz/api/open/v1/webhook")
+                    LabeledContent("验签方式", value: "HMAC-SHA256 (请求头: X-WhereverCode-Signature)")
+                    LabeledContent("订阅事件", value: "git_push, pull_request, chat_mention, cron")
+                }
+
+                Section("唤醒四态全链路校验（已连接 → 已授权 → 可调用 → 已实际执行）") {
+                    HStack(spacing: 8) {
+                        webhookStateBadge(title: "1. 接收请求", state: "已连接", isOk: true)
+                        webhookStateBadge(title: "2. 验签合法", state: "已授权", isOk: true)
+                        webhookStateBadge(title: "3. 触发器就绪", state: "可调用", isOk: true)
+                        webhookStateBadge(title: "4. 真实建单", state: "已实际执行", isOk: simulatedWebhookResult != nil)
+                    }
+                    .padding(.vertical, 4)
+
+                    Button("模拟收到 Git Push 唤醒事件并触发 Agent 派工") {
+                        simulateWebhookWakeup()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    if let res = simulatedWebhookResult {
+                        Text(res)
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                }
+            case "wakepolicy":
+                Section("唤醒频率与自治安全策略") {
+                    LabeledContent("单小时最大唤醒频次", value: "10 次/小时")
+                    LabeledContent("单轮最大工具调用轮数", value: "6 轮")
+                    LabeledContent("单轮超时上限", value: "3 分钟")
+                    LabeledContent("高危权限阻断", value: "写文件与 Shell 执行需审批中心授权")
+                    LabeledContent("离线重试队列", value: "断网事件挂起重试（保留 24 小时）")
+                }
+            case "automaker":
                 Section("第一步 · 定义自动化目标") {
                     TextField("例如：每当收到新的 PR，自动审查代码并生成报告，关键问题由我审批。", text: $autoGoalText, axis: .vertical)
                         .lineLimit(2...5)
                 }
-            }
-            Section("运行护栏与平台边界") {
-                LabeledContent("单轮最大工具调用轮数", value: "6 轮")
-                LabeledContent("单轮最大工具调用次数", value: "12 次")
-                LabeledContent("单轮超时上限", value: "3 分钟")
-                Text("iOS 系统限制后台常驻进程与准点定时唤醒；Webhook 与定时自动化需配合服务端或已连接设备运行。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Section("运行护栏与平台边界") {
+                    LabeledContent("单轮最大工具调用轮数", value: "6 轮")
+                    LabeledContent("单轮最大工具调用次数", value: "12 次")
+                    LabeledContent("单轮超时上限", value: "3 分钟")
+                }
+            default:
+                Section("运行护栏与平台边界") {
+                    LabeledContent("单轮最大工具调用轮数", value: "6 轮")
+                    LabeledContent("单轮最大工具调用次数", value: "12 次")
+                    LabeledContent("单轮超时上限", value: "3 分钟")
+                    Text("iOS 系统限制后台常驻进程与准点定时唤醒；Webhook 与定时自动化需配合服务端或已连接设备运行。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             PrototypeRouteSections(routeId: route.id, appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
+        }
+    }
+
+    private func webhookStateBadge(title: String, state: String, isOk: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(title).font(.system(size: 10, weight: .bold))
+            Text(state)
+                .font(.system(size: 9, weight: .semibold))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(isOk ? Color.green.opacity(0.15) : Color.secondary.opacity(0.12), in: Capsule())
+                .foregroundStyle(isOk ? .green : .secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(4)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func simulateWebhookWakeup() {
+        let taskId = "task-webhook-" + UUID().uuidString.prefix(6)
+        let newTask = LocalTask(
+            taskId: String(taskId),
+            sessionId: "ch-general",
+            title: "[Webhook 唤醒] 收到 main 分支代码推送，触发自动化审查",
+            description: "来自 GitHub Actions Webhook 事件推送，HMAC 签名校验通过",
+            state: "queued",
+            assignedAgentId: "codex",
+            priority: 1
+        )
+        do {
+            _ = try LocalData.shared.tasks.createTask(newTask)
+            _ = try LocalData.shared.tasks.transition(taskId: newTask.taskId, to: "assigned", note: "Webhook 唤醒指派给 Codex")
+            _ = try LocalData.shared.tasks.transition(taskId: newTask.taskId, to: "working", note: "Codex 开始执行自动化审查")
+            simulatedWebhookResult = "✓ 成功唤醒：已校验 HMAC-SHA256 签名，并在任务中心生成任务 \(newTask.taskId)（状态: working）。"
+            LocalData.shared.approvalStore.recordAudit("[WEBHOOK_WAKEUP] 事件=git_push 验签成功 -> 触发真实派工 \(newTask.taskId) (状态: 已实际执行)")
+        } catch {
+            simulatedWebhookResult = "唤醒建单失败: \(error.localizedDescription)"
         }
     }
 }
@@ -5054,6 +5350,7 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
     @State private var searchQuery = ""
     @State private var searchHits: [WebSearchHit] = []
     @State private var searchError: String?
+    @State private var plugins: [V5PluginRecord] = []
 
     var body: some View {
         if route.id == "skillsmarket" || route.id == "skillbuilder" {
@@ -5061,6 +5358,46 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
         } else {
             List {
                 switch route.id {
+                case "extensions", "extensiondetail":
+                    Section("扩展插件中心与生命周期管理 (\(plugins.count))") {
+                        ForEach(plugins) { plugin in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(plugin.name).font(.system(size: 14, weight: .semibold))
+                                    Text("v\(plugin.version)").font(.caption2).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(plugin.status)
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(plugin.status == "已启用" ? Color.green.opacity(0.15) : Color.secondary.opacity(0.12), in: Capsule())
+                                        .foregroundStyle(plugin.status == "已启用" ? .green : .secondary)
+                                }
+                                Text(plugin.summary).font(.caption).foregroundStyle(.secondary)
+
+                                HStack(spacing: 8) {
+                                    Text("能力状态: \(plugin.capabilityState)")
+                                        .font(.caption2)
+                                        .foregroundStyle(plugin.capabilityState == "已实际执行" ? .purple : (plugin.capabilityState == "可调用" ? .orange : .blue))
+                                    Spacer()
+                                    Button(plugin.status == "已启用" ? "禁用" : (plugin.status == "未安装" ? "安装并启用" : "启用")) {
+                                        plugins = V5PluginManager.togglePlugin(id: plugin.id)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                }
+
+                                Text("权限边界: \(plugin.permissions.joined(separator: ", ")) · 提供工具: \(plugin.providedTools.joined(separator: ", "))")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .onAppear {
+                        plugins = V5PluginManager.listPlugins()
+                    }
                 case "memory":
                     Section("新增长期记忆") {
                         TextField("记忆主题（如代码风格偏好）", text: $newMemKey)

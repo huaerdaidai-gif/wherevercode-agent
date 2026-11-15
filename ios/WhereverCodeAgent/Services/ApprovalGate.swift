@@ -96,6 +96,13 @@ public final class InteractiveApprovalStore: ObservableObject, ApprovalGate, @un
         notifyObservers()
     }
 
+    public func recordAudit(_ entry: String) {
+        lock.lock()
+        _auditTrail.insert(entry, at: 0)
+        lock.unlock()
+        notifyObservers()
+    }
+
     private func notifyObservers() {
         if Thread.isMainThread {
             objectWillChange.send()
