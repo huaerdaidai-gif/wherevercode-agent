@@ -22,8 +22,8 @@ class EntryRegistryTest {
 
     @Test
     fun `registry has exactly the de-duplicated entries`() {
-        assertEquals(86, EntryRegistry.ENTRIES.size)
-        assertEquals(86, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
+        assertEquals(89, EntryRegistry.ENTRIES.size)
+        assertEquals(89, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
     }
 
     @Test
@@ -158,6 +158,34 @@ class EntryRegistryTest {
         assertEquals("nav_channels", EntryRegistry.find("feature_direct_message")?.parentId)
         assertEquals("nav_running_tasks", EntryRegistry.find("feature_create_task")?.parentId)
         assertEquals("nav_mcp_plugins", EntryRegistry.find("feature_extension_manifest")?.parentId)
+    }
+
+    @Test
+    fun `master list v1 additions are registered as implemented screen features`() {
+        // 2026-11-15 项目整理：主清单 v1.0 已裁决采纳的三项——代码编辑器、
+        // 自主度、应用更新——均已在页内真实实现（WorkspaceEditSession 接线 /
+        // 设置页自主度分节 / 设置页检查更新），本轮补登为已实现 SCREEN
+        // 入口，从功能中心落到能力所在页（项目页 / 设置页）。
+        val editor = EntryRegistry.find("feature_code_editor")!!
+        assertEquals(Status.IMPLEMENTED, editor.status)
+        assertEquals(EntryRegistry.TargetKind.SCREEN, editor.targetKind)
+        assertEquals("code_editor", editor.target)
+        assertEquals(Group.FEATURE, editor.group)
+        assertEquals("feature_project_files", editor.parentId)
+
+        val autonomy = EntryRegistry.find("feature_autonomy")!!
+        assertEquals(Status.IMPLEMENTED, autonomy.status)
+        assertEquals(EntryRegistry.TargetKind.SCREEN, autonomy.targetKind)
+        assertEquals("autonomy", autonomy.target)
+        assertEquals(Group.FEATURE, autonomy.group)
+        assertEquals("nav_workbench", autonomy.parentId)
+
+        val update = EntryRegistry.find("feature_app_update")!!
+        assertEquals(Status.IMPLEMENTED, update.status)
+        assertEquals(EntryRegistry.TargetKind.SCREEN, update.targetKind)
+        assertEquals("app_update", update.target)
+        assertEquals(Group.FEATURE, update.group)
+        assertEquals("nav_workbench", update.parentId)
     }
 
     @Test

@@ -1,156 +1,70 @@
-# WhereverCode V5 Android 整改 — 交接说明（2026-11-15）
+# WhereverCode V5 Android — 交接说明（2026-11-15）
 
-> 交接对象：接手本任务的 Agent / 开发者。
-> 本文只写**当前真实状态**：哪些已改、哪些没做完、怎么构建、卡在哪。
-> 未完成的项一律标注「未完成」，不存在“看起来做了但没接线”的项。
-
----
+> 本文只写当前真实状态。未完成的项一律标注「未完成」，不写“看起来做了”。
 
 ## 0. 一句话现状
 
-一级导航（对话 / 项目 / 频道 / 控制）的**模型层、抽屉视图层、路由层、入口注册表、MainActivity 路由分支已改完**，
-**`assembleDebug` 构建成功，APK 已产出**；
-**单元测试未跑通验证、频道/私聊双分区首页、频道附件菜单、频道 CRUD、7 张截图、功能矩阵均未完成**。
-
----
+Android 收尾线在 `feature/v5-android-cloud` 上推进：入口注册表已与 GPT
+《双端唯一功能主清单 v1.0》对齐为 **89 条**，四主入口（对话 / 项目 /
+频道 / 控制）真实可用，Android CI 全绿。剩余阻塞主要是服务端接口
+缺失（见 §5），不在 Android 客户端范围内。
 
 ## 1. 仓库与分支
 
 | 项 | 值 |
 |---|---|
 | 仓库 | `huaerdaidai-gif/wherevercode-agent`（**不是**旧的 `wherevercode`） |
-| 本地路径 | `/workspace/wherevercode-agent` |
-| 分支 | `feature/v5-nav-overhaul`（从 `main` 切出，未合并、未推送） |
-| 远端 | `origin` 已配置；**当前环境无 GitHub 凭据**（`gh auth status` = not logged in），push 需接手方携带 token |
-| 旧仓库 | 全程未改动 |
+| 分支 | `feature/v5-android-cloud` |
+| 本轮提交 | 见本提交（父提交 `789bb383`） |
+| GitHub 访问 | 读写走 custom.github-agent connector；CI 读取走 custom.github |
 
-接手后先确认：
-```bash
-cd /workspace/wherevercode-agent && git log --oneline -5 && git status
-```
+## 2. 入口注册表与主清单
 
----
+- `ui/EntryRegistry.kt` 共 **89 条**：已实现 30 / 待开发 59。
+- 本轮补登 3 条（主清单 v1.0 已裁决采纳、审计证实页内已实现但未登记）：
+  `feature_code_editor`（代码编辑器，落项目页）、`feature_autonomy`
+  （自主度，落设置页）、`feature_app_update`（应用更新，落设置页），
+  均为 SCREEN 入口，`MainActivity.openRegistryEntry` 已加对应落点。
+- 注册表是双端共用入口清单的 Android 事实来源；状态口径与主清单
+  v1.0 一致：待开发点开只给诚实提示，绝不伪装已实现。
+- `EntryRegistry.validate()` 自检须为空；`EntryRegistryTest` 断言总数 89。
 
-## 2. 构建环境（本机已配好，换机需重装）
+## 3. 四主入口现状
 
-| 组件 | 位置 / 版本 | 备注 |
-|---|---|---|
-| JDK | 系统默认（Java 17 级别即可） | AGP 8.1.4 |
-| Android SDK | `/opt/android-sdk`（platforms;android-34、build-tools;34.0.0、platform-tools） | `android/local.properties` 已写 `sdk.dir=/opt/android-sdk` |
-| Gradle | **`/opt/gradle-8.5/bin/gradle`**（从腾讯镜像装的） | 项目自带 `gradlew` 缺 jar 且下载失败；**系统 sdkman 的 Gradle 9.3 与 AGP 8.1.4 不兼容** |
-| 已删除的坑 | `/root/.gradle/init.gradle` 已 mv 成 `.bak`（里面有 `mavelCentral()` 拼写错误，导致所有 Gradle 任务直接挂） | 若恢复会重新报错 |
+| 入口 | 状态 |
+|---|---|
+| 对话 | 已实现：大脑对话 / 单兵对话，输入框操作入口真实可用 |
+| 项目 | 已实现：项目列表与项目页（任务 / 代码 / 文件 / 成果）；代码编辑已接线（WorkspaceEditSession） |
+| 频道 | 部分可用：已配置频道的消息协作真实；完整频道列表、频道管理、频道文件、私聊待服务端接口（§5） |
+| 控制 | 已实现：本机真实快照（计数 / 事件 / 日志 / 审批深链），非空壳 |
 
-**可用构建命令（已验证可跑，离线模式）**：
-```bash
-cd /workspace/wherevercode-agent/android
-ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk \
-  /opt/gradle-8.5/bin/gradle assembleDebug --no-daemon --offline
-```
-单元测试：
-```bash
-cd /workspace/wherevercode-agent/android
-ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk \
-  /opt/gradle-8.5/bin/gradle testDebugUnitTest --no-daemon --offline
-```
+设置从抽屉底部账号进入，不是一级菜单；「全部功能」是跨导航索引。
 
-> 注意：`gradle ... | tail -40` 的退出码是 `tail` 的，**不要用管道判断成败**，要读日志里的 `BUILD SUCCESSFUL/FAILED`。
+## 4. CI 与证据口径
 
----
+- 验证只走 GitHub Actions 的 Android CI（本机无 Java 环境）。
+- 测试总数以最近一次 CI 的 test-reports 工件为准：本轮基线为 JVM
+  测试 2730 个（2729 通过 / 1 跳过 / 0 失败，CI #235）；本轮提交后
+  以新一轮 CI 结果为准，只许增、不许减、0 失败。
+- 模拟器证据：v5-runtime 工件 7 张截图 + `V5_RUNTIME_OK`。
+- 本轮只有 CI 模拟器证据，**没有真机验证**；真机验收归 Funk 本人。
 
-## 3. 已完成（代码已落地）
+## 5. 未解阻塞（非 Android 客户端可解）
 
-### 3.1 抽屉模型 `ui/DrawerController.kt`
-- `DEFAULT_ORDER` = `[chat, projects, channels, control]`，四项固定顺序。
-- 新增 `ID_CHAT = "chat"`、`ID_CHANNELS = "channels"`、`ID_CONTROL = "control"`。
-- 旧 id（`new_conversation` / `history_search` / `tasks` / `agents_team` / `devices` / `tools_connections` / `results` / `help` / `settings` / `console` / `mcp_plugins` / `team_channel`）**全部保留为路由常量**，只是不再进 `DEFAULT_ORDER`——70 屏能力靠子页面逐层访问，没删。
-- `reset()`、`DrawerPrefs` 默认值随四项更新。
+- 服务端缺接口：完整频道列表、频道管理 CRUD / 成员权限、频道文件
+  （上传 / 网盘引用 / 预览 / 下载）、私聊服务（含服务端禁
+  Agent↔Agent 权限）、用量与成本数据。客户端条目已登记为诚实待开发。
+- iOS 侧对齐与 ADAPTER_PENDING 项归 AGY；本分支不动 iOS 文件。
 
-### 3.2 路由表 `ui/DrawerRouter.kt`
-- `EntryScreen` 新增 `CHANNELS`。
-- `screenFor()`：四项一级 + 13 个旧 id 兜底 + 未知 id → `HOME`。
+## 6. 关键文档
 
-### 3.3 抽屉视图 `ui/DrawerView.kt`
-- 结构改为：品牌头 → 四项一级入口 → 最近会话区 → 底部固定操作区（左账号头像 / 右 ＋ 新对话）。
-- 新增 `RecentSession` 数据类 + `recentSessionsProvider` / `onSessionSelected` 回调，会话数据由宿主传入（控制器不自己造数据）。
-- 底部账号行点击进设置；＋ 新建对话。
+- 双端唯一功能主清单 v1.0（GPT 裁决版）：https://drive.google.com/file/d/1_FJWWFAGyMCl-S_Hvcyk3P9V9xv3P1-TwV6NTrpjRQ4/view
+- Android 入口清单独立优化审计：https://drive.google.com/file/d/1u17rMfsWeBW58E01Bwx89GRNPzT2sc8J/view
+- Android 路由回填表（对 iOS 70 屏）：https://drive.google.com/file/d/10oGrF4gs7Px53fk2svi9DXqMe9IUv0Yv/view
 
-### 3.4 入口注册表 `ui/EntryRegistry.kt`
-- `DRAWER_TOP` 组只剩四项：`nav_chat` / `nav_projects` / `nav_channels` / `nav_control`。
-- 其余入口降级到 `DRAWER_WORKSPACE` 组（子页面入口），文案注明“从 X 入口内访问”。
-- 头部注释已改为四项口径。
+## 7. 红线
 
-### 3.5 `MainActivity.kt`
-- `showEntry()` 的映射与可见性补上 `EntryScreen.CHANNELS`（当前指向已有真实团队频道页 `screenTeamChannel`）。
-- 离开频道停 WS/轮询的条件已包含 `CHANNELS`。
-- 新增 `recentSessionsForDrawer()`：从 `SessionLedger.listSessions("user")` 读真实会话，按 `updatedAtEpochSeconds` 倒序取 8 条，**无数据返回空列表（抽屉显示空态），不造数据**。
-- 新增 `openSessionById()`：点抽屉会话打开对应会话。
-- 字段修复：`SessionRecord` 用的是 `updatedAtEpochSeconds`（不是 `updatedAt`），已改。
-
-### 3.6 测试（已改，**未跑通验证**）
-- `DrawerControllerTest` / `DrawerViewTest` / `DrawerRoutingTest` / `EntryRegistryTest` 已按四项口径重写。
-- **状态：`testDebugUnitTest` 跑了约 7 分钟仍未结束，为控额度被主动终止，`app/build/test-results/` 下无结果文件 —— 即“测试代码能编译，但一个断言都没验证过”**（`compileDebugUnitTestKotlin` 通过）。接手方必须重跑并修断言。
-
----
-
-## 4. 未完成（按优先级）
-
-| # | 事项 | 说明 |
-|---|---|---|
-| 1 | **编译验证 + 单元测试跑通** | 主代码最后一次编译只剩 1 个错误（`updatedAt`），已修；但**修完还没重新编译验证**。接手第一件事就是 `assembleDebug`。 |
-| 2 | **频道 / 私聊双分区首页** | 完全没做。任务要求：频道/私聊 Tab、列表、搜索、创建、最近消息、未读数、免打扰。当前「频道」入口直接落到已有团队频道页。数据源要接真实 API（现在代码库里只有单频道 `PlatformChannelTransport`，**没有频道列表接口**）。 |
-| 3 | **频道内 消息/文件/任务 三分区** | 已有 `TeamChannelController`（消息 + 扇出），**文件区、任务区没做**。 |
-| 4 | **输入框 ＋ 收纳（附件 / 项目文件 / 网盘 / 关联任务）** | 没做。需要上传通道 + 统一存储适配器；**禁止自建第二套文件系统**，先确认后端有没有现成上传接口。 |
-| 5 | **消息长按菜单**（回复/复制/编辑/撤回/删除/关联任务/时间） | 没做。 |
-| 6 | **频道 CRUD**（建/改/删频道、成员与角色、删消息、清个人记录） | 没做。高风险操作需二次确认 + 区分撤回/个人清除/服务端删除。 |
-| 7 | **私聊权限**（禁 Agent↔Agent） | 需服务端强制。当前客户端**没有**私聊入口，也就没有绕过风险，但也没有实现。 |
-| 8 | **7 张真实运行截图** | 一张都没出。见 §5。 |
-| 9 | **APK 交付** | 构建已启动，结果见 §6。 |
-| 10 | **70 屏功能保留矩阵、接线状态清单** | 需从 `EntryRegistry`（约 100+ 条 Entry）导出成表格，标注 已实现 / 待接线 / 未实现。 |
-| 11 | **设置页分组（账户 / 应用）** | 现有 `screen_settings.xml` 是单 ScrollView 分节，**没有按“账户/应用”两大组重排**。 |
-
----
-
-## 5. 截图：当前环境的关键阻塞
-
-- **本机 `/dev/kvm` 不存在，CPU 也没有 vmx/svm**（`grep -c 'vmx|svm' /proc/cpuinfo` = 0）。
-  → x86_64 Android 模拟器**无法启用加速**，基本跑不起来；ARM 镜像走 TCG 软件模拟，启动以十分钟计且极易 ANR。
-  → **不要在这台机器上反复尝试模拟器**，浪费时间。
-- 可行替代（按推荐顺序）：
-  1. **换一台有 KVM 的机器 / 真机**：`emulator -avd <name>` 或 `adb install`，然后 `adb exec-out screencap -p > shot.png`。这是唯一能称为“Android 真实运行截图”的路径。
-  2. **Robolectric native graphics 渲染**：把 Activity 跑在 JVM 上，用 `@GraphicsMode(NATIVE)` 把 View 树画成 Bitmap。像素来自真实布局代码，但**不是设备运行**，交付时必须明确标注“Robolectric 渲染，非模拟器/真机”，不能混称。
-  3. 设计稿 / 手绘示意图：**只能当参考，禁止当验收截图**。
-- 任务原文要求「模拟器、真机和设计图必须明确区分」，交接时同理：**截图来源必须在交付说明里逐张标注**。
-
----
-
-## 6. 本次收尾动作（已核对的事实）
-
-- 分支：`feature/v5-nav-overhaul`
-- commit：`cfc3ec5 feat(android): V5 四项一级导航整改（对话/项目/频道/控制）`（代码 + 本文件；13 文件，+1232/−793）
-- **构建：`assembleDebug` = BUILD SUCCESSFUL（2m58s，47 tasks）**
-- **APK：`android/app/build/outputs/apk/debug/app-debug.apk`（18 MB），另存 `/workspace/wherevercode-v5-nav-debug.apk`**
-- **单元测试：未验证**（跑了约 7 分钟未结束被终止，无结果文件；见 §3.6）
-- **截图：0 张**（本机无 KVM，原因见 §5）
-- **未推送远端**（无 GitHub 凭据）、**未合并 main**、**未部署**
-
----
-
-## 7. 接手步骤建议
-
-1. `git log -1 --stat` 看本次提交范围；`git status` 确认工作区干净。
-2. 跑 `assembleDebug`（命令见 §2），修掉编译错误。
-3. 跑 `testDebugUnitTest`，修 4 个抽屉测试。
-4. 装 APK 到有 KVM 的机器，确认四项抽屉、最近会话、底部账号/新对话、设置入口跑得通。
-5. 再决定「频道」是继续复用团队频道页，还是新建 `ChannelListController`（建议新建，团队频道页保留为频道内的一级详情页）。
-6. 频道列表接口若后端没有，**先在界面上标“待接线”并写进清单**，不要用假数据填列表。
-
----
-
-## 8. 不能碰的红线（原任务原文）
-
-- 不修改旧仓库 `huaerdaidai-gif/wherevercode`。
-- 不覆盖其他 Agent 分支，**不自行合并 main**、不部署生产。
-- 保留 `BrainEngine`、模型适配器、任务系统、`TerminalWriteGuard`、权限校验、停止确认与生命周期保护。
-- 不新建平行任务系统 / 频道系统 / 文件系统。
-- 普通界面不出现 `route_id`、`P0`、`待验收`、`扩展` 等开发字段。
-- 未接通的能力显示真实状态，**不得用假数据模拟成功**。
+- 不合 main、不部署生产、不动旧仓库 `huaerdaidai-gif/wherevercode`。
+- 安全四项中危 + Hand stdio 零认证未过前，**不得宣布正式发布就绪**；
+  CI 产出的 debug APK 不是正式升级包。
+- 未接通的能力如实标待开发，不用假数据模拟成功。

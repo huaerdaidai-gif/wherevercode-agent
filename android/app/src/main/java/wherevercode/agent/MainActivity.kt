@@ -4726,6 +4726,12 @@ class MainActivity : AppCompatActivity() {
                 // 项目文件与代码就在项目页内（文件树 + 代码查看/编辑），
                 // 落到项目页即达能力所在页。
                 "project_files" -> showEntry(DrawerController.ID_PROJECTS)
+                // 代码编辑器能力同在项目文件页内（WorkspaceEditSession），落项目页。
+                "code_editor" -> showEntry(DrawerController.ID_PROJECTS)
+                // 自主度（设置页“自主度”分节）与应用更新（设置页“关于”
+                // 分节更新区）都在设置页内，无独立页，落设置页即达。
+                "autonomy" -> showEntry(DrawerController.ID_SETTINGS)
+                "app_update" -> showEntry(DrawerController.ID_SETTINGS)
                 else -> toast("${entry.title}待开发")
             }
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
