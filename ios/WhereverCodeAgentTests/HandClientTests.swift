@@ -113,9 +113,9 @@ final class HandClientTests: XCTestCase {
         let uninstallCmd = DeviceInstallGuide.uninstallCommand(for: .mac)
         XCTAssertTrue(uninstallCmd.contains("v5-uninstall-hand.sh"))
 
-        // 校验内置哈希
-        XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "8d2217aca1d8e49bd0d60ccf94f16be22ec6f523a16410c558d2b821bf9a9783")
-        XCTAssertEqual(DeviceInstallGuide.scriptSha256["v5-install-hand.sh"], "42fdb32f63e40c956590a2448a6a1d97f54bf9ea90325b708b44b936255826b8")
+        // 校验内置哈希与实际发布包一致
+        XCTAssertEqual(DeviceInstallGuide.scriptSha256["hand_server.py"], "f5357dd8a6535afa59a9435f8a43dcb0ab4cfbd0d71b2113f4097b2ceebf7458")
+        XCTAssertEqual(DeviceInstallGuide.scriptSha256["v5-install-hand.sh"], "3072654f1c35094666a9fc7a3bd1a09f7a2cfaedbd08d94715abdd7d7dc15caa")
     }
 
     // 5. 验证 Keychain 凭据隔离与未明文保存
@@ -132,5 +132,101 @@ final class HandClientTests: XCTestCase {
 
         HandIdentityManager.deleteDeviceCredentials(deviceId: "peer-test-device")
         XCTAssertNil(HandIdentityManager.getPeerPublicKey(deviceId: "peer-test-device"))
+    }
+
+    // 6. 验证工作区路径正规化
+    func testNormalizePath() {
+        XCTAssertEqual(HandClient.normalizePath("/Users/a1234/v5-codex-work/"), "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(HandClient.normalizePath("/Users/a1234//v5-codex-work///"), "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(HandClient.normalizePath("  /a/b/c  "), "/a/b/c")
+        XCTAssertEqual(HandClient.normalizePath(""), "")
+    }
+
+    // 7. 验证跨设备工具注册表定义与能力集
+    func testCrossDeviceToolRegistryDefinitions() {
+        let registry = HandCrossDeviceToolRegistry(
+            host: "100.75.41.0",
+            port: 18743,
+            targetDeviceId: "MacBook-Air",
+            agentId: "codex",
+            defaultFolder: "/Users/a1234/v5-codex-work"
+        )
+        XCTAssertEqual(registry.workspaceRoot, "/Users/a1234/v5-codex-work")
+
+        let tools = registry.toolsForCapabilities(nil, authorizedTools: [])
+        XCTAssertEqual(tools.count, 4)
+        let toolNames = Set(tools.map(\.name))
+        XCTAssertTrue(toolNames.contains("list_files"))
+        XCTAssertTrue(toolNames.contains("read_file"))
+        XCTAssertTrue(toolNames.contains("write_file"))
+        XCTAssertTrue(toolNames.contains("run_command"))
+
+        XCTAssertTrue(registry.isReadOnlyExtensionTool("list_files"))
+        XCTAssertTrue(registry.isReadOnlyExtensionTool("read_file"))
+        XCTAssertFalse(registry.isReadOnlyExtensionTool("write_file"))
+        XCTAssertFalse(registry.isReadOnlyExtensionTool("run_command"))
+    }
+
+    // 8. 验证跨设备工具调用合法性校验
+    func testCrossDeviceToolRegistryValidation() {
+        let registry = HandCrossDeviceToolRegistry(
+            host: "100.75.41.0",
+            port: 18743,
+            targetDeviceId: "MacBook-Air",
+            agentId: "codex",
+            defaultFolder: "/Users/a1234/v5-codex-work"
+        )
+        let context = ToolContext(
+            taskId: "task-test",
+            agentId: "codex",
+            approvalGate: DenyApprovalGate(),
+            workspaceRoot: "/Users/a1234/v5-codex-work",
+            deviceId: "MacBook-Air",
+            folder: "/Users/a1234/v5-codex-work"
+        )
+
+        let validAction = BrainAction(tool: "list_files", args: ["path": ""])
+        XCTAssertNil(registry.validateOnly(validAction, context))
+
+        let unknownAction = BrainAction(tool: "delete_everything", args: [:])
+        let outcome = registry.validateOnly(unknownAction, context)
+        XCTAssertNotNil(outcome)
+        XCTAssertFalse(outcome!.ok)
+        XCTAssertEqual(outcome!.errorCode, "unknown_tool")
+    }
+
+    // 9. 验证设备删除时级联注销所属 Agent 契约
+    func testDeviceCascadeAgentDeletionContract() throws {
+        let testDevId = "test-cascade-mac"
+        let testDev = AgentRecord(
+            agentId: testDevId,
+            displayName: "Test Cascade Mac",
+            kind: .device,
+            access: .app,
+            deviceId: testDevId
+        )
+        let childAgent = AgentRecord(
+            agentId: "\(testDevId):codex",
+            displayName: "Codex (Test Cascade Mac)",
+            kind: .device,
+            access: .cli,
+            deviceId: testDevId
+        )
+
+        try LocalData.shared.agents.saveAgent(testDev)
+        try LocalData.shared.agents.saveAgent(childAgent)
+
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
+        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex"))
+
+        // 模拟级联删除
+        let all = try LocalData.shared.agents.listAgents()
+        for a in all where a.deviceId == testDevId {
+            try LocalData.shared.agents.deleteAgent(agentId: a.agentId)
+        }
+        try LocalData.shared.agents.deleteAgent(agentId: testDevId)
+
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
+        XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex"))
     }
 }

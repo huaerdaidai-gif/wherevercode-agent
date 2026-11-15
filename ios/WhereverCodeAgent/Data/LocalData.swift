@@ -207,6 +207,7 @@ public final class LocalChatModel: ObservableObject {
     @Published public var messages: [ConversationMessage] = []
     @Published public var history: [Conversation] = []
     @Published public var selectedBrain: String = ""
+    @Published public var selectedAgent: AgentRecord? = nil
     @Published public var selectedExecutionTarget: String = "local_brain"
     @Published public var activeProjectId: String? = nil
     @Published public var attachedFiles: [String] = []
@@ -372,6 +373,17 @@ public final class LocalChatModel: ObservableObject {
     }
 
     public func stopSending() {
+        if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl {
+            let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+            let parts = clean.split(separator: ":")
+            let host = String(parts[0])
+            let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+            let targetDev = agent.deviceId ?? "MacBook-Air"
+            let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+            Task {
+                _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: "codex", action: "stop")
+            }
+        }
         currentTurn?.cancel()
         currentTurn = nil
         isSending = false
@@ -409,24 +421,46 @@ public final class LocalChatModel: ObservableObject {
         // 自然语言任务控制：暂停、停止、继续
         if text == "暂停" || text == "暂停任务" {
             draft = ""
+            if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl {
+                let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+                let parts = clean.split(separator: ":")
+                let host = String(parts[0])
+                let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+                let targetDev = agent.deviceId ?? "MacBook-Air"
+                let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+                Task {
+                    _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: "codex", action: "pause")
+                }
+            }
             if let working = (try? data.tasks.listTasks())?.first(where: { $0.state == "working" }) {
                 _ = try? data.tasks.setPaused(taskId: working.taskId, isPaused: true)
                 eventLog.append(conversationId: conversationID ?? "conv", kind: "TASK_PAUSED", detail: "任务已通过自然语言暂停。")
                 appendSystemNotice("已暂停任务「\(working.title)」。可通过自然语言输入「继续」恢复执行，或输入「停止」取消任务。")
             } else {
-                appendSystemNotice("当前没有正在执行中的任务。")
+                appendSystemNotice("已向设备发送暂停指令。")
             }
             return
         }
 
         if text == "继续" || text == "继续执行" || text == "恢复" {
             draft = ""
+            if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl {
+                let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+                let parts = clean.split(separator: ":")
+                let host = String(parts[0])
+                let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+                let targetDev = agent.deviceId ?? "MacBook-Air"
+                let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+                Task {
+                    _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: "codex", action: "resume")
+                }
+            }
             if let paused = (try? data.tasks.listTasks())?.first(where: { $0.isPaused }) {
                 _ = try? data.tasks.setPaused(taskId: paused.taskId, isPaused: false)
                 eventLog.append(conversationId: conversationID ?? "conv", kind: "TASK_RESUMED", detail: "任务已通过自然语言恢复。")
                 appendSystemNotice("已恢复任务「\(paused.title)」的执行。")
             } else {
-                appendSystemNotice("当前没有已暂停的任务。")
+                appendSystemNotice("已向设备发送恢复指令。")
             }
             return
         }
@@ -493,25 +527,77 @@ public final class LocalChatModel: ObservableObject {
                 }
             }
 
-            let engine = appState.makeBrainEngine(
-                conversations: data.conversations,
-                tools: ChatUnavailableTools(),
-                eventLog: eventLog,
-                approvalGate: DenyApprovalGate()
-            )
-            for try await event in engine.chat(
-                conversationId: id,
-                userText: outgoing,
-                brainIdOverride: selectedBrain,
-                allowFailover: false
-            ) {
-                try Task.checkCancellation()
-                switch event {
-                case .textDelta(let delta): streaming += delta
-                case .error(let info): error = info.message
-                default: break
-                }
+            if let agent = selectedAgent, agent.kind == .device, let hostRaw = agent.baseUrl {
+                // 单兵 Agent 真实远端执行
+                let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+                let parts = clean.split(separator: ":")
+                let host = String(parts[0])
+                let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+                let targetDev = agent.deviceId ?? "MacBook-Air"
+                let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+                let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
+
+                let userMsg = ConversationMessage(conversationId: id, role: "user", content: outgoing, source: "user", taskId: activeTaskId)
+                try? data.conversations.appendMessage(userMsg)
                 reload()
+
+                let output = try await HandClient.shared.runAgent(
+                    host: host,
+                    port: port,
+                    targetDeviceId: targetDev,
+                    folder: folder,
+                    agentId: realAgentId,
+                    prompt: outgoing,
+                    timeoutSeconds: 60.0
+                ) { progress in
+                    Task { @MainActor in
+                        self.streaming = progress
+                    }
+                }
+
+                let assistantMsg = ConversationMessage(
+                    conversationId: id,
+                    role: "assistant",
+                    content: output.isEmpty ? "（任务已执行完毕，无控制台输出）" : output,
+                    source: agent.displayName,
+                    taskId: activeTaskId
+                )
+                try? data.conversations.appendMessage(assistantMsg)
+            } else {
+                // 大脑推理模式：若有已连接设备，装配真实跨设备工具
+                let toolRegistry: ToolRegistry
+                if let dev = (try? data.agents.listAgents())?.first(where: { $0.kind == .device && $0.memberConnectionState == "CONNECTED" }),
+                   let hostRaw = dev.baseUrl {
+                    let clean = hostRaw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+                    let parts = clean.split(separator: ":")
+                    let host = String(parts[0])
+                    let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+                    let folder = dev.deviceFolder ?? "/Users/a1234/v5-codex-work"
+                    toolRegistry = HandCrossDeviceToolRegistry(host: host, port: port, targetDeviceId: dev.deviceId ?? dev.agentId, agentId: "codex", defaultFolder: folder)
+                } else {
+                    toolRegistry = ChatUnavailableTools()
+                }
+
+                let engine = appState.makeBrainEngine(
+                    conversations: data.conversations,
+                    tools: toolRegistry,
+                    eventLog: eventLog,
+                    approvalGate: DenyApprovalGate()
+                )
+                for try await event in engine.chat(
+                    conversationId: id,
+                    userText: outgoing,
+                    brainIdOverride: selectedBrain,
+                    allowFailover: false
+                ) {
+                    try Task.checkCancellation()
+                    switch event {
+                    case .textDelta(let delta): streaming += delta
+                    case .error(let info): error = info.message
+                    default: break
+                    }
+                    reload()
+                }
             }
 
             if let tid = activeTaskId {
@@ -1453,7 +1539,7 @@ public struct ModelAndAgentSheet: View {
     public var body: some View {
         NavigationStack {
             List {
-                Section("Agent / 大脑") {
+                Section("当前推理大脑模型 (Brain / LLM)") {
                     if model.usableBrains.isEmpty {
                         Text("还没有可用的大脑（需填写 API Key）。会员登录与 API Key 是两种不同授权，ChatGPT 会员在 iOS 尚未接入。")
                             .font(.footnote).foregroundStyle(.secondary)
@@ -1471,6 +1557,39 @@ public struct ModelAndAgentSheet: View {
                         }
                     }
                     Button("管理模型与连接") { dismiss(); onManage() }
+                }
+
+                Section("执行主体 (Agent)") {
+                    Button {
+                        model.selectedAgent = nil
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("大脑单兵直接执行 (默认)").foregroundStyle(.primary)
+                                Text("由当前大脑使用跨设备工具集直接读写").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if model.selectedAgent == nil { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                        }
+                    }
+
+                    let availableAgents = ((try? LocalData.shared.agents.listAgents()) ?? []).filter {
+                        !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.enabled
+                    }
+                    ForEach(availableAgents) { ag in
+                        Button {
+                            model.selectedAgent = ag
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ag.displayName).foregroundStyle(.primary)
+                                    Text("类型: \(ag.kind.rawValue) · 设备: \(ag.deviceId ?? "本机")").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if model.selectedAgent?.agentId == ag.agentId { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            }
+                        }
+                    }
                 }
                 Section("模型（从服务商实时获取）") {
                     if loading { ProgressView() }
@@ -1544,8 +1663,11 @@ public struct ChatComposerBar: View {
     @State private var showCamera = false
 
     private var brainLabel: String {
+        if let ag = model.selectedAgent {
+            return "Agent: \(ag.displayName)"
+        }
         let cfg = model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
-        guard let cfg else { return "选择模型" }
+        guard let cfg else { return "选择模型 / Agent" }
         return cfg.model.isEmpty ? cfg.label : cfg.model
     }
 

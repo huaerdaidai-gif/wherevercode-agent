@@ -1363,13 +1363,8 @@ private struct CollaborationAndAgentsScreen: View {
     @State private var newAgentAccess: AgentAccess = .cli
     @State private var newAgentEndpoint = ""
     @State private var bannerMsg: String? = nil
-
-    private let presets: [(id: String, name: String, kind: AgentKind, access: AgentAccess, summary: String)] = [
-        ("codex-cli", "Codex · 可用于代码任务", .cloud, .cli, "代码、测试、审查"),
-        ("claude-agent", "Claude · 对话与规划", .cloud, .api, "对话、架构规划、代码审查"),
-        ("deepseek-agent", "DeepSeek · 模型适配", .cloud, .api, "推理、代码生成"),
-        ("k70-worker", "K70 设备 Agent", .device, .connector, "Android 设备执行节点")
-    ]
+    @State private var testingAgentId: String? = nil
+    @State private var testResultMsg: String? = nil
 
     var body: some View {
         List {
@@ -1381,31 +1376,11 @@ private struct CollaborationAndAgentsScreen: View {
                 }
             }
 
-            Section("快速添加预设 Agent") {
-                ForEach(presets, id: \.id) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name).font(.subheadline.weight(.medium))
-                            Text("\(item.kind.rawValue) · \(item.access.rawValue) · \(item.summary)")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(agents.contains(where: { $0.agentId == item.id }) ? "详情" : "＋ 添加") {
-                            let rec = AgentRecord(
-                                agentId: item.id,
-                                displayName: item.name,
-                                kind: item.kind,
-                                access: item.access,
-                                lastTestSummary: item.summary,
-                                memberConnectionState: "NOT_CONNECTED"
-                            )
-                            try? LocalData.shared.agents.saveAgent(rec)
-                            reload()
-                            bannerMsg = "已保存「\(item.name)」至本地 Agent 目录。"
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
+            if let testResultMsg {
+                Section {
+                    Text(testResultMsg)
+                        .font(.caption)
+                        .foregroundStyle(.blue)
                 }
             }
 
@@ -1472,9 +1447,26 @@ private struct CollaborationAndAgentsScreen: View {
                             Text("ID: \(ag.agentId) · 类型: \(ag.kind.rawValue) · 接入: \(ag.access.rawValue)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let devId = ag.deviceId, !devId.isEmpty {
+                                Text("运行在设备：\(devId)\(ag.deviceFolder.map { " · 目录：\($0)" } ?? "")")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
                             HStack(spacing: 8) {
-                                Button("委派任务") { onNavigateRoute("delegate") }.buttonStyle(.bordered).controlSize(.mini)
-                                Button("查看任务") { onNavigateRoute("tasks") }.buttonStyle(.bordered).controlSize(.mini)
+                                if ag.kind == .device, let host = ag.baseUrl {
+                                    Button(testingAgentId == ag.agentId ? "正在测试…" : "单兵运行测试") {
+                                        executeSingleAgentTest(ag)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.mini)
+                                    .disabled(testingAgentId != nil)
+                                }
+                                Button("对话执行") {
+                                    onNavigateRoute("chat")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+
                                 Button("工具权限") { onNavigateRoute("mcp") }.buttonStyle(.bordered).controlSize(.mini)
                                 Spacer()
                                 Button("删除", role: .destructive) {
@@ -1492,8 +1484,50 @@ private struct CollaborationAndAgentsScreen: View {
         .onAppear(perform: reload)
     }
 
+    private func executeSingleAgentTest(_ ag: AgentRecord) {
+        guard let raw = ag.baseUrl else { return }
+        testingAgentId = ag.agentId
+        testResultMsg = "正在向 \(ag.displayName) 下发单兵冒烟测试指令…"
+        let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+        let parts = clean.split(separator: ":")
+        let host = String(parts[0])
+        let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+        let targetDev = ag.deviceId ?? "MacBook-Air"
+        let folder = ag.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        let realAgentId = ag.agentId.contains(":") ? String(ag.agentId.split(separator: ":").last!) : ag.agentId
+
+        Task {
+            do {
+                let output = try await HandClient.shared.runAgent(
+                    host: host,
+                    port: port,
+                    targetDeviceId: targetDev,
+                    folder: folder,
+                    agentId: realAgentId,
+                    prompt: "echo SINGLE_AGENT_SMOKE_PASS",
+                    timeoutSeconds: 30.0
+                ) { progress in
+                    Task { @MainActor in
+                        self.testResultMsg = "进度：\(progress)"
+                    }
+                }
+                await MainActor.run {
+                    self.testingAgentId = nil
+                    self.testResultMsg = "单兵测试成功！输出：\(output.trimmingCharacters(in: .whitespacesAndNewlines))"
+                }
+            } catch {
+                await MainActor.run {
+                    self.testingAgentId = nil
+                    self.testResultMsg = "单兵测试失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     private func reload() {
-        agents = (try? LocalData.shared.agents.listAgents()) ?? []
+        let all = (try? LocalData.shared.agents.listAgents()) ?? []
+        // 过滤掉纯设备记录，确保 Agent 列表中只有纯正智能体，不与设备混淆
+        agents = all.filter { !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) }
     }
 }
 

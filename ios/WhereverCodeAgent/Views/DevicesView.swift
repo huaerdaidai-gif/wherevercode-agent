@@ -38,10 +38,13 @@ public struct DevicesView: View {
 
             discoveryAndInstallSection
             registeredDevicesSection
-            templatesSection
             shortcutsSection
         }
         .navigationTitle("设备")
+        .refreshable {
+            reload()
+            startLanScan()
+        }
         .onAppear {
             reload()
             startLanScan()
@@ -193,58 +196,21 @@ public struct DevicesView: View {
             .onDelete { offsets in
                 for idx in offsets {
                     let d = devices[idx]
-                    HandIdentityManager.deleteDeviceCredentials(deviceId: d.agentId)
-                    try? LocalData.shared.agents.deleteAgent(agentId: d.agentId)
+                    deleteDeviceCascade(deviceId: d.agentId)
                 }
-                reload()
             }
         }
     }
 
-    // MARK: - 模板登记与快捷入口
-
-    private let prototypeTemplates: [(id: String, name: String, subtitle: String, access: AgentAccess, host: String, folder: String)] = [
-        ("device-mac-workstation", "Mac · 开发工作站", "macOS · 局域网开发主机", .app, "192.168.1.4:18743", "/Users/a1234/Projects/wherevercode-agent"),
-        ("device-redmi-k70", "Redmi K70 · Android Worker", "Android · 移动执行节点", .connector, "100.96.45.81:8022", "/sdcard/Projects"),
-        ("device-xiaomi-12", "小米 12 · 本地模型", "Android / Termux · 本地推理节点", .api, "100.94.147.89:8022", "~/AI-Workspace"),
-        ("device-vps-us", "美国机房 VPS · 远程构建机", "Linux / Ubuntu · 云端执行节点", .cli, "100.107.143.123:18743", "/root/workspace")
-    ]
-
-    @ViewBuilder
-    private var templatesSection: some View {
-        Section("常见设备预设") {
-            ForEach(prototypeTemplates, id: \.id) { tpl in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(tpl.name).font(.subheadline)
-                        Text(tpl.subtitle).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("一键载入") {
-                        if let existing = devices.first(where: { $0.agentId == tpl.id }) {
-                            selectedDevice = existing
-                        } else {
-                            let rec = AgentRecord(
-                                agentId: tpl.id,
-                                displayName: tpl.name,
-                                kind: .device,
-                                access: tpl.access,
-                                baseUrl: tpl.host,
-                                lastTestSummary: "本地已登记 · 待探测连接",
-                                memberConnectionState: "NOT_CONNECTED",
-                                deviceId: tpl.id,
-                                deviceFolder: tpl.folder
-                            )
-                            try? LocalData.shared.agents.saveAgent(rec)
-                            reload()
-                            selectedDevice = rec
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
+    private func deleteDeviceCascade(deviceId: String) {
+        HandIdentityManager.deleteDeviceCredentials(deviceId: deviceId)
+        if let all = try? LocalData.shared.agents.listAgents() {
+            for a in all where a.deviceId == deviceId {
+                try? LocalData.shared.agents.deleteAgent(agentId: a.agentId)
             }
         }
+        try? LocalData.shared.agents.deleteAgent(agentId: deviceId)
+        reload()
     }
 
     @ViewBuilder
@@ -579,6 +545,9 @@ private struct AddDeviceSheet: View {
                     if self.name.isEmpty {
                         self.name = hello.displayName
                     }
+                    if let firstFolder = hello.agents.first?.folder, !firstFolder.isEmpty {
+                        self.folder = firstFolder
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -607,6 +576,7 @@ private struct AddDeviceSheet: View {
                     case .approved:
                         let cleanName = self.name.isEmpty ? hello.displayName : self.name
                         let fullHost = "\(cleanHost):\(port)"
+                        let selectedFolder = folder.isEmpty ? (hello.agents.first?.folder ?? "/Users/a1234/v5-codex-work") : folder
                         let rec = AgentRecord(
                             agentId: hello.deviceId,
                             displayName: cleanName,
@@ -617,19 +587,20 @@ private struct AddDeviceSheet: View {
                             lastTestSummary: "已连接（在线 · \(hello.agents.count) 个 Agent）",
                             memberConnectionState: "CONNECTED",
                             deviceId: hello.deviceId,
-                            deviceFolder: folder.isEmpty ? "~/Projects" : folder
+                            deviceFolder: selectedFolder
                         )
                         try? LocalData.shared.agents.saveAgent(rec)
 
-                        // 自动发现并注册该设备上的 Agent
+                        // 自动发现并注册该设备上的真实 Agent (kind: .device, access: .cli)
                         for ag in hello.agents where ag.available {
+                            let agentId = "\(hello.deviceId):\(ag.agentId)"
                             let agentRec = AgentRecord(
-                                agentId: ag.agentId,
+                                agentId: agentId,
                                 displayName: "\(ag.displayName) (\(cleanName))",
-                                kind: .cloud,
-                                access: .connector,
+                                kind: .device,
+                                access: .cli,
                                 baseUrl: fullHost,
-                                lastTestSummary: "远端设备 Agent · 可调度",
+                                lastTestSummary: "设备 Agent · \(ag.folder)",
                                 memberConnectionState: "CONNECTED",
                                 deviceId: hello.deviceId,
                                 deviceFolder: ag.folder
@@ -851,6 +822,24 @@ private struct DeviceDetailSheet: View {
                     }
                 }
 
+                Section("工作区目录授权") {
+                    TextField("工作目录路径", text: Binding(
+                        get: { device.deviceFolder ?? "/Users/a1234/v5-codex-work" },
+                        set: { val in
+                            device.deviceFolder = val
+                            try? LocalData.shared.agents.saveAgent(device)
+                            onUpdated()
+                        }
+                    ))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    Button("向目标机授权此目录 (authorizeProjectFolder)") {
+                        authorizeCurrentFolder()
+                    }
+                    .font(.subheadline)
+                }
+
                 Section("工作区文件读取验证") {
                     Button(isListingFiles ? "正在读取目录…" : "读取远程项目目录") {
                         loadDirectoryFiles()
@@ -899,6 +888,11 @@ private struct DeviceDetailSheet: View {
                     Button("查看关联任务") { onNavigateRoute("tasks") }
                     Button("断开并删除设备", role: .destructive) {
                         HandIdentityManager.deleteDeviceCredentials(deviceId: device.agentId)
+                        if let all = try? LocalData.shared.agents.listAgents() {
+                            for a in all where a.deviceId == device.agentId {
+                                try? LocalData.shared.agents.deleteAgent(agentId: a.agentId)
+                            }
+                        }
                         try? LocalData.shared.agents.deleteAgent(agentId: device.agentId)
                         onUpdated()
                         dismiss()
@@ -1000,6 +994,37 @@ private struct DeviceDetailSheet: View {
             } catch {
                 await MainActor.run {
                     self.fileOpResult = "发送控制失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func authorizeCurrentFolder() {
+        guard let raw = device.baseUrl, !raw.isEmpty else { return }
+        let (host, port) = parseHostAndPort(raw)
+        let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        fileOpResult = "正在请求授权目录「\(folder)」…"
+
+        Task {
+            do {
+                let ok = try await HandClient.shared.authorizeProjectFolder(
+                    host: host,
+                    port: port,
+                    targetDeviceId: device.deviceId ?? device.agentId,
+                    agentId: "codex",
+                    folder: folder
+                )
+                await MainActor.run {
+                    if ok {
+                        self.fileOpResult = "成功授权目录「\(folder)」，立即测试列目录…"
+                        self.loadDirectoryFiles()
+                    } else {
+                        self.fileOpResult = "目录授权被远端拒绝"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.fileOpResult = "授权失败：\(error.localizedDescription)"
                 }
             }
         }

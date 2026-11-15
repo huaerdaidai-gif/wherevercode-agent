@@ -3675,16 +3675,26 @@ def adapter_folder(entry: dict, device_id: str) -> str:
     dev = canonical_device_id(device_id)
     by_device = entry.get("folders_by_device", {}) or {}
     folders = by_device.get(dev) or by_device.get(device_id) or []
-    if folders:
-        return folders[0]
-    plain = entry.get("folders", []) or []
-    return plain[0] if plain else ""
+    folder = folders[0] if folders else ((entry.get("folders", []) or [""])[0])
+    if folder:
+        if folder.startswith("/Users/example-user/"):
+            home = os.path.expanduser("~")
+            folder = os.path.join(home, folder[len("/Users/example-user/"):])
+        elif folder.startswith("~"):
+            folder = os.path.expanduser(folder)
+    return folder
 
 
 def adapter_log_path(entry: dict, device_id: str, task_id: str) -> str | None:
     dev = canonical_device_id(device_id)
     tmpl = entry.get("log_template", {}) or {}
     raw = tmpl.get(dev) or tmpl.get(device_id)
+    if raw:
+        if raw.startswith("/Users/example-user/"):
+            home = os.path.expanduser("~")
+            raw = os.path.join(home, raw[len("/Users/example-user/"):])
+        elif raw.startswith("~"):
+            raw = os.path.expanduser(raw)
     safe_id = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
     return raw.replace("{task_id}", safe_id) if raw else None
 

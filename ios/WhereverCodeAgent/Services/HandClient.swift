@@ -896,22 +896,45 @@ public actor HandClient {
         return output
     }
 
+    public static func normalizePath(_ path: String) -> String {
+        var clean = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { return clean }
+        while clean.contains("//") {
+            clean = clean.replacingOccurrences(of: "//", with: "/")
+        }
+        if clean.count > 1 && clean.hasSuffix("/") {
+            clean.removeLast()
+        }
+        return clean
+    }
+
     /// 授权远程项目路径
     public func authorizeProjectFolder(
         host: String,
         port: Int = 18743,
         targetDeviceId: String,
         agentId: String = "codex",
+        baseFolder: String = "",
         folder: String
     ) async throws -> Bool {
+        let cleanFolder = Self.normalizePath(folder)
+        var resolvedBase = Self.normalizePath(baseFolder)
+        if resolvedBase.isEmpty {
+            if let hello = try? await probeHello(host: host, port: port),
+               let ag = hello.agents.first(where: { $0.agentId == agentId }) {
+                resolvedBase = Self.normalizePath(ag.folder)
+            } else {
+                resolvedBase = cleanFolder
+            }
+        }
         let res = try await executeCall(
             host: host,
             port: port,
             targetDeviceId: targetDeviceId,
-            folder: folder,
+            folder: resolvedBase,
             agentId: agentId,
             action: "authorize_project_folder",
-            args: ["folder": folder]
+            args: ["folder": cleanFolder]
         )
         guard let args = res["args"] as? [String: Any],
               let output = args["output"] as? String,
@@ -1014,5 +1037,107 @@ public actor HandClient {
             }
         }
         return results
+    }
+}
+
+// MARK: - 真实跨设备工具调用引擎 (HandCrossDeviceToolRegistry)
+
+public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendable {
+    public let host: String
+    public let port: Int
+    public let targetDeviceId: String
+    public let agentId: String
+    public let defaultFolder: String
+
+    public init(
+        host: String,
+        port: Int = 18743,
+        targetDeviceId: String,
+        agentId: String = "codex",
+        defaultFolder: String = "/Users/a1234/v5-codex-work"
+    ) {
+        self.host = host
+        self.port = port
+        self.targetDeviceId = targetDeviceId
+        self.agentId = agentId
+        self.defaultFolder = defaultFolder
+    }
+
+    public var workspaceRoot: String? { defaultFolder }
+
+    public func toolsForCapabilities(_ capabilities: BrainCapabilities?, authorizedTools: Set<String>) -> [ToolDef] {
+        return [
+            ToolDef(name: "list_files", description: "列出远程工作区指定目录下的文件和子目录", parameters: [
+                "path": "相对工作区的子目录路径，传空表示工作区根目录"
+            ]),
+            ToolDef(name: "read_file", description: "读取远程工作区指定文件的纯文本内容", parameters: [
+                "path": "相对工作区的文件路径"
+            ]),
+            ToolDef(name: "write_file", description: "向远程工作区指定文件写入内容", parameters: [
+                "path": "相对工作区的文件路径",
+                "content": "待写入的文本内容"
+            ]),
+            ToolDef(name: "run_command", description: "在远程设备的工作区中执行命令", parameters: [
+                "command": "待执行的命令字符串"
+            ])
+        ]
+    }
+
+    public func gitHostToolsFor(project: Project?, location: ProjectLocation?) -> [ToolDef] { [] }
+
+    public func allToolNames() -> Set<String> {
+        ["list_files", "read_file", "write_file", "run_command", "list", "read", "write", "run"]
+    }
+
+    public func validateOnly(_ action: BrainAction, _ context: ToolContext) -> ToolOutcome? {
+        guard allToolNames().contains(action.tool) else {
+            return ToolOutcome(ok: false, summary: "未知工具 \(action.tool)", errorCode: "unknown_tool")
+        }
+        return nil
+    }
+
+    public func execute(_ action: BrainAction, _ context: ToolContext, stopped: @escaping () -> Bool) async throws -> ToolOutcome {
+        if stopped() {
+            return ToolOutcome(ok: false, summary: "操作已被用户终止", errorCode: "stopped")
+        }
+        let folder = defaultFolder.isEmpty ? "/Users/a1234/v5-codex-work" : defaultFolder
+        do {
+            switch action.tool {
+            case "list_files", "list":
+                let relPath = action.args["path"] ?? ""
+                let entries = try await HandClient.shared.listDirectory(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath)
+                let names = entries.map { "\($0.isDir ? "[DIR] " : "")\($0.name)" }.joined(separator: "\n")
+                return ToolOutcome(ok: true, summary: "获取到 \(entries.count) 个条目", data: names)
+
+            case "read_file", "read":
+                guard let relPath = action.args["path"], !relPath.isEmpty else {
+                    return ToolOutcome(ok: false, summary: "缺少文件路径", errorCode: "missing_path")
+                }
+                let content = try await HandClient.shared.readFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath)
+                return ToolOutcome(ok: true, summary: "成功读取 \(relPath) (\(content.count) 字符)", data: content)
+
+            case "write_file", "write":
+                guard let relPath = action.args["path"], !relPath.isEmpty else {
+                    return ToolOutcome(ok: false, summary: "缺少写入路径", errorCode: "missing_path")
+                }
+                let content = action.args["content"] ?? ""
+                let ok = try await HandClient.shared.writeFile(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, path: relPath, content: content)
+                return ToolOutcome(ok: ok, summary: ok ? "已写入 \(relPath)" : "写入失败", errorCode: ok ? nil : "write_failed")
+
+            case "run_command", "run":
+                let prompt = action.args["command"] ?? action.args["prompt"] ?? ""
+                let output = try await HandClient.shared.runAgent(host: host, port: port, targetDeviceId: targetDeviceId, folder: folder, agentId: agentId, prompt: prompt, timeoutSeconds: 60.0) { _ in }
+                return ToolOutcome(ok: true, summary: "命令执行完成", data: output)
+
+            default:
+                return ToolOutcome(ok: false, summary: "不支持的跨设备工具: \(action.tool)", errorCode: "unsupported_tool")
+            }
+        } catch {
+            return ToolOutcome(ok: false, summary: "跨设备工具执行失败: \(error.localizedDescription)", errorCode: "tool_execution_failed")
+        }
+    }
+
+    public func isReadOnlyExtensionTool(_ name: String) -> Bool {
+        name == "list_files" || name == "read_file" || name == "list" || name == "read"
     }
 }
