@@ -137,13 +137,14 @@ class EntryRegistryTest {
 
     @Test
     fun `channel and task gap entries are registered as todo features`() {
-        // 2026-11-15 查缺补漏新增：频道管理/频道文件/私聊/新建任务/扩展
-        // Manifest 五个真缺口先以诚实待开发入口落地，不伪装已实现。
+        // 2026-11-15 查缺补漏新增：频道管理/频道文件/私聊/扩展 Manifest
+        // 四个真缺口仍以诚实待开发入口落地，不伪装已实现。新建任务
+        // （feature_create_task）已于核心功能推进第 3 项真实现，
+        // 见 create task 测试，不再在本组。
         val gapIds = listOf(
             "feature_channel_manage",
             "feature_channel_files",
             "feature_direct_message",
-            "feature_create_task",
             "feature_extension_manifest",
         )
         gapIds.forEach { id ->
@@ -156,7 +157,6 @@ class EntryRegistryTest {
         assertEquals("nav_channels", EntryRegistry.find("feature_channel_manage")?.parentId)
         assertEquals("nav_channels", EntryRegistry.find("feature_channel_files")?.parentId)
         assertEquals("nav_channels", EntryRegistry.find("feature_direct_message")?.parentId)
-        assertEquals("nav_running_tasks", EntryRegistry.find("feature_create_task")?.parentId)
         assertEquals("nav_mcp_plugins", EntryRegistry.find("feature_extension_manifest")?.parentId)
     }
 
@@ -232,9 +232,22 @@ class EntryRegistryTest {
         assertEquals("queue_schedule", entry.target)
         assertEquals(Group.FEATURE, entry.group)
         assertEquals("nav_running_tasks", entry.parentId)
-        // 状态计数随本项升级同步：待开发 58 → 57、已实现 31 → 32，总数仍 89。
-        assertEquals(57, EntryRegistry.ENTRIES.count { it.status == Status.TODO })
-        assertEquals(32, EntryRegistry.ENTRIES.count { it.status == Status.IMPLEMENTED })
+        // 状态计数（随第 3 项新建任务升级后）：待开发 56、已实现 33，总数仍 89。
+        assertEquals(56, EntryRegistry.ENTRIES.count { it.status == Status.TODO })
+        assertEquals(33, EntryRegistry.ENTRIES.count { it.status == Status.IMPLEMENTED })
+    }
+
+    @Test
+    fun `create task is registered as implemented screen feature`() {
+        // 2026-11-15 核心功能推进第 3 项：新建任务已真实现（CreateTaskForm
+        // 纯逻辑 + CreateTaskFormDialog，提交走与对话派单同一创建路径），
+        // 从待开发升为已实现 SCREEN 入口，落点 target = "create_task"。
+        val entry = EntryRegistry.find("feature_create_task")!!
+        assertEquals(Status.IMPLEMENTED, entry.status)
+        assertEquals(EntryRegistry.TargetKind.SCREEN, entry.targetKind)
+        assertEquals("create_task", entry.target)
+        assertEquals(Group.FEATURE, entry.group)
+        assertEquals("nav_running_tasks", entry.parentId)
     }
 
     @Test

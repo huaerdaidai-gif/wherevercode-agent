@@ -253,6 +253,8 @@ import wherevercode.agent.core.task.TriageRouter
 import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.transport.LanTransport
 import wherevercode.agent.ui.ChatProjectPickerDialog
+import wherevercode.agent.ui.CreateTaskForm
+import wherevercode.agent.ui.CreateTaskFormDialog
 import wherevercode.agent.ui.GlobalSearchDialog
 import wherevercode.agent.ui.QueueBoardDialog
 import wherevercode.agent.ui.SessionListController
@@ -4745,6 +4747,9 @@ class MainActivity : AppCompatActivity() {
                 // 队列与调度看板（弹窗）：TaskStore 全量任务按状态分组，
                 // 点任务进详情、排队中可取消（见 showQueueBoard）。
                 "queue_schedule" -> showQueueBoard()
+                // 新建任务独立表单（弹窗）：走与对话派单同一创建路径
+                // 建分派任务行（见 showCreateTaskForm）。
+                "create_task" -> showCreateTaskForm()
                 else -> toast("${entry.title}待开发")
             }
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
@@ -4909,6 +4914,88 @@ class MainActivity : AppCompatActivity() {
                     "取消排队任务？",
                     "确定要取消这个排队中的任务吗？取消后不会再被执行。",
                 ) { stopTask(task) }
+            }
+        }.start()
+    }
+
+    /**
+     * 新建任务（核心功能推进第 3 项，2026-11-15）：独立表单建分派
+     * 任务行。数据在后台线程组装（agentStore 中已启用且可派单的
+     * Agent / projectStore 项目列表），界面走 [CreateTaskFormDialog]；
+     * 提交走与对话派单同一条创建路径——[CreateTaskForm.buildRecord]
+     * 复用 [ChatTaskDispatcher] 工厂的分派行不变量（sessionId=null、
+     * state=queued、assignedAgentId=memberId=所选 Agent），再经
+     * TaskStore.createTask 落库（与聊天派单、Agent 页指派、任务
+     * 重试同一写口）。建出的行立即可在任务列表 / 队列看板看到；
+     * 执行去向与既有口径一致：远端设备 Agent 由 RemoteTaskPump
+     * 认领发到设备执行，其他 Agent 进 queued 等其认领，本地
+     * 执行器不代执行（表单内按所选 Agent 如实标注）。失败时把
+     * 真实错误回给表单原样显示，不吞错装成功。
+     */
+    private fun showCreateTaskForm() {
+        val components = brainComponents ?: run {
+            toast("大脑还在加载，请稍候再试。")
+            return
+        }
+        Thread {
+            val agents = CreateTaskForm.dispatchableAgents(
+                try {
+                    agentStore.listAgents()
+                } catch (_: Exception) {
+                    emptyList()
+                },
+            )
+            val projects = try {
+                projectStore.listProjects()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                CreateTaskFormDialog.show(
+                    context = this,
+                    agents = agents,
+                    projects = projects,
+                    onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
+                    onSubmit = { input, done ->
+                        submitCreateTaskForm(components, input, done)
+                    },
+                )
+            }
+        }.start()
+    }
+
+    /**
+     * 表单提交：后台线程建行；成功先关表单（done 回调），再 toast
+     * 并打开任务详情（任务列表 / 队列看板同源刷新）；失败把真实
+     * 错误原文回给表单显示，弹窗不关、不假装成功。
+     */
+    private fun submitCreateTaskForm(
+        components: BrainBootstrap.BrainComponents,
+        input: CreateTaskForm.Input,
+        done: (error: String?, createdTaskId: String?) -> Unit,
+    ) {
+        Thread {
+            var error: String? = null
+            var createdId: String? = null
+            try {
+                val record = CreateTaskForm.buildRecord(input)
+                createdId = components.taskStore.createTask(record).taskId
+            } catch (e: Exception) {
+                error = e.message?.takeIf { it.isNotBlank() } ?: "任务库写入失败。"
+            }
+            val resultError = error
+            val resultId = createdId
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (resultId != null) {
+                    done(null, resultId)
+                    toast("任务已创建，进入 queued 等 ${input.agent?.displayName ?: "Agent"} 认领。")
+                    refreshTasks()
+                    openTaskDetail(resultId)
+                } else {
+                    done(resultError, null)
+                }
             }
         }.start()
     }

@@ -281,8 +281,9 @@ object EntryRegistry {
             Status.TODO, TargetKind.TODO, "",
             "审", null, "nav_running_tasks", "代码审查待开发（独立审查页尚未开发）", "原型页 11。"),
         Entry("feature_create_task", "新建任务", Group.FEATURE,
-            Status.TODO, TargetKind.TODO, "",
-            "建", null, "nav_running_tasks", "新建任务待开发（独立创建任务表单尚未开发；当前从对话派单创建任务）", null),
+            Status.IMPLEMENTED, TargetKind.SCREEN, "create_task",
+            "建", null, "nav_running_tasks", null,
+            "新建任务已实现（CreateTaskForm 纯逻辑 + CreateTaskFormDialog）：独立表单建分派任务行——标题（必填）/详细说明（可选）/执行 Agent（必选，agentStore 已启用且可派单的真实列表，空态引导先去添加）/项目（可选，含不绑定）。提交走与对话派单同一创建路径（ChatTaskDispatcher 工厂不变量 + TaskStore.createTask）：sessionId=null、state=queued；远端设备 Agent 由 RemoteTaskPump 认领发到设备执行，其他 Agent 进 queued 等其认领，本地执行器不代执行。优先级/执行权限不在表单：两台执行器按 createdAt FIFO 不读 priority，执行权限由运行时审批闸门管。原型页 5。"),
         // ── 父级：频道 ──
         Entry("feature_channel_manage", "频道管理", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
