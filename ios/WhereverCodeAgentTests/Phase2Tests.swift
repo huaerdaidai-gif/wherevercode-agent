@@ -454,6 +454,7 @@ final class EntryRegistryTests: XCTestCase {
         XCTAssertEqual(uniqueIds.count, 83)
     }
 
+    @MainActor
     func testProjectSourceRegistryMatchesAndroid() {
         let sources = ProjectSourceRegistry.shared.sources()
         XCTAssertEqual(sources.count, 6)
