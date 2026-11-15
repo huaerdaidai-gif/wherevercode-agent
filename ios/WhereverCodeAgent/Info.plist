@@ -35,6 +35,8 @@
     <string>需要使用麦克风在对话中进行语音输入与听写。</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>需要使用语音识别将您的语音转写为对话或任务指令。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>需要使用相机拍照并作为对话附件。</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>需要访问相册以向支持视觉的大脑模型添加图片附件。</string>
     <key>UILaunchScreen</key>

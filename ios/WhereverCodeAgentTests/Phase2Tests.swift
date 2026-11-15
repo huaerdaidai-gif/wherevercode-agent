@@ -419,3 +419,29 @@ final class LocalChatHomeTests: XCTestCase {
         XCTAssertFalse(capabilities.openExistingFeature("editor"))
     }
 }
+
+@MainActor
+final class P0DeviceAcceptanceTests: XCTestCase {
+    func testProjectSourceBindingRoundTrip() throws {
+        let b = ProjectSourceBinding(providerId: "vps", targetId: "a1", targetTitle: "Box", path: "/srv/app")
+        let cfg = ChatSessionConfig(source: b, permission: .readOnly)
+        let decoded = try JSONDecoder().decode(ChatSessionConfig.self, from: JSONEncoder().encode(cfg))
+        XCTAssertEqual(decoded, cfg)
+    }
+
+    func testRegistryIsExtensible() {
+        let reg = ProjectSourceRegistry()
+        let ids = reg.all(data: LocalData.shared).map(\.id)
+        for id in ["local", "lan", "remote", "vps", "clouddrive", "github"] { XCTAssertTrue(ids.contains(id)) }
+        reg.register(PendingAccountSource(id: "gitlab", title: "GitLab", icon: "link", reason: "未接入"))
+        XCTAssertNotNil(reg.provider(id: "gitlab", data: LocalData.shared))
+        XCTAssertFalse(reg.provider(id: "github", data: LocalData.shared)!.canExecute)
+        XCTAssertFalse(reg.provider(id: "clouddrive", data: LocalData.shared)!.status(data: LocalData.shared).isReady)
+    }
+
+    func testSiwcHasNoAdapterSoCannotBeCurrent() {
+        let reg = BrainBootstrap.buildRegistry(
+            configStore: KeyValueBrainConfigStore(kv: LocalData.shared.kv), keyStore: BrainKeyStore())
+        XCTAssertNil(reg.get(BrainBootstrap.siwcBrainId))
+    }
+}

@@ -53,7 +53,28 @@ public final class BrainSettingsModel: ObservableObject {
         return keyStore.getSecret(authRef: authRef) != nil
     }
 
+    /// Whether this brain can actually serve a chat right now: its
+    /// adapter is registered (SIWC is not until the OAuth body lands)
+    /// and, for API brains, a key is stored. Membership login and
+    /// API keys are distinct — a ChatGPT membership is never treated
+    /// as an API credential.
+    func unusableReason(for config: BrainConfig) -> String? {
+        if registryProvider().get(config.adapterId) == nil {
+            return config.kind == .subscription
+                ? "会员登录在 iOS 上尚未接入，不能作为当前大脑"
+                : "此大脑的接入模块未加载"
+        }
+        if config.kind != .subscription && !hasKey(for: config) {
+            return "尚未填写 API Key"
+        }
+        return nil
+    }
+
     func setCurrent(brainId: String?) {
+        if let brainId, let config = configStore.getConfig(brainId: brainId),
+           unusableReason(for: config) != nil {
+            return
+        }
         configStore.setCurrentBrainId(brainId)
         reload()
         onChange()
@@ -381,6 +402,12 @@ private struct BrainEditorView: View {
                             save()
                             model.setCurrent(brainId: original.brainId)
                             dismiss()
+                        }
+                        .disabled(isSiwc || (!model.hasKey(for: original) && apiKey.isEmpty))
+                        if let reason = model.unusableReason(for: original), apiKey.isEmpty {
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     } else {
                         Button("取消当前大脑（停用大脑层）") {

@@ -91,11 +91,28 @@ public final class AppState: ObservableObject {
             self?.brainRegistry ?? BrainAdapterRegistry()
         }
         model.onChange = { [weak self] in self?.rebuildBrainStack() }
+        repairCurrentBrainReference()
     }
 
     public func rebuildBrainStack() {
         brainRegistry = BrainBootstrap.buildRegistry(
             configStore: brainConfigStore, keyStore: brainKeyStore)
+        repairCurrentBrainReference()
+    }
+
+    /// P0 device fix: a stale current-brain reference (e.g. the
+    /// seeded "siwc-chatgpt" membership brain, whose adapter is not
+    /// registered on iOS yet, or a deleted brain) made every send
+    /// fail with "找不到大脑配置 siwc-chatgpt". Clear the dangling
+    /// reference so the UI honestly shows "未配置大脑" and lets the
+    /// user pick a brain that can actually run.
+    private func repairCurrentBrainReference() {
+        guard let current = brainConfigStore.currentBrainId() else { return }
+        let config = brainRegistry.configFor(current) ?? brainConfigStore.getConfig(brainId: current)
+        if config == nil || brainRegistry.get(config!.adapterId) == nil {
+            brainConfigStore.setCurrentBrainId(nil)
+            brainSettingsModel.reload()
+        }
     }
 
     public func makeBrainEngine(

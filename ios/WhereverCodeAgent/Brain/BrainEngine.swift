@@ -940,9 +940,18 @@ public final class BrainEngine {
             }
             guard let config = adapters.configFor(brainId),
                   let adapter = adapters.get(config.adapterId) else {
+                let cfg = adapters.configFor(brainId)
+                let msg: String
+                if cfg == nil {
+                    msg = "当前大脑已不存在：请到 设置 › 模型 重新选择一个已连接的大脑。"
+                } else if cfg?.kind == .subscription {
+                    msg = "「\(cfg!.label)」的会员登录在 iOS 上尚未接入，无法对话。请在 设置 › 模型 选择已填写 API Key 的大脑。"
+                } else {
+                    msg = "「\(cfg!.label)」的接入模块未加载，请在 设置 › 模型 重新保存后再试。"
+                }
                 let err = BrainErrorInfo(
                     code: "brain_not_found",
-                    message: "找不到大脑配置 \(brainId)：请检查大脑设置。",
+                    message: msg,
                     retryable: false)
                 emitError(err)
                 log(conversation.id, "error", err.message)

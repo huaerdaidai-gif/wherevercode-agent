@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 /// The local data layer facade: opens the shared database and
 /// vends every store. Android keeps conversations, tasks, sessions
@@ -212,6 +214,12 @@ public final class LocalChatModel: ObservableObject {
     @Published public var streaming: String = ""
     @Published public var isSending: Bool = false
     @Published public var showHistory: Bool = false
+    /// Project source / working path bound to this conversation
+    /// (independent of the brain/model selection).
+    @Published public var projectSource: ProjectSourceBinding = .localDefault
+    /// Execution permission for this conversation. Only modes the
+    /// current chat path can honour are selectable.
+    @Published public var permissionMode: ChatPermissionMode = .readOnly
 
     public private(set) var conversationID: String?
     public unowned let appState: AppState
@@ -228,7 +236,55 @@ public final class LocalChatModel: ObservableObject {
         if let id = conversationID, let conversation = try? data.conversations.getConversation(id: id) {
             self.selectedBrain = conversation.brainId ?? self.selectedBrain
         }
+        restoreSessionConfig()
         reload()
+    }
+
+    // MARK: Session config + draft persistence (P0)
+
+    private var draftKey: String { "chat.draft.\(conversationID ?? "new")" }
+    private var configKey: String? { conversationID.map { "chat.sessionConfig.\($0)" } }
+
+    private func restoreSessionConfig() {
+        let cfg = configKey.flatMap { try? data.kv.getJSON($0, as: ChatSessionConfig.self) }
+        projectSource = cfg?.source ?? .localDefault
+        permissionMode = cfg?.permission ?? .readOnly
+        draft = (try? data.kv.get(draftKey)) ?? nil ?? ""
+    }
+
+    public func persistSessionConfig() {
+        guard let key = configKey else { return }
+        try? data.kv.setJSON(key, ChatSessionConfig(source: projectSource, permission: permissionMode))
+    }
+
+    public func persistDraft() {
+        try? data.kv.set(draftKey, draft.isEmpty ? nil : draft)
+    }
+
+    /// Brains that can actually serve a chat right now.
+    public var usableBrains: [BrainConfig] {
+        appState.brainSettingsModel.configs.filter {
+            appState.brainSettingsModel.unusableReason(for: $0) == nil
+        }
+    }
+
+    /// Resolve the brain to send with. A stale binding (e.g. the
+    /// "siwc-chatgpt" membership brain that has no iOS adapter) falls
+    /// back to the current usable brain instead of failing with
+    /// "找不到大脑配置".
+    private func resolveBrainForSend() -> (String?, String?) {
+        let usable = usableBrains
+        if usable.contains(where: { $0.brainId == selectedBrain }) { return (selectedBrain, nil) }
+        if let current = appState.brainConfigStore.currentBrainId(),
+           usable.contains(where: { $0.brainId == current }) {
+            return (current, nil)
+        }
+        if let first = usable.first { return (first.brainId, nil) }
+        if let cfg = appState.brainSettingsModel.configs.first(where: { $0.brainId == selectedBrain }),
+           let reason = appState.brainSettingsModel.unusableReason(for: cfg) {
+            return (nil, "「\(cfg.label)」不可用：\(reason)。请到 设置 › 模型 连接一个可用的大脑。")
+        }
+        return (nil, "还没有可用的大脑：请到 设置 › 模型 填写 API Key 并设为当前大脑。")
     }
 
     public func reload() {
@@ -249,9 +305,12 @@ public final class LocalChatModel: ObservableObject {
             error = "请等待当前回复完成后新建对话"
             return
         }
+        persistDraft()
         conversationID = nil
         data.chatPrefs.currentSessionId = nil
         draft = ""
+        projectSource = .localDefault
+        permissionMode = .readOnly
         messages = []
         streaming = ""
         error = nil
@@ -259,12 +318,13 @@ public final class LocalChatModel: ObservableObject {
 
     public func open(_ conversation: Conversation) {
         guard !isSending else { return }
+        persistDraft()
         conversationID = conversation.id
         data.chatPrefs.currentSessionId = conversation.id
         selectedBrain = conversation.brainId ?? appState.brainConfigStore.currentBrainId() ?? ""
         error = nil
-        draft = ""
         streaming = ""
+        restoreSessionConfig()
         showHistory = false
         reload()
     }
@@ -371,10 +431,12 @@ public final class LocalChatModel: ObservableObject {
             return
         }
 
-        guard !selectedBrain.isEmpty else {
-            error = "请在模型与连接中配置并选择模型"
+        let (resolvedBrain, brainError) = resolveBrainForSend()
+        guard let resolvedBrain else {
+            error = brainError
             return
         }
+        selectedBrain = resolvedBrain
         isSending = true
         error = nil
         streaming = ""
@@ -389,11 +451,16 @@ public final class LocalChatModel: ObservableObject {
                     brainId: selectedBrain,
                     title: String(text.prefix(48))
                 )
+                try? data.kv.set(draftKey, nil)
                 conversationID = conversation.id
                 data.chatPrefs.currentSessionId = conversation.id
+                persistSessionConfig()
             }
             guard let id = conversationID else { return }
             draft = ""
+            persistDraft()
+            let outgoing = text + attachmentContext()
+            attachedFiles = []
 
             // 自然语言发起真实 Agent 任务：检测编程、修复、测试、执行等意图并在本地账本建单
             let isTaskIntent = text.contains("任务") || text.contains("实现") || text.contains("编写") || text.contains("修复") || text.contains("测试") || text.contains("开发")
@@ -422,7 +489,7 @@ public final class LocalChatModel: ObservableObject {
             )
             for try await event in engine.chat(
                 conversationId: id,
-                userText: text,
+                userText: outgoing,
                 brainIdOverride: selectedBrain,
                 allowFailover: false
             ) {
@@ -449,6 +516,23 @@ public final class LocalChatModel: ObservableObject {
     public func send(userText: String) async {
         draft = userText
         await send()
+    }
+
+    /// Text attachments are inlined (bounded); binary attachments are
+    /// named honestly as not sent — the chat path has no upload API.
+    private func attachmentContext() -> String {
+        guard !attachedFiles.isEmpty else { return "" }
+        var out = "\n\n[附件]"
+        for name in attachedFiles {
+            let url = ChatAttachmentStore.url(for: name)
+            if let d = try? Data(contentsOf: url), d.count <= 64 * 1024,
+               let text = String(data: d, encoding: .utf8) {
+                out += "\n--- \(name) ---\n\(text)"
+            } else {
+                out += "\n- \(name)（图片或二进制文件，当前大脑通道不上传内容）"
+            }
+        }
+        return out
     }
 }
 
@@ -543,6 +627,7 @@ public struct LocalChatHomeView: View {
     @State private var greetingDismissed = false
     @State private var showAgentSelectorSheet = false
     @State private var query = ""
+    @FocusState private var inputFocused: Bool
 
     public init(
         appState: AppState,
@@ -734,7 +819,10 @@ public struct LocalChatHomeView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
+                    .contentShape(Rectangle())
+                    .onTapGesture { inputFocused = false }
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: model.messages.count) { _, _ in
                     if let lastId = model.messages.last?.id {
                         withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
@@ -742,111 +830,8 @@ public struct LocalChatHomeView: View {
                 }
             }
 
-            // 底部 Claude 风格悬浮胶囊输入栏
-            VStack(spacing: 8) {
-                if !model.attachedFiles.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(model.attachedFiles, id: \.self) { file in
-                                HStack(spacing: 4) {
-                                    Image(systemName: "paperclip")
-                                    Text(file)
-                                    Button {
-                                        model.attachedFiles.removeAll { $0 == file }
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                    }
-                                }
-                                .font(.caption)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color(red: 0.94, green: 0.93, blue: 0.90), in: Capsule())
-                            }
-                        }
-                    }
-                }
-
-                HStack(alignment: .center, spacing: 12) {
-                    Menu {
-                        Button { onSelectRoute("files") } label: {
-                            Label("导入/浏览本地沙盒文件", systemImage: "folder")
-                        }
-                        Button { onSelectRoute("projects") } label: {
-                            Label("项目 · 查看已保存位置", systemImage: "shippingbox")
-                        }
-                        Button { onSelectRoute("compose") } label: {
-                            Label("转为正式任务派单 (compose)", systemImage: "checklist")
-                        }
-                        Button { onSelectRoute("voice") } label: {
-                            Label("语音与多模态附件 (voice)", systemImage: "waveform")
-                        }
-                        Button { model.newConversation() } label: {
-                            Label("新建空白对话", systemImage: "square.and.pencil")
-                        }
-                        Button { model.showHistory = true } label: {
-                            Label("查看历史会话 (history)", systemImage: "clock.arrow.circlepath")
-                        }
-                    } label: {
-                        Text("＋")
-                            .font(.system(size: 22, weight: .regular))
-                            .foregroundStyle(Color(red: 0.35, green: 0.34, blue: 0.32))
-                            .frame(width: 34, height: 34)
-                    }
-                    .accessibilityIdentifier("home.plusMenu")
-
-                    TextField("输入或长按说话", text: $model.draft, axis: .vertical)
-                        .lineLimit(1...5)
-                        .font(.system(size: 16))
-                        .accessibilityIdentifier("chat.input")
-                        .submitLabel(.send)
-                        .onSubmit {
-                            model.startSending()
-                        }
-
-                    Button {
-                        onSelectRoute("voice")
-                    } label: {
-                        Image(systemName: "mic")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel("语音输入")
-
-                    if model.isSending {
-                        Button {
-                            model.stopSending()
-                        } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.black, in: Circle())
-                        }
-                        .accessibilityIdentifier("chat.stop")
-                        .accessibilityLabel("停止当前生成")
-                    } else {
-                        Button {
-                            model.startSending()
-                        } label: {
-                            Image(systemName: model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "waveform" : "arrow.up")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color(red: 0.08, green: 0.08, blue: 0.08), in: Circle())
-                        }
-                        .accessibilityIdentifier("chat.send")
-                    }
-                }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 10)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 30))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 30)
-                        .stroke(Color(red: 0.89, green: 0.88, blue: 0.86), lineWidth: 1)
-                )
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 14)
+            // Codex 参考输入框：来源选择器在上，输入框随键盘上移
+            ChatComposerBar(model: model, focused: $inputFocused, onSelectRoute: onSelectRoute)
         }
         .background(Color(red: 0.98, green: 0.976, blue: 0.968).ignoresSafeArea())
         .sheet(isPresented: $model.showHistory) {
@@ -885,29 +870,14 @@ public struct LocalChatHomeView: View {
             }
         }
         .sheet(isPresented: $showAgentSelectorSheet) {
-            NavigationStack {
-                List {
-                    Section("当前推理大脑 (Brain)") {
-                        Picker("选择大脑", selection: $model.selectedBrain) {
-                            Text("未选择模型").tag("")
-                            ForEach(appState.brainSettingsModel.configs) { cfg in
-                                Text("\(cfg.label) (\(cfg.model.isEmpty ? "未设模型" : cfg.model))").tag(cfg.brainId)
-                            }
-                        }
-                        Button("管理模型与连接 (models)") {
-                            showAgentSelectorSheet = false
-                            onSelectRoute("models")
-                        }
-                    }
-                    Section("执行目标环境区分（严禁伪装本地执行）") {
-                        Picker("执行目标", selection: $model.selectedExecutionTarget) {
-                            Text("iPhone 本机大脑对话 (Sandbox 只读/受限)").tag("local_brain")
-                            Text("远端设备 Hand 执行 (需配对授权)").tag("remote_hand")
-                            Text("云端 Agent 执行 (V5 平台 MCP)").tag("cloud_mcp")
-                        }
-                    }
-                }
-                .navigationTitle("Agent 与模型切换")
+            ModelAndAgentSheet(model: model, onManage: { onSelectRoute("models") })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { inputFocused = false }
             }
         }
     }
@@ -994,3 +964,644 @@ public struct LocalWorkbenchView: View {
         .navigationTitle(section == .projects ? "项目" : (section == .agents ? "团队（Agent / 成员）" : "控制台事件"))
     }
 }
+
+// MARK: - Project sources (extensible registry, P0)
+//
+// Sources are NOT a fixed enum: each is a `ProjectSourceProvider`
+// registered in `ProjectSourceRegistry`. Built-ins cover 本机 / 局域网
+// 电脑 / NAT·远程设备 / VPS / 网盘 / GitHub; new kinds (WebDAV, SSH,
+// GitLab, 自建服务 …) register a provider — or the user adds a custom
+// source in the picker — without touching the composer, the binding
+// format or session restore. A binding stores only `providerId` +
+// target ids, so unknown providers restore as "不可用" rather than
+// crash. Selecting a source never grants command execution.
+
+public enum ProjectSourceStatus: Equatable, Sendable {
+    case ready
+    case needsAuth(String)
+    case offline(String)
+    case unsupported(String)
+
+    public var text: String {
+        switch self {
+        case .ready: return "可用"
+        case .needsAuth(let m), .offline(let m), .unsupported(let m): return m
+        }
+    }
+    public var isReady: Bool { if case .ready = self { return true } else { return false } }
+}
+
+public struct ProjectSourceTarget: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var subtitle: String
+    public var path: String?
+    public init(id: String, title: String, subtitle: String = "", path: String? = nil) {
+        self.id = id; self.title = title; self.subtitle = subtitle; self.path = path
+    }
+}
+
+@MainActor
+public protocol ProjectSourceProvider {
+    var id: String { get }
+    var title: String { get }
+    var icon: String { get }
+    /// Real connection / authorisation state.
+    func status(data: LocalData) -> ProjectSourceStatus
+    /// Devices / accounts / projects the user can choose (step 3-4).
+    func targets(data: LocalData) -> [ProjectSourceTarget]
+    /// Whether choosing this source can ever enable command execution.
+    var canExecute: Bool { get }
+}
+
+/// Device-backed sources (LAN / NAT / VPS): targets are paired device
+/// agents from the agent registry, filtered by an access predicate.
+public struct DeviceProjectSource: ProjectSourceProvider {
+    public let id: String
+    public let title: String
+    public let icon: String
+    public let matches: @Sendable (AgentRecord) -> Bool
+    public var canExecute: Bool { true }
+
+    public func targets(data: LocalData) -> [ProjectSourceTarget] {
+        let agents = ((try? data.agents.listAgents()) ?? []).filter { $0.kind == .device && $0.enabled && matches($0) }
+        return agents.map {
+            ProjectSourceTarget(id: $0.agentId, title: $0.displayName,
+                                subtitle: $0.memberConnectionState == "CONNECTED" ? "在线" : "离线 / 未连接",
+                                path: $0.deviceFolder)
+        }
+    }
+
+    public func status(data: LocalData) -> ProjectSourceStatus {
+        targets(data: data).isEmpty ? .needsAuth("尚未配对设备：到 控制 › 设备 添加并配对") : .ready
+    }
+}
+
+public struct LocalProjectSource: ProjectSourceProvider {
+    public let id = "local"
+    public let title = "本机"
+    public let icon = "iphone"
+    public var canExecute: Bool { false }
+    public func status(data: LocalData) -> ProjectSourceStatus { .ready }
+    public func targets(data: LocalData) -> [ProjectSourceTarget] {
+        var out = [ProjectSourceTarget(id: "sandbox", title: "App 沙盒", subtitle: "iPhone 本机文件（只读对话）", path: "/")]
+        for p in (try? data.projects.listProjects()) ?? [] {
+            out.append(ProjectSourceTarget(id: p.project.projectId, title: p.project.name,
+                                           subtitle: p.activeHome?.workspacePath ?? "未设置位置",
+                                           path: p.activeHome?.workspacePath))
+        }
+        return out
+    }
+}
+
+/// Account-backed sources whose authorisation flow is not on iOS yet.
+public struct PendingAccountSource: ProjectSourceProvider {
+    public let id: String
+    public let title: String
+    public let icon: String
+    public let reason: String
+    public var canExecute: Bool { false }
+    public func status(data: LocalData) -> ProjectSourceStatus { .unsupported(reason) }
+    public func targets(data: LocalData) -> [ProjectSourceTarget] { [] }
+}
+
+/// A user-added source (e.g. WebDAV / SSH / 自建 Git) — stored in kv,
+/// shown honestly as "未接入" until a provider for its scheme exists.
+public struct CustomSourceRecord: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var title: String
+    public var endpoint: String
+}
+
+public struct CustomProjectSource: ProjectSourceProvider {
+    public let record: CustomSourceRecord
+    public var id: String { record.id }
+    public var title: String { record.title }
+    public var icon: String { "link" }
+    public var canExecute: Bool { false }
+    public func status(data: LocalData) -> ProjectSourceStatus {
+        .unsupported("自定义来源：已保存地址，暂无对应接入模块")
+    }
+    public func targets(data: LocalData) -> [ProjectSourceTarget] {
+        [ProjectSourceTarget(id: record.id, title: record.title, subtitle: record.endpoint, path: record.endpoint)]
+    }
+}
+
+@MainActor
+public final class ProjectSourceRegistry {
+    public static let shared = ProjectSourceRegistry()
+    private var builtIns: [ProjectSourceProvider] = []
+    private let customKey = "chat.customProjectSources"
+
+    public init() {
+        builtIns = [
+            LocalProjectSource(),
+            DeviceProjectSource(id: "lan", title: "局域网电脑", icon: "desktopcomputer",
+                                matches: { ($0.baseUrl ?? "").contains("192.168.") || ($0.baseUrl ?? "").contains(".local") || $0.baseUrl == nil }),
+            DeviceProjectSource(id: "remote", title: "NAT / 远程设备", icon: "network",
+                                matches: { $0.access == .connector || $0.access == .webhook }),
+            DeviceProjectSource(id: "vps", title: "VPS", icon: "server.rack",
+                                matches: { $0.access == .cli || $0.access == .api }),
+            PendingAccountSource(id: "clouddrive", title: "网盘", icon: "externaldrive.badge.icloud",
+                                 reason: "网盘授权尚未在 iOS 接入"),
+            PendingAccountSource(id: "github", title: "GitHub", icon: "chevron.left.forwardslash.chevron.right",
+                                 reason: "GitHub 授权尚未在 iOS 接入"),
+        ]
+    }
+
+    /// Register an additional provider (new source kinds plug in here).
+    public func register(_ provider: ProjectSourceProvider) {
+        builtIns.removeAll { $0.id == provider.id }
+        builtIns.append(provider)
+    }
+
+    public func customRecords(data: LocalData) -> [CustomSourceRecord] {
+        (try? data.kv.getJSON(customKey, as: [CustomSourceRecord].self)) ?? nil ?? []
+    }
+
+    public func addCustom(title: String, endpoint: String, data: LocalData) {
+        var list = customRecords(data: data)
+        list.append(CustomSourceRecord(id: "custom-\(UUID().uuidString.prefix(8))", title: title, endpoint: endpoint))
+        try? data.kv.setJSON(customKey, list)
+    }
+
+    public func removeCustom(id: String, data: LocalData) {
+        try? data.kv.setJSON(customKey, customRecords(data: data).filter { $0.id != id })
+    }
+
+    public func all(data: LocalData) -> [ProjectSourceProvider] {
+        builtIns + customRecords(data: data).map { CustomProjectSource(record: $0) }
+    }
+
+    public func provider(id: String, data: LocalData) -> ProjectSourceProvider? {
+        all(data: data).first { $0.id == id }
+    }
+}
+
+public struct ProjectSourceBinding: Codable, Equatable, Sendable {
+    public var providerId: String
+    public var targetId: String?
+    public var targetTitle: String?
+    public var path: String?
+
+    public static let localDefault = ProjectSourceBinding(providerId: "local", targetId: "sandbox", targetTitle: "App 沙盒", path: "/")
+
+    public var chipLabel: String { targetTitle ?? providerId }
+}
+
+public enum ChatPermissionMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case readOnly, askEveryTime, autoInWorkspace
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .readOnly: return "只读对话"
+        case .askEveryTime: return "每次审批"
+        case .autoInWorkspace: return "工作区内自动"
+        }
+    }
+}
+
+public struct ChatSessionConfig: Codable, Equatable, Sendable {
+    public var source: ProjectSourceBinding
+    public var permission: ChatPermissionMode
+}
+
+public enum ChatAttachmentStore {
+    public static var dir: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let d = base.appendingPathComponent("chat-attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    public static func url(for name: String) -> URL { dir.appendingPathComponent(name) }
+    @discardableResult
+    public static func save(_ data: Data, name: String) -> String {
+        let safe = name.replacingOccurrences(of: "/", with: "_")
+        try? data.write(to: url(for: safe))
+        return safe
+    }
+}
+
+// MARK: - Codex-style composer (P0)
+
+
+public struct ProjectSourceChip: View {
+    @ObservedObject var model: LocalChatModel
+    @State private var showPicker = false
+
+    public var body: some View {
+        let provider = ProjectSourceRegistry.shared.provider(id: model.projectSource.providerId, data: model.data)
+        Button { showPicker = true } label: {
+            HStack(spacing: 5) {
+                Image(systemName: provider?.icon ?? "questionmark.folder")
+                Text(provider.map { "\($0.title) · \(model.projectSource.chipLabel)" } ?? "来源不可用")
+                    .lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Color(red: 0.30, green: 0.29, blue: 0.27))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.9), in: Capsule())
+            .overlay(Capsule().stroke(Color(red: 0.89, green: 0.88, blue: 0.86), lineWidth: 1))
+        }
+        .accessibilityIdentifier("chat.projectSource")
+        .sheet(isPresented: $showPicker) {
+            ProjectSourcePickerSheet(model: model)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+/// 选择来源 → 连接或授权 → 选择设备/账号 → 选择项目或路径 → 确认
+public struct ProjectSourcePickerSheet: View {
+    @ObservedObject var model: LocalChatModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var customTitle = ""
+    @State private var customEndpoint = ""
+    @State private var refresh = 0
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                Section("选择来源") {
+                    ForEach(ProjectSourceRegistry.shared.all(data: model.data), id: \.id) { p in
+                        NavigationLink {
+                            ProjectSourceTargetList(model: model, provider: p) { dismiss() }
+                        } label: {
+                            HStack {
+                                Image(systemName: p.icon).frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.title)
+                                    Text(p.status(data: model.data).text)
+                                        .font(.caption)
+                                        .foregroundStyle(p.status(data: model.data).isReady ? Color.secondary : Color.orange)
+                                }
+                                Spacer()
+                                if model.projectSource.providerId == p.id {
+                                    Image(systemName: "checkmark").foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                    }
+                    .id(refresh)
+                }
+                Section {
+                    TextField("名称（如 公司 WebDAV）", text: $customTitle)
+                    TextField("地址（https:// / ssh:// …）", text: $customEndpoint)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("添加自定义来源") {
+                        ProjectSourceRegistry.shared.addCustom(title: customTitle, endpoint: customEndpoint, data: model.data)
+                        customTitle = ""; customEndpoint = ""; refresh += 1
+                    }
+                    .disabled(customTitle.isEmpty || customEndpoint.isEmpty)
+                } header: {
+                    Text("扩展来源")
+                } footer: {
+                    Text("来源可扩展：新增类型以接入模块注册，未接入的来源会如实显示状态。选择任何来源都不会自动获得命令执行权限。")
+                }
+            }
+            .navigationTitle("项目来源")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
+        }
+    }
+}
+
+private struct ProjectSourceTargetList: View {
+    @ObservedObject var model: LocalChatModel
+    let provider: ProjectSourceProvider
+    let onDone: () -> Void
+    @State private var selected: ProjectSourceTarget?
+    @State private var path = ""
+
+    var body: some View {
+        let status = provider.status(data: model.data)
+        let targets = provider.targets(data: model.data)
+        List {
+            Section("连接状态") {
+                Label(status.text, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.circle")
+                    .foregroundStyle(status.isReady ? Color.green : Color.orange)
+                if !status.isReady, provider.id == "lan" || provider.id == "remote" || provider.id == "vps" {
+                    Button("去添加 / 配对设备") { model.appState.onSelectRoute?("devices"); onDone() }
+                }
+            }
+            if status.isReady {
+                Section("选择设备 / 项目") {
+                    if targets.isEmpty { Text("没有可选项").foregroundStyle(.secondary) }
+                    ForEach(targets) { t in
+                        Button {
+                            selected = t
+                            path = t.path ?? ""
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t.title).foregroundStyle(.primary)
+                                    if !t.subtitle.isEmpty { Text(t.subtitle).font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                                if selected?.id == t.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            }
+                        }
+                    }
+                }
+                if selected != nil {
+                    Section("工作路径") {
+                        TextField("路径", text: $path)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    Section {
+                        Button("确认") {
+                            model.projectSource = ProjectSourceBinding(
+                                providerId: provider.id, targetId: selected?.id,
+                                targetTitle: selected?.title, path: path.isEmpty ? nil : path)
+                            if !provider.canExecute { model.permissionMode = .readOnly }
+                            model.persistSessionConfig()
+                            onDone()
+                        }
+                        .bold()
+                    }
+                }
+            }
+        }
+        .navigationTitle(provider.title)
+    }
+}
+
+public struct ModelAndAgentSheet: View {
+    @ObservedObject var model: LocalChatModel
+    var onManage: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var models: [ModelInfo] = []
+    @State private var loading = false
+    @State private var loadError: String?
+
+    private var currentConfig: BrainConfig? {
+        model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                Section("Agent / 大脑") {
+                    if model.usableBrains.isEmpty {
+                        Text("还没有可用的大脑（需填写 API Key）。会员登录与 API Key 是两种不同授权，ChatGPT 会员在 iOS 尚未接入。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    ForEach(model.usableBrains) { cfg in
+                        Button {
+                            model.selectedBrain = cfg.brainId
+                            Task { await loadModels() }
+                        } label: {
+                            HStack {
+                                Text(cfg.label).foregroundStyle(.primary)
+                                Spacer()
+                                if cfg.brainId == model.selectedBrain { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            }
+                        }
+                    }
+                    Button("管理模型与连接") { dismiss(); onManage() }
+                }
+                Section("模型（从服务商实时获取）") {
+                    if loading { ProgressView() }
+                    if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
+                    ForEach(models) { m in
+                        Button {
+                            if var cfg = currentConfig {
+                                cfg.model = m.id
+                                model.appState.brainSettingsModel.save(config: cfg, apiKey: "")
+                            }
+                        } label: {
+                            HStack {
+                                Text(m.displayName.isEmpty ? m.id : m.displayName).foregroundStyle(.primary)
+                                Spacer()
+                                if currentConfig?.model == m.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            }
+                        }
+                    }
+                }
+                Section {
+                    LabeledContent("智能等级", value: "该大脑接口未提供")
+                    LabeledContent("速度", value: "该大脑接口未提供")
+                } header: { Text("高级") } footer: {
+                    Text("仅显示当前接入实际支持的参数。")
+                }
+                Section {
+                    ForEach(ChatPermissionMode.allCases) { mode in
+                        Button {
+                            model.permissionMode = mode
+                            model.persistSessionConfig()
+                        } label: {
+                            HStack {
+                                Text(mode.title).foregroundStyle(mode == .readOnly ? .primary : .secondary)
+                                Spacer()
+                                if model.permissionMode == mode { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                            }
+                        }
+                        .disabled(mode != .readOnly)
+                    }
+                } header: { Text("执行权限") } footer: {
+                    Text("当前对话通道不执行命令，仅「只读对话」可用；执行需在已配对设备上通过审批中心逐项批准。")
+                }
+            }
+            .navigationTitle("模型与权限")
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await loadModels() }
+        }
+    }
+
+    private func loadModels() async {
+        guard let cfg = currentConfig, let adapter = model.appState.brainRegistry.get(cfg.adapterId) else {
+            models = []; return
+        }
+        loading = true; loadError = nil
+        defer { loading = false }
+        switch await adapter.listModels() {
+        case .success(let list): models = list
+        case .failure(let e): models = []; loadError = SecretRedactor.redact(e.localizedDescription)
+        }
+    }
+}
+
+public struct ChatComposerBar: View {
+    @ObservedObject var model: LocalChatModel
+    var focused: FocusState<Bool>.Binding
+    var onSelectRoute: (String) -> Void
+    @State private var showModelSheet = false
+    @State private var showPhotoPicker = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showFileImporter = false
+    @State private var showCamera = false
+
+    private var brainLabel: String {
+        let cfg = model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
+        guard let cfg else { return "选择模型" }
+        return cfg.model.isEmpty ? cfg.label : cfg.model
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProjectSourceChip(model: model)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if !model.attachedFiles.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(model.attachedFiles, id: \.self) { file in
+                                HStack(spacing: 4) {
+                                    Image(systemName: "paperclip")
+                                    Text(file).lineLimit(1)
+                                    Button { model.attachedFiles.removeAll { $0 == file } } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                    }
+                                }
+                                .font(.caption)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(Color(red: 0.94, green: 0.93, blue: 0.90), in: Capsule())
+                            }
+                        }
+                    }
+                }
+
+                TextField("向 Agent 提问或分派任务", text: $model.draft, axis: .vertical)
+                    .lineLimit(1...8)
+                    .font(.system(size: 16))
+                    .focused(focused)
+                    .accessibilityIdentifier("chat.input")
+                    .onChange(of: model.draft) { _, _ in model.persistDraft() }
+
+                HStack(spacing: 10) {
+                    Menu {
+                        Button { showCamera = true } label: { Label("相机", systemImage: "camera") }
+                        Button { showPhotoPicker = true } label: { Label("照片", systemImage: "photo") }
+                        Button { showFileImporter = true } label: { Label("文件", systemImage: "doc") }
+                        Button { onSelectRoute("mcp") } label: { Label("插件", systemImage: "puzzlepiece.extension") }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .medium))
+                            .frame(width: 32, height: 32)
+                    }
+                    .accessibilityIdentifier("home.plusMenu")
+
+                    Button { showModelSheet = true } label: {
+                        HStack(spacing: 3) {
+                            Text(brainLabel).lineLimit(1)
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                    }
+                    .accessibilityIdentifier("home.agentSelectorButton")
+
+                    Spacer()
+
+                    Button {
+                        focused.wrappedValue = true
+                    } label: {
+                        Image(systemName: "mic").font(.system(size: 16, weight: .medium))
+                    }
+                    .accessibilityLabel("语音输入（使用键盘听写）")
+
+                    if model.isSending {
+                        Button { model.stopSending() } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                                .frame(width: 32, height: 32).background(Color.black, in: Circle())
+                        }
+                        .accessibilityIdentifier("chat.stop")
+                    } else if model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button { onSelectRoute("voice") } label: {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                .frame(width: 32, height: 32).background(Color.black, in: Circle())
+                        }
+                        .accessibilityLabel("语音会话")
+                    } else {
+                        Button { model.startSending() } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                .frame(width: 32, height: 32).background(Color.black, in: Circle())
+                        }
+                        .accessibilityIdentifier("chat.send")
+                    }
+                }
+                .foregroundStyle(Color(red: 0.35, green: 0.34, blue: 0.32))
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color(red: 0.89, green: 0.88, blue: 0.86), lineWidth: 1))
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .sheet(isPresented: $showModelSheet) {
+            ModelAndAgentSheet(model: model, onManage: { onSelectRoute("models") })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems, maxSelectionCount: 5, matching: .images)
+        .onChange(of: photoItems) { _, items in
+            for item in items {
+                Task {
+                    if let d = try? await item.loadTransferable(type: Data.self) {
+                        let name = ChatAttachmentStore.save(d, name: "photo-\(UUID().uuidString.prefix(6)).jpg")
+                        model.attachedFiles.append(name)
+                    }
+                }
+            }
+            photoItems = []
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls {
+                let ok = url.startAccessingSecurityScopedResource()
+                defer { if ok { url.stopAccessingSecurityScopedResource() } }
+                if let d = try? Data(contentsOf: url) {
+                    model.attachedFiles.append(ChatAttachmentStore.save(d, name: url.lastPathComponent))
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCaptureView { data in
+                if let data {
+                    model.attachedFiles.append(ChatAttachmentStore.save(data, name: "camera-\(UUID().uuidString.prefix(6)).jpg"))
+                }
+                showCamera = false
+            }
+            .ignoresSafeArea()
+        }
+    }
+}
+
+#if canImport(UIKit)
+import UIKit
+
+struct CameraCaptureView: UIViewControllerRepresentable {
+    let onFinish: (Data?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (Data?) -> Void
+        init(onFinish: @escaping (Data?) -> Void) { self.onFinish = onFinish }
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            let image = info[.originalImage] as? UIImage
+            onFinish(image?.jpegData(compressionQuality: 0.8))
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
+    }
+}
+#endif
