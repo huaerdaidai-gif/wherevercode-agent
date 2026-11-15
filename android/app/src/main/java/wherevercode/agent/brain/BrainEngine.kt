@@ -1039,7 +1039,6 @@ class BrainEngine(
                             val s = controlState()
                             s == TurnControlState.STOPPED || s == TurnControlState.GOAL_CHANGED
                         },
-                        paused = { controlState() == TurnControlState.PAUSED },
                     )
                 } catch (e: CancellationException) {
                     throw e
