@@ -222,6 +222,22 @@ class EntryRegistryTest {
     }
 
     @Test
+    fun `queue schedule is registered as implemented screen feature`() {
+        // 2026-11-15 核心功能推进第 2 项：队列与调度已真实现（QueueBoard
+        // 纯逻辑 + QueueBoardDialog，按 TaskStore 真实状态分组看板），
+        // 从待开发升为已实现 SCREEN 入口，落点 target = "queue_schedule"。
+        val entry = EntryRegistry.find("feature_queue_schedule")!!
+        assertEquals(Status.IMPLEMENTED, entry.status)
+        assertEquals(EntryRegistry.TargetKind.SCREEN, entry.targetKind)
+        assertEquals("queue_schedule", entry.target)
+        assertEquals(Group.FEATURE, entry.group)
+        assertEquals("nav_running_tasks", entry.parentId)
+        // 状态计数随本项升级同步：待开发 58 → 57、已实现 31 → 32，总数仍 89。
+        assertEquals(57, EntryRegistry.ENTRIES.count { it.status == Status.TODO })
+        assertEquals(32, EntryRegistry.ENTRIES.count { it.status == Status.IMPLEMENTED })
+    }
+
+    @Test
     fun `seventy screen gap entries are registered as todo features`() {
         val newIds = listOf(
             "feature_change_diff",

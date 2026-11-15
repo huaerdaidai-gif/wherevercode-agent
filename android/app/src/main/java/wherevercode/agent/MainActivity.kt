@@ -216,6 +216,7 @@ import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
 import wherevercode.agent.core.security.SecretRedactor
 import wherevercode.agent.core.session.SessionKind
+import wherevercode.agent.core.queue.QueueBoard
 import wherevercode.agent.core.search.SearchableConversation
 import wherevercode.agent.core.search.SearchableProject
 import wherevercode.agent.core.search.SearchableTask
@@ -253,6 +254,7 @@ import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.transport.LanTransport
 import wherevercode.agent.ui.ChatProjectPickerDialog
 import wherevercode.agent.ui.GlobalSearchDialog
+import wherevercode.agent.ui.QueueBoardDialog
 import wherevercode.agent.ui.SessionListController
 import wherevercode.agent.ui.chatConversationId
 import wherevercode.agent.ui.PipelineAction
@@ -4740,6 +4742,9 @@ class MainActivity : AppCompatActivity() {
                 // 全局搜索是独立搜索界面（弹窗）：搜本机会话 / 项目 / 任务，
                 // 结果点开走既有打开方法真跳转（见 showGlobalSearch）。
                 "global_search" -> showGlobalSearch()
+                // 队列与调度看板（弹窗）：TaskStore 全量任务按状态分组，
+                // 点任务进详情、排队中可取消（见 showQueueBoard）。
+                "queue_schedule" -> showQueueBoard()
                 else -> toast("${entry.title}待开发")
             }
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
@@ -4813,6 +4818,97 @@ class MainActivity : AppCompatActivity() {
                     onOpenProject = { projectId -> openProjectFromSearch(projectId) },
                     onOpenTask = { taskId -> openTaskDetail(taskId) },
                 )
+            }
+        }.start()
+    }
+
+    /**
+     * 队列与调度（核心功能推进第 2 项，2026-11-15）：TaskStore 全量任务
+     * 按真实状态分组的看板。数据在后台线程组装（listTasks 全量 → 纯
+     * 逻辑 [QueueBoard] 分组排序 → Agent / 项目显示名解析），界面走
+     * [QueueBoardDialog]。点任务行复用 [openTaskDetail] 进详情（暂停/
+     * 停止/重试/改目标等全套操作都在详情里）；排队中（可认领三态）的
+     * 「取消」走 [confirmCancelQueuedTask]：重读任务确认仍在排队后，
+     * 二次确认再走既有 [stopTask] 围栏路径（与任务卡/详情页的「停止」
+     * 同一条路径，不另造取消逻辑）。本页只展示队列与状态，不改变
+     * 调度顺序；认领与执行仍由既有调度器/执行器负责。
+     */
+    private fun showQueueBoard() {
+        val components = brainComponents ?: run {
+            toast("大脑还在加载，请稍候再试。")
+            return
+        }
+        Thread {
+            val tasks = try {
+                components.taskStore.listTasks()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val board = QueueBoard.build(tasks)
+            val agentNames = tasks.mapNotNull { it.assignedAgentId }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .associateWith { agentId ->
+                    try {
+                        agentStore.getAgent(agentId)?.displayName
+                    } catch (_: Exception) {
+                        null
+                    } ?: agentId
+                }
+            val projectNames = tasks.mapNotNull { it.projectId }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .associateWith { projectId ->
+                    try {
+                        projectStore.getProject(projectId)?.name
+                    } catch (_: Exception) {
+                        null
+                    } ?: projectId
+                }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                QueueBoardDialog.show(
+                    context = this,
+                    board = board,
+                    agentNames = agentNames,
+                    projectNames = projectNames,
+                    onOpenTask = { taskId -> openTaskDetail(taskId) },
+                    onCancelQueued = { taskId -> confirmCancelQueuedTask(taskId) },
+                )
+            }
+        }.start()
+    }
+
+    /**
+     * 看板里排队任务的取消：先在后台线程重读任务，确认仍是可认领态
+     * （queued / requeued / rework）才弹二次确认；确认后走 [stopTask]
+     * ——它对未执行的排队任务是带版本围栏的直写 cancelled（执行器
+     * [wherevercode.agent.core.task.LocalTaskRunner.cancel] 只管在飞
+     * 任务，排队任务的取消本就由 UI 这条路径承接）。状态已变化时
+     * 如实提示，不强行取消。
+     */
+    private fun confirmCancelQueuedTask(taskId: String) {
+        val components = brainComponents ?: return
+        Thread {
+            val task = try {
+                components.taskStore.getTask(taskId)
+            } catch (_: Exception) {
+                null
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (task == null) {
+                    toast("任务不存在或已被删除。")
+                    return@runOnUiThread
+                }
+                if (!TaskStates.isClaimable(task.state)) {
+                    toast("该任务已不在排队中，状态已变化。")
+                    return@runOnUiThread
+                }
+                confirmStopDialog(
+                    "取消排队任务？",
+                    "确定要取消这个排队中的任务吗？取消后不会再被执行。",
+                ) { stopTask(task) }
             }
         }.start()
     }
