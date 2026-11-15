@@ -1848,6 +1848,70 @@ public struct V5DirectMessageItem: Identifiable, Equatable, Hashable {
     }
 }
 
+public struct V5ChannelMember: Identifiable, Codable, Equatable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var isAgent: Bool
+    public var role: String
+    public var status: String
+    public var agentRecordId: String?
+
+    public init(id: String, name: String, isAgent: Bool, role: String, status: String = "在线", agentRecordId: String? = nil) {
+        self.id = id
+        self.name = name
+        self.isAgent = isAgent
+        self.role = role
+        self.status = status
+        self.agentRecordId = agentRecordId
+    }
+}
+
+public enum ChannelMemberManager {
+    public static func loadMembers(channelId: String) -> [V5ChannelMember] {
+        let key = "channel.members.\(channelId)"
+        if let stored = try? LocalData.shared.kv.getJSON(key, as: [V5ChannelMember].self), !stored.isEmpty {
+            return stored
+        }
+        let initial: [V5ChannelMember] = [
+            V5ChannelMember(id: "user-me", name: "我", isAgent: false, role: "项目主管 · 人工审批", status: "在线"),
+            V5ChannelMember(id: "agent-codex", name: "Codex", isAgent: true, role: "设备 Agent · 代码实现与构建", status: "在线", agentRecordId: "codex"),
+            V5ChannelMember(id: "agent-claude", name: "Claude Code", isAgent: true, role: "云端 Agent · 架构规划与审查", status: "就绪", agentRecordId: "claude-code")
+        ]
+        try? LocalData.shared.kv.setJSON(key, initial)
+        return initial
+    }
+
+    public static func saveMembers(_ members: [V5ChannelMember], channelId: String) {
+        let key = "channel.members.\(channelId)"
+        try? LocalData.shared.kv.setJSON(key, members)
+    }
+
+    public static func addAgentMember(_ agent: AgentRecord, channelId: String) -> [V5ChannelMember] {
+        var list = loadMembers(channelId: channelId)
+        if !list.contains(where: { $0.agentRecordId == agent.agentId || $0.name == agent.displayName }) {
+            let roleDesc = "\(agent.kind == .device ? "设备" : (agent.kind == .cloud ? "云端" : "本地模型")) Agent · \(agent.brainKind)"
+            let newMember = V5ChannelMember(
+                id: "agent-\(agent.agentId.replacingOccurrences(of: ":", with: "-"))",
+                name: agent.displayName,
+                isAgent: true,
+                role: roleDesc,
+                status: agent.memberConnectionState == "CONNECTED" ? "在线" : "就绪",
+                agentRecordId: agent.agentId
+            )
+            list.append(newMember)
+            saveMembers(list, channelId: channelId)
+        }
+        return list
+    }
+
+    public static func removeMember(memberId: String, channelId: String) -> [V5ChannelMember] {
+        var list = loadMembers(channelId: channelId)
+        list.removeAll { $0.id == memberId }
+        saveMembers(list, channelId: channelId)
+        return list
+    }
+}
+
 public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
     public let id: String
     public var senderId: String
@@ -2571,6 +2635,7 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var messages: [V5ChannelMessage] = []
     @State private var files: [V5ChannelFile] = []
     @State private var activeTasks: [LocalTask] = []
+    @State private var members: [V5ChannelMember] = []
 
     // 交互状态
     @State private var replyingTo: V5ChannelMessage? = nil
@@ -2583,6 +2648,10 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var showChannelSettingsSheet = false
     @State private var showSendErrorAlert = false
     @State private var sendErrorMessage = ""
+
+    private var currentChannelId: String {
+        channelItem?.id ?? dmItem?.id ?? "ch-general"
+    }
 
     public enum WorkspaceTab: String, CaseIterable, Identifiable {
         case messages = "消息"
@@ -2661,7 +2730,9 @@ public struct ChannelDetailWorkspaceView: View {
             AgentProfileSheet(message: msg)
         }
         .sheet(isPresented: $showChannelSettingsSheet) {
-            ChannelSettingsSheet(channel: channelItem, dm: dmItem)
+            ChannelSettingsSheet(channel: channelItem, dm: dmItem) { updatedMembers in
+                self.members = updatedMembers
+            }
         }
         .sheet(isPresented: $showProjectFilePicker) {
             ProjectFilePickerSheet { selectedFile in
@@ -2703,7 +2774,7 @@ public struct ChannelDetailWorkspaceView: View {
                     Circle()
                         .fill(Color.green)
                         .frame(width: 7, height: 7)
-                    Text("实时连接 · WebSocket live")
+                    Text("实时连接 · WebSocket live · \(members.filter { $0.isAgent }.count) 位 Agent 在线 · \(activeTasks.count) 个协同任务")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -2831,23 +2902,9 @@ public struct ChannelDetailWorkspaceView: View {
                         .background(Color(red: 0.94, green: 0.93, blue: 0.90), in: RoundedRectangle(cornerRadius: 8))
                     }
 
-                    // 关联任务卡片
+                    // 关联任务卡片（支持实时状态与协作审查流转）
                     if let tId = msg.linkedTaskId, let tTitle = msg.linkedTaskTitle {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checklist")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("关联任务: \(tTitle)")
-                                    .font(.system(size: 12, weight: .medium))
-                                Text("状态: \(msg.linkedTaskState ?? "working") · ID: \(String(tId.prefix(8)))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(8)
-                        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        taskCollaborationCard(taskId: tId, title: tTitle, fallbackState: msg.linkedTaskState)
                     }
                 }
             }
@@ -3000,14 +3057,18 @@ public struct ChannelDetailWorkspaceView: View {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || selectedAttachment != nil else { return }
 
+        let now = Date()
+        let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
+        let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
+
         let newMsg = V5ChannelMessage(
             id: UUID().uuidString,
             senderId: "user-me",
             senderName: "我",
             isAgent: false,
             text: text.isEmpty ? "分享了附件" : text,
-            timestamp: "12:46",
-            fullDateTime: "2026-11-15 12:46:00",
+            timestamp: timeStr,
+            fullDateTime: fullDateStr,
             replyToId: replyingTo?.id,
             replyToText: replyingTo?.text,
             attachmentName: selectedAttachment?.fileName,
@@ -3018,6 +3079,9 @@ public struct ChannelDetailWorkspaceView: View {
         composerText = ""
         replyingTo = nil
         selectedAttachment = nil
+
+        // 自然语言派工与多 Agent 协同流转处理
+        processNaturalLanguageDispatch(text: text, timeStr: timeStr, fullDateStr: fullDateStr)
     }
 
     // MARK: - 文件分区
@@ -3173,20 +3237,154 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    private func taskStateBadge(_ state: String) -> some View {
+        let (color, text): (Color, String) = {
+            switch state {
+            case "queued": return (.blue, "排队中")
+            case "assigned": return (.purple, "已认领")
+            case "working": return (.orange, "执行中")
+            case "blocked": return (.red, "已阻塞")
+            case "review": return (.purple, "待审查")
+            case "rework": return (.pink, "返工中")
+            case "requeued": return (.gray, "重新排队")
+            case "completed": return (.green, "已交付")
+            case "failed": return (.red, "执行失败")
+            case "cancelled": return (.gray, "已取消")
+            default: return (.secondary, state)
+            }
+        }()
+
+        return Text(text)
+            .font(.caption2)
+            .fontWeight(.bold)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
+    }
+
+    private func taskCollaborationCard(taskId: String, title: String, fallbackState: String?) -> some View {
+        let task = try? LocalData.shared.tasks.getTask(taskId: taskId)
+        let state = task?.state ?? fallbackState ?? "working"
+        let assigneeName = members.first(where: { $0.id == task?.assignedAgentId || $0.agentRecordId == task?.assignedAgentId })?.name ?? "Agent"
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.blue)
+                Text("协同任务: \(title)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                Spacer()
+                taskStateBadge(state)
+            }
+
+            HStack {
+                Text("负责人: \(assigneeName) · ID: \(String(taskId.prefix(8))) · P\(task?.priority ?? 1)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let t = task, t.isPaused {
+                    Text("已暂停")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            // 协作审查与执行流转动作栏
+            HStack(spacing: 6) {
+                if state == "working" {
+                    Button {
+                        submitTaskForReview(taskId: taskId)
+                    } label: {
+                        Label("提交审查", systemImage: "arrow.up.doc")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.orange)
+                    .controlSize(.mini)
+                } else if state == "review" {
+                    Button {
+                        approveTaskDelivery(taskId: taskId)
+                    } label: {
+                        Label("批准交付", systemImage: "checkmark.seal.fill")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.green)
+                    .controlSize(.mini)
+
+                    Button {
+                        reworkTask(taskId: taskId)
+                    } label: {
+                        Label("打回返工", systemImage: "arrow.uturn.backward.circle.fill")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.red)
+                    .controlSize(.mini)
+                } else if state == "queued" {
+                    Button {
+                        _ = try? LocalData.shared.tasks.transition(taskId: taskId, to: "assigned")
+                        _ = try? LocalData.shared.tasks.transition(taskId: taskId, to: "working")
+                        reloadWorkspaceTasks()
+                    } label: {
+                        Text("认领执行")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                } else if state == "completed" {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("已完成交付")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                } else if state == "rework" {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .foregroundStyle(.pink)
+                        Text("返工修改中")
+                            .font(.caption2)
+                            .foregroundStyle(.pink)
+                    }
+                    Button {
+                        submitTaskForReview(taskId: taskId)
+                    } label: {
+                        Text("重新提交审查")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+
+                Spacer()
+
+                Button("查看详情") {
+                    onNavigateRoute("taskdetail")
+                }
+                .font(.system(size: 11))
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+            .padding(.top, 2)
+        }
+        .padding(8)
+        .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.15), lineWidth: 1))
+    }
+
     private func channelTaskCard(_ t: LocalTask) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(t.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                 Spacer()
-                Text(t.state)
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.orange.opacity(0.15), in: Capsule())
-                    .foregroundStyle(.orange)
+                taskStateBadge(t.state)
             }
 
             Text((t.description?.isEmpty ?? true) ? "无详细任务描述" : (t.description ?? ""))
@@ -3195,10 +3393,70 @@ public struct ChannelDetailWorkspaceView: View {
                 .lineLimit(2)
 
             HStack {
-                Text("优先级: P\(t.priority) · ID: \(String(t.id.prefix(8)))")
+                let assigneeName = members.first(where: { $0.id == t.assignedAgentId || $0.agentRecordId == t.assignedAgentId })?.name ?? "未指派"
+                Text("负责人: \(assigneeName) · P\(t.priority) · ID: \(String(t.id.prefix(8)))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
+                if t.isPaused {
+                    Text("已暂停")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            // 快捷流转按钮
+            HStack(spacing: 8) {
+                if t.state == "working" {
+                    Button {
+                        submitTaskForReview(taskId: t.id)
+                    } label: {
+                        Label("提交审查", systemImage: "arrow.up.doc")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.orange)
+
+                    Button {
+                        try? LocalData.shared.tasks.togglePause(taskId: t.id)
+                        reloadWorkspaceTasks()
+                    } label: {
+                        Text(t.isPaused ? "恢复" : "暂停")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.bordered)
+                } else if t.state == "review" {
+                    Button {
+                        approveTaskDelivery(taskId: t.id)
+                    } label: {
+                        Label("批准交付", systemImage: "checkmark.seal.fill")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.green)
+
+                    Button {
+                        reworkTask(taskId: t.id)
+                    } label: {
+                        Label("打回返工", systemImage: "arrow.uturn.backward.circle.fill")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.red)
+                } else if t.state == "queued" {
+                    Button {
+                        _ = try? LocalData.shared.tasks.transition(taskId: t.id, to: "assigned")
+                        _ = try? LocalData.shared.tasks.transition(taskId: t.id, to: "working")
+                        reloadWorkspaceTasks()
+                    } label: {
+                        Text("认领执行")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                Spacer()
+
                 Button("查看详情") {
                     onNavigateRoute("taskdetail")
                 }
@@ -3211,7 +3469,204 @@ public struct ChannelDetailWorkspaceView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
     }
 
+    private func processNaturalLanguageDispatch(text: String, timeStr: String, fullDateStr: String) {
+        guard !text.isEmpty else { return }
+
+        // 1. 查找被 @ 的 Agent
+        var targetAgent: V5ChannelMember? = nil
+        for member in members where member.isAgent {
+            if text.contains("@\(member.name)") || text.lowercased().contains("@\(member.name.lowercased())") {
+                targetAgent = member
+                break
+            }
+        }
+
+        // 2. 如果未明确 @ 但包含任务动词，指派给首位在位 Agent
+        let taskVerbs = ["派工", "任务", "开发", "测试", "实现", "修复", "优化", "审查", "重构", "检查"]
+        let hasTaskIntent = taskVerbs.contains(where: { text.contains($0) })
+        if targetAgent == nil && hasTaskIntent {
+            targetAgent = members.first(where: { $0.isAgent })
+        }
+
+        guard let agent = targetAgent else { return }
+
+        // 3. 提取干净的任务标题
+        var taskTitle = text
+        for prefix in ["@\(agent.name)", "@\(agent.name.lowercased())", "请", "协助", "派工：", "任务："] {
+            taskTitle = taskTitle.replacingOccurrences(of: prefix, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if taskTitle.isEmpty { taskTitle = "协同执行任务 (\(text.prefix(20)))" }
+
+        // 4. 调用 LocalTaskStore 创建正式任务 (初始状态 queued)
+        let chId = currentChannelId
+        let newTaskId = "task-" + UUID().uuidString.prefix(8)
+        let newTask = LocalTask(
+            taskId: String(newTaskId),
+            projectId: channelItem?.associatedProjectId,
+            sessionId: chId,
+            title: taskTitle,
+            description: "来自频道 [\(displayName)] 自然语言派发：\(text)",
+            state: "queued",
+            assignedAgentId: agent.agentRecordId ?? agent.id,
+            priority: 1
+        )
+
+        do {
+            _ = try LocalData.shared.tasks.createTask(newTask)
+            // 5. Agent 认领任务并流转: queued -> assigned -> working
+            _ = try LocalData.shared.tasks.transition(
+                taskId: newTask.taskId,
+                to: "assigned",
+                note: "Agent [\(agent.name)] 认领任务并建立租约"
+            )
+            _ = try LocalData.shared.tasks.transition(
+                taskId: newTask.taskId,
+                to: "working",
+                note: "Agent [\(agent.name)] 开始执行任务"
+            )
+
+            // 6. 频道回传执行与认领消息
+            let replyMsg = V5ChannelMessage(
+                id: UUID().uuidString,
+                senderId: agent.id,
+                senderName: agent.name,
+                isAgent: true,
+                text: "已认领并开始执行任务：「\(taskTitle)」。正在分析上下文并准备工具调用...",
+                timestamp: timeStr,
+                fullDateTime: fullDateStr,
+                linkedTaskId: newTask.taskId,
+                linkedTaskTitle: taskTitle,
+                linkedTaskState: "working"
+            )
+            messages.append(replyMsg)
+            reloadWorkspaceTasks()
+        } catch {
+            sendErrorMessage = "派发任务失败: \(error.localizedDescription)"
+            showSendErrorAlert = true
+        }
+    }
+
+    private func submitTaskForReview(taskId: String) {
+        do {
+            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "review", note: "Agent 执行完成，提交人工审查")
+            let t = try LocalData.shared.tasks.getTask(taskId: taskId)
+            let taskTitle = t?.title ?? "任务"
+            let agentName = members.first(where: { $0.agentRecordId == t?.assignedAgentId || $0.id == t?.assignedAgentId })?.name ?? "Agent"
+            let now = Date()
+            let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
+            let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
+
+            let reviewMsg = V5ChannelMessage(
+                id: UUID().uuidString,
+                senderId: t?.assignedAgentId ?? "agent-codex",
+                senderName: agentName,
+                isAgent: true,
+                text: "[审查请求] \(agentName) 已完成任务「\(taskTitle)」，产物与代码已就绪，请项目主管审查。",
+                timestamp: timeStr,
+                fullDateTime: fullDateStr,
+                linkedTaskId: taskId,
+                linkedTaskTitle: taskTitle,
+                linkedTaskState: "review"
+            )
+            messages.append(reviewMsg)
+            reloadWorkspaceTasks()
+        } catch {
+            sendErrorMessage = "提交审查失败: \(error.localizedDescription)"
+            showSendErrorAlert = true
+        }
+    }
+
+    private func approveTaskDelivery(taskId: String) {
+        do {
+            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "completed", note: "项目主管已批准交付")
+            let t = try LocalData.shared.tasks.getTask(taskId: taskId)
+            let taskTitle = t?.title ?? "任务"
+            let now = Date()
+            let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
+            let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
+
+            let approveMsg = V5ChannelMessage(
+                id: UUID().uuidString,
+                senderId: "user-me",
+                senderName: "我",
+                isAgent: false,
+                text: "[交付完成] 项目主管已批准交付任务：「\(taskTitle)」，状态已归档为 completed。",
+                timestamp: timeStr,
+                fullDateTime: fullDateStr,
+                linkedTaskId: taskId,
+                linkedTaskTitle: taskTitle,
+                linkedTaskState: "completed"
+            )
+            messages.append(approveMsg)
+            reloadWorkspaceTasks()
+        } catch {
+            sendErrorMessage = "批准交付失败: \(error.localizedDescription)"
+            showSendErrorAlert = true
+        }
+    }
+
+    private func reworkTask(taskId: String) {
+        do {
+            let t = try LocalData.shared.tasks.getTask(taskId: taskId)
+            let taskTitle = t?.title ?? "任务"
+            let agentName = members.first(where: { $0.agentRecordId == t?.assignedAgentId || $0.id == t?.assignedAgentId })?.name ?? "Codex"
+
+            // 统一 10 状态机严格流转：review -> rework -> assigned -> working
+            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "rework", note: "审查未通过，退回返工")
+            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "assigned", note: "重新指派给 \(agentName)")
+            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "working", note: "\(agentName) 进入返工修复阶段")
+
+            let now = Date()
+            let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
+            let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
+
+            let rejectMsg = V5ChannelMessage(
+                id: UUID().uuidString,
+                senderId: "user-me",
+                senderName: "我",
+                isAgent: false,
+                text: "[打回返工] 任务「\(taskTitle)」审查未通过，已退回给 \(agentName) 返工修复。",
+                timestamp: timeStr,
+                fullDateTime: fullDateStr,
+                linkedTaskId: taskId,
+                linkedTaskTitle: taskTitle,
+                linkedTaskState: "working"
+            )
+            let ackMsg = V5ChannelMessage(
+                id: UUID().uuidString,
+                senderId: t?.assignedAgentId ?? "agent-codex",
+                senderName: agentName,
+                isAgent: true,
+                text: "收到返工要求，已重新接单并进入修复修改流程。",
+                timestamp: timeStr,
+                fullDateTime: fullDateStr,
+                linkedTaskId: taskId,
+                linkedTaskTitle: taskTitle,
+                linkedTaskState: "working"
+            )
+            messages.append(rejectMsg)
+            messages.append(ackMsg)
+            reloadWorkspaceTasks()
+        } catch {
+            sendErrorMessage = "打回返工失败: \(error.localizedDescription)"
+            showSendErrorAlert = true
+        }
+    }
+
+    private func reloadWorkspaceTasks() {
+        let chId = currentChannelId
+        let channelTasks = (try? LocalData.shared.tasks.listTasks(sessionId: chId)) ?? []
+        if !channelTasks.isEmpty {
+            activeTasks = channelTasks
+        } else {
+            activeTasks = (try? LocalData.shared.tasks.listTasks()) ?? []
+        }
+    }
+
     private func loadWorkspaceData() {
+        members = ChannelMemberManager.loadMembers(channelId: currentChannelId)
+        reloadWorkspaceTasks()
+
         if messages.isEmpty {
             messages = [
                 V5ChannelMessage(
@@ -3285,8 +3740,6 @@ public struct ChannelDetailWorkspaceView: View {
                 )
             ]
         }
-
-        activeTasks = (try? LocalData.shared.tasks.listTasks()) ?? []
     }
 }
 
@@ -3513,7 +3966,21 @@ public struct AgentProfileSheet: View {
 public struct ChannelSettingsSheet: View {
     public let channel: V5ChannelItem?
     public let dm: V5DirectMessageItem?
+    public var onMembersChanged: (([V5ChannelMember]) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+
+    @State private var members: [V5ChannelMember] = []
+    @State private var showInviteAgentSheet = false
+
+    private var channelId: String {
+        channel?.id ?? dm?.id ?? "ch-general"
+    }
+
+    public init(channel: V5ChannelItem?, dm: V5DirectMessageItem?, onMembersChanged: (([V5ChannelMember]) -> Void)? = nil) {
+        self.channel = channel
+        self.dm = dm
+        self.onMembersChanged = onMembersChanged
+    }
 
     public var body: some View {
         NavigationStack {
@@ -3523,14 +3990,70 @@ public struct ChannelSettingsSheet: View {
                         LabeledContent("频道名称", value: "# \(ch.name)")
                         LabeledContent("频道性质", value: ch.isPrivate ? "私有频道" : "公开频道")
                         LabeledContent("讨论主题", value: ch.topic.isEmpty ? "无主题" : ch.topic)
-                        LabeledContent("成员总数", value: "\(ch.memberCount) 人")
-                        LabeledContent("已入驻 Agent", value: "\(ch.agentCount) 位")
+                        LabeledContent("成员总数", value: "\(members.count) 人")
+                        LabeledContent("已入驻 Agent", value: "\(members.filter { $0.isAgent }.count) 位")
                     }
                 } else if let d = dm {
                     Section("私聊信息") {
                         LabeledContent("对象姓名", value: d.targetName)
                         LabeledContent("身份类型", value: d.isAgent ? "平台 Agent" : "团队成员")
                         LabeledContent("归属角色", value: d.targetRole)
+                    }
+                }
+
+                Section("频道成员与入驻 Agent (\(members.count))") {
+                    ForEach(members) { m in
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(m.isAgent ? Color(red: 0.85, green: 0.52, blue: 0.38) : Color(red: 0.45, green: 0.58, blue: 0.70))
+                                .frame(width: 32, height: 32)
+                                .overlay(
+                                    Text(String(m.name.prefix(1)))
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.white)
+                                )
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(m.name)
+                                        .font(.system(size: 14, weight: .semibold))
+                                    if m.isAgent {
+                                        Text("Agent")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(Color.orange.opacity(0.12), in: Capsule())
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                                Text(m.role)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(m.status)
+                                .font(.caption2)
+                                .foregroundStyle(m.status == "在线" ? .green : .secondary)
+                        }
+                    }
+                    .onDelete { indexSet in
+                        for idx in indexSet {
+                            let m = members[idx]
+                            if m.id != "user-me" {
+                                members = ChannelMemberManager.removeMember(memberId: m.id, channelId: channelId)
+                                onMembersChanged?(members)
+                            }
+                        }
+                    }
+
+                    Button {
+                        showInviteAgentSheet = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.plus")
+                            Text("邀请已注册 Agent 入驻频道")
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
                     }
                 }
 
@@ -3546,7 +4069,112 @@ public struct ChannelSettingsSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .onAppear {
+                members = ChannelMemberManager.loadMembers(channelId: channelId)
+            }
+            .sheet(isPresented: $showInviteAgentSheet) {
+                InviteAgentSheet(channelId: channelId) { newMember in
+                    members = ChannelMemberManager.loadMembers(channelId: channelId)
+                    onMembersChanged?(members)
+                }
+            }
         }
+    }
+}
+
+public struct InviteAgentSheet: View {
+    public let channelId: String
+    public var onInvited: (V5ChannelMember) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var registeredAgents: [AgentRecord] = []
+
+    public init(channelId: String, onInvited: @escaping (V5ChannelMember) -> Void) {
+        self.channelId = channelId
+        self.onInvited = onInvited
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                Section("选择已注册 Agent 入驻频道") {
+                    if registeredAgents.isEmpty {
+                        Text("暂无其他可用 Agent，所有受信任 Agent 均已在频道中。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(registeredAgents) { agent in
+                            Button {
+                                let updated = ChannelMemberManager.addAgentMember(agent, channelId: channelId)
+                                if let newlyAdded = updated.first(where: { $0.agentRecordId == agent.agentId || $0.name == agent.displayName }) {
+                                    onInvited(newlyAdded)
+                                }
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .fill(Color(red: 0.85, green: 0.52, blue: 0.38))
+                                        .frame(width: 36, height: 36)
+                                        .overlay(
+                                            Text(String(agent.displayName.prefix(1)))
+                                                .font(.system(size: 14, weight: .bold))
+                                                .foregroundStyle(.white)
+                                        )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(agent.displayName)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                            Text(agent.kind.rawValue)
+                                                .font(.system(size: 9, weight: .bold))
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Color.orange.opacity(0.12), in: Capsule())
+                                                .foregroundStyle(.orange)
+                                        }
+                                        Text("\(agent.access.rawValue) · \(agent.memberConnectionState) · \(agent.baseUrl ?? "本地设备")")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("邀请 Agent 入驻")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .onAppear(perform: loadAvailableAgents)
+        }
+    }
+
+    private func loadAvailableAgents() {
+        let currentMembers = ChannelMemberManager.loadMembers(channelId: channelId)
+        let currentAgentRecordIds = Set(currentMembers.compactMap { $0.agentRecordId })
+        let currentNames = Set(currentMembers.map { $0.name })
+
+        var list = (try? LocalData.shared.agents.listAgents()) ?? []
+        list = list.filter { !currentAgentRecordIds.contains($0.agentId) && !currentNames.contains($0.displayName) }
+
+        if list.isEmpty {
+            let defaults: [AgentRecord] = [
+                AgentRecord(agentId: "codex", displayName: "Codex (Mac Hand)", kind: .device, access: .app, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED", deviceId: "MacBook-Air"),
+                AgentRecord(agentId: "claude-code", displayName: "Claude Code", kind: .cloud, access: .api, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED"),
+                AgentRecord(agentId: "codebuddy", displayName: "CodeBuddy", kind: .cloud, access: .connector, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED"),
+                AgentRecord(agentId: "qa-reviewer", displayName: "QA Reviewer Agent", kind: .cloud, access: .api, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED")
+            ].filter { !currentAgentRecordIds.contains($0.agentId) && !currentNames.contains($0.displayName) }
+            list.append(contentsOf: defaults)
+        }
+        registeredAgents = list
     }
 }
 
