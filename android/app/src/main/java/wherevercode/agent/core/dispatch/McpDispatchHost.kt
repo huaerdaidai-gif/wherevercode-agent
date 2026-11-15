@@ -10,6 +10,7 @@ import wherevercode.agent.core.security.FileAuditLog
 import wherevercode.agent.core.security.RoomAuthorizationStore
 import wherevercode.agent.core.security.RoomRevocationStore
 import wherevercode.agent.core.task.RoomTaskStore
+import wherevercode.agent.core.task.TerminalWriteGuardTaskStore
 import wherevercode.agent.core.task.TaskDatabase
 import wherevercode.agent.core.task.TaskScheduler
 import wherevercode.agent.core.task.TaskStore
@@ -40,7 +41,9 @@ class McpDispatchHost(
             appContext: Context,
             taskDb: TaskDatabase,
             stateDir: File,
-            taskStore: TaskStore = RoomTaskStore(taskDb),
+            // 任务 C 复核 C-1：默认必须经终态写入守卫包装，与 BrainBootstrap 生产接线一致；
+            // 此前裸 RoomTaskStore 使经 MCP 派工路径的迟到 result 写可覆盖已取消任务。
+            taskStore: TaskStore = TerminalWriteGuardTaskStore(RoomTaskStore(taskDb)),
             controlPlane: ControlPlane? = null,
             remoteTargetResolver: ((String?) -> wherevercode.agent.core.mcp.RemoteTarget?)? = null,
             remoteControlSender: wherevercode.agent.core.mcp.RemoteControlSender? = null,
