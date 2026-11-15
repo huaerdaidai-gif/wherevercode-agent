@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 struct FlagshipRoute: Identifiable, Hashable {
     let id: String
