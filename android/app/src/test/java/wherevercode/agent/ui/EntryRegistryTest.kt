@@ -22,8 +22,8 @@ class EntryRegistryTest {
 
     @Test
     fun `registry has exactly the de-duplicated entries`() {
-        assertEquals(38, EntryRegistry.ENTRIES.size)
-        assertEquals(38, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
+        assertEquals(83, EntryRegistry.ENTRIES.size)
+        assertEquals(83, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
     }
 
     @Test
@@ -144,6 +144,37 @@ class EntryRegistryTest {
             assertEquals(EntryRegistry.TargetKind.TODO, entry.targetKind)
             assertEquals("", entry.target)
         }
+    }
+
+    @Test
+    fun `feature center is implemented and opens the all-features list`() {
+        val center = EntryRegistry.find("nav_feature_center")!!
+        assertEquals(Status.IMPLEMENTED, center.status)
+        assertEquals(EntryRegistry.TargetKind.ACTION, center.targetKind)
+        assertEquals("open_feature_center", center.target)
+    }
+
+    @Test
+    fun `seventy screen gap entries are registered as todo features`() {
+        val newIds = listOf(
+            "feature_global_search",
+            "feature_change_diff",
+            "feature_agent_detail",
+            "feature_network",
+            "feature_create_automation",
+            "feature_triggers_wakeup",
+            "feature_wakeup_policy",
+        )
+        newIds.forEach { id ->
+            val entry = EntryRegistry.find(id)
+            assertTrue("missing entry: $id", entry != null)
+            assertEquals(Status.TODO, entry!!.status)
+            assertEquals(Group.FEATURE, entry.group)
+            assertTrue(entry.todoMessage!!.contains("待开发"))
+        }
+        assertEquals("nav_projects", EntryRegistry.find("feature_change_diff")?.parentId)
+        assertEquals("nav_feature_center", EntryRegistry.find("feature_create_automation")?.parentId)
+        assertEquals("nav_devices", EntryRegistry.find("feature_network")?.parentId)
     }
 
     @Test

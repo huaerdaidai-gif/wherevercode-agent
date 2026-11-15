@@ -62,6 +62,26 @@ class DrawerViewTest {
     }
 
     @Test
+    fun `feature center row is rendered in its own center group`() {
+        val drawerView = view()
+        assertEquals(listOf("nav_feature_center"), drawerView.renderedGroupIds("center"))
+        val row = drawerView.renderedRows().first { it.group == "center" }
+        assertEquals("全部功能", row.label)
+        assertEquals("›", row.trailing)
+        assertEquals(R.drawable.ic_dashboard, row.iconRes)
+        // 一级入口仍严格四项，不被全部功能行污染
+        assertEquals(4, drawerView.renderedGroupIds("top").size)
+    }
+
+    @Test
+    fun `tap on feature center row emits its registry id`() {
+        val selected = mutableListOf<String>()
+        val drawerView = view(selected = selected)
+        assertTrue(drawerView.clickRowForTest("nav_feature_center"))
+        assertEquals(listOf("nav_feature_center"), selected)
+    }
+
+    @Test
     fun `bottom row shows user label and new chat button`() {
         val drawerView = view(userLabel = "已登录")
         val bottom = drawerView.renderedRows().filter { it.group == "bottom" }

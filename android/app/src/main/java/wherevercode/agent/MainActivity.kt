@@ -4716,10 +4716,40 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
+                "open_feature_center" -> showFeatureCenterDialog()
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
         }
+    }
+
+    /**
+     * 「全部功能」列表（70 屏补漏，2026-11-15）：把注册表里工作空间、扩展与
+     * 功能三组条目集中列出，保证每个功能都有可见入口。待开发条目标
+     * 「（待开发）」，点开只给含「待开发」的诚实提示，绝不伪装；已实现
+     * 条目走 [openRegistryEntry] 真打开。
+     */
+    private fun showFeatureCenterDialog() {
+        val entries = EntryRegistry.ENTRIES.filter {
+            it.group == EntryRegistry.Group.DRAWER_WORKSPACE ||
+                it.group == EntryRegistry.Group.DRAWER_EXTENSIONS ||
+                it.group == EntryRegistry.Group.FEATURE
+        }
+        val labels = entries.map { entry ->
+            if (entry.status == EntryRegistry.Status.TODO) "${entry.title}（待开发）" else entry.title
+        }.toTypedArray()
+        android.app.AlertDialog.Builder(this)
+            .setTitle("全部功能")
+            .setItems(labels) { _, which ->
+                val entry = entries[which]
+                if (entry.status == EntryRegistry.Status.TODO) {
+                    toast(entry.todoMessage ?: "${entry.title}待开发")
+                } else {
+                    openRegistryEntry(entry.id)
+                }
+            }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     // ------------------------------------------------------------------

@@ -94,7 +94,7 @@ class DrawerView(
         val id: String,
         val label: String,
         val indent: Int,
-        /** "top" / "sessions" / "bottom"。 */
+        /** "top" / "center" / "sessions" / "bottom"。 */
         val group: String,
         val badge: Int?,
         val todo: Boolean,
@@ -222,6 +222,8 @@ class DrawerView(
         addBrandHeader()
         // ── 一级入口（严格四项：对话、项目、频道、控制）──
         addPrimaryEntries(rows)
+        // ── 全部功能：集中列出全部注册表入口（70 屏补漏）──
+        addFeatureCenterEntry(rows)
         addSessionSearch()
         // ── 最近会话列表（支持关键词过滤）──
         addRecentSessionsSection(rows)
@@ -285,6 +287,42 @@ class DrawerView(
             }
             content.addView(row)
         }
+    }
+
+    /**
+     * 「全部功能」行（一级入口之下）：点按打开功能中心列表，集中列出
+     * 全部注册表条目，保证每个功能都有可见入口（不靠隐藏手势）。
+     * group 用 "center"，不进 "top"（一级入口严格四项不变）。
+     */
+    private fun addFeatureCenterEntry(rows: MutableList<RenderedRow>) {
+        val entryId = "nav_feature_center"
+        val iconRes = iconResFor(entryId)
+        rows += RenderedRow(entryId, "全部功能", 0, "center", null, false, false, "›", iconRes)
+        val row = UiKit.horizontal(context).apply {
+            tag = entryId
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(52),
+            )
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { onEntrySelected(entryId) }
+        }
+        row.addView(iconView(iconRes, false))
+        row.addView(
+            UiKit.text(
+                context,
+                "全部功能",
+                16f,
+                R.color.text_primary,
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f,
+                )
+            },
+        )
+        content.addView(row)
     }
 
     /** 搜索只过滤真实最近会话，不伪造远端搜索结果。 */
