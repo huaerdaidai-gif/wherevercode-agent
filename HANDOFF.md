@@ -8,8 +8,9 @@
 
 ## 0. 一句话现状
 
-一级导航（对话 / 项目 / 频道 / 控制）的**模型层、抽屉视图层、路由层、入口注册表、MainActivity 路由分支已改完并可编译**；
-**频道/私聊双分区首页、频道消息附件菜单、频道 CRUD、7 张截图、APK、测试报告均未完成**。
+一级导航（对话 / 项目 / 频道 / 控制）的**模型层、抽屉视图层、路由层、入口注册表、MainActivity 路由分支已改完**，
+**`assembleDebug` 构建成功，APK 已产出**；
+**单元测试未跑通验证、频道/私聊双分区首页、频道附件菜单、频道 CRUD、7 张截图、功能矩阵均未完成**。
 
 ---
 
@@ -85,9 +86,9 @@ ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk \
 - 新增 `openSessionById()`：点抽屉会话打开对应会话。
 - 字段修复：`SessionRecord` 用的是 `updatedAtEpochSeconds`（不是 `updatedAt`），已改。
 
-### 3.6 测试（已改，**尚未跑通验证**）
+### 3.6 测试（已改，**未跑通验证**）
 - `DrawerControllerTest` / `DrawerViewTest` / `DrawerRoutingTest` / `EntryRegistryTest` 已按四项口径重写。
-- **状态：只改了代码，没跑过 `testDebugUnitTest`。第一次跑大概率有断言或 API 不匹配，接手方必须先跑一遍并修。**
+- **状态：`testDebugUnitTest` 跑了约 7 分钟仍未结束，为控额度被主动终止，`app/build/test-results/` 下无结果文件 —— 即“测试代码能编译，但一个断言都没验证过”**（`compileDebugUnitTestKotlin` 通过）。接手方必须重跑并修断言。
 
 ---
 
@@ -122,12 +123,15 @@ ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk \
 
 ---
 
-## 6. 本次收尾动作（可核对）
+## 6. 本次收尾动作（已核对的事实）
 
 - 分支：`feature/v5-nav-overhaul`
-- 本地 commit：见 `git log -1`（本次收尾提交，含全部代码改动 + 本文件）
-- 构建：`assembleDebug` 结果记录在提交说明里（成功则附 APK 路径 `android/app/build/outputs/apk/debug/app-debug.apk`；失败则附首个错误行）
-- **未推送远端**（无凭据），**未合并 main**，**未部署**
+- commit：`cfc3ec5 feat(android): V5 四项一级导航整改（对话/项目/频道/控制）`（代码 + 本文件；13 文件，+1232/−793）
+- **构建：`assembleDebug` = BUILD SUCCESSFUL（2m58s，47 tasks）**
+- **APK：`android/app/build/outputs/apk/debug/app-debug.apk`（18 MB），另存 `/workspace/wherevercode-v5-nav-debug.apk`**
+- **单元测试：未验证**（跑了约 7 分钟未结束被终止，无结果文件；见 §3.6）
+- **截图：0 张**（本机无 KVM，原因见 §5）
+- **未推送远端**（无 GitHub 凭据）、**未合并 main**、**未部署**
 
 ---
 
