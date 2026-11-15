@@ -5457,15 +5457,34 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 删除一台 MCP 服务器：先断开（停重连），再删注册表行（内置行删不掉）。 */
+    /**
+     * 删除一台 MCP 服务器：先断开（停重连），再删注册表行（内置行删不掉），
+     * 删成功后同步删它在密钥库里的凭据（R3 C-2）。
+     *
+     * 顺序取舍：先删配置、后删凭据，且只在配置真删掉时才删凭据——
+     * 反过来先删凭据的话，配置删除失败（内置行）会留下一台没凭据的
+     * 服务器，比残留凭据更糟。凭据删除失败不回滚配置删除（用户删
+     * 服务器的意图已达成），但不静默：失败数经 toast 告诉用户，
+     * 失败的引用名记在 McpSecretSealer.lastDeleteFailures（只有名字）。
+     * 条目必须在删行之前捕获——删行后注册表里就推不出它有哪些凭据了。
+     */
     private fun deleteMcpServer(serverId: String) {
         Thread {
             val components = brainComponents ?: return@Thread
             runBlocking { components.mcpServerManager.disconnect(serverId) }
+            val entry = components.extensionRegistry.get(ExtensionKind.MCP, serverId)
             val removed = components.extensionRegistry.remove(ExtensionKind.MCP, serverId)
+            val deleteFailures = if (removed && entry != null) {
+                components.mcpSecretSealer?.deleteSecretsFor(entry) ?: emptyList()
+            } else {
+                emptyList()
+            }
             runOnUiThread {
                 if (removed) {
                     toast("已删除 MCP 服务器：$serverId")
+                    if (deleteFailures.isNotEmpty()) {
+                        toast("服务器已删除，但 ${deleteFailures.size} 项凭据未能从密钥库清除")
+                    }
                 } else {
                     toast("删不掉：$serverId 是内置服务器，只能停用")
                 }

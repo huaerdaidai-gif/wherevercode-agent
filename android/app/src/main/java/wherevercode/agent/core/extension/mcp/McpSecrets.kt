@@ -23,6 +23,8 @@ import wherevercode.agent.core.extension.ExtensionEntry
  * - [SecretSealingExtensionStore]：包住注册表的持久化后端，**落盘前**封存；
  *   读取时发现旧版明文会就地迁移（封存后写回）。
  * - [SecretStoreMcpCredentialResolver]：建客户端时把 `keystore:` 引用解回来。
+ * - 删除服务器时由 [McpSecretSealer.deleteSecretsFor] 按同一命名规则
+ *   同步删掉该服务器的凭据（R3 C-2），不留残留条目。
  *
  * 封存失败（Keystore 不可用）时保留原值、不丢配置——与修复前行为一致，
  * 不会更糟；调用方可经 [McpSecretSealer.lastFailures] 得知。
@@ -66,12 +68,25 @@ object McpSecretPolicy {
 
     fun headerRef(serverId: String, header: String): String = "mcp:$serverId:header:${header.lowercase()}"
     fun envRef(serverId: String, env: String): String = "mcp:$serverId:env:$env"
+
+    /**
+     * 某个引用名是否属于这台服务器自己的命名空间（封存生成的引用都在
+     * 此空间内）。带尾随冒号判定：服务器 `gh` 不会命中 `gh2` 的引用。
+     * 用户手填的命名空间外引用（如 `keystore:github-mcp`）不属于任何
+     * 一台服务器，删除服务器时不动它（可能是多处共用的手管凭证）。
+     */
+    fun isOwnRef(serverId: String, ref: String): Boolean = ref.startsWith("mcp:$serverId:")
 }
 
 class McpSecretSealer(private val secrets: AgentSecretStore) {
     /** 最近一次封存失败的 (serverId, 字段名) —— 只有名字，没有值。 */
     @Volatile
     var lastFailures: List<String> = emptyList()
+        private set
+
+    /** 最近一次删凭据失败的引用名 —— 只有名字，没有值。 */
+    @Volatile
+    var lastDeleteFailures: List<String> = emptyList()
         private set
 
     /** 这一行里是否还有未封存的明文凭证。 */
@@ -102,6 +117,71 @@ class McpSecretSealer(private val secrets: AgentSecretStore) {
         }
         lastFailures = failures
         return if (extra == entry.extra) entry else entry.copy(extra = extra)
+    }
+
+    /**
+     * 这一行（删除前捕获的条目）在密钥库里的全部关联凭据引用名。
+     *
+     * [AgentSecretStore] 没有枚举接口，能删的集合只能从条目本身推：
+     * - 按命名规则现算：secret 请求头 → [McpSecretPolicy.headerRef]、
+     *   secret 环境变量 → [McpSecretPolicy.envRef]（封存时正是这样
+     *   生成的；值仍是明文/封存失败时库里本就没有，删了也是空操作）；
+     * - 条目值里实际写着的 `keystore:` 引用（整值或 `Bearer keystore:…`
+     *   形态都认），但只收属于本服务器命名空间的——命名空间外的
+     *   手填引用与别台服务器的引用一律不碰，防误删共用/他人凭证。
+     */
+    fun refsFor(entry: ExtensionEntry): Set<String> {
+        if (entry.kind != ExtensionKind.MCP) return emptySet()
+        val refs = LinkedHashSet<String>()
+        val headers = parseMap(entry.extra["headersJson"])
+        for ((name, value) in headers) {
+            if (McpSecretPolicy.isSecretHeader(name)) {
+                refs += McpSecretPolicy.headerRef(entry.id, name)
+            }
+            collectOwnRefs(entry.id, value, refs)
+        }
+        val env = parseMap(entry.extra["envJson"])
+        for ((name, value) in env) {
+            if (McpSecretPolicy.isSecretEnv(name)) {
+                refs += McpSecretPolicy.envRef(entry.id, name)
+            }
+            collectOwnRefs(entry.id, value, refs)
+        }
+        return refs
+    }
+
+    /** 从一个配置值里抽出属于本服务器命名空间的 `keystore:` 引用。 */
+    private fun collectOwnRefs(serverId: String, value: String, out: MutableSet<String>) {
+        var from = 0
+        while (true) {
+            val idx = value.indexOf(McpSecretPolicy.REF_PREFIX, from)
+            if (idx < 0) return
+            val rest = value.substring(idx + McpSecretPolicy.REF_PREFIX.length)
+            val ref = rest.takeWhile { !it.isWhitespace() }
+            if (ref.isNotEmpty() && McpSecretPolicy.isOwnRef(serverId, ref)) out += ref
+            from = idx + McpSecretPolicy.REF_PREFIX.length
+        }
+    }
+
+    /**
+     * 删除一台服务器的全部关联凭据（删除服务器时调用，R3 C-2）。
+     *
+     * 幂等：引用不存在时底层删除是空操作；重复调用不崩。单个引用
+     * 删除失败（Keystore 不可用）不中断其余引用、不抛异常——失败的
+     * 引用名记入 [lastDeleteFailures] 并作为返回值交给调用方提示
+     * 用户（只有名字，没有值）。非 MCP 行直接空操作。
+     */
+    fun deleteSecretsFor(entry: ExtensionEntry): List<String> {
+        val failures = mutableListOf<String>()
+        for (ref in refsFor(entry)) {
+            try {
+                secrets.delete(ref)
+            } catch (_: Exception) {
+                failures += ref
+            }
+        }
+        lastDeleteFailures = failures
+        return failures
     }
 
     /** 返回封存后的 map；没有任何改动时返回 null。 */

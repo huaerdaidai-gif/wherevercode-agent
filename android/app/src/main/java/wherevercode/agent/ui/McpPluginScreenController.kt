@@ -455,7 +455,7 @@ class McpPluginScreenController(
     private fun confirmDeleteServer(id: String, displayName: String) {
         AlertDialog.Builder(context)
             .setTitle("删除 MCP 服务器")
-            .setMessage("删除 MCP 服务器“$displayName”？已连接时会先断开。内置服务器删不掉（只能停用）。")
+            .setMessage("删除 MCP 服务器“$displayName”？已连接时会先断开，它保存在本机密钥库里的凭据会一起删除。内置服务器删不掉（只能停用）。")
             .setPositiveButton("删除") { _, _ -> onDeleteServer(id) }
             .setNegativeButton("取消", null)
             .show()
