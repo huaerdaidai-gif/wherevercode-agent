@@ -1,0 +1,2489 @@
+{
+  "tests": 2736,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 1,
+  "suites": 310,
+  "results": [
+    {
+      "name": "wherevercode.agent.brain.oauth.OAuthPkceTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.team.TeamChannelTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.298"
+    },
+    {
+      "name": "wherevercode.agent.ui.ResultsAggregationChatLeakTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.python.ChaquopyPythonResultParsingTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.092"
+    },
+    {
+      "name": "wherevercode.agent.core.security.ReplayGuardTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformAgentChatBridgeTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.188"
+    },
+    {
+      "name": "wherevercode.agent.brain.GitHostToolsTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.051"
+    },
+    {
+      "name": "wherevercode.agent.ui.DrawerPrefsStoreTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpOAuthTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.374"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskStepArtifactsTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.028"
+    },
+    {
+      "name": "wherevercode.agent.ui.TaskEventSummaryTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.dispatch.McpDispatchCurlE2ETest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.724"
+    },
+    {
+      "name": "wherevercode.agent.core.team.TeamMemberStoreTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.118"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcAuthorizationUrlTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.351"
+    },
+    {
+      "name": "wherevercode.agent.core.task.DeliveryCardTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.012"
+    },
+    {
+      "name": "wherevercode.agent.ui.MainLayoutTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.411"
+    },
+    {
+      "name": "wherevercode.agent.core.task.PipelineReviewHoldTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.074"
+    },
+    {
+      "name": "wherevercode.agent.core.control.ControlAuditLogTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.01"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpResourcesPromptsTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.755"
+    },
+    {
+      "name": "wherevercode.agent.core.task.DecompositionStoreTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.095"
+    },
+    {
+      "name": "wherevercode.agent.MainActivitySmokeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "6.983"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.HandServerTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.session.SessionLedgerListTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.ui.ConsoleSnapshotTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "wherevercode.agent.ui.DrawerBadgesTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.cli.CliMembershipBrainAdapterTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.021"
+    },
+    {
+      "name": "wherevercode.agent.core.team.MemberDispatchTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.279"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.ConsoleWsClientTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.639"
+    },
+    {
+      "name": "wherevercode.agent.core.team.ChannelAgentRelayTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.218"
+    },
+    {
+      "name": "wherevercode.agent.ui.BrainLoginSettingsTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.433"
+    },
+    {
+      "name": "wherevercode.agent.brain.deepseek.DeepSeekBlankReplyRegressionTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.168"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcM2BrainAdapterTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.012"
+    },
+    {
+      "name": "wherevercode.agent.brain.generic.GenericOpenAiImagePartsTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskPacketTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.052"
+    },
+    {
+      "name": "wherevercode.agent.brain.TurnControllerResumeTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpNotificationsTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.533"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatAttachmentImageTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.435"
+    },
+    {
+      "name": "wherevercode.agent.ui.MarkdownLiteTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.brain.muse.MuseBrainAdapterTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.01"
+    },
+    {
+      "name": "wherevercode.agent.brain.ConversationStoreTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.SandboxScanRemovedTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.625"
+    },
+    {
+      "name": "wherevercode.agent.ui.TurnTaskRecorderTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.21"
+    },
+    {
+      "name": "wherevercode.agent.brain.oauth.OAuthIdTokenTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.651"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.AuthorizeProjectFolderE2ETest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.23"
+    },
+    {
+      "name": "wherevercode.agent.ui.LineDiffTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.008"
+    },
+    {
+      "name": "wherevercode.agent.core.project.ProjectStoreTest",
+      "tests": "55",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.008"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskSchedulerTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.17"
+    },
+    {
+      "name": "wherevercode.agent.brain.cloudflare.CloudflareM2BrainAdapterTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.014"
+    },
+    {
+      "name": "wherevercode.agent.core.project.GitRepoUrlTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.ui.DrawerRoutingMcpTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.task.DispatchClaimExecuteTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.302"
+    },
+    {
+      "name": "wherevercode.agent.ui.DrawerControllerTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.032"
+    },
+    {
+      "name": "wherevercode.agent.brain.cloudflare.CloudflareBrainAdapterTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.039"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration8To9Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.037"
+    },
+    {
+      "name": "wherevercode.agent.core.team.TeamFanoutTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.086"
+    },
+    {
+      "name": "wherevercode.agent.core.task.RoutingDecisionTriageTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.071"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpHttpSessionTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.246"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.DeviceAgentFormTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.claude.ClaudeBrainAdapterTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.021"
+    },
+    {
+      "name": "wherevercode.agent.brain.cli.CliRunnerTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.dispatch.McpDispatchHttpE2ETest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "5.321"
+    },
+    {
+      "name": "wherevercode.agent.core.team.VisibleTeamChannelMembersTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.security.SecretRedactorTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.006"
+    },
+    {
+      "name": "wherevercode.agent.core.team.RemoteMemberVerdictTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.brain.devicecode.DeviceCodeConfigsTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.ui.NativeApprovalTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.088"
+    },
+    {
+      "name": "wherevercode.agent.ui.ListDialogTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.28"
+    },
+    {
+      "name": "wherevercode.agent.brain.WebSearchClientTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.brain.devicecode.DeviceCodeBrainAdapterTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.018"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpServersConfigTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.brain.deepseek.DeepSeekBrainAdapterTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "wherevercode.agent.core.dispatch.McpDispatchServiceTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.811"
+    },
+    {
+      "name": "wherevercode.agent.brain.GitHostEngineTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.034"
+    },
+    {
+      "name": "wherevercode.agent.ui.EventLogGroupingTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.012"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatProjectPickerDialogTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.252"
+    },
+    {
+      "name": "wherevercode.agent.brain.oauth.OAuthDiscoveryTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.358"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatHistoryStoreSessionIdTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.05"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformAgentFormTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatViewModelAgentRoutingTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.311"
+    },
+    {
+      "name": "wherevercode.agent.ui.MembershipLoginRowsTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.core.task.EvalLogStoreTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.107"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.AgentSecretEditTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.ui.McpPluginScreenControllerTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.466"
+    },
+    {
+      "name": "wherevercode.agent.core.workspace.WorkspaceAdapterGuardWriteTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.018"
+    },
+    {
+      "name": "wherevercode.agent.core.security.CommandLimitsTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.ResponsesApiTest",
+      "tests": "27",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.035"
+    },
+    {
+      "name": "wherevercode.agent.ui.DeviceUnavailableLabelTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.246"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatViewModelManusChatTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.531"
+    },
+    {
+      "name": "wherevercode.agent.core.control.RemoteControlTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.01"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformChannelTransportTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.01"
+    },
+    {
+      "name": "wherevercode.agent.ui.TaskControlActionsTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.102"
+    },
+    {
+      "name": "wherevercode.agent.ui.ToolActionLabelsTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.session.ControlInstructionRouterTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.core.team.MemberTaskControlTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskLibraryGroupingTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.dispatch.DispatchTokenRegistryTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.095"
+    },
+    {
+      "name": "wherevercode.agent.core.transport.DirectTransportTest",
+      "tests": "27",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "71.1"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.RemoteAgentSessionTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.062"
+    },
+    {
+      "name": "wherevercode.agent.ui.SettingsCleanupTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.441"
+    },
+    {
+      "name": "wherevercode.agent.ui.RoomDrawerPrefsStoreTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.101"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.McpGuardTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.ExtensionRegistryTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.008"
+    },
+    {
+      "name": "wherevercode.agent.brain.StreamParserTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.security.RoomAuthorizationStoreTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.172"
+    },
+    {
+      "name": "wherevercode.agent.core.session.SessionTypesTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDecomposerTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.13"
+    },
+    {
+      "name": "wherevercode.agent.ui.CodeHighlightTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.ui.BrainDisplayNameTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.167"
+    },
+    {
+      "name": "wherevercode.agent.core.team.RemoteTaskPumpTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.869"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatTextSanitizerTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TriageRouterTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.069"
+    },
+    {
+      "name": "wherevercode.agent.brain.BrainConfigTest",
+      "tests": "21",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.637"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatSessionRestoreTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.ui.flagship.V5NavigationTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.006"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.McpChannelEventFeedTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.11"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.ExtensionToolBridgeTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.ui.BrainListRowViewTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.114"
+    },
+    {
+      "name": "wherevercode.agent.ui.BrainCapsuleVisibilityTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.368"
+    },
+    {
+      "name": "wherevercode.agent.core.install.InstallCommandTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.project.SyncFolderWarningTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.deepseek.DeepSeekApiClientTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.019"
+    },
+    {
+      "name": "wherevercode.agent.core.project.GitHostTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.update.DriveUpdateSourceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.task.KanbanStatusTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.control.ControlPlaneTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.01"
+    },
+    {
+      "name": "wherevercode.agent.ui.OnboardingControllerTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskRetryTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.oauth.VendorOAuthConfigsTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.install.HandInstallBundleTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.team.PipelineRemoteCallerTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.126"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatViewModelProjectBindingTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.287"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcRefreshTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.513"
+    },
+    {
+      "name": "wherevercode.agent.brain.RoundLifecycleRegressionTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.167"
+    },
+    {
+      "name": "wherevercode.agent.brain.AgentChatRouterTest",
+      "tests": "22",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.057"
+    },
+    {
+      "name": "wherevercode.agent.core.security.DeviceKeysTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.04"
+    },
+    {
+      "name": "wherevercode.agent.brain.ToolRegistryExtensionTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.009"
+    },
+    {
+      "name": "wherevercode.agent.core.control.ModuleRegistrationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatViewModelPlatformChatTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.46"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.AgentToggleTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.HandClientTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.152"
+    },
+    {
+      "name": "wherevercode.agent.ui.TaskComposerTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.282"
+    },
+    {
+      "name": "wherevercode.agent.brain.BrainEngineTest",
+      "tests": "79",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.398"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.DelegationTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.528"
+    },
+    {
+      "name": "wherevercode.agent.core.task.PipelineRunnerTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.371"
+    },
+    {
+      "name": "wherevercode.agent.ui.WorkModeTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.042"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpJsonRpcTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.security.RoomRevocationStoreTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.09"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration7To8Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.033"
+    },
+    {
+      "name": "wherevercode.agent.ui.VersionInfoTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.CloudAgentSetupSheetTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration3To4Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.036"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpClientTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.52"
+    },
+    {
+      "name": "wherevercode.agent.brain.SkillMemoryTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.026"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.AgentCredentialStoresTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.ui.BrainAgentBoundaryTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.956"
+    },
+    {
+      "name": "wherevercode.agent.core.team.TaskAttemptFenceTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.095"
+    },
+    {
+      "name": "wherevercode.agent.brain.oauth.OAuthRevokeTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.28"
+    },
+    {
+      "name": "wherevercode.agent.brain.BrainAdapterRegistryTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.KeystoreSiwcTokenStoreMemoryTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.ContextManagerTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.transport.DeviceListFormatTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.ui.SessionListControllerTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.317"
+    },
+    {
+      "name": "wherevercode.agent.core.session.SessionLedgerTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.006"
+    },
+    {
+      "name": "wherevercode.agent.brain.ApprovalHistoryTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.229"
+    },
+    {
+      "name": "wherevercode.agent.core.control.ControlCountersTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.brain.ConversationIdReuseTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.team.RemoteTaskDispatcherVerdictTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.343"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcCallbackTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.395"
+    },
+    {
+      "name": "wherevercode.agent.core.project.GitHostApiClientTest",
+      "tests": "31",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.033"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.plugin.LocalUtilsPluginTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.core.install.HandUpdateTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.962"
+    },
+    {
+      "name": "wherevercode.agent.brain.ToolRegistryDispatchProjectTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.022"
+    },
+    {
+      "name": "wherevercode.agent.core.project.GitHostProjectPortTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.014"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatTimelineTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.control.ControlStoreTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.232"
+    },
+    {
+      "name": "wherevercode.agent.core.team.MemberDeliveryTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.028"
+    },
+    {
+      "name": "wherevercode.agent.core.session.SessionDatabaseTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.285"
+    },
+    {
+      "name": "wherevercode.agent.brain.deepseek.DeepSeekStreamParserTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatHistoryRestoreTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.282"
+    },
+    {
+      "name": "wherevercode.agent.core.task.PipelinePlanTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.139"
+    },
+    {
+      "name": "wherevercode.agent.core.a2a.A2aClientTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.009"
+    },
+    {
+      "name": "wherevercode.agent.core.transport.RemoteDeviceStoreTest",
+      "tests": "26",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.task.PipelineMechanicalChecksTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.128"
+    },
+    {
+      "name": "wherevercode.agent.core.project.CheckoutLinkTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcModelDiscoveryTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.project.ChatProjectBindingTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformTokenIssuerTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.security.PairingRoomMainThreadTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.069"
+    },
+    {
+      "name": "wherevercode.agent.core.install.SshInstallerTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration5To6Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.034"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.KeystoreSiwcTokenStoreTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "1",
+      "time": "0.053"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration6To7Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.047"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformAgentTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.ManusChatBridgeTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.055"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.AgentStoreTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.core.autonomy.AutonomyTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.324"
+    },
+    {
+      "name": "wherevercode.agent.update.GoogleDriveAuthTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.326"
+    },
+    {
+      "name": "wherevercode.agent.brain.FailoverTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.brain.cloudflare.CloudflareApiTest",
+      "tests": "35",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.083"
+    },
+    {
+      "name": "wherevercode.agent.core.task.EvalLogTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.security.PairingTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.ui.SessionListItemsChatHistoryTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.AgentConnectionTesterTest",
+      "tests": "41",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.021"
+    },
+    {
+      "name": "wherevercode.agent.brain.oauth.OAuthTokenTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.88"
+    },
+    {
+      "name": "wherevercode.agent.core.task.CapabilityCardTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.ChannelWsClientTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.73"
+    },
+    {
+      "name": "wherevercode.agent.ui.ProjectScreenControllerTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.716"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcBrainAdapterTest",
+      "tests": "25",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.031"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatAttachmentTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.brain.ConversationRoomStoreTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.253"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.RemoteAgentAuthorizeProjectFolderTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.018"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatViewModelRemoteAgentTest",
+      "tests": "22",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.856"
+    },
+    {
+      "name": "wherevercode.agent.brain.AgentChatRouterRemoteTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.task.PipelineOrchestratorTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.543"
+    },
+    {
+      "name": "wherevercode.agent.brain.PythonClosedLoopTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.172"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskClaimControlTransactionTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.216"
+    },
+    {
+      "name": "wherevercode.agent.core.task.DecompositionOrchestratorTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.395"
+    },
+    {
+      "name": "wherevercode.agent.update.AppUpdateTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.brain.grok.GrokBrainAdapterTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "wherevercode.agent.core.team.RemoteTaskPumpFolderFallbackTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.191"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatViewModelManusTaskTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.318"
+    },
+    {
+      "name": "wherevercode.agent.core.project.HostProjectTest",
+      "tests": "25",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.009"
+    },
+    {
+      "name": "wherevercode.agent.ui.PlusMenuSheetTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.093"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.RemoteAgentListFolderTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.047"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskStoreTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.43"
+    },
+    {
+      "name": "wherevercode.agent.core.team.TeamMemberTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.ui.MembershipTombstoneTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.101"
+    },
+    {
+      "name": "wherevercode.agent.core.security.PairingRoomStoreTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.124"
+    },
+    {
+      "name": "wherevercode.agent.core.task.PipelineStoreTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.101"
+    },
+    {
+      "name": "wherevercode.agent.core.security.AuditLogTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.019"
+    },
+    {
+      "name": "wherevercode.agent.core.session.DeliveryTrackerTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.core.dispatch.McpDispatchRestartTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.153"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.ManusTaskAdapterTest",
+      "tests": "41",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.012"
+    },
+    {
+      "name": "wherevercode.agent.core.task.LocalTaskRunnerAssignTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.074"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcPkceTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.HandProtocolTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.ui.WorkspaceBrowserTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.042"
+    },
+    {
+      "name": "wherevercode.agent.core.control.CancellationTokenTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.install.InstallTargetTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.ui.WorkspaceEditTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.009"
+    },
+    {
+      "name": "wherevercode.agent.core.project.ProjectDispatchFolderTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.008"
+    },
+    {
+      "name": "wherevercode.agent.core.project.ActiveGitHomeTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.ui.DrawerViewTest",
+      "tests": "21",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.572"
+    },
+    {
+      "name": "wherevercode.agent.core.security.RemoteCryptoInteropTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.098"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.HandClientWsTokenTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.084"
+    },
+    {
+      "name": "wherevercode.agent.brain.PythonToolChainTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.257"
+    },
+    {
+      "name": "wherevercode.agent.brain.cli.CliConfigTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.transport.LanTransportTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformWebhookTesterTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.014"
+    },
+    {
+      "name": "wherevercode.agent.core.task.SkillDatabaseTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.103"
+    },
+    {
+      "name": "wherevercode.agent.core.mcp.HandAdminClientTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.04"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.AgentBrainWiringTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskStatesTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.ui.HomeScreenControllerTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.006"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration4To5Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.041"
+    },
+    {
+      "name": "wherevercode.agent.ui.ResultsAggregationTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.project.RemoteFolderParseTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDeleteTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.239"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.LoopbackCallbackServerTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.227"
+    },
+    {
+      "name": "wherevercode.agent.ui.DrawerRoutingTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.PythonUnittestAndCwdRegressionTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.294"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigrationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.035"
+    },
+    {
+      "name": "wherevercode.agent.ui.ConsoleWsFeedTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.078"
+    },
+    {
+      "name": "wherevercode.agent.core.install.InstallFlowTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.005"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.CloudAgentFormTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.core.project.OpenFolderEntryTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.GenericBrainToolRoundTripTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.071"
+    },
+    {
+      "name": "wherevercode.agent.core.transport.DiscoveryTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.brain.ApprovalSafetyTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.072"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.mcp.McpGenericTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.412"
+    },
+    {
+      "name": "wherevercode.agent.core.security.TaskCredentialTest",
+      "tests": "23",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.009"
+    },
+    {
+      "name": "wherevercode.agent.ui.ConsoleScreenControllerTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.501"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.PlatformEndpointPinningTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.079"
+    },
+    {
+      "name": "wherevercode.agent.ui.SessionListItemsTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.002"
+    },
+    {
+      "name": "wherevercode.agent.core.task.LocalTaskRunnerVerdictTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.092"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.SharedPreferencesAgentStoreTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.229"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskEventLogTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.221"
+    },
+    {
+      "name": "wherevercode.agent.ui.SessionListFilterTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.058"
+    },
+    {
+      "name": "wherevercode.agent.ui.HomeScreenWiringTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseMigration9To10Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.077"
+    },
+    {
+      "name": "wherevercode.agent.ui.EntryRegistryTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.devicecode.DeviceCodeEngineTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.01"
+    },
+    {
+      "name": "wherevercode.agent.core.install.InstallRouteTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.ui.TaskDetailArtifactsTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.core.security.PairingSnapshotTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.session.SessionLedgerDeleteTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.brain.SkillMemoryEndToEndTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.215"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskStepRoomStoreTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.183"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.ChannelFeedTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.244"
+    },
+    {
+      "name": "wherevercode.agent.brain.generic.GenericOpenAiBrainAdapterTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.044"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskDatabaseProviderTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.014"
+    },
+    {
+      "name": "wherevercode.agent.core.task.CapabilityRouterTest",
+      "tests": "20",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "wherevercode.agent.ui.TaskControlViewTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.073"
+    },
+    {
+      "name": "wherevercode.agent.ui.OnboardingViewTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.251"
+    },
+    {
+      "name": "wherevercode.agent.ui.SessionListControllerDeleteTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.035"
+    },
+    {
+      "name": "wherevercode.agent.core.control.ExecutionFenceTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.011"
+    },
+    {
+      "name": "wherevercode.agent.core.extension.ExtensionManifestTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.003"
+    },
+    {
+      "name": "wherevercode.agent.ui.ChatTurnViewTest",
+      "tests": "26",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.262"
+    },
+    {
+      "name": "wherevercode.agent.brain.oauth.OAuthAuthorizationUrlTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.356"
+    },
+    {
+      "name": "wherevercode.agent.core.agent.DeviceAgentDiscoveryTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.004"
+    },
+    {
+      "name": "wherevercode.agent.brain.AgentChatRouterManusTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.029"
+    },
+    {
+      "name": "wherevercode.agent.brain.devicecode.DeviceCodeManagerTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.009"
+    },
+    {
+      "name": "wherevercode.agent.ui.BrainLoginMethodsTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.274"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskStepsTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.001"
+    },
+    {
+      "name": "wherevercode.agent.core.team.RemoteTargetResolutionTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.0"
+    },
+    {
+      "name": "wherevercode.agent.brain.DeliveryCardPlumbingTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.007"
+    },
+    {
+      "name": "wherevercode.agent.core.transport.PairingClientTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.448"
+    },
+    {
+      "name": "wherevercode.agent.core.task.TaskSchedulerMemberParallelTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.067"
+    },
+    {
+      "name": "wherevercode.agent.brain.siwc.SiwcRevokeTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.485"
+    },
+    {
+      "name": "wherevercode.agent.ui.DeviceTapRefreshTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.707"
+    }
+  ]
+}

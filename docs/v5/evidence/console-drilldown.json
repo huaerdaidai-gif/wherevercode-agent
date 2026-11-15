@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "method": "manual ADB tap on real console task row; UIAutomator hierarchy and raw screen capture",
+  "task_id": "e9234fcf-73ec-4082-a722-fc79d6ca4783",
+  "visible_state": "失败",
+  "task_detail_back_visible": true,
+  "note": "Task detail is above console; no task control action was executed"
+}
