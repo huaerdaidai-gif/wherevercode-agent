@@ -2101,9 +2101,9 @@ class MainActivity : AppCompatActivity() {
             inputPrompt.requestFocus()
         }
         buttonChatConsole.setOnClickListener {
-            // V5 C2-3-R1d：控制台是注册表里的待开发入口（去重后六大页面
-            // 一份，后续批次做）——点按只给提示，不再把工具与连接冒充成控制台。
-            openRegistryEntry("nav_console")
+            // V5 C2-3-R1d：打开注册表「控制」入口（nav_control；「控制台」
+            // 已与其合并为一份，2026-11-15 去重），不再把工具与连接冒充成控制台。
+            openRegistryEntry("nav_control")
         }
         // V5 C2-3-R1：原型图输入行里的 Agent 选择器（已有选 Agent 对话框）。
         buttonAgentSelect.setOnClickListener { showSelectAgentDialog() }
@@ -4731,9 +4731,11 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showFeatureCenterDialog() {
         val entries = EntryRegistry.ENTRIES.filter {
-            it.group == EntryRegistry.Group.DRAWER_WORKSPACE ||
-                it.group == EntryRegistry.Group.DRAWER_EXTENSIONS ||
-                it.group == EntryRegistry.Group.FEATURE
+            // 排除「全部功能」入口自身，避免在弹窗里点它又重开弹窗（自引用）。
+            it.id != "nav_feature_center" &&
+                (it.group == EntryRegistry.Group.DRAWER_WORKSPACE ||
+                    it.group == EntryRegistry.Group.DRAWER_EXTENSIONS ||
+                    it.group == EntryRegistry.Group.FEATURE)
         }
         val labels = entries.map { entry ->
             if (entry.status == EntryRegistry.Status.TODO) "${entry.title}（待开发）" else entry.title

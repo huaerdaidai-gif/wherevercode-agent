@@ -22,8 +22,8 @@ class EntryRegistryTest {
 
     @Test
     fun `registry has exactly the de-duplicated entries`() {
-        assertEquals(83, EntryRegistry.ENTRIES.size)
-        assertEquals(83, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
+        assertEquals(86, EntryRegistry.ENTRIES.size)
+        assertEquals(86, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
     }
 
     @Test
@@ -118,10 +118,11 @@ class EntryRegistryTest {
     fun `every de-duplicated feature is registered once`() {
         val ids = EntryRegistry.ENTRIES.map { it.id }.toSet()
         assertTrue(ids.contains("feature_task_detail"))
-        assertTrue(ids.contains("nav_console"))
+        // 「控制台」已与「控制」合并为一份：旧 nav_console 注册删除，
+        // 旧路由常量 ID_CONSOLE 保留兼容（见 all old routing targets 测试）。
+        assertFalse(ids.contains("nav_console"))
         assertTrue(ids.contains("nav_control"))
         assertTrue(ids.contains("feature_permissions"))
-        assertTrue(ids.contains("feature_team_chat"))
         assertTrue(ids.contains("nav_projects"))
         assertTrue(ids.contains("nav_tools"))
         assertTrue(ids.contains("nav_team"))
@@ -132,6 +133,31 @@ class EntryRegistryTest {
         assertTrue(ids.contains("feature_auto_exec"))
         assertTrue(ids.contains("feature_quick_actions"))
         assertTrue(ids.contains("feature_nesting"))
+    }
+
+    @Test
+    fun `channel and task gap entries are registered as todo features`() {
+        // 2026-11-15 查缺补漏新增：频道管理/频道文件/私聊/新建任务/扩展
+        // Manifest 五个真缺口先以诚实待开发入口落地，不伪装已实现。
+        val gapIds = listOf(
+            "feature_channel_manage",
+            "feature_channel_files",
+            "feature_direct_message",
+            "feature_create_task",
+            "feature_extension_manifest",
+        )
+        gapIds.forEach { id ->
+            val entry = EntryRegistry.find(id)
+            assertTrue("missing entry: $id", entry != null)
+            assertEquals(Status.TODO, entry!!.status)
+            assertEquals(Group.FEATURE, entry.group)
+            assertTrue(entry.todoMessage!!.contains("待开发"))
+        }
+        assertEquals("nav_channels", EntryRegistry.find("feature_channel_manage")?.parentId)
+        assertEquals("nav_channels", EntryRegistry.find("feature_channel_files")?.parentId)
+        assertEquals("nav_channels", EntryRegistry.find("feature_direct_message")?.parentId)
+        assertEquals("nav_running_tasks", EntryRegistry.find("feature_create_task")?.parentId)
+        assertEquals("nav_mcp_plugins", EntryRegistry.find("feature_extension_manifest")?.parentId)
     }
 
     @Test
