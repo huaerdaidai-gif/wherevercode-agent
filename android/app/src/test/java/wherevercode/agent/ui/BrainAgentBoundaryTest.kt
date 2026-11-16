@@ -810,9 +810,10 @@ class BrainAgentBoundaryTest {
 
     @Test
     fun `three modes each have a clear identifier`() {
-        // 大脑对话：没选 Agent。
+        // 模型对话：没选 Agent（自选模式，2026-11-17 定版：原「大脑
+        // 对话」模式取消，BRAIN 为模型对话的内部模式 id）。
         assertEquals(ChatMode.BRAIN, ChatMode.forConversation(null))
-        assertEquals("大脑对话", ChatMode.BRAIN.label)
+        assertEquals("模型对话", ChatMode.BRAIN.label)
         // 单兵对话：选了一个 Agent——远程设备（VPS 的 Example Agent）。
         assertEquals(ChatMode.SINGLE_AGENT, ChatMode.forConversation(grokAgent()))
         assertEquals("单兵对话", ChatMode.SINGLE_AGENT.label)

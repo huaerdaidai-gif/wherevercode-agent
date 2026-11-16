@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,11 +55,12 @@ class MainActivitySmokeTest {
         )
         assertNotNull(activity.findViewById<View>(R.id.drawerContainer))
         assertNotNull(activity.findViewById<View>(R.id.drawerScrim))
-        // 设置清理 2（2026-11-11，Claude 标准）：聊天输入框里常驻当前大脑
-        // 胶囊，点按打开设置页大脑列表切换。
+        // 聊天输入框里的大脑胶囊只作状态显示（大脑降级 2026-11-17：
+        // 原点按跳设置页大脑列表的入口已撤下，胶囊不可点；大脑管理
+        // 只从「全部功能」的大脑枢纽进入）。
         val capsule = activity.findViewById<TextView>(R.id.brainCapsule)
         assertNotNull(capsule)
-        assertTrue(capsule.isClickable)
+        assertFalse(capsule.isClickable)
         val container = activity.findViewById<android.widget.FrameLayout>(R.id.screenContainer)
         // 5 个屏（聊天/项目/任务/Agent/设置）+ 1 个任务详情浮层（阶段 3 批 3a，
         // 复用设置浮层的宿主模式）+ 1 个会话列表（阶段 3 批 3c，聊天 Tab 首屏）
