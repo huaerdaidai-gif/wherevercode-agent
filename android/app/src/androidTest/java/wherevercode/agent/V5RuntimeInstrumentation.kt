@@ -178,20 +178,27 @@ class V5RuntimeInstrumentation : Instrumentation() {
     private fun findNodeByText(text: String): android.view.accessibility.AccessibilityNodeInfo? =
         allWindowNodes().firstOrNull { it.text?.toString() == text }
 
-    /** Scroll the visible dialog list until the row with [text] is in the tree. */
+    /**
+     * Scroll the visible dialog list until the row with [text] is in the
+     * tree. The dialog may need a moment to appear, and its ListView
+     * accessibility node does not reliably flag itself scrollable, so:
+     * wait for any ListView node across all windows (up to ~15 s), then
+     * scroll it forward until the row shows up.
+     */
     private fun scrollDialogListTo(text: String) {
-        var attempts = 0
-        while (findNodeByText(text) == null && attempts < 15) {
+        val deadline = SystemClock.elapsedRealtime() + 15_000
+        while (findNodeByText(text) == null && SystemClock.elapsedRealtime() < deadline) {
             val list = allWindowNodes().firstOrNull {
-                it.className?.toString() == "android.widget.ListView" && it.isScrollable
-            } ?: error("No scrollable dialog list while looking for: $text")
-            runOnMainSync {
-                list.performAction(
-                    android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
-                )
+                it.className?.toString() == "android.widget.ListView"
+            }
+            if (list != null) {
+                runOnMainSync {
+                    list.performAction(
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+                    )
+                }
             }
             settle()
-            attempts++
         }
         check(findNodeByText(text) != null) { "Dialog row never appeared: $text" }
     }
