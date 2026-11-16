@@ -265,4 +265,10 @@ public final class AgentRegistryStore {
     public func platformAgent() throws -> AgentRecord? {
         try listAgents().first { $0.adapterId == AgentRecord.platformAdapterId }
     }
+
+    /// 开源纯净模式：彻底清空所有预存、缓存或残留的 Agent 与设备数据
+    public func clearAllAgents() throws {
+        try kv.setJSON(storageKey, [AgentRecord]())
+        try kv.setJSON(deletedDevicesKey, [String]())
+    }
 }

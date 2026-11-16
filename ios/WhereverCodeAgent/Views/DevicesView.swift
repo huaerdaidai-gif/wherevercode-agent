@@ -688,7 +688,7 @@ private struct AddDeviceSheet: View {
                     case .approved:
                         let cleanName = self.name.isEmpty ? hello.displayName : self.name
                         let fullHost = "\(cleanHost):\(port)"
-                        let selectedFolder = folder.isEmpty ? (hello.agents.first?.folder ?? "/Users/a1234/v5-codex-work") : folder
+                        let selectedFolder = folder.isEmpty ? (hello.agents.first?.folder ?? "") : folder
                         let rec = AgentRecord(
                             agentId: hello.deviceId,
                             displayName: cleanName,
@@ -967,7 +967,7 @@ private struct DeviceDetailSheet: View {
 
                 Section("工作区目录授权") {
                     TextField("工作目录路径", text: Binding(
-                        get: { device.deviceFolder ?? "/Users/a1234/v5-codex-work" },
+                        get: { device.deviceFolder ?? "" },
                         set: { val in
                             device.deviceFolder = val
                             try? LocalData.shared.agents.saveAgent(device)
@@ -1176,7 +1176,7 @@ private struct DeviceDetailSheet: View {
     private func loadDirectoryFiles() {
         guard let raw = device.baseUrl, !raw.isEmpty else { return }
         let (host, port) = parseHostAndPort(raw)
-        let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        let folder = device.deviceFolder ?? ""
         isListingFiles = true
 
         Task {
@@ -1204,7 +1204,7 @@ private struct DeviceDetailSheet: View {
     private func sendControlAction(_ action: String) {
         guard let raw = device.baseUrl, !raw.isEmpty else { return }
         let (host, port) = parseHostAndPort(raw)
-        let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        let folder = device.deviceFolder ?? ""
 
         Task {
             do {
@@ -1229,7 +1229,7 @@ private struct DeviceDetailSheet: View {
     private func authorizeCurrentFolder() {
         guard let raw = device.baseUrl, !raw.isEmpty else { return }
         let (host, port) = parseHostAndPort(raw)
-        let folder = device.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        let folder = device.deviceFolder ?? ""
         fileOpResult = "正在请求授权目录「\(folder)」…"
 
         let cleanAgentId: String = {

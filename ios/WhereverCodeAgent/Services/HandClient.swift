@@ -1146,8 +1146,8 @@ public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendabl
         host: String,
         port: Int = 18743,
         targetDeviceId: String,
-        agentId: String = "codex",
-        defaultFolder: String = "/Users/a1234/v5-codex-work"
+        agentId: String = "",
+        defaultFolder: String = ""
     ) {
         self.host = host
         self.port = port
@@ -1193,7 +1193,7 @@ public final class HandCrossDeviceToolRegistry: ToolRegistry, @unchecked Sendabl
         if stopped() {
             return ToolOutcome(ok: false, summary: "操作已被用户终止", errorCode: "stopped")
         }
-        let folder = defaultFolder.isEmpty ? "/Users/a1234/v5-codex-work" : defaultFolder
+        let folder = defaultFolder
 
         func normalizeRelativePath(_ p: String) -> String {
             var path = p.trimmingCharacters(in: .whitespacesAndNewlines)

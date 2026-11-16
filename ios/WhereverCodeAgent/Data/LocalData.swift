@@ -232,19 +232,34 @@ public final class LocalChatModel: ObservableObject {
         self.appState = appState
         self.data = data
         self.eventLog = data.eventLog
-        self.selectedBrain = appState.brainConfigStore.currentBrainId() ?? ""
+        self.selectedBrain = ""
+        self.selectedAgent = nil
         self.conversationID = data.chatPrefs.currentSessionId
         if let id = conversationID, let conversation = try? data.conversations.getConversation(id: id) {
-            self.selectedBrain = conversation.brainId ?? self.selectedBrain
+            self.selectedBrain = conversation.brainId ?? ""
         }
         restoreSessionConfig()
         reload()
     }
 
+    // MARK: - Filtered Messages for UI (Single Agent / Speaker)
+
+    /// Messages visible to user in the chat UI.
+    /// Internal protocol messages (tool calls, tool results) are filtered out so that
+    /// the user never sees multiple duplicate "Assistant" bubbles for a single turn.
+    public var visibleMessages: [ConversationMessage] {
+        messages.filter { msg in
+            if msg.role == "tool" { return false }
+            if msg.source.hasPrefix("tool-call:") || msg.source.hasPrefix("tool:") { return false }
+            if msg.role != "user" && msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+            return true
+        }
+    }
+
     // MARK: Session config + draft persistence + default resources (P0)
 
     public var defaultBrainId: String {
-        get { (try? data.kv.get("chat.defaultBrainId")) ?? nil ?? appState.brainConfigStore.currentBrainId() ?? "" }
+        get { (try? data.kv.get("chat.defaultBrainId")) ?? nil ?? "" }
         set {
             try? data.kv.set("chat.defaultBrainId", newValue.isEmpty ? nil : newValue)
             appState.brainConfigStore.setCurrentBrainId(newValue.isEmpty ? nil : newValue)
@@ -258,6 +273,36 @@ public final class LocalChatModel: ObservableObject {
         }
     }
 
+    public var defaultSelectionId: String {
+        if let defAid = defaultAgentId, !defAid.isEmpty {
+            return "agent:\(defAid)"
+        }
+        if !defaultBrainId.isEmpty {
+            return "brain:\(defaultBrainId)"
+        }
+        return ""
+    }
+
+    public enum SelectionType {
+        case brain
+        case agent
+    }
+
+    public func setDefaultSelection(type: SelectionType, id: String) {
+        switch type {
+        case .brain:
+            defaultAgentId = nil
+            defaultBrainId = id
+            selectBrainInCurrentSession(id)
+        case .agent:
+            defaultBrainId = ""
+            defaultAgentId = id
+            if let ag = (try? data.agents.getAgent(agentId: id)) {
+                selectAgentInCurrentSession(ag)
+            }
+        }
+    }
+
     private var draftKey: String { "chat.draft.\(conversationID ?? "new")" }
     private var configKey: String? { conversationID.map { "chat.sessionConfig.\($0)" } }
 
@@ -265,18 +310,22 @@ public final class LocalChatModel: ObservableObject {
         let cfg = configKey.flatMap { try? data.kv.getJSON($0, as: ChatSessionConfig.self) }
         projectSource = cfg?.source ?? .localDefault
         permissionMode = cfg?.permission ?? .readOnly
-        if let bid = cfg?.brainId, !bid.isEmpty {
+
+        // Strictly restore either Agent OR Brain (mutually exclusive)
+        if let aid = cfg?.agentId, !aid.isEmpty, let ag = try? data.agents.getAgent(agentId: aid) {
+            selectedAgent = ag
+            selectedBrain = cfg?.brainId ?? defaultBrainId
+        } else if let bid = cfg?.brainId, !bid.isEmpty {
             selectedBrain = bid
-        } else if let convId = conversationID, let conv = try? data.conversations.getConversation(id: convId), let bid = conv.brainId, !bid.isEmpty {
-            selectedBrain = bid
+            selectedAgent = nil
+        } else if let defAid = defaultAgentId, !defAid.isEmpty, let ag = try? data.agents.getAgent(agentId: defAid) {
+            selectedAgent = ag
+            selectedBrain = defaultBrainId
         } else if !defaultBrainId.isEmpty {
             selectedBrain = defaultBrainId
-        }
-        if let aid = cfg?.agentId, !aid.isEmpty {
-            selectedAgent = (try? data.agents.getAgent(agentId: aid))
-        } else if let defAid = defaultAgentId, !defAid.isEmpty {
-            selectedAgent = (try? data.agents.getAgent(agentId: defAid))
+            selectedAgent = nil
         } else {
+            selectedBrain = ""
             selectedAgent = nil
         }
         draft = (try? data.kv.get(draftKey)) ?? nil ?? ""
@@ -287,16 +336,20 @@ public final class LocalChatModel: ObservableObject {
         try? data.kv.setJSON(key, ChatSessionConfig(
             source: projectSource,
             permission: permissionMode,
-            brainId: selectedBrain.isEmpty ? nil : selectedBrain,
+            brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : nil,
             agentId: selectedAgent?.agentId
         ))
         if let cid = conversationID {
-            try? data.conversations.updateConversationBrain(id: cid, brainId: selectedBrain.isEmpty ? nil : selectedBrain)
+            try? data.conversations.updateConversationBrain(
+                id: cid,
+                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : (selectedAgent?.displayName ?? selectedAgent?.agentId)
+            )
         }
     }
 
     public func selectBrainInCurrentSession(_ brainId: String) {
         selectedBrain = brainId
+        selectedAgent = nil
         persistSessionConfig()
     }
 
@@ -306,13 +359,16 @@ public final class LocalChatModel: ObservableObject {
     }
 
     public func setAsDefaultBrain(_ brainId: String) {
-        defaultBrainId = brainId
-        selectBrainInCurrentSession(brainId)
+        setDefaultSelection(type: .brain, id: brainId)
     }
 
     public func setAsDefaultAgent(_ agent: AgentRecord?) {
-        defaultAgentId = agent?.agentId
-        selectAgentInCurrentSession(agent)
+        if let ag = agent {
+            setDefaultSelection(type: .agent, id: ag.agentId)
+        } else {
+            defaultAgentId = nil
+            selectAgentInCurrentSession(nil)
+        }
     }
 
     public func persistDraft() {
@@ -381,12 +437,14 @@ public final class LocalChatModel: ObservableObject {
         draft = ""
         projectSource = .localDefault
         permissionMode = .readOnly
-        if !defaultBrainId.isEmpty {
+        if let defAid = defaultAgentId, !defAid.isEmpty, let ag = try? data.agents.getAgent(agentId: defAid) {
+            selectedAgent = ag
             selectedBrain = defaultBrainId
-        }
-        if let defAid = defaultAgentId, !defAid.isEmpty {
-            selectedAgent = (try? data.agents.getAgent(agentId: defAid))
+        } else if !defaultBrainId.isEmpty {
+            selectedBrain = defaultBrainId
+            selectedAgent = nil
         } else {
+            selectedBrain = ""
             selectedAgent = nil
         }
         messages = []
@@ -475,10 +533,11 @@ public final class LocalChatModel: ObservableObject {
             let parts = clean.split(separator: ":")
             let host = String(parts[0])
             let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-            let targetDev = agent.deviceId ?? "MacBook-Air"
-            let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+            let targetDev = agent.deviceId ?? ""
+            let folder = agent.deviceFolder ?? ""
+            let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
             Task {
-                _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: "codex", action: "stop")
+                _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: realAgentId, action: "stop")
             }
         }
         currentTurn?.cancel()
@@ -523,10 +582,11 @@ public final class LocalChatModel: ObservableObject {
                 let parts = clean.split(separator: ":")
                 let host = String(parts[0])
                 let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-                let targetDev = agent.deviceId ?? "MacBook-Air"
-                let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+                let targetDev = agent.deviceId ?? ""
+                let folder = agent.deviceFolder ?? ""
+                let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
                 Task {
-                    _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: "codex", action: "pause")
+                    _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: realAgentId, action: "pause")
                 }
             }
             if let working = (try? data.tasks.listTasks())?.first(where: { $0.state == "working" }) {
@@ -546,10 +606,11 @@ public final class LocalChatModel: ObservableObject {
                 let parts = clean.split(separator: ":")
                 let host = String(parts[0])
                 let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-                let targetDev = agent.deviceId ?? "MacBook-Air"
-                let folder = agent.deviceFolder ?? "/Users/a1234/v5-codex-work"
+                let targetDev = agent.deviceId ?? ""
+                let folder = agent.deviceFolder ?? ""
+                let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
                 Task {
-                    _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: "codex", action: "resume")
+                    _ = try? await HandClient.shared.sendControl(host: host, port: port, targetDeviceId: targetDev, folder: folder, agentId: realAgentId, action: "resume")
                 }
             }
             if let paused = (try? data.tasks.listTasks())?.first(where: { $0.isPaused }) {
@@ -574,114 +635,66 @@ public final class LocalChatModel: ObservableObject {
             return
         }
 
-        let (resolvedBrain, brainError) = resolveBrainForSend()
-        guard let resolvedBrain else {
-            error = brainError
-            return
-        }
-        selectedBrain = resolvedBrain
-        isSending = true
-        error = nil
-        streaming = ""
-        defer {
-            isSending = false
+        if let agent = selectedAgent {
+            // 单选模式：当前明确选定了 Agent，由目标 Agent 独立且完整回复，绝不触发大脑二次回复
+            isSending = true
+            error = nil
             streaming = ""
-            reload()
-        }
-        do {
-            if conversationID == nil {
-                let conversation = try data.conversations.createConversation(
-                    brainId: selectedBrain,
-                    title: String(text.prefix(48))
-                )
-                try? data.kv.set(draftKey, nil)
-                conversationID = conversation.id
-                data.chatPrefs.currentSessionId = conversation.id
-                persistSessionConfig()
-            }
-            guard let id = conversationID else { return }
-            draft = ""
-            persistDraft()
-            let outgoing = text + attachmentContext()
-            attachedFiles = []
-
-            // 意图分析：精准区分普通问候闲聊与实际工程执行任务
-            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let lowerText = trimmedText.lowercased()
-            let isGreetingOrSmallTalk = lowerText == "在吗" || lowerText == "你好" || lowerText == "在不在" ||
-                                        lowerText == "hi" || lowerText == "hello" || lowerText.hasPrefix("你好") ||
-                                        lowerText == "在吗？" || lowerText == "在吗?" || lowerText == "你是谁" || lowerText == "你能做什么"
-
-            let isTaskIntent = !isGreetingOrSmallTalk && (
-                text.contains("任务") || text.contains("实现") || text.contains("编写") ||
-                text.contains("修复") || text.contains("测试") || text.contains("开发") ||
-                text.contains("运行") || text.contains("执行") || text.contains("构建") ||
-                text.contains("代码") || text.contains("写") || text.contains("改")
-            )
-
             var activeTaskId: String? = nil
-            if isTaskIntent {
+            defer {
+                isSending = false
+                streaming = ""
+                reload()
+            }
+            do {
+                if conversationID == nil {
+                    let conversation = try data.conversations.createConversation(
+                        brainId: agent.displayName,
+                        title: String(text.prefix(48))
+                    )
+                    try? data.kv.set(draftKey, nil)
+                    conversationID = conversation.id
+                    data.chatPrefs.currentSessionId = conversation.id
+                    persistSessionConfig()
+                }
+                guard let id = conversationID else { return }
+                draft = ""
+                persistDraft()
+                let outgoing = text + attachmentContext()
+                attachedFiles = []
+
                 let taskTitle = String(text.prefix(32))
                 if let task = try? data.tasks.createTask(
                     LocalTask(
                         title: taskTitle,
                         description: text,
                         priority: 0,
-                        brainId: selectedBrain
+                        brainId: agent.displayName
                     )
                 ) {
                     activeTaskId = task.taskId
-                    _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "自然语言发起 Agent 任务")
+                    _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "分派给 \(agent.displayName)")
                     eventLog.append(conversationId: id, kind: "TASK_DISPATCH", detail: "已在本机 SQLite 登记任务 \(task.taskId)")
                 }
-            }
 
-            if isGreetingOrSmallTalk {
-                // 普通问候与闲聊：走系统大脑自然语言直接回复，绝不触发未授权或信封不全的远端命令
-                let userMsg = ConversationMessage(conversationId: id, role: "user", content: outgoing, source: "user", taskId: nil)
-                try? data.conversations.appendMessage(userMsg)
-                reload()
-
-                let engine = appState.makeBrainEngine(
-                    conversations: data.conversations,
-                    tools: ChatUnavailableTools(),
-                    eventLog: eventLog,
-                    approvalGate: DenyApprovalGate()
-                )
-                var replied = false
-                do {
-                    for try await event in engine.chat(
+                guard agent.kind == .device else {
+                    let errMsg = "当前选中的 Agent 类型「\(agent.kind.rawValue)」在 iOS 端尚未开放直接对话。"
+                    self.error = errMsg
+                    if let tid = activeTaskId {
+                        _ = try? data.tasks.transition(taskId: tid, to: "failed", note: errMsg)
+                    }
+                    let assistantMsg = ConversationMessage(
                         conversationId: id,
-                        userText: outgoing,
-                        brainIdOverride: selectedBrain,
-                        allowFailover: true
-                    ) {
-                        try Task.checkCancellation()
-                        switch event {
-                        case .textDelta(let delta):
-                            streaming += delta
-                            replied = true
-                        case .error(let info):
-                            error = info.message
-                        default: break
-                        }
-                    }
-                } catch {
-                    if !replied {
-                        let greeting = "在的！WhereverCode 随时待命。您可以直接向我下达开发、修复或调试任务，我将通过已配对的设备与 Agent 为您执行。"
-                        self.streaming = greeting
-                        let assistantMsg = ConversationMessage(
-                            conversationId: id,
-                            role: "assistant",
-                            content: greeting,
-                            source: selectedAgent?.displayName ?? "WhereverCode",
-                            taskId: nil
-                        )
-                        try? data.conversations.appendMessage(assistantMsg)
-                    }
+                        role: "assistant",
+                        content: errMsg,
+                        source: agent.displayName,
+                        taskId: activeTaskId
+                    )
+                    try? data.conversations.appendMessage(assistantMsg)
+                    reload()
+                    return
                 }
-            } else if let agent = selectedAgent, agent.kind == .device, isTaskIntent {
-                // 单兵 Agent 明确执行工程任务
+
                 guard let hostRaw = agent.baseUrl ?? ((try? data.agents.listAgents())?.first(where: { $0.deviceId == agent.deviceId && $0.baseUrl != nil })?.baseUrl), !hostRaw.isEmpty else {
                     let errMsg = "设备「\(agent.deviceId ?? "未知")」离线或未配置连接地址，无法执行任务。"
                     if let tid = activeTaskId {
@@ -704,18 +717,16 @@ public final class LocalChatModel: ObservableObject {
                 let parts = clean.split(separator: ":")
                 let host = String(parts[0])
                 let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-                let targetDev = agent.deviceId ?? "MacBook-Air"
+                let targetDev = agent.deviceId ?? ""
 
-                // 优先采用项目源中明确绑定的路径；若未指定则回退到 Agent/设备授权根目录
                 let projectFolder = (projectSource.targetId == targetDev || projectSource.providerId == "device") ? (projectSource.path ?? "") : ""
                 let rawFolder = !projectFolder.isEmpty ? projectFolder :
                                 ((agent.deviceFolder?.isEmpty == false) ? agent.deviceFolder! :
                                 ((try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.deviceFolder?.isEmpty == false })?.deviceFolder ?? ""))
-                let folder = !rawFolder.isEmpty ? rawFolder : (targetDev.contains("Android") || targetDev.contains("Termux") || targetDev.contains("x") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
+                let folder = !rawFolder.isEmpty ? rawFolder : (agent.deviceFolder ?? "")
 
                 let realAgentId = agent.agentId.contains(":") ? String(agent.agentId.split(separator: ":").last!) : agent.agentId
 
-                // 附件同步：若有二进制或图片附件，先推送到设备端工作区 attachments/
                 var attachmentNotice = ""
                 for name in attachedFiles {
                     let url = ChatAttachmentStore.url(for: name)
@@ -763,11 +774,103 @@ public final class LocalChatModel: ObservableObject {
                     taskId: activeTaskId
                 )
                 try? data.conversations.appendMessage(assistantMsg)
+
+                if let tid = activeTaskId {
+                    _ = try? data.tasks.transition(taskId: tid, to: "completed", note: "Agent 执行完毕")
+                }
+            } catch is CancellationError {
+                self.error = "回复已停止"
+                if let tid = activeTaskId {
+                    _ = try? data.tasks.transition(taskId: tid, to: "cancelled", note: "任务已取消")
+                }
+                reload()
+            } catch {
+                let errorText = SecretRedactor.redact(error.localizedDescription)
+                self.error = errorText
+                if let tid = activeTaskId {
+                    _ = try? data.tasks.transition(taskId: tid, to: "failed", note: errorText)
+                }
+                let failMsg = ConversationMessage(
+                    conversationId: conversationID ?? "conv",
+                    role: "assistant",
+                    content: "任务执行失败：\(errorText)",
+                    source: agent.displayName,
+                    taskId: activeTaskId
+                )
+                try? data.conversations.appendMessage(failMsg)
+                reload()
+                if messages.last?.content != text { draft = text }
+            }
+            return
+        }
+
+        // selectedAgent == nil: 大脑直接对话与推理模式
+        let (resolvedBrain, brainError) = resolveBrainForSend()
+        guard let resolvedBrain else {
+            error = brainError
+            return
+        }
+        selectedBrain = resolvedBrain
+        isSending = true
+        error = nil
+        streaming = ""
+        var activeTaskId: String? = nil
+        defer {
+            isSending = false
+            streaming = ""
+            reload()
+        }
+        do {
+            if conversationID == nil {
+                let conversation = try data.conversations.createConversation(
+                    brainId: selectedBrain,
+                    title: String(text.prefix(48))
+                )
+                try? data.kv.set(draftKey, nil)
+                conversationID = conversation.id
+                data.chatPrefs.currentSessionId = conversation.id
+                persistSessionConfig()
+            }
+            guard let id = conversationID else { return }
+            draft = ""
+            persistDraft()
+            let outgoing = text + attachmentContext()
+            attachedFiles = []
+
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowerText = trimmedText.lowercased()
+            let isGreetingOrSmallTalk = lowerText == "在吗" || lowerText == "你好" || lowerText == "在不在" ||
+                                        lowerText == "hi" || lowerText == "hello" || lowerText.hasPrefix("你好") ||
+                                        lowerText == "在吗？" || lowerText == "在吗?" || lowerText == "你是谁" || lowerText == "你能做什么"
+
+            let isTaskIntent = !isGreetingOrSmallTalk && (
+                text.contains("任务") || text.contains("实现") || text.contains("编写") ||
+                text.contains("修复") || text.contains("测试") || text.contains("开发") ||
+                text.contains("运行") || text.contains("执行") || text.contains("构建") ||
+                text.contains("代码") || text.contains("写") || text.contains("改")
+            )
+
+            if isTaskIntent {
+                let taskTitle = String(text.prefix(32))
+                if let task = try? data.tasks.createTask(
+                    LocalTask(
+                        title: taskTitle,
+                        description: text,
+                        priority: 0,
+                        brainId: selectedBrain
+                    )
+                ) {
+                    activeTaskId = task.taskId
+                    _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "自然语言发起 Agent 任务")
+                    eventLog.append(conversationId: id, kind: "TASK_DISPATCH", detail: "已在本机 SQLite 登记任务 \(task.taskId)")
+                }
+            }
+
+            let toolRegistry: ToolRegistry
+            if isGreetingOrSmallTalk {
+                toolRegistry = ChatUnavailableTools()
             } else {
-                // 大脑推理模式：若有已连接设备，装配真实跨设备工具
-                let toolRegistry: ToolRegistry
-                let targetDevObj = (selectedAgent?.kind == .device) ? selectedAgent :
-                                   (try? data.agents.listAgents())?.first(where: { $0.deviceId == projectSource.targetId && $0.memberConnectionState == "CONNECTED" }) ??
+                let targetDevObj = (try? data.agents.listAgents())?.first(where: { $0.deviceId == projectSource.targetId && $0.memberConnectionState == "CONNECTED" }) ??
                                    (try? data.agents.listAgents())?.first(where: { $0.kind == .device && $0.memberConnectionState == "CONNECTED" })
 
                 if let dev = targetDevObj, let hostRaw = dev.baseUrl ?? ((try? data.agents.listAgents())?.first(where: { $0.deviceId == dev.deviceId && $0.baseUrl != nil })?.baseUrl) {
@@ -780,37 +883,37 @@ public final class LocalChatModel: ObservableObject {
                     let projectFolder = (projectSource.targetId == targetDevId || projectSource.providerId == "device") ? (projectSource.path ?? "") : ""
                     let rawFolder = !projectFolder.isEmpty ? projectFolder :
                                     ((dev.deviceFolder?.isEmpty == false) ? dev.deviceFolder! : "")
-                    let folder = !rawFolder.isEmpty ? rawFolder : (targetDevId.contains("Android") || targetDevId.contains("x") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work")
+                    let folder = !rawFolder.isEmpty ? rawFolder : (dev.deviceFolder ?? "")
 
-                    let boundAgentId = (selectedAgent != nil && selectedAgent?.kind == .device) ? selectedAgent!.agentId :
-                                       ((try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDevId && $0.agentId != targetDevId })?.agentId ?? "codex")
+                    let boundAgentId = (try? data.agents.listAgents())?.first(where: { $0.deviceId == targetDevId && $0.agentId != targetDevId })?.agentId ?? ""
                     let realAgentId = boundAgentId.contains(":") ? String(boundAgentId.split(separator: ":").last!) : boundAgentId
 
                     toolRegistry = HandCrossDeviceToolRegistry(host: host, port: port, targetDeviceId: targetDevId, agentId: realAgentId, defaultFolder: folder)
                 } else {
                     toolRegistry = ChatUnavailableTools()
                 }
+            }
 
-                let engine = appState.makeBrainEngine(
-                    conversations: data.conversations,
-                    tools: toolRegistry,
-                    eventLog: eventLog,
-                    approvalGate: DenyApprovalGate()
-                )
-                let images = collectImageDataUrls()
-                for try await event in engine.chat(
-                    conversationId: id,
-                    userText: outgoing,
-                    brainIdOverride: selectedBrain,
-                    allowFailover: false,
-                    imageDataUrls: images
-                ) {
-                    try Task.checkCancellation()
-                    switch event {
-                    case .textDelta(let delta): streaming += delta
-                    case .error(let info): error = info.message
-                    default: break
-                    }
+            let engine = appState.makeBrainEngine(
+                conversations: data.conversations,
+                tools: toolRegistry,
+                eventLog: eventLog,
+                approvalGate: DenyApprovalGate()
+            )
+            let images = collectImageDataUrls()
+            for try await event in engine.chat(
+                conversationId: id,
+                userText: outgoing,
+                brainIdOverride: selectedBrain,
+                allowFailover: isGreetingOrSmallTalk,
+                taskId: activeTaskId,
+                imageDataUrls: images
+            ) {
+                try Task.checkCancellation()
+                switch event {
+                case .textDelta(let delta): streaming += delta
+                case .error(let info): error = info.message
+                default: break
                 }
             }
 
@@ -832,7 +935,7 @@ public final class LocalChatModel: ObservableObject {
                     conversationId: conversationID ?? "conv",
                     role: "assistant",
                     content: "任务执行失败：\(errorText)",
-                    source: selectedAgent?.displayName ?? "系统",
+                    source: "系统",
                     taskId: tid
                 )
                 try? data.conversations.appendMessage(failMsg)
@@ -1114,7 +1217,7 @@ public struct LocalChatHomeView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 16) {
-                        if model.messages.isEmpty && !model.isSending && !greetingDismissed {
+                        if model.visibleMessages.isEmpty && !model.isSending && !greetingDismissed {
                             Spacer(minLength: 88)
                             VStack(spacing: 14) {
                                 Text("✳")
@@ -1140,11 +1243,11 @@ public struct LocalChatHomeView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 32)
                         } else {
-                            ForEach(model.messages) { message in
+                            ForEach(model.visibleMessages) { message in
                                 VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 6) {
                                     HStack {
                                         if message.role == "user" { Spacer() }
-                                        Text(message.role == "user" ? "你" : "Assistant")
+                                        Text(messageSenderName(message))
                                             .font(.system(size: 12, weight: .medium))
                                             .foregroundStyle(.secondary)
                                         if message.role != "user" { Spacer() }
@@ -1205,8 +1308,8 @@ public struct LocalChatHomeView: View {
                     .onTapGesture { inputFocused = false }
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: model.messages.count) { _, _ in
-                    if let lastId = model.messages.last?.id {
+                .onChange(of: model.visibleMessages.count) { _, _ in
+                    if let lastId = model.visibleMessages.last?.id {
                         withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
                     }
                 }
@@ -1325,6 +1428,28 @@ public struct LocalChatHomeView: View {
             .background(Color.white, in: Capsule())
             .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
         }
+    }
+
+    private func messageSenderName(_ message: ConversationMessage) -> String {
+        if message.role == "user" { return "你" }
+        if message.source == "codex_control" { return "系统" }
+        if message.source.hasPrefix("brain:") {
+            let bid = String(message.source.dropFirst(6))
+            if let cfg = model.appState.brainSettingsModel.configs.first(where: { $0.brainId == bid }) {
+                return cfg.label
+            }
+            return bid
+        }
+        if !message.source.isEmpty && message.source != "assistant" && message.source != "user" && !message.source.hasPrefix("tool") {
+            return message.source
+        }
+        if let ag = model.selectedAgent {
+            return ag.displayName
+        }
+        if let cfg = model.appState.brainSettingsModel.configs.first(where: { $0.brainId == model.selectedBrain }) {
+            return cfg.label
+        }
+        return "Assistant"
     }
 }
 
@@ -1862,12 +1987,13 @@ public struct ModelAndAgentSheet: View {
     public var body: some View {
         NavigationStack {
             List {
-                Section("当前推理大脑模型 (Brain / LLM)") {
+                Section {
                     if model.usableBrains.isEmpty {
                         Text("还没有可用的大脑（需填写 API Key）。会员登录与 API Key 是两种不同授权，ChatGPT 会员在 iOS 尚未接入。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     ForEach(model.usableBrains) { cfg in
+                        let isSelected = (model.selectedAgent == nil && cfg.brainId == model.selectedBrain)
                         HStack {
                             Button {
                                 model.selectBrainInCurrentSession(cfg.brainId)
@@ -1875,16 +2001,18 @@ public struct ModelAndAgentSheet: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(cfg.label).foregroundStyle(.primary)
-                                    if model.defaultBrainId == cfg.brainId {
-                                        Text("默认大脑").font(.caption2).foregroundStyle(.green)
+                                    if model.defaultSelectionId == "brain:\(cfg.brainId)" {
+                                        Text("默认模型").font(.caption2).foregroundStyle(.green)
                                     }
                                 }
                             }
                             Spacer()
-                            if cfg.brainId == model.selectedBrain { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                            if model.defaultBrainId != cfg.brainId {
+                            if isSelected {
+                                Image(systemName: "checkmark").foregroundStyle(.blue)
+                            }
+                            if model.defaultSelectionId != "brain:\(cfg.brainId)" {
                                 Button("设为默认") {
-                                    model.setAsDefaultBrain(cfg.brainId)
+                                    model.setDefaultSelection(type: .brain, id: cfg.brainId)
                                 }
                                 .font(.caption2)
                                 .buttonStyle(.bordered)
@@ -1892,84 +2020,77 @@ public struct ModelAndAgentSheet: View {
                         }
                     }
                     Button("管理模型与连接") { dismiss(); onManage() }
+                } header: {
+                    Text("AI 大脑模型 (Brain / LLM)")
                 }
 
-                Section("执行主体 (Agent)") {
-                    HStack {
-                        Button {
-                            model.selectAgentInCurrentSession(nil)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("大脑单兵直接执行 (默认)").foregroundStyle(.primary)
-                                Text("由当前大脑使用跨设备工具集直接读写").font(.caption2).foregroundStyle(.secondary)
-                                if model.defaultAgentId == nil {
-                                    Text("默认执行主体").font(.caption2).foregroundStyle(.green)
-                                }
-                            }
-                        }
-                        Spacer()
-                        if model.selectedAgent == nil { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                        if model.defaultAgentId != nil {
-                            Button("设为默认") {
-                                model.setAsDefaultAgent(nil)
-                            }
-                            .font(.caption2)
-                            .buttonStyle(.bordered)
-                        }
-                    }
-
-                    let availableAgents = ((try? LocalData.shared.agents.listAgents()) ?? []).filter {
-                        !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.enabled
-                    }
-                    ForEach(availableAgents) { ag in
-                        HStack {
-                            Button {
-                                model.selectAgentInCurrentSession(ag)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(ag.displayName).foregroundStyle(.primary)
-                                    Text("类型: \(ag.kind.rawValue) · 设备: \(ag.deviceId ?? "本机")").font(.caption2).foregroundStyle(.secondary)
-                                    if model.defaultAgentId == ag.agentId {
-                                        Text("默认 Agent").font(.caption2).foregroundStyle(.green)
+                let availableAgents = ((try? LocalData.shared.agents.listAgents()) ?? []).filter {
+                    !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.enabled
+                }
+                if !availableAgents.isEmpty {
+                    Section {
+                        ForEach(availableAgents) { ag in
+                            let isSelected = (model.selectedAgent?.agentId == ag.agentId)
+                            HStack {
+                                Button {
+                                    model.selectAgentInCurrentSession(ag)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(ag.displayName).foregroundStyle(.primary)
+                                        Text("类型: \(ag.kind.rawValue) · 设备: \(ag.deviceId ?? "本机")").font(.caption2).foregroundStyle(.secondary)
+                                        if model.defaultSelectionId == "agent:\(ag.agentId)" {
+                                            Text("默认 Agent").font(.caption2).foregroundStyle(.green)
+                                        }
                                     }
                                 }
-                            }
-                            Spacer()
-                            if model.selectedAgent?.agentId == ag.agentId { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                            if model.defaultAgentId != ag.agentId {
-                                Button("设为默认") {
-                                    model.setAsDefaultAgent(ag)
-                                }
-                                .font(.caption2)
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                    }
-                }
-                Section("模型规格（当前大脑：\(currentConfig?.label ?? "未选择")）") {
-                    if loading { ProgressView() }
-                    if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
-                    ForEach(models) { m in
-                        Button {
-                            if var cfg = currentConfig {
-                                cfg.model = m.id
-                                model.appState.brainSettingsModel.save(config: cfg, apiKey: "")
-                            }
-                        } label: {
-                            HStack {
-                                Text(m.displayName.isEmpty ? m.id : m.displayName).foregroundStyle(.primary)
                                 Spacer()
-                                if currentConfig?.model == m.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                                if isSelected {
+                                    Image(systemName: "checkmark").foregroundStyle(.blue)
+                                }
+                                if model.defaultSelectionId != "agent:\(ag.agentId)" {
+                                    Button("设为默认") {
+                                        model.setDefaultSelection(type: .agent, id: ag.agentId)
+                                    }
+                                    .font(.caption2)
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("独立 Agent（设备 / 云端）")
+                    } footer: {
+                        Text("单选规则：对话框仅保留一个勾选的 Agent 或模型，不再搞大脑和普通 Agent 并排。")
+                    }
+                }
+
+                if model.selectedAgent == nil, let cfg = currentConfig {
+                    Section("模型规格（当前大脑：\(cfg.label)）") {
+                        if loading { ProgressView() }
+                        if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
+                        ForEach(models) { m in
+                            Button {
+                                if var c = currentConfig {
+                                    c.model = m.id
+                                    model.appState.brainSettingsModel.save(config: c, apiKey: "")
+                                }
+                            } label: {
+                                HStack {
+                                    Text(m.displayName.isEmpty ? m.id : m.displayName).foregroundStyle(.primary)
+                                    Spacer()
+                                    if currentConfig?.model == m.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
+                                }
                             }
                         }
                     }
                 }
+
                 Section {
                     LabeledContent("智能等级", value: "该大脑接口未提供")
                     LabeledContent("速度", value: "该大脑接口未提供")
                 } header: { Text("高级") } footer: {
                     Text("仅显示当前接入实际支持的参数。")
                 }
+
                 Section {
                     ForEach(ChatPermissionMode.allCases) { mode in
                         Button {
@@ -1988,7 +2109,7 @@ public struct ModelAndAgentSheet: View {
                     Text("当前对话通道不执行命令，仅「只读对话」可用；执行需在已配对设备上通过审批中心逐项批准。")
                 }
             }
-            .navigationTitle("模型与权限")
+            .navigationTitle("模型与 Agent 选择")
             .navigationBarTitleDisplayMode(.inline)
             .task { await loadModels() }
         }

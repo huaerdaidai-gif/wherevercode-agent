@@ -77,7 +77,8 @@ class CrossDeviceE2ETest(unittest.TestCase):
     def test_fault_b_agy_real_execution(self):
         """Fault B: agy execution with '修复 bug' exits 0 and returns valid output."""
         argv_str = json.dumps(["agent", "agy", "修复 bug"])
-        events = self.client.tool_call("t_run_agy", "agy", AUTHORIZED_PROJECT, "run", {"argv": argv_str}, timeout=60)
+        task_id = "t_run_agy_" + os.urandom(4).hex()
+        events = self.client.tool_call(task_id, "agy", AUTHORIZED_PROJECT, "run", {"argv": argv_str}, timeout=60)
         self.assertTrue(len(events) > 0)
         res = events[-1]
         self.assertEqual(res.get("type"), "cross_device_result", f"Response: {res}")

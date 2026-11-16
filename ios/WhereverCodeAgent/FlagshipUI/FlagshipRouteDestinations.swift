@@ -1505,8 +1505,8 @@ private struct CollaborationAndAgentsScreen: View {
         let parts = clean.split(separator: ":")
         let host = String(parts[0])
         let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-        let targetDev = ag.deviceId ?? "MacBook-Air"
-        let folder = ag.deviceFolder ?? "/Users/a1234/v5-codex-work"
+        let targetDev = ag.deviceId ?? ""
+        let folder = ag.deviceFolder ?? ""
         let realAgentId = ag.agentId.contains(":") ? String(ag.agentId.split(separator: ":").last!) : ag.agentId
 
         Task {
@@ -1570,53 +1570,10 @@ public enum V5PluginManager {
     private static let storageKey = "v5.plugins.records.v1"
 
     public static func listPlugins() -> [V5PluginRecord] {
-        if let stored = try? LocalData.shared.kv.getJSON(storageKey, as: [V5PluginRecord].self), !stored.isEmpty {
+        if let stored = try? LocalData.shared.kv.getJSON(storageKey, as: [V5PluginRecord].self) {
             return stored
         }
-        let defaults: [V5PluginRecord] = [
-            V5PluginRecord(
-                id: "plugin-git",
-                name: "Git 变更审查与提交助手",
-                version: "1.2.0",
-                summary: "支持 Git diff 计算、分支切换与 Commit 建议生成",
-                status: "已启用",
-                permissions: ["filesystem:read", "git:inspect"],
-                providedTools: ["git_status", "git_diff", "git_commit_preview"],
-                capabilityState: "可调用"
-            ),
-            V5PluginRecord(
-                id: "plugin-hand-remote",
-                name: "Mac Hand 跨设备执行插件",
-                version: "2.1.0",
-                summary: "桥接远端 Mac 设备的沙盒工作区读写与命令运行",
-                status: "已启用",
-                permissions: ["network", "filesystem:read", "filesystem:write", "shell:exec"],
-                providedTools: ["list_files", "read_file", "write_file", "run_command"],
-                capabilityState: "已实际执行"
-            ),
-            V5PluginRecord(
-                id: "plugin-web-search",
-                name: "联网深度研究插件",
-                version: "1.0.4",
-                summary: "通过通用搜索引擎检索技术文档与开源库最新发布日志",
-                status: "已启用",
-                permissions: ["network"],
-                providedTools: ["web_search", "fetch_url_content"],
-                capabilityState: "可调用"
-            ),
-            V5PluginRecord(
-                id: "plugin-docker",
-                name: "Docker 远程容器构建工具包",
-                version: "0.9.1",
-                summary: "管理远程开发机 Docker 容器实例与镜像打包",
-                status: "未安装",
-                permissions: ["shell:exec", "network"],
-                providedTools: ["docker_ps", "docker_build", "docker_logs"],
-                capabilityState: "已连接"
-            )
-        ]
-        try? LocalData.shared.kv.setJSON(storageKey, defaults)
-        return defaults
+        return []
     }
 
     public static func savePlugins(_ plugins: [V5PluginRecord]) {
@@ -4393,16 +4350,6 @@ public struct InviteAgentSheet: View {
 
         var list = (try? LocalData.shared.agents.listAgents()) ?? []
         list = list.filter { !currentAgentRecordIds.contains($0.agentId) && !currentNames.contains($0.displayName) }
-
-        if list.isEmpty {
-            let defaults: [AgentRecord] = [
-                AgentRecord(agentId: "codex", displayName: "Codex (Mac Hand)", kind: .device, access: .app, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED", deviceId: "MacBook-Air"),
-                AgentRecord(agentId: "claude-code", displayName: "Claude Code", kind: .cloud, access: .api, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED"),
-                AgentRecord(agentId: "codebuddy", displayName: "CodeBuddy", kind: .cloud, access: .connector, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED"),
-                AgentRecord(agentId: "qa-reviewer", displayName: "QA Reviewer Agent", kind: .cloud, access: .api, brainKind: "MODEL_API", lastTestSummary: "Verified", memberConnectionState: "CONNECTED")
-            ].filter { !currentAgentRecordIds.contains($0.agentId) && !currentNames.contains($0.displayName) }
-            list.append(contentsOf: defaults)
-        }
         registeredAgents = list
     }
 }
@@ -4411,11 +4358,7 @@ public struct ProjectFilePickerSheet: View {
     public var onSelect: (V5ChannelFile) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    private let sampleProjectFiles = [
-        V5ChannelFile(id: "pf-1", fileName: "FlagshipApp.swift", fileSize: "28 KB", fileType: "code", uploaderName: "Git", associatedProjectName: "WhereverCode"),
-        V5ChannelFile(id: "pf-2", fileName: "routes_wiring.json", fileSize: "42 KB", fileType: "code", uploaderName: "Git", associatedProjectName: "Contracts"),
-        V5ChannelFile(id: "pf-3", fileName: "architecture.png", fileSize: "1.8 MB", fileType: "image", uploaderName: "Git", associatedProjectName: "Docs")
-    ]
+    private let sampleProjectFiles: [V5ChannelFile] = []
 
     public var body: some View {
         NavigationStack {
@@ -4449,11 +4392,7 @@ public struct CloudDrivePickerSheet: View {
     public var onSelect: (V5ChannelFile) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    private let sampleCloudFiles = [
-        V5ChannelFile(id: "cf-1", fileName: "spec-v5-navigation.pdf", fileSize: "1.4 MB", fileType: "pdf", uploaderName: "Google Drive", sourceKind: "google_drive"),
-        V5ChannelFile(id: "cf-2", fileName: "release_notes_build6.md", fileSize: "18 KB", fileType: "markdown", uploaderName: "OneDrive", sourceKind: "onedrive"),
-        V5ChannelFile(id: "cf-3", fileName: "test_matrix_backup.zip", fileSize: "8.6 MB", fileType: "zip", uploaderName: "WebDAV", sourceKind: "webdav")
-    ]
+    private let sampleCloudFiles: [V5ChannelFile] = []
 
     public var body: some View {
         NavigationStack {
