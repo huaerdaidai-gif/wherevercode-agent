@@ -6,8 +6,16 @@ name: Android Walkthrough89 (registry full pass)
 # 每项写一行结果到 walkthrough89-results.txt，已实现项逐屏截图
 # wt-<id>.png。单项失败是走查数据，不让 job 变红；只有走查没跑完
 # （无 WALKTHROUGH89_DONE 行）才算 job 失败。
-# 成本门：仅手动 workflow_dispatch 触发，不随普通推送跑。
+# 成本门：workflow_dispatch 需工作流在默认分支上才可用（本文件只在
+# 走查分支上，故 API dispatch 返回 404）；改为「推本分支且改动安卓/
+# 本工作流才跑」+ dispatch 双触发，普通分支推送不触发。
 on:
+  push:
+    branches:
+      - feat/walkthrough-89-android-20261117
+    paths:
+      - "android/**"
+      - ".github/workflows/android-walkthrough89.yml"
   workflow_dispatch:
 
 permissions:
