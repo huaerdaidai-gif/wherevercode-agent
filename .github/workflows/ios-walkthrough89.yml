@@ -1,0 +1,91 @@
+name: iOS Walkthrough89 (registry full pass)
+
+# 89 入口逐屏走查（2026-11-17）：在 macOS runner 的 iPhone 模拟器里跑
+# Walkthrough89UITests——经抽屉 → 全部功能（功能中心）逐行点按
+# EntryRegistry 89 条：已实现项须真跳转且不崩，待开发项须显示该条
+# 自己的诚实待开发说明。每项截图 wt-<id>，结果汇总为
+# walkthrough89-results 文本附件（xcresult 导出）。
+# 单项失败是走查数据；job 成败看测试进程是否跑完并产出结果附件。
+# 仅手动 workflow_dispatch 触发。
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-walkthrough89-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  walkthrough89:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode on the runner
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app || true
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1 || true)"
+          if [ -n "$XCODE" ]; then
+            echo "Using $XCODE"
+            sudo xcode-select -s "$XCODE"
+          fi
+          xcodebuild -version
+
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          UDID="$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          phones = [d for runtimes in data['devices'].values() for d in runtimes
+                    if d.get('isAvailable') and 'iPhone' in d.get('name', '')]
+          phones.sort(key=lambda d: ('iPhone 17' not in d['name'], d['name']))
+          print(phones[0]['udid'] if phones else '')
+          ")"
+          if [ -z "$UDID" ]; then
+            echo "No available iPhone simulator on this runner."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $UDID"
+
+      - name: Run Walkthrough89 UI test on simulator
+        run: |
+          set -uo pipefail
+          xcodebuild test \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}' \
+            -derivedDataPath .build/derived \
+            -parallel-testing-enabled NO \
+            -resultBundlePath .build/WalkthroughResults.xcresult \
+            -only-testing:WhereverCodeAgentUITests/Walkthrough89UITests \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY="-" 2>&1 | tee .build-walkthrough.log
+          echo "xcodebuild exit: ${PIPESTATUS[0]}"
+
+      - name: Export walkthrough screenshots and results
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p .build/walkthrough-export
+          if [ -f ".build/WalkthroughResults.xcresult/Info.plist" ]; then
+            xcrun xcresulttool export attachments --path .build/WalkthroughResults.xcresult --output-path .build/walkthrough-export || true
+            xcrun xcresulttool get test-results summary --path .build/WalkthroughResults.xcresult > .build/walkthrough-export/test-summary.json || true
+          fi
+          cp .build-walkthrough.log .build/walkthrough-export/ 2>/dev/null || true
+          find .build/walkthrough-export -type f | sort | head -120 || true
+
+      - name: Upload walkthrough evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkthrough89-ios-${{ github.sha }}
+          path: .build/walkthrough-export
+          retention-days: 30
+          if-no-files-found: warn
