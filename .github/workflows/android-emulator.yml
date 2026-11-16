@@ -1,11 +1,14 @@
 name: Android Emulator Acceptance (iOS-align remodel)
 
-# 安卓照 iOS 改（2026-11-16）逐页截图验收。复用组装线
-# android-emulator.yml 的稳定配方（GitHub 托管 ubuntu + KVM +
-# API 34 google_apis x86_64 + swiftshader），但只跑本分支的
-# RemodelScreenshotTest（六页：对话首页/抽屉/项目/频道/控制/
-# 全部功能弹窗），不跑组装线才有的 FlagshipNavTest/PageCaptureTest
-#（本分支没有 FlagshipActivity 深链）。
+# 安卓照 iOS 改（2026-11-16）逐页截图验收。跑本分支自己的
+# V5RuntimeInstrumentation（android/app/build.gradle.kts 里
+# testInstrumentationRunner 指定的那个）：它走真实抽屉路径
+# 依次打开 对话/项目/频道/控制/账号设置，逐页实拍 PNG 到
+# 外部存储 v5-runtime/，不造假数据。本分支没有
+# FlagshipActivity 深链，也不跑 JUnit instrumentation 测试，
+# 故 instrument 命令必须指 V5RuntimeInstrumentation（指
+# AndroidJUnitRunner 会立即 INSTRUMENTATION_FAILED，见
+# bf8462be 轮教训）。
 # 成本门（Funk 2026-11-14）：普通推送不烧模拟器；仅手动 dispatch
 # 或提交信息带 [emu] 才真跑。
 on:
@@ -57,17 +60,16 @@ jobs:
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             mkdir -p emulator-evidence
             adb logcat -c
-            adb shell am instrument -w -e allowTaskCreation true -e class wherevercode.agent.ui.RemodelScreenshotTest wherevercode.agent.ci.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee emulator-evidence/instrumentation.txt
+            adb shell am instrument -w -e allowTaskCreation true wherevercode.agent.ci.test/wherevercode.agent.V5RuntimeInstrumentation 2>&1 | tee emulator-evidence/instrumentation.txt
             adb shell screencap -p /sdcard/final-screen.png || true
             adb pull /sdcard/final-screen.png emulator-evidence/ || true
-            mkdir -p emulator-evidence/page-capture
-            adb exec-out run-as wherevercode.agent.ci tar -c files/page-capture 2>/dev/null | tar -x -C emulator-evidence/page-capture --strip-components=2 || true
-            ls -la emulator-evidence/page-capture/ || true
+            adb pull /sdcard/Android/data/wherevercode.agent.ci/files/v5-runtime emulator-evidence/ || true
+            ls -la emulator-evidence/v5-runtime/ || true
             adb logcat -d > emulator-evidence/logcat.txt || true
-            grep -q "OK (" emulator-evidence/instrumentation.txt
-      - name: Verify page-capture evidence (anti fake-green)
+            grep -q "V5_RUNTIME_OK" emulator-evidence/instrumentation.txt
+      - name: Verify runtime captures (anti fake-green)
         if: ${{ !cancelled() }}
-        run: python3 scripts/verify_page_capture.py emulator-evidence 01-chat-home.png 02-sidebar.png 03-projects.png 04-channels.png 05-console.png 06-feature-center.png
+        run: python3 scripts/verify_v5_runtime.py emulator-evidence
       - name: Upload emulator evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

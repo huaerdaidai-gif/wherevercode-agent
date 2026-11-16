@@ -214,12 +214,6 @@ dependencies {
     // NOTE: no BouncyCastle dependency. DeviceKeys uses a pure-Kotlin
     // RFC 7748 X25519 ladder instead (minSdk 26; JCA "XDH" needs API 31+),
     // so the crypto works identically in JVM unit tests and on the phone.
-    // 模拟器逐页截图验收（2026-11-16，安卓照 iOS 改）：RemodelScreenshotTest
-    // 用 UiAutomator 走真实抽屉路径；版本与组装线 android-emulator.yml
-    // 所用的同一组一致。
-    androidTestImplementation("androidx.test:runner:1.5.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.2.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("org.robolectric:robolectric:4.11.1")
