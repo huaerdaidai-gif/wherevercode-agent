@@ -135,6 +135,12 @@ class AgentScreenController(
          * onAddRemote 必须是最后一个函数参数（见 onRediscover 注释）。
          */
         onUpdateHand: ((RemoteDevice) -> Unit)? = null,
+        /**
+         * 已配对远程设备卡片上的“查看用量”（Paseo 式连接，2026-11-17）：
+         * 点后经密封通道查该设备上各 Agent 的账号用量。放在 onAddRemote
+         * 之前——onAddRemote 必须是最后一个函数参数（见 onRediscover 注释）。
+         */
+        onUsage: ((RemoteDevice) -> Unit)? = null,
         onAddRemote: (() -> Unit)? = null,
     ) {
         list.addView(
@@ -158,7 +164,7 @@ class AgentScreenController(
         // 根本不传远程设备，加完也看不见。状态文案与选设备对话框一致。
         if (remoteDevices.isNotEmpty()) {
             list.addView(sectionTitle("远程设备（手动添加，${remoteDevices.size}）"))
-            remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand)) }
+            remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onUsage)) }
         }
         if (onAddRemote != null) {
             val row = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
@@ -190,6 +196,7 @@ class AgentScreenController(
         onRediscover: ((RemoteDevice) -> Unit)? = null,
         onEditRemote: ((RemoteDevice) -> Unit)? = null,
         onUpdateHand: ((RemoteDevice) -> Unit)? = null,
+        onUsage: ((RemoteDevice) -> Unit)? = null,
     ): LinearLayout {
         val card = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
@@ -289,13 +296,16 @@ class AgentScreenController(
             // 补建服务端新增的 Agent 记录；已有的按去重口径保留不动。
             // Hand 自更新（2026-11-12）：“更新 Hand”只在已配对时出，
             // 落后或未知（旧版）时才出，最新时不出。
-            if (onEditRemote != null || onRediscover != null || (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank()))) {
+            if (onEditRemote != null || onRediscover != null || onUsage != null || (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank()))) {
                 val actions = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
                 if (onEditRemote != null) {
                     actions.addView(actionButton("编辑地址") { onEditRemote(row.device) })
                 }
                 if (onRediscover != null) {
                     actions.addView(actionButton("重新发现 Agent") { onRediscover(row.device) })
+                }
+                if (onUsage != null) {
+                    actions.addView(actionButton("查看用量") { onUsage(row.device) })
                 }
                 if (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank())) {
                     actions.addView(actionButton("更新 Hand") { onUpdateHand(row.device) })

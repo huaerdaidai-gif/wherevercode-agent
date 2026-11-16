@@ -73,6 +73,14 @@ data class RemoteAgentInfo(
      * 不是 git 仓库时服务端发空数组，同样为空。
      */
     val repos: List<HelloRepoCheckout> = emptyList(),
+    /**
+     * 模型数（Paseo 式连接，2026-11-17，可选）：Hand 缓存探针的实测值
+     * （如 agy 的 18 个模型）。旧版 Hand 不发此字段、或探针没查到时
+     * 为 null（未知），绝不编造。
+     */
+    val modelCount: Int? = null,
+    /** 该 Agent 在 Hand 用量注册表里有查询规格（与查没查到是两回事）。 */
+    val usageSupported: Boolean = false,
 )
 
 /** Hand hello 里一个 git 检出的实测值（分支/commit 缺失时为 null）。 */
@@ -215,6 +223,11 @@ class DirectTransport(
                         // P1 能力卡：repos 是可选 enrichment——一条坏记录
                         // 绝不能让整个 hello 失败，只跳过该条。
                         repos = parseHelloRepos(entry.optJSONArray("repos")),
+                        // 模型数/用量可用性是可选 enrichment：坏值只
+                        // 丢弃该字段，绝不让整个 hello 失败。
+                        modelCount = if (entry.isNull("model_count")) null
+                            else entry.optInt("model_count", -1).takeIf { it >= 0 },
+                        usageSupported = entry.optBoolean("usage_supported", false),
                     )
                 }
             }

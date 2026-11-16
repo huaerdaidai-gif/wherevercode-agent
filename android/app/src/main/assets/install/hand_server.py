@@ -200,6 +200,14 @@ PAIR_CODE_LENGTH = 6
 PAIR_CODE_MAX_FAILS = 5
 PAIR_CODE_LOCK_SECONDS = 3600
 
+# 配对链接（Paseo 式连接，2026-11-17）：一次性 offer。secret 是 128 位
+# 随机数，只以 SHA-256 哈希存 pair_offers.json（0600），10 分钟过期、
+# 用过即废、生成新的即旧的全部作废。错误码与 App 侧 PairingOffer 对齐。
+ERR_PAIR_OFFER_INVALID = "pair_offer_invalid"
+ERR_PAIR_OFFER_EXPIRED = "pair_offer_expired"
+ERR_PAIR_OFFER_USED = "pair_offer_used"
+PAIR_OFFER_TTL_SECONDS = 600
+
 # mDNS 广播：局域网发现用的服务类型（与 App 侧 Discovery.SERVICE_TYPE 同款）。
 MDNS_SERVICE_TYPE = "_wherevercode._tcp.local"
 MDNS_GROUP = "224.0.0.251"
@@ -540,6 +548,243 @@ def verify_credential(
 
 
 # --------------------------------------------------------------------------
+# 配对链接 / 用量 / 模型探针（Paseo 式连接，2026-11-17）
+# --------------------------------------------------------------------------
+# 只学 Paseo 的机制（配对 offer + 连上自动发现 + 由 CLI 本人查用量），
+# 源码自主实现。红线：Hand 只调用各 CLI 的公开查询面（Codex 的
+# app-server JSON-RPC、agy 的 models / -p /usage），绝不读取、存储或
+# 回传任何 CLI 的凭据文件；账号标识字段（邮箱等）一律丢弃不回传。
+
+PAIR_LINK_SCHEME = "wherevercode://pair?d="
+
+
+def build_pair_link(offer: dict) -> str:
+    """offer JSON → 配对链接。二维码内容与此字符串相同，不另设格式。"""
+    raw = json.dumps(offer, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return PAIR_LINK_SCHEME + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def local_host_hints() -> list[str]:
+    """本机可达地址提示（局域网/Tailnet IPv4）。只是连接提示，不是信任根
+    （信任根是 offer 里的公钥 + hello 公钥比对）。拿不到就返回空列表。"""
+    hosts: set[str] = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
+                hosts.add(ip)
+    except OSError:
+        pass
+
+    def rank(ip: str) -> tuple[int, str]:
+        if ip.startswith("100."):
+            return (1, ip)  # Tailnet CGNAT 段其次
+        return (0, ip)  # 局域网私网优先
+
+    return sorted(hosts, key=rank)
+
+
+# 用量查询规格（按注册表 adapter id 索引）：核心只认规格不认厂商；
+# 给新 CLI 加用量 = 加一行规格 + 一个解析分支，不改协议。
+# verified=False 的解析器按厂商公开输出形状写、未经真机实测，解析
+# 失败回 error 状态，绝不给假数。
+USAGE_SPECS: dict[str, dict] = {
+    "codex": {"kind": "codex-app-server", "verified": True},
+    "agy": {"kind": "command-json",
+            "argv": ["{binary}", "-p", "/usage", "--output-format", "json"],
+            "parser": "agy-usage", "verified": False},
+}
+
+# 模型数探针规格（同样按 adapter id 索引）。
+MODEL_SPECS: dict[str, dict] = {
+    "agy": {"kind": "command-lines", "argv": ["{binary}", "models"]},
+    "codex": {"kind": "codex-app-server-models"},
+}
+
+_PLAN_DISPLAY = {"plus": "Plus", "pro": "Pro", "team": "Team",
+                 "enterprise": "Enterprise", "free": "Free",
+                 "business": "Business"}
+
+
+def plan_display_name(raw: str) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    return _PLAN_DISPLAY.get(value.lower(), value[:1].upper() + value[1:])
+
+
+def parse_codex_rate_limits(rate_limits: dict, account: dict | None) -> dict:
+    """Codex app-server 的 account/read + account/rateLimits/read 结果
+    → 归一化用量（不含 agent_id/queried_at，调用方补）。
+
+    纯函数（可直接单测）。窗口按 windowDurationMins 区分（300=5h、
+    10080=weekly），不按字段位置猜；缺字段的窗口丢弃。account 里的
+    邮箱等账号标识字段不读、不回传。
+    """
+    rl = rate_limits if isinstance(rate_limits, dict) else {}
+    acct = account if isinstance(account, dict) else {}
+    acct_inner = acct.get("account") if isinstance(acct.get("account"), dict) else acct
+    plan = plan_display_name(str(rl.get("planType") or acct_inner.get("planType") or ""))
+    windows = []
+    for key in ("primary", "secondary"):
+        w = rl.get(key)
+        if not isinstance(w, dict):
+            continue
+        mins = w.get("windowDurationMins")
+        used = w.get("usedPercent")
+        if not isinstance(mins, (int, float)) or not isinstance(used, (int, float)):
+            continue
+        kind = "5h" if int(mins) == 300 else ("weekly" if int(mins) == 10080 else f"window_{int(mins)}m")
+        entry = {"kind": kind, "window_minutes": int(mins),
+                 "used_percent": used, "resets_at": w.get("resetsAt")}
+        windows.append(entry)
+    credits = rl.get("credits") if isinstance(rl.get("credits"), dict) else {}
+    return {
+        "plan": plan or None,
+        "windows": windows,
+        "credits_balance": credits.get("balance"),
+        "credits_unlimited": bool(credits.get("unlimited", False)),
+    }
+
+
+def parse_agy_usage(payload: dict) -> dict:
+    """agy -p /usage --output-format json 的结果 → 归一化用量。
+
+    形状：command.data.groups[].buckets[]，bucket 带 remaining_fraction
+    （剩余比例）与 reset_time。纯函数；形状对不上就抛 ValueError，
+    调用方转 error 状态。plan 不在此数据里，保持 None（未知不编造）。
+    """
+    root = payload if isinstance(payload, dict) else {}
+    data = root.get("data")
+    if not isinstance(data, dict):
+        cmd = root.get("command")
+        data = cmd.get("data") if isinstance(cmd, dict) else None
+    if not isinstance(data, dict):
+        raise ValueError("agy usage: missing data")
+    groups = data.get("groups")
+    if not isinstance(groups, list):
+        raise ValueError("agy usage: missing groups")
+    windows = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        buckets = group.get("buckets")
+        if not isinstance(buckets, list):
+            continue
+        for bucket in buckets:
+            if not isinstance(bucket, dict):
+                continue
+            frac = bucket.get("remaining_fraction")
+            if not isinstance(frac, (int, float)):
+                continue
+            used = round((1.0 - float(frac)) * 100.0, 1)
+            if float(used).is_integer():
+                used = int(used)
+            reset_raw = bucket.get("reset_time", bucket.get("resetTime"))
+            resets_at = None
+            if isinstance(reset_raw, (int, float)):
+                resets_at = int(reset_raw)
+            elif isinstance(reset_raw, str) and reset_raw:
+                try:
+                    import datetime as _dt
+                    resets_at = int(_dt.datetime.fromisoformat(
+                        reset_raw.replace("Z", "+00:00")).timestamp())
+                except ValueError:
+                    resets_at = None
+            label = str(bucket.get("window") or bucket.get("id")
+                        or group.get("name") or "window")
+            windows.append({"kind": label, "window_minutes": None,
+                            "used_percent": used, "resets_at": resets_at})
+    if not windows:
+        raise ValueError("agy usage: no buckets")
+    return {"plan": None, "windows": windows,
+            "credits_balance": None, "credits_unlimited": False}
+
+
+def codex_app_server_query(binary: str, methods: list[str],
+                           timeout: float = 20.0) -> dict:
+    """起 `codex app-server`（stdio JSON-RPC），依次问 methods，返回
+    {method: result}。CLI 用自己的本地凭据回答，Hand 不碰凭据文件。
+    任何失败抛 RuntimeError（中文原因）。子进程在任何路径都被终止。"""
+    try:
+        proc = subprocess.Popen(
+            [binary, "app-server"], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError as e:
+        raise RuntimeError(f"Codex app-server 启动失败：{e}") from None
+    try:
+        assert proc.stdin is not None and proc.stdout is not None
+        requests = [{"method": "initialize", "id": 0,
+                     "params": {"clientInfo": {"name": "wherevercode-hand",
+                                               "title": "WhereverCode Hand",
+                                               "version": "1"}}}]
+        for i, method in enumerate(methods, start=1):
+            requests.append({"method": method, "id": i, "params": None})
+        for req in requests:
+            proc.stdin.write(json.dumps(req) + "\n")
+        proc.stdin.flush()
+        wanted = {req["id"]: req["method"] for req in requests[1:]}
+        results: dict[str, dict] = {}
+        errors: dict[str, str] = {}
+        deadline = time.time() + timeout
+        import select as _select
+        fd = proc.stdout.fileno()
+        buf = ""
+        while time.time() < deadline and len(results) + len(errors) < len(wanted):
+            ready, _, _ = _select.select([fd], [], [], max(0.0, deadline - time.time()))
+            if not ready:
+                break
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            buf += chunk.decode("utf-8", errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                mid = msg.get("id")
+                if mid not in wanted:
+                    continue  # 通知帧（如 account/rateLimits/updated）跳过
+                if isinstance(msg.get("result"), dict):
+                    results[wanted[mid]] = msg["result"]
+                elif isinstance(msg.get("error"), dict):
+                    errors[wanted[mid]] = str(
+                        msg["error"].get("message", "app-server error"))[:200]
+        if errors and not results:
+            raise RuntimeError("Codex 查询被拒：" + "; ".join(
+                f"{m}: {e}" for m, e in errors.items()))
+        if not results:
+            raise RuntimeError("Codex app-server 超时未回包")
+        return results
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def count_model_lines(text: str) -> int:
+    """agy models 输出 → 模型数：id<TAB>名字 的行数；没有 TAB 时退回
+    数非空行（排除 Fetching/ERROR 等状态行）。纯函数。"""
+    lines = [ln for ln in str(text or "").splitlines() if ln.strip()]
+    tabbed = [ln for ln in lines if "\t" in ln]
+    if tabbed:
+        return len(tabbed)
+    body = [ln for ln in lines
+            if not ln.startswith(("Fetching", "ERROR", "WARNING"))]
+    return len(body)
+
+
+# --------------------------------------------------------------------------
 # 状态存储
 # --------------------------------------------------------------------------
 
@@ -694,6 +939,182 @@ class HandServer:
             self.state.save_json("pair_attempts.json", attempts)
             return False, f"配对码不对（已错 {fails} 次，错 5 次锁定 1 小时）：请核对目标设备上的配对码"
 
+    # -- 配对链接（一次性 offer，2026-11-17） ------------------------------
+    # 生成在 CLI 进程、校验在服务进程：与 pair_code.json 同款，每次都
+    # 现读文件（不缓存），两个进程看到同一份状态。secret 只存哈希。
+
+    def create_pair_offer(self) -> dict:
+        """生成新 offer（旧的未用 offer 全部作废）。返回可编码进链接
+        的 offer 本体（含明文 secret，只在生成这一刻出现）。"""
+        secret = secrets.token_hex(16)
+        offer_id = secrets.token_hex(8)
+        now = int(time.time())
+        record = {
+            "secret_sha256": hashlib.sha256(secret.encode("ascii")).hexdigest(),
+            "created_at": now,
+            "expires_at": now + PAIR_OFFER_TTL_SECONDS,
+            "used": False,
+        }
+        with self.state.lock:
+            self.state.save_json("pair_offers.json", {offer_id: record})
+            tmp = os.path.join(self.state.dir, "pair_offers.json")
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+        return {
+            "v": 1,
+            "type": "wherevercode-pair",
+            "server_id": self.device_id,
+            "display_name": self.display_name,
+            "public_key_b64": b64e(self.public_key),
+            "fingerprint": self.fingerprint(),
+            "port": self.port,
+            "hosts": local_host_hints(),
+            "relay": None,
+            "offer_id": offer_id,
+            "secret": secret,
+            "expires_at": record["expires_at"],
+        }
+
+    def check_pair_offer(self, secret: str) -> tuple[bool, str, str]:
+        """验 offer secret。返回 (通过, 中文原因, 错误码)。通过时把
+        offer 标记为已用（一次性）。恒时比较哈希，不比明文。"""
+        digest = hashlib.sha256(str(secret or "").encode("utf-8")).hexdigest()
+        now = int(time.time())
+        with self.state.lock:
+            offers = self.state.load_json("pair_offers.json", {})
+            if not isinstance(offers, dict):
+                return False, "配对链接无效：请在目标设备上重新生成配对链接", ERR_PAIR_OFFER_INVALID
+            hit_id = None
+            for offer_id, rec in offers.items():
+                if isinstance(rec, dict) and hmac.compare_digest(
+                        str(rec.get("secret_sha256", "")), digest):
+                    hit_id = offer_id
+                    break
+            if hit_id is None:
+                return False, "配对链接无效或已被新链接取代：请在目标设备上重新生成配对链接", ERR_PAIR_OFFER_INVALID
+            rec = offers[hit_id]
+            if rec.get("used"):
+                return False, "这条配对链接已经用过了：请在目标设备上重新生成配对链接", ERR_PAIR_OFFER_USED
+            if int(rec.get("expires_at", 0) or 0) < now:
+                return False, "配对链接已过期（10 分钟）：请在目标设备上重新生成配对链接", ERR_PAIR_OFFER_EXPIRED
+            rec["used"] = True
+            offers[hit_id] = rec
+            self.state.save_json("pair_offers.json", offers)
+            return True, "", ""
+
+    # -- 模型数缓存 ---------------------------------------------------------
+
+    def _model_count(self, agent_id: str) -> int | None:
+        cache = self.state.load_json("model_counts.json", {})
+        entry = cache.get(agent_id) if isinstance(cache, dict) else None
+        if isinstance(entry, dict) and isinstance(entry.get("count"), int):
+            return entry["count"]
+        return None
+
+    def refresh_model_count(self, agent_id: str) -> int | None:
+        """按 MODEL_SPECS 探一次模型数并写缓存。探不到返回 None，
+        不编造。只由 discover/usage 等显式动作触发，不进 hello 热路径。"""
+        reg = resolve_adapters(self.state.dir, self.device_id).get(agent_id)
+        if reg is None or not reg.get("discovered"):
+            return None
+        spec = MODEL_SPECS.get(agent_id)
+        binary = reg.get("binary_path")
+        if spec is None or not binary:
+            return None
+        count: int | None = None
+        try:
+            if spec["kind"] == "command-lines":
+                argv = [part.replace("{binary}", binary) for part in spec["argv"]]
+                done = subprocess.run(argv, stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL,
+                                      timeout=30)
+                count = count_model_lines(done.stdout.decode("utf-8", errors="replace"))
+            elif spec["kind"] == "codex-app-server-models":
+                results = codex_app_server_query(binary, ["model/list"])
+                data = results.get("model/list", {})
+                rows = data.get("data") if isinstance(data, dict) else None
+                if isinstance(rows, list):
+                    count = len(rows)
+        except Exception:
+            return None
+        if count is None:
+            return None
+        with self.state.lock:
+            cache = self.state.load_json("model_counts.json", {})
+            if not isinstance(cache, dict):
+                cache = {}
+            cache[agent_id] = {"count": count, "at": int(time.time())}
+            self.state.save_json("model_counts.json", cache)
+        return count
+
+    # -- 用量查询 -----------------------------------------------------------
+
+    def query_agent_usage(self, agent_id: str, reg: dict) -> dict:
+        """查一个 Agent 的账号用量（由 CLI 本人查，凭据不出设备）。"""
+        base = {"agent_id": agent_id, "provider": agent_id,
+                "queried_at": int(time.time()), "plan": None, "windows": [],
+                "credits_balance": None, "credits_unlimited": False,
+                "detail": ""}
+        spec = USAGE_SPECS.get(agent_id)
+        if spec is None:
+            return {**base, "status": "unsupported",
+                    "detail": "该 Agent 暂无用量查询规格（未声明支持）"}
+        binary = reg.get("binary_path")
+        if not binary:
+            return {**base, "status": "error",
+                    "detail": "本机未发现该 Agent 的程序，无法查询用量"}
+        try:
+            if spec["kind"] == "codex-app-server":
+                results = codex_app_server_query(
+                    binary, ["account/read", "account/rateLimits/read"])
+                rl_result = results.get("account/rateLimits/read")
+                if rl_result is None:
+                    return {**base, "status": "not_logged_in",
+                            "detail": "Codex 未登录或用量读取被拒：请先在设备上登录 Codex"}
+                parsed = parse_codex_rate_limits(
+                    rl_result.get("rateLimits") or {},
+                    results.get("account/read"))
+                return {**base, **parsed, "status": "ok"}
+            if spec["kind"] == "command-json":
+                argv = [part.replace("{binary}", binary) for part in spec["argv"]]
+                done = subprocess.run(argv, stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL, timeout=60)
+                if done.returncode != 0:
+                    return {**base, "status": "error",
+                            "detail": f"用量查询命令退出码 {done.returncode}：请确认该 Agent 已登录"}
+                payload = json.loads(done.stdout.decode("utf-8", errors="replace"))
+                parsed = parse_agy_usage(payload)
+                return {**base, **parsed, "status": "ok"}
+        except RuntimeError as e:
+            return {**base, "status": "error", "detail": str(e)[:200]}
+        except Exception as e:
+            return {**base, "status": "error",
+                    "detail": f"用量查询失败：{e}"[:200]}
+        return {**base, "status": "unsupported", "detail": "未知用量规格"}
+
+    def query_all_usage(self, only_agent_id: str | None = None) -> list[dict]:
+        resolved = resolve_adapters(self.state.dir, self.device_id)
+        out = []
+        for agent_id, reg in resolved.items():
+            if only_agent_id and agent_id != only_agent_id:
+                continue
+            if not reg.get("discovered"):
+                continue
+            if only_agent_id is None and agent_id not in USAGE_SPECS:
+                continue
+            out.append(self.query_agent_usage(agent_id, reg))
+        if only_agent_id and not out:
+            out.append({"agent_id": only_agent_id, "provider": only_agent_id,
+                        "queried_at": int(time.time()), "status": "error",
+                        "plan": None, "windows": [], "credits_balance": None,
+                        "credits_unlimited": False,
+                        "detail": "本机未发现该 Agent"})
+        return out
+
     def agents(self) -> list[dict]:
         """hello 用的 Agent 列表：注册表（内置 + 自定义行）解析出的
         Agent + agents.json 里独有的遗留条目，合成一张表。
@@ -722,6 +1143,11 @@ class HandServer:
                 "available": available,
                 "source": reg["source"],
                 "discovered": reg["discovered"],
+                # Paseo 式连接（2026-11-17，可选字段）：模型数只报
+                # 缓存探针的实测值（未知为 null，不编造）；用量可用性
+                # 只表示注册表里有查询规格，与查没查到是两回事。
+                "model_count": self._model_count(agent_id),
+                "usage_supported": agent_id in USAGE_SPECS,
             })
             seen.add(agent_id)
         raw = self.state.load_json("agents.json", {})
@@ -739,6 +1165,8 @@ class HandServer:
                 "available": available,
                 "source": "agents-json",
                 "discovered": available,
+                "model_count": self._model_count(agent_id),
+                "usage_supported": agent_id in USAGE_SPECS,
             })
         return out
 
@@ -1271,8 +1699,17 @@ class HandServer:
             except Exception:
                 pass
             return
-        code = str(envelope.get("code", "")).strip()
-        ok, reason = self.check_pair_code(code, client_id)
+        secret = str(envelope.get("secret", "")).strip()
+        if secret:
+            # 配对链接路径（2026-11-17）：一次性 secret，验法与码不同
+            # （哈希 + 过期 + 一次性），错误码细分 invalid/expired/used。
+            ok, reason, err_code = self.check_pair_offer(secret)
+            via = "pair_offer"
+        else:
+            code = str(envelope.get("code", "")).strip()
+            ok, reason = self.check_pair_code(code, client_id)
+            err_code = ERR_PAIR_CODE_WRONG
+            via = "pair_code"
         if ok:
             with self.state.lock:
                 clients = self.state.load_json("paired_clients.json", {})
@@ -1282,7 +1719,7 @@ class HandServer:
                 entry["status"] = "APPROVED"
                 clients[client_id] = entry
                 self.state.save_json("paired_clients.json", clients)
-            self.state.audit({"event": "pair_approved", "client": client_id, "via": "pair_code"})
+            self.state.audit({"event": "pair_approved", "client": client_id, "via": via})
             try:
                 self._send(
                     conn, session_key, envelope, "cross_device_pair_approved",
@@ -1291,11 +1728,12 @@ class HandServer:
             except Exception:
                 pass
         else:
-            self.state.audit({"event": "pair_code_failed", "client": client_id, "reason": reason})
+            self.state.audit({"event": "pair_failed", "client": client_id,
+                              "via": via, "reason": reason})
             try:
                 self._send(
                     conn, session_key, envelope, "cross_device_error",
-                    {"code": ERR_PAIR_CODE_WRONG, "message": reason}, 1,
+                    {"code": err_code, "message": reason}, 1,
                 )
             except Exception:
                 pass
@@ -1472,9 +1910,24 @@ class HandServer:
     def _handle_device_admin(self, conn, session_key, client_id, envelope) -> None:
         seq = int(envelope.get("seq", 1))
         action = str(envelope.get("action", ""))
+        if action == "agent_usage":
+            # 用量查询（2026-11-17）：只读，不要求 confirmed；但本分支
+            # 本身只在 APPROVED 之后可达，配对信任是前提。args 里
+            # agent_id 可选，缺省查全部有规格的 Agent。
+            args0 = envelope.get("args", {}) or {}
+            if not isinstance(args0, dict):
+                args0 = {}
+            only = str(args0.get("agent_id", "")).strip() or None
+            results = self.query_all_usage(only)
+            self._send(conn, session_key, envelope,
+                       "wherevercode_device_admin_reply",
+                       {"ok": True,
+                        "usage": json.dumps(results, ensure_ascii=False)},
+                       seq + 1)
+            return
         if action != "update_hand":
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
-                        "不支持的管理操作：只允许 update_hand")
+                        "不支持的管理操作：只允许 update_hand / agent_usage")
             return
         if envelope.get("confirmed") is not True:
             self._error(conn, session_key, envelope, seq + 1, ERR_COMMAND_NOT_ALLOWED,
@@ -2301,6 +2754,7 @@ def serve(state_dir: str, device_id: str, display_name: str, host: str, port: in
         print(f"hand server listening on {host}:{port} device={device_id}", flush=True)
         print(f"fingerprint: {hand.fingerprint()}", flush=True)
         print(f"pair code: {hand.get_or_create_pair_code()}（App 配对时填入；轮换：hand_server.py pair-code --rotate）", flush=True)
+        print(f"pair link: {build_pair_link(hand.create_pair_offer())}（配对链接，10 分钟内有效且只能用一次；扫码或粘贴到 App 即配对；重新生成：hand_server.py pair-offer）", flush=True)
         print(f"state dir: {hand.state.dir}", flush=True)
         # 自更新看门狗凭它判断新版是不是真的起来了。
         hand.mark_healthy_start()
@@ -2336,6 +2790,11 @@ def main(argv: list[str] | None = None) -> int:
     approve.add_argument("device_id")
     pc = sub.add_parser("pair-code", help="查看本机配对码（App 内配对时填入）")
     pc.add_argument("--rotate", action="store_true", help="生成新配对码（旧码立即失效）")
+    po = sub.add_parser("pair-offer", help="生成一次性配对链接（扫码/粘贴配对，10 分钟有效）")
+    po.add_argument("--json", action="store_true", help="输出 offer JSON（含 link 字段）")
+    usg = sub.add_parser("usage", help="查询本机 Agent 的账号用量（由 CLI 本人查询）")
+    usg.add_argument("agent_id", nargs="?", default="",
+                     help="只查这个 Agent（缺省查全部有规格的）")
     revoke = sub.add_parser("pair-revoke", help="撤销一个客户端的配对")
     revoke.add_argument("device_id")
     grant = sub.add_parser("grant", help="授权某 agent 访问某文件夹")
@@ -2403,6 +2862,20 @@ def main(argv: list[str] | None = None) -> int:
             print(hand.rotate_pair_code())
         else:
             print(hand.get_or_create_pair_code())
+        return 0
+    if args.command == "pair-offer":
+        offer = hand.create_pair_offer()
+        link = build_pair_link(offer)
+        if args.json:
+            print(json.dumps({**offer, "link": link}, ensure_ascii=False))
+        else:
+            print(link)
+            print("配对链接：10 分钟内有效、只能用一次；把整条链接粘贴到 App 的"
+                  "「添加设备 → 粘贴配对链接」，或用 App 扫这条链接的二维码。", file=sys.stderr)
+        return 0
+    if args.command == "usage":
+        print(json.dumps(hand.query_all_usage(args.agent_id or None),
+                         ensure_ascii=False, indent=2))
         return 0
     if args.command == "pair-revoke":
         with hand.state.lock:
@@ -2497,6 +2970,10 @@ def main(argv: list[str] | None = None) -> int:
         print("用法：extension {register|enable|disable|remove} …", file=sys.stderr)
         return 1
     if args.command == "discover":
+        # 顺带刷新模型数缓存（hello 只读缓存，不在热路径探针）。
+        for _aid in list(resolve_adapters(args.state_dir, args.device_id)):
+            if _aid in MODEL_SPECS:
+                hand.refresh_model_count(_aid)
         resolved = resolve_adapters(args.state_dir, args.device_id)
         out = []
         for ext_id, reg in resolved.items():

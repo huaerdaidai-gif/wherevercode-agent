@@ -54,10 +54,41 @@ object PairingClient {
         ownPrivateKey: ByteArray,
         serverPublicKey: ByteArray,
         code: String,
-    ): PairConfirmResult = withContext(Dispatchers.IO) {
+    ): PairConfirmResult {
         if (!isValidPairCode(code)) {
-            return@withContext PairConfirmResult.Failed("配对码必须是 6 位数字")
+            return PairConfirmResult.Failed("配对码必须是 6 位数字")
         }
+        return sendConfirm(peer, ownDeviceId, ownPrivateKey, serverPublicKey,
+            mapOf("code" to code))
+    }
+
+    /**
+     * 配对链接路径的密封确认（2026-11-17）：与输码路径同一条密封通道，
+     * 信封里换成 offer 的一次性 secret（Hand 侧验哈希 + 过期 + 一次性）。
+     * [peer] 必须来自 [PairingOffer.candidatePeers]（地址提示之一），
+     * 且 hello 回包的公钥会与 offer 公钥再比对一次（在 sendConfirm 内）。
+     */
+    suspend fun sendPairOfferConfirm(
+        peer: DiscoveredPeer,
+        ownDeviceId: String,
+        ownPrivateKey: ByteArray,
+        offer: PairingOffer,
+    ): PairConfirmResult {
+        if (peer.deviceId != offer.serverId) {
+            return PairConfirmResult.Failed("配对链接的设备与要连接的设备不一致：请重新扫码或粘贴链接")
+        }
+        return sendConfirm(peer, ownDeviceId, ownPrivateKey, offer.publicKey,
+            mapOf("secret" to offer.secret))
+    }
+
+    /** 密封配对确认的共用流程：hello → 公钥比对 → 密封帧 → 解回包。 */
+    private suspend fun sendConfirm(
+        peer: DiscoveredPeer,
+        ownDeviceId: String,
+        ownPrivateKey: ByteArray,
+        serverPublicKey: ByteArray,
+        fields: Map<String, String>,
+    ): PairConfirmResult = withContext(Dispatchers.IO) {
         val ownPublicKey = try {
             DeviceKeys.publicKeyFromPrivate(ownPrivateKey)
         } catch (e: Exception) {
@@ -102,7 +133,7 @@ object PairingClient {
             val env = JSONObject().apply {
                 put("type", "cross_device_pair_confirm")
                 put("version", 1)
-                put("code", code)
+                fields.forEach { (key, value) -> put(key, value) }
             }
             val sealed = try {
                 DeviceKeys.seal(sessionKey, env.toString().toByteArray(Charsets.UTF_8))
@@ -148,7 +179,7 @@ object PairingClient {
                     ?: reply.optString("message", "").takeIf { it.isNotBlank() }
                     ?: "对方拒绝了配对"
                 if (code == "cross_device_not_authorized") {
-                    PairConfirmResult.Failed("对方 Hand 太旧，不支持 App 内配对：请先升级对方 Hand（重装或等更新），或在服务端跑 hand_server.py pair-approve 批准")
+                    PairConfirmResult.Failed("对方 Hand 太旧，不支持 App 内配对：请先升级对方 Hand（重装或等更新），或在设备上跑 hand_server.py pair-approve 批准")
                 } else {
                     PairConfirmResult.Rejected(message)
                 }

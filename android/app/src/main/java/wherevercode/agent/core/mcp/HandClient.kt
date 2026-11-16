@@ -78,6 +78,17 @@ sealed class HandAdminResult {
     data class Failed(val reason: String) : HandAdminResult()
 }
 
+/**
+ * 用量查询结果（[HandClient.requestAgentUsage]，2026-11-17）。
+ * Ok 带归一化用量列表（可能为空 = 对方 Hand 没回用量，如实显示）；
+ * Failed 只给中文原因。列表里每项的 status 由界面如实呈现
+ * （未登录/无规格不拼假数，见 AgentUsage）。
+ */
+sealed class AgentUsageResult {
+    data class Ok(val usages: List<wherevercode.agent.core.agent.AgentUsage>) : AgentUsageResult()
+    data class Failed(val reason: String) : AgentUsageResult()
+}
+
 data class HandCallRequest(
     val taskId: String,
     val agentId: String,
@@ -344,6 +355,33 @@ class HandClient(
             try {
                 connection.close()
             } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * 查远端设备上各 Agent 的账号用量（Paseo 式连接第 4 件，2026-11-17）。
+     *
+     * 走既有设备管理密封通道（action="agent_usage"，只读，Hand 只在
+     * 已配对后处理）：Hand 调用设备上已登录 CLI 本人的查询面拿回
+     * 套餐/用量/重置时间，原始凭据不出设备、Hand 与 App 都不读不存。
+     * [agentId] 为空 = 查全部有规格的 Agent。旧版 Hand 不认识该动作：
+     * 回 cross_device_error 或非管理回包，一律 Failed 如实报。
+     */
+    suspend fun requestAgentUsage(
+        peer: DiscoveredPeer,
+        agentId: String? = null,
+    ): AgentUsageResult {
+        val args = if (agentId.isNullOrBlank()) emptyMap()
+            else mapOf("agent_id" to agentId)
+        return when (val admin = requestHandAdmin(peer, "agent_usage", args)) {
+            is HandAdminResult.Failed -> AgentUsageResult.Failed(admin.reason)
+            is HandAdminResult.Ok -> {
+                val usageJson = admin.args["usage"]
+                    ?: return AgentUsageResult.Failed(
+                        "对方 Hand 没有回用量数据：对方 Hand 可能太旧，请先升级对方 Hand")
+                AgentUsageResult.Ok(
+                    wherevercode.agent.core.agent.AgentUsageParser.parseList(usageJson))
             }
         }
     }

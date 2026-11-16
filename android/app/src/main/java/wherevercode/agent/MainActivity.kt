@@ -131,6 +131,7 @@ import wherevercode.agent.core.install.AssetReader
 import wherevercode.agent.core.install.DeviceInstallController
 import wherevercode.agent.core.install.HandInstallBundleLoader
 import wherevercode.agent.core.install.JschSshSessionFactory
+import wherevercode.agent.core.mcp.AgentUsageResult
 import wherevercode.agent.core.mcp.HandClient
 import wherevercode.agent.core.mcp.HandEvent
 import wherevercode.agent.core.mcp.HandRemoteAgentChatPort
@@ -204,6 +205,8 @@ import wherevercode.agent.core.transport.DirectTransport
 import wherevercode.agent.core.transport.HostCapabilities
 import wherevercode.agent.core.transport.PairConfirmResult
 import wherevercode.agent.core.transport.PairingClient
+import wherevercode.agent.core.transport.PairingOfferParse
+import wherevercode.agent.core.transport.PairingOfferParser
 import wherevercode.agent.core.transport.RemoteAgentInfo
 import wherevercode.agent.core.transport.RemoteDevice
 import wherevercode.agent.core.transport.RemoteDeviceRow
@@ -2544,6 +2547,8 @@ class MainActivity : AppCompatActivity() {
                 toast("局域网内没有发现 Hand 设备：请确认目标设备与手机在同一 Wi-Fi、Hand 在运行；或用下面的“手输 IP 地址”。")
             }
         }
+        rows += "粘贴配对链接…"
+        actions += { showPairOfferForm() }
         rows += "手输 IP 地址…"
         actions += { showManualRemoteDeviceForm() }
         rows += "在新设备上安装 Hand…"
@@ -2686,7 +2691,14 @@ class MainActivity : AppCompatActivity() {
             "该设备上没有可用的 Agent。"
         } else {
             "发现 ${hello.agents.size} 个 Agent：" +
-                hello.agents.joinToString("、") { it.displayName }
+                hello.agents.joinToString("、") { agent ->
+                    // 模型数是 Hand 实测缓存值，有才显示，没有不编造。
+                    if (agent.modelCount != null) {
+                        "${agent.displayName}（${agent.modelCount} 个模型）"
+                    } else {
+                        agent.displayName
+                    }
+                }
         }
         val codeInput = EditText(this).apply {
             hint = "6 位配对码"
@@ -2779,6 +2791,105 @@ class MainActivity : AppCompatActivity() {
                         is PairConfirmResult.Failed -> {
                             toast(result.reason)
                         }
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { toast("配对失败：${e.message}") }
+            }
+        }.start()
+    }
+
+    /**
+     * 配对链接入口（Paseo 式连接，2026-11-17）：粘贴 Hand 生成的一次性
+     * 配对链接（wherevercode://pair?d=…），解析校验通过后自动 hello
+     * 核对公钥并发密封确认——用户不用手打地址、不用输配对码。
+     * 扫码得到的也是同一条链接文本，粘到这里走同一路径（本入口不
+     * 单独调相机）。链接无效/过期在解析阶段就如实报错，不连网猜测。
+     */
+    private fun showPairOfferForm() {
+        val linkInput = EditText(this).apply {
+            hint = "粘贴配对链接（wherevercode://pair?d=…）"
+            setSingleLine(false)
+            inputType = InputType.TYPE_CLASS_TEXT
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+            addView(linkInput)
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "配对链接在目标设备上跑 hand_server.py pair-offer 生成（或看 Hand 启动时打印的 pair link），10 分钟内有效、只能用一次。"
+                    setPadding(0, dp(6), 0, 0)
+                },
+            )
+        }
+        AlertDialog.Builder(this)
+            .setTitle("粘贴配对链接")
+            .setView(container)
+            .setPositiveButton("配对") { _, _ ->
+                when (val parsed = PairingOfferParser.parse(linkInput.text.toString())) {
+                    is PairingOfferParse.Failed -> toast(parsed.reason)
+                    is PairingOfferParse.Ok -> pairWithOffer(parsed.offer)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 用配对链接完成配对：按链接里的地址提示依次 hello，公钥与链接
+     * 不一致的地址直接跳过（防链接被掉包）；连上真正的设备后发密封
+     * 确认（一次性 secret），批准后走与输码路径相同的落盘与自动
+     * 发现（[confirmRemoteDevice]）。链接没有可用地址时如实报错。
+     */
+    private fun pairWithOffer(offer: wherevercode.agent.core.transport.PairingOffer) {
+        if (offer.hosts.isEmpty()) {
+            toast("配对链接里没有可用的设备地址：请确认目标设备与手机在同一网络，或改用局域网发现/手输 IP 配对。")
+            return
+        }
+        toast("正在按配对链接连接 ${offer.displayName}…")
+        Thread {
+            try {
+                val identity = deviceIdentityStore.getOrCreate()
+                var lastError = "没有可用地址"
+                var paired = false
+                for (peer in offer.candidatePeers()) {
+                    val hello = try {
+                        runBlocking {
+                            directTransport.fetchHelloUnverified(
+                                peer, identity.deviceId, identity.publicKey)
+                        }
+                    } catch (e: Exception) {
+                        lastError = "${peer.host}：${e.message}"
+                        continue
+                    }
+                    if (hello.deviceId != offer.serverId ||
+                        !hello.publicKey.contentEquals(offer.publicKey)
+                    ) {
+                        lastError = "${peer.host}：设备与配对链接不一致（已跳过）"
+                        continue
+                    }
+                    val result = runBlocking {
+                        PairingClient.sendPairOfferConfirm(
+                            peer, identity.deviceId, identity.privateKey, offer)
+                    }
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        when (result) {
+                            PairConfirmResult.Approved ->
+                                confirmRemoteDevice(
+                                    offer.displayName, peer.host, offer.port,
+                                    hello, offer.fingerprintSha256)
+                            is PairConfirmResult.Rejected -> toast(result.reason)
+                            is PairConfirmResult.Failed -> toast(result.reason)
+                        }
+                    }
+                    paired = true
+                    break
+                }
+                if (!paired) {
+                    runOnUiThread {
+                        toast("配对链接连接失败：$lastError。请确认目标设备在线、Hand 在运行，且链接未过期。")
                     }
                 }
             } catch (e: Exception) {
@@ -2921,6 +3032,51 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { toast("重新发现失败：${e.message}") }
             }
         }.start()
+    }
+
+    /**
+     * 查看某台已配对设备上各 Agent 的账号用量（Paseo 式连接第 4 件，
+     * 2026-11-17）：经密封管理通道让 Hand 调用设备上已登录 CLI 本人
+     * 查回套餐/用量/重置时间（凭据不出设备）。结果用对话框逐个 Agent
+     * 一行实话展示：查不到的按 Hand 回的状态显示原因，不拼假数。
+     * 对方 Hand 太旧（不认识 agent_usage）时如实报升级提示。
+     */
+    private fun showDeviceUsage(device: RemoteDevice) {
+        val record = try {
+            pairingSnapshot.load(device.deviceId)
+        } catch (_: Exception) {
+            null
+        }
+        if (record == null || record.state != PairingState.CONFIRMED) {
+            toast("${device.displayName} 未配对：请先完成配对，再查看用量。")
+            return
+        }
+        val peer = device.toDiscoveredPeer(record.fingerprintSha256)
+        val client = wsHandClient(peer)
+        if (client == null) {
+            toast("配对记录里没有对方的公钥：请删除配对并重新配对后再查看用量。")
+            return
+        }
+        toast("正在查询 ${device.displayName} 上的 Agent 用量…")
+        lifecycleScope.launch {
+            when (val result = client.requestAgentUsage(peer)) {
+                is AgentUsageResult.Failed -> toast(result.reason)
+                is AgentUsageResult.Ok -> {
+                    val text = if (result.usages.isEmpty()) {
+                        "对方没有回任何用量（可能没有已发现的 Agent，或对方 Hand 太旧）。"
+                    } else {
+                        result.usages.joinToString("\n") { usage ->
+                            "${usage.agentId}：${usage.summaryLine()}"
+                        }
+                    }
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("${device.displayName} · 账号用量")
+                        .setMessage(text)
+                        .setPositiveButton("好", null)
+                        .show()
+                }
+            }
+        }
     }
 
     /**
@@ -7555,6 +7711,7 @@ class MainActivity : AppCompatActivity() {
             },
             onAddRemote = { showAddRemoteDeviceDialog() },
             onRediscover = { device -> rediscoverDeviceAgents(device) },
+            onUsage = { device -> showDeviceUsage(device) },
             onEditRemote = { device -> showEditRemoteDeviceDialog(device) },
             onUpdateHand = { device -> handUpdateController?.updateDevice(device) },
         )

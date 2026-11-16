@@ -32,6 +32,8 @@ data class DeviceAgentDiscoveryResult(
     val skippedUnavailable: List<String>,
     /** 同 agentId 已属另一台设备，存不下，已跳过。 */
     val skippedCollision: List<String>,
+    /** hello 报了实测模型数的 Agent（agentId → 模型数），未知不在表里。 */
+    val modelCounts: Map<String, Int> = emptyMap(),
 )
 
 object DeviceAgentDiscovery {
@@ -54,6 +56,9 @@ object DeviceAgentDiscovery {
         val alreadyPresent = mutableListOf<String>()
         val skippedUnavailable = mutableListOf<String>()
         val skippedCollision = mutableListOf<String>()
+        val modelCounts = helloAgents
+            .mapNotNull { info -> info.modelCount?.let { info.agentId to it } }
+            .toMap()
         val byId = existing.associateBy { it.agentId }
         for (info in helloAgents) {
             if (!info.available || info.folder.isBlank()) {
@@ -90,6 +95,7 @@ object DeviceAgentDiscovery {
             alreadyPresent = alreadyPresent,
             skippedUnavailable = skippedUnavailable,
             skippedCollision = skippedCollision,
+            modelCounts = modelCounts,
         )
     }
 
@@ -100,6 +106,11 @@ object DeviceAgentDiscovery {
         if (result.alreadyPresent.isNotEmpty()) parts += "${result.alreadyPresent.size} 个已在"
         if (result.skippedUnavailable.isNotEmpty()) parts += "${result.skippedUnavailable.size} 个不可用已跳过"
         if (result.skippedCollision.isNotEmpty()) parts += "${result.skippedCollision.size} 个与别台设备重名已跳过"
+        if (result.modelCounts.isNotEmpty()) {
+            val models = result.modelCounts.entries
+                .joinToString("、") { (id, count) -> "$id $count 个模型" }
+            parts += "模型数：$models"
+        }
         if (parts.isEmpty()) return "没有发现可用 Agent"
         return parts.joinToString("，")
     }

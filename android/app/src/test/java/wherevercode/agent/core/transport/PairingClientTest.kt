@@ -275,6 +275,74 @@ class PairingClientTest {
         assertTrue((result as PairConfirmResult.Failed).reason.contains("无法识别"))
     }
 
+    /**
+     * 配对链接路径的真 Hand 用例：用另一个 CLI 进程对同一 state dir
+     * 跑 pair-offer --json 拿到真实链接 → PairingOfferParser 解析 →
+     * sendPairOfferConfirm 密封确认 → 应批准；第二台手机重用同一条
+     * 链接 → 应被拒（pair_offer_used 的中文原话）。
+     */
+    private fun generateOfferLink(hand: RealHand): String {
+        val handPath = findHandScriptForTest()
+        val proc = ProcessBuilder(
+            "python3", handPath,
+            "--state-dir", hand.stateDir.absolutePath,
+            "--device-id", "test-hand",
+            "--display-name", "Test Hand",
+            "pair-offer", "--json",
+        ).redirectErrorStream(true).start()
+        val out = proc.inputStream.bufferedReader().readText()
+        check(proc.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
+            "pair-offer CLI 15 秒没结束：$out"
+        }
+        return JSONObject(out).getString("link")
+    }
+
+    private fun findHandScriptForTest(): String {
+        var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (dir != null) {
+            for (relative in listOf(
+                "app/src/main/assets/install/hand_server.py",
+                "android/app/src/main/assets/install/hand_server.py",
+            )) {
+                val file = File(dir, relative)
+                if (file.isFile) return file.absolutePath
+            }
+            dir = dir.parentFile
+        }
+        throw IllegalStateException("找不到 hand_server.py")
+    }
+
+    @Test
+    fun `pair offer secret is approved by the real hand and is single use`() {
+        assumeLoopback()
+        RealHand.start().use { hand ->
+            val link = generateOfferLink(hand)
+            val parsed = PairingOfferParser.parse(link)
+            assertTrue("offer 解析失败：$parsed", parsed is PairingOfferParse.Ok)
+            val offer = (parsed as PairingOfferParse.Ok).offer
+            assertEquals("test-hand", offer.serverId)
+            assertTrue(offer.publicKey.contentEquals(hand.serverPublicKey))
+            val phone = DeviceKeys.generateKeyPair()
+            val result = runBlocking {
+                PairingClient.sendPairOfferConfirm(
+                    peer(hand), "phone-test", phone.privateKey, offer,
+                )
+            }
+            assertEquals(PairConfirmResult.Approved, result)
+            // 一次性：另一台手机重用同一条链接，必须被拒并给原话。
+            val phone2 = DeviceKeys.generateKeyPair()
+            val reused = runBlocking {
+                PairingClient.sendPairOfferConfirm(
+                    peer(hand), "phone-two", phone2.privateKey, offer,
+                )
+            }
+            assertTrue("重用应被拒，实际：$reused", reused is PairConfirmResult.Rejected)
+            assertTrue(
+                (reused as PairConfirmResult.Rejected).reason.contains("已经用过"),
+            )
+        }
+    }
+
     @Test
     fun `unreachable hand fails with reason`() {
         val phone = DeviceKeys.generateKeyPair()
