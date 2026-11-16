@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.EditText
 import android.widget.TextView
@@ -182,9 +183,12 @@ class V5RuntimeInstrumentation : Instrumentation() {
             // (~1 s+) plus idle waits let every toast expire before the
             // poll started. Click, screenshot inside the toast window,
             // then poll immediately.
+            armToastListener()
             clickNodeNoSettle(item)
+            SystemClock.sleep(800)
             try { capture("wt-${entry.id}") } catch (_: Throwable) { }
-            val hinted = pollToastContains("待开发", 3_500)
+            val hinted = pollToastEvent("待开发", 3_000) || pollToastContains("待开发", 800)
+            disarmToastListener()
             dismissDialogs()
             if (hinted) wtRecord(entry, "TODO_OK", "honest 待开发 toast shown")
             else wtRecord(entry, "FAIL", "TODO entry gave no 待开发 hint when tapped")
@@ -381,6 +385,41 @@ class V5RuntimeInstrumentation : Instrumentation() {
         val text = node.text?.toString() ?: throw IllegalStateException("node not clickable")
         val view = findClickableByText(text) ?: throw IllegalStateException("node not clickable: $text")
         click(view)
+    }
+
+    @Volatile
+    private var lastToastTexts: List<String> = emptyList()
+
+    /** Toasts surface as TYPE_NOTIFICATION_STATE_CHANGED events whose
+     * text list carries the toast message (the classic UiAutomator
+     * toast-detection path). getWindows() does NOT expose toast
+     * windows on this emulator/API level — runs 43962532904 and
+     * 43966858167 polled windows and saw nothing while the shared
+     * dialog listener demonstrably fires (implemented rows navigate). */
+    private fun armToastListener() {
+        lastToastTexts = emptyList()
+        try {
+            uiAutomation.setOnAccessibilityEventListener { event ->
+                if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+                    val texts = event.text.map { it.toString() }
+                    if (texts.isNotEmpty()) lastToastTexts = texts
+                }
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun disarmToastListener() {
+        try { uiAutomation.setOnAccessibilityEventListener(null) } catch (_: Throwable) { }
+    }
+
+    private fun pollToastEvent(text: String, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (lastToastTexts.any { it.contains(text) }) return true
+            SystemClock.sleep(100)
+        }
+        return lastToastTexts.any { it.contains(text) }
     }
 
     private fun pollToastContains(text: String, timeoutMs: Long): Boolean {
