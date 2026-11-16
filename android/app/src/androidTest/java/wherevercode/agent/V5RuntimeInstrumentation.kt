@@ -175,14 +175,24 @@ class V5RuntimeInstrumentation : Instrumentation() {
         val label = if (entry.status == EntryRegistry.Status.TODO) "${entry.title}（待开发）" else entry.title
         val item = findDialogItem(label, entry.title)
             ?: throw IllegalStateException("feature-center row not found: $label")
-        clickNode(item)
-        settle()
         if (entry.status == EntryRegistry.Status.TODO) {
-            val hinted = pollToastContains("待开发", 2_500)
+            // Toast timing is critical: a LENGTH_SHORT toast lives ~2 s,
+            // so do NOT settle before polling — run 43962532904 recorded
+            // all 56 TODO entries as FAIL because two settle() calls
+            // (~1 s+) plus idle waits let every toast expire before the
+            // poll started. Click, screenshot inside the toast window,
+            // then poll immediately.
+            clickNodeNoSettle(item)
+            try { capture("wt-${entry.id}") } catch (_: Throwable) { }
+            val hinted = pollToastContains("待开发", 3_500)
             dismissDialogs()
             if (hinted) wtRecord(entry, "TODO_OK", "honest 待开发 toast shown")
             else wtRecord(entry, "FAIL", "TODO entry gave no 待开发 hint when tapped")
-        } else {
+            return
+        }
+        clickNode(item)
+        settle()
+        run {
             capture("wt-${entry.id}")
             dismissDialogs()
             // App must still be alive and able to open the drawer.
@@ -190,6 +200,23 @@ class V5RuntimeInstrumentation : Instrumentation() {
             find { it.tag == "drawer_close" || it.tag == "nav_chat" }?.let { }
             wtRecord(entry, "PASS", "opened from feature center without crash")
         }
+    }
+
+    /** ACTION_CLICK without the settle() wait (toast-window timing). */
+    private fun clickNodeNoSettle(node: AccessibilityNodeInfo) {
+        var current: AccessibilityNodeInfo? = node
+        var hops = 0
+        while (current != null && hops < 8) {
+            if (current.isClickable) {
+                check(current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    "node click rejected"
+                }
+                return
+            }
+            current = current.parent
+            hops++
+        }
+        throw IllegalStateException("node not clickable")
     }
 
     private fun openFeatureCenter() {
