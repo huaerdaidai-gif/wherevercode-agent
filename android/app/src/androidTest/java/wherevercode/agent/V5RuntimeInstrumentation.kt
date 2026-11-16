@@ -404,7 +404,7 @@ class V5RuntimeInstrumentation : Instrumentation() {
                 if (view is TextView && match(view.text.toString())) {
                     var current: View? = view
                     var hops = 0
-                    while (current != null && hops < 6) {
+                    while (current != null && hops < 10) {
                         if (current.isClickable) return current
                         current = current.parent as? View
                         hops++
@@ -433,7 +433,18 @@ class V5RuntimeInstrumentation : Instrumentation() {
         ?: error("Missing visible tag: $tag"))
 
     private fun click(view: View) {
-        runOnMainSync { check(view.isShown && view.performClick()) { "View cannot be clicked" } }
+        // The check must NOT run inside runOnMainSync: an exception there
+        // is rethrown on the main thread and kills the whole process
+        // (run 43961215513 crashed at the 6th walkthrough entry).
+        var ok = false
+        runOnMainSync {
+            ok = try {
+                view.isShown && view.performClick()
+            } catch (_: Throwable) {
+                false
+            }
+        }
+        check(ok) { "View cannot be clicked" }
         settle()
     }
 
