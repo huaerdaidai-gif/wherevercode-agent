@@ -881,7 +881,7 @@ public actor HandClient {
         content: String,
         encoding: String = "utf-8"
     ) async throws -> String {
-        var callArgs: [String: Any] = ["path": path, "content": content]
+        var callArgs: [String: String] = ["path": path, "content": content]
         if encoding != "utf-8" {
             callArgs["encoding"] = encoding
         }
