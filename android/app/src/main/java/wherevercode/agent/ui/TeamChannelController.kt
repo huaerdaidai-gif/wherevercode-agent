@@ -217,6 +217,13 @@ class TeamChannelController(
         root.addView(inputBar)
     }
 
+    /**
+     * 底部输入栏（频道对话框化，2026-11-17）：与单 Agent 对话同一
+     * 对话框形态——底部只一条输入行（消息输入 + 发送），消息流在
+     * 上、输入在下。原并排的第二条扇出输入行撤下：扇出提问归位到
+     * 消息流里的「只读扇出」区（见 fanoutSection），呈现与对话的
+     * 执行结果同在消息流内，不再做成控制台式的双输入栏。
+     */
     private fun buildInputBar(): LinearLayout {
         val bar = UiKit.vertical(context).apply {
             setPadding(dp(16), dp(8), dp(16), dp(12))
@@ -235,20 +242,6 @@ class TeamChannelController(
             },
         )
         bar.addView(sendRow)
-        val fanoutRow = UiKit.horizontal(context).apply { setPadding(0, dp(8), 0, 0) }
-        fanoutRow.addView(
-            fanoutInput.apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            },
-        )
-        fanoutRow.addView(
-            UiKit.text(context, "只读问大家", 12f, R.color.accent, bold = true).apply {
-                setBackgroundResource(R.drawable.bg_chip_accent)
-                setPadding(dp(14), dp(8), dp(14), dp(8))
-                setOnClickListener { startFanout() }
-            },
-        )
-        bar.addView(fanoutRow)
         return bar
     }
 
@@ -487,9 +480,27 @@ class TeamChannelController(
             col.addView(note("正在问大家…分支回齐后这里会列出摘要。"))
         }
         if (snapshot.fanoutRuns.isEmpty() && !snapshot.fanoutRunning) {
-            col.addView(note("还没有问过大家。在下面输入问题，点“只读问大家”。"))
+            col.addView(note("还没有问过大家。在下方输入问题，点“只读问大家”。"))
         }
         snapshot.fanoutRuns.forEach { run -> col.addView(fanoutRunRow(run)) }
+        // 扇出提问输入（频道对话框化，2026-11-17）：从底部输入栏归位
+        // 到本区末尾——问与答同在消息流里，底部栏只留频道消息输入。
+        // fanoutInput 是单实例，每次 render 重建本区时先从旧父容器摘下。
+        (fanoutInput.parent as? android.view.ViewGroup)?.removeView(fanoutInput)
+        val fanoutRow = UiKit.horizontal(context).apply { setPadding(0, dp(8), 0, 0) }
+        fanoutRow.addView(
+            fanoutInput.apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        fanoutRow.addView(
+            UiKit.text(context, "只读问大家", 12f, R.color.accent, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip_accent)
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                setOnClickListener { startFanout() }
+            },
+        )
+        col.addView(fanoutRow)
         return col
     }
 
