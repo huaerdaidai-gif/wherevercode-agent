@@ -87,6 +87,7 @@ jobs:
             xcrun xcresulttool get test-results summary --path .build/WalkthroughResults.xcresult > .build/walkthrough-export/test-summary.json || true
           fi
           cp .build-walkthrough.log .build/walkthrough-export/ 2>/dev/null || true
+          grep -a "WALK89_PROGRESS" .build-walkthrough.log > .build/walkthrough-export/progress.txt 2>/dev/null || true
           find .build/walkthrough-export -type f | sort | head -120 || true
 
       - name: Upload walkthrough evidence
@@ -94,6 +95,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: walkthrough89-ios-${{ github.sha }}
-          path: .build/walkthrough-export
+          path: |
+            .build/walkthrough-export
+            .build-walkthrough.log
           retention-days: 30
           if-no-files-found: warn

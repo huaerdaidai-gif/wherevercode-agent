@@ -132,8 +132,10 @@ final class Walkthrough89UITests: XCTestCase {
             app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 20),
             "chat home did not appear after launch"
         )
-        for entry in Self.entries {
-            walk(app, entry)
+        var sheetOpen = false
+        for (index, entry) in Self.entries.enumerated() {
+            print("WALK89_PROGRESS \(index + 1)/89 \(entry.id)")
+            sheetOpen = walk(app, entry, sheetAlreadyOpen: sheetOpen)
         }
         let pass = results.filter { $0.contains("|PASS|") }.count
         let todoOk = results.filter { $0.contains("|TODO_OK|") }.count
@@ -147,20 +149,21 @@ final class Walkthrough89UITests: XCTestCase {
 
     // MARK: - Per-entry walk
 
-    private func walk(_ app: XCUIApplication, _ entry: WEntry) {
+    /// Returns whether the feature-center sheet is open afterwards.
+    private func walk(_ app: XCUIApplication, _ entry: WEntry, sheetAlreadyOpen: Bool) -> Bool {
         let statusLabel = entry.implemented ? "IMPLEMENTED" : "TODO"
-        guard openFeatureCenter(app) else {
+        guard openFeatureCenter(app, alreadyOpen: sheetAlreadyOpen) else {
             record(entry, statusLabel, "FAIL", "feature center did not open")
             recover(app)
-            return
+            return false
         }
         guard let row = findRow(app, id: entry.id) else {
             record(entry, statusLabel, "FAIL", "row not found in feature center list")
             scrollListToTop(app)
-            return
+            return true
         }
         row.tap()
-        Thread.sleep(forTimeInterval: 1.0)
+        Thread.sleep(forTimeInterval: 0.6)
         if entry.implemented {
             // Sheet must be gone and the app alive on some real page.
             let sheetGone = !app.buttons.matching(
@@ -175,19 +178,21 @@ final class Walkthrough89UITests: XCTestCase {
                 record(entry, statusLabel, "FAIL", "app not in foreground after tap (crash?)")
             }
             goBackToHome(app)
+            return false
         } else {
             let expected = entry.todoMessage ?? "【待开发】该功能尚未开发"
             scrollListToTop(app)
             let hint = app.staticTexts.matching(
                 NSPredicate(format: "label CONTAINS %@", String(expected.prefix(10)))
             ).firstMatch
-            let hinted = hint.waitForExistence(timeout: 5)
+            let hinted = hint.waitForExistence(timeout: 3)
             snap(app, "wt-\(entry.id)")
             if hinted {
                 record(entry, statusLabel, "TODO_OK", "honest todo hint shown")
             } else {
                 record(entry, statusLabel, "FAIL", "TODO entry showed no honest hint")
             }
+            return true
         }
     }
 
@@ -197,33 +202,24 @@ final class Walkthrough89UITests: XCTestCase {
 
     // MARK: - Navigation helpers
 
-    private func openFeatureCenter(_ app: XCUIApplication) -> Bool {
-        // Already open? The sheet's navigation title is 全部功能 (89 项).
-        if app.navigationBars.matching(
-            NSPredicate(format: "identifier CONTAINS %@", "全部功能")
-        ).firstMatch.exists {
-            scrollListToTop(app)
-            return true
-        }
-        let anyRow = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "home_dev_app")
-        ).firstMatch
-        if anyRow.exists {
+    private func openFeatureCenter(_ app: XCUIApplication, alreadyOpen: Bool) -> Bool {
+        if alreadyOpen {
+            // Sheet stayed open after a TODO tap: just rewind the list.
             scrollListToTop(app)
             return true
         }
         let menu = app.buttons["navigation.menu"].firstMatch
-        guard menu.waitForExistence(timeout: 8) else { return false }
+        guard menu.waitForExistence(timeout: 6) else { return false }
         menu.tap()
         let centerByRoute = app.buttons["drawer.route.feature_center"].firstMatch
         let centerByName = app.buttons["drawer.featureCenter"].firstMatch
-        let center = centerByRoute.exists ? centerByRoute : centerByName
-        guard center.waitForExistence(timeout: 8) else { return false }
+        let center = centerByRoute.waitForExistence(timeout: 5) ? centerByRoute : centerByName
+        guard center.exists else { return false }
         center.tap()
         let opened = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "home_dev_app")
         ).firstMatch
-        return opened.waitForExistence(timeout: 10)
+        return opened.waitForExistence(timeout: 8)
     }
 
     private func findRow(_ app: XCUIApplication, id: String) -> XCUIElement? {
@@ -231,16 +227,15 @@ final class Walkthrough89UITests: XCTestCase {
             NSPredicate(format: "label CONTAINS %@", id)
         ).firstMatch
         var swipes = 0
-        while !row.isHittable && swipes < 30 {
+        while !row.isHittable && swipes < 16 {
             app.swipeUp()
             swipes += 1
-            if row.waitForExistence(timeout: 1) && row.isHittable { break }
         }
         return row.isHittable ? row : nil
     }
 
     private func scrollListToTop(_ app: XCUIApplication) {
-        for _ in 0..<8 { app.swipeDown() }
+        for _ in 0..<5 { app.swipeDown() }
     }
 
     private func goBackToHome(_ app: XCUIApplication) {
