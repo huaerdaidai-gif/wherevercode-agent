@@ -200,7 +200,17 @@ class V5RuntimeInstrumentation : Instrumentation() {
             }
             settle()
         }
-        check(findNodeByText(text) != null) { "Dialog row never appeared: $text" }
+        check(findNodeByText(text) != null) { "Dialog row never appeared: $text; diag: ${dialogDiagnostics()}" }
+    }
+
+    /** Failure diagnostics: what the accessibility tree actually sees. */
+    private fun dialogDiagnostics(): String {
+        val nodes = allWindowNodes()
+        val texts = nodes.mapNotNull { it.text?.toString() }.take(60)
+        val classes = nodes.mapNotNull { it.className?.toString() }.distinct().take(20)
+        return "windows=${uiAutomation.windows.size} nodes=${nodes.size} " +
+            "hasListView=${nodes.any { it.className?.toString() == "android.widget.ListView" }} " +
+            "classes=$classes texts=$texts"
     }
 
     private fun clickDialogItem(text: String) {
