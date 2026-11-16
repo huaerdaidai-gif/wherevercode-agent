@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ListView
 import android.widget.TextView
 import java.io.File
 
@@ -96,12 +95,12 @@ class V5RuntimeInstrumentation : Instrumentation() {
             open("nav_chat")
             clickId(R.id.buttonAgentSelect)
             val pickerDeadline = SystemClock.elapsedRealtime() + 10_000
-            while (findInWindows { it is TextView && it.text.toString() == "选择对话方" } == null &&
+            while (findNodeByText("选择对话方") == null &&
                 SystemClock.elapsedRealtime() < pickerDeadline) {
                 SystemClock.sleep(100)
                 waitForIdleSync()
             }
-            check(findInWindows { it is TextView && it.text.toString() == "选择对话方" } != null) {
+            check(findNodeByText("选择对话方") != null) {
                 "Partner picker did not open from the chat partner capsule"
             }
             capture("12-partner-picker")
@@ -153,47 +152,58 @@ class V5RuntimeInstrumentation : Instrumentation() {
         return result
     }
 
-    /** Dialog windows (AlertDialog) live outside the activity window: search every window root. */
-    private fun findInWindows(predicate: (View) -> Boolean): View? {
-        var result: View? = null
-        for (window in uiAutomation.windows) {
-            val root = window.root ?: continue
-            fun visit(view: View): View? {
-                if (predicate(view)) return view
-                if (view is ViewGroup) for (i in 0 until view.childCount) {
-                    visit(view.getChildAt(i))?.let { return it }
-                }
-                return null
-            }
-            visit(root)?.let { result = it }
-            if (result != null) break
+    /**
+     * Dialog windows (AlertDialog) live outside the activity window and
+     * UiAutomation exposes them as accessibility node trees, not Views:
+     * search every window root's node tree by exact visible text.
+     */
+    private fun collectNodes(
+        node: android.view.accessibility.AccessibilityNodeInfo,
+        out: MutableList<android.view.accessibility.AccessibilityNodeInfo>,
+    ) {
+        out += node
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { collectNodes(it, out) }
         }
-        return result
     }
 
-    private fun dialogListWith(text: String): ListView? =
-        findInWindows {
-            it is ListView && (0 until it.adapter.count).any { i -> it.adapter.getItem(i)?.toString() == text }
-        } as? ListView
+    private fun allWindowNodes(): List<android.view.accessibility.AccessibilityNodeInfo> {
+        val out = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
+        for (window in uiAutomation.windows) {
+            window.root?.let { collectNodes(it, out) }
+        }
+        return out
+    }
 
+    private fun findNodeByText(text: String): android.view.accessibility.AccessibilityNodeInfo? =
+        allWindowNodes().firstOrNull { it.text?.toString() == text }
+
+    /** Scroll the visible dialog list until the row with [text] is in the tree. */
     private fun scrollDialogListTo(text: String) {
-        val list = dialogListWith(text) ?: error("No dialog list containing: $text")
-        val position = (0 until list.adapter.count)
-            .first { list.adapter.getItem(it)?.toString() == text }
-        runOnMainSync { list.smoothScrollToPosition(position) }
-        settle()
+        var attempts = 0
+        while (findNodeByText(text) == null && attempts < 15) {
+            val list = allWindowNodes().firstOrNull {
+                it.className?.toString() == "android.widget.ListView" && it.isScrollable
+            } ?: error("No scrollable dialog list while looking for: $text")
+            runOnMainSync {
+                list.performAction(
+                    android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+                )
+            }
+            settle()
+            attempts++
+        }
+        check(findNodeByText(text) != null) { "Dialog row never appeared: $text" }
     }
 
     private fun clickDialogItem(text: String) {
-        val list = dialogListWith(text) ?: error("No dialog list containing: $text")
-        val position = (0 until list.adapter.count)
-            .first { list.adapter.getItem(it)?.toString() == text }
-        runOnMainSync { list.smoothScrollToPosition(position) }
-        settle()
-        val row = findInWindows { it is TextView && it.text.toString() == text }
-            ?: error("Dialog row not visible: $text")
+        scrollDialogListTo(text)
+        var node = findNodeByText(text) ?: error("Dialog row not found: $text")
+        while (!node.isClickable) {
+            node = node.parent ?: error("Dialog row is not clickable: $text")
+        }
         runOnMainSync {
-            check(list.performItemClick(row, position, list.adapter.getItemId(position))) {
+            check(node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
                 "Dialog item cannot be clicked: $text"
             }
         }
