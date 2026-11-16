@@ -270,8 +270,9 @@
                     android:ellipsize="end"
                     android:contentDescription="选择 Agent" />
 
-                <!-- 设置清理 2（2026-11-11，Claude 标准）：当前大脑胶囊，
-                     点按打开设置页大脑列表切换。 -->
+                <!-- 当前大脑胶囊：只作状态显示（大脑降级 2026-11-17：
+                     原点按跳设置页大脑列表的入口已撤下，大脑管理只从
+                     「全部功能」的大脑枢纽进入）。 -->
                 <TextView
                     android:id="@+id/brainCapsule"
                     android:layout_width="wrap_content"
@@ -284,7 +285,7 @@
                     android:text="未连接"
                     android:textColor="@color/home_text"
                     android:textSize="12sp"
-                    android:contentDescription="当前大脑，点按切换" />
+                    android:contentDescription="当前大脑" />
 
                 <!-- 大脑/Agent 边界（maintainer 2026-11-12）：显式标任务开关——
                      发消息时明确说“这句是任务”，不用靠 App 猜。点按切换，

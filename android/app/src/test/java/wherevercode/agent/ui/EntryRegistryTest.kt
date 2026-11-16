@@ -27,15 +27,34 @@ class EntryRegistryTest {
     }
 
     @Test
-    fun `home has four suggestion pills and three top entries`() {
+    fun `home has four suggestion pills and two top entries`() {
         assertEquals(
             listOf("home_dev_app", "home_import_project", "home_organize_team", "home_automation"),
             EntryRegistry.homeSuggestions().map { it.id },
         )
         assertEquals(
-            listOf("home_search", "home_brain", "home_new"),
+            listOf("home_search", "home_new"),
             EntryRegistry.byGroup(Group.HOME_TOP).map { it.id },
         )
+    }
+
+    @Test
+    fun `brain is demoted to feature center only`() {
+        // 大脑降级（Funk 2026-11-17 定）：首页顶栏与抽屉一级入口无大脑；
+        // 旧 home_brain 快捷入口已撤下。
+        assertEquals(null, EntryRegistry.find("home_brain"))
+        assertFalse(EntryRegistry.byGroup(Group.HOME_TOP).any { it.id.contains("brain") })
+        assertFalse(EntryRegistry.byGroup(Group.DRAWER_TOP).any { it.id.contains("brain") })
+        // 大脑只在「全部功能」（FEATURE 组，父入口 nav_feature_center）里
+        // 一条枢纽入口：点开分模型对话 / 大脑管理两路（见 MainActivity
+        // showBrainHubDialog）；适配器与管理页本体不删。
+        val brain = EntryRegistry.find("feature_brain")
+        assertEquals("大脑", brain?.title)
+        assertEquals(Group.FEATURE, brain?.group)
+        assertEquals("nav_feature_center", brain?.parentId)
+        assertEquals(Status.IMPLEMENTED, brain?.status)
+        assertEquals(EntryRegistry.TargetKind.ACTION, brain?.targetKind)
+        assertEquals("open_brain_hub", brain?.target)
     }
 
     @Test

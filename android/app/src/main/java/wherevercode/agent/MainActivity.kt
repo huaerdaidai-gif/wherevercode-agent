@@ -2120,9 +2120,11 @@ class MainActivity : AppCompatActivity() {
         }
         // V5 C2-3-R1：原型图输入行里的 Agent 选择器（已有选 Agent 对话框）。
         buttonAgentSelect.setOnClickListener { showSelectAgentDialog() }
-        // 设置清理 2（2026-11-11，Claude 标准）：当前大脑胶囊，点按打开
-        // 设置页大脑列表切换（列表本身就是干净的切换器）。
-        brainCapsule.setOnClickListener { showEntry(DrawerController.ID_SETTINGS) }
+        // 大脑降级（2026-11-17）：胶囊只作状态显示（当前模型名，
+        // 只在模型对话里出现，Agent 对话时隐藏——规则不变），不再是
+        // 入口：原点按跳设置页大脑列表的接线撤下，大脑管理只从
+        // 「全部功能」的大脑枢纽进入。模型切换走对话方选择器
+        // （选模型即切换当前模型，见 showSelectAgentDialog）。
         // V5 C2-3-R1 / maintainer 02:42：工作模式 id 持久化位（接线口子）。
         // 当前只有对话协作已实现；切换 UI 是第二步的活，这里只读存量、
         // 不展示切换、不改模式。
@@ -2199,7 +2201,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showChatModePicker() {
         val current = ChatMode.forConversation(chatViewModel.selectedAgent)
-        val modes = ChatMode.values()
+        // 大脑降级（2026-11-17）：切换列表只列单兵/团队（见
+        // ChatMode.pickerModes）；模型对话只从「全部功能」大脑枢纽进入。
+        val modes = ChatMode.pickerModes()
         val labels = modes.map { mode ->
             val mark = if (mode == current) "● " else ""
             "$mark${mode.label} —— ${mode.description}"
@@ -2228,160 +2232,101 @@ class MainActivity : AppCompatActivity() {
             // 的不在这里出现（也不进建议）；全停用时如实提示去 Agent 页
             // 重新启用，不假装“暂无已添加 Agent”。
             val enabled = agents.enabledAgents()
-            val suggestion = suggestAgentForCurrentChat(enabled)
+            // 自选模式（Funk 2026-11-17 定版）：选择器同时列已配置的
+            // 模型——用户选哪个 Agent 或哪个模型，就由它来对话并在
+            // 对话中执行任务；不再算「建议」搞大脑背后的自动路由
+            // （原 suggestAgentForCurrentChat 已摘除）。
+            val models = try {
+                brainComponents?.let { comps ->
+                    comps.configStore.listConfigs()
+                        .filter { comps.isBrainConfigured(it.brainId) }
+                } ?: emptyList()
+            } catch (_: Exception) {
+                emptyList()
+            }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                showSelectAgentDialogWithSuggestion(enabled, suggestion, allDisabled = agents.isNotEmpty() && enabled.isEmpty())
+                showPartnerPicker(enabled, models, allDisabled = agents.isNotEmpty() && enabled.isEmpty())
             }
         }.start()
     }
 
-    private sealed interface AgentPickerRow {
-        data class Suggested(val decision: RoutingDecision, val agent: AgentRecord) : AgentPickerRow
-        data class Plain(val agent: AgentRecord) : AgentPickerRow
+    /** 对话方选择行（自选模式）：Agent 行与模型行，用户点哪行就由谁对话。 */
+    private sealed interface PartnerRow {
+        data class Agent(val agent: AgentRecord) : PartnerRow
+        data class Model(val brainId: String, val label: String) : PartnerRow
     }
 
-    private fun showSelectAgentDialogWithSuggestion(
+    /**
+     * 对话方选择器（自选模式，Funk 2026-11-17 定版）：列启用的 Agent
+     * 与已配置的模型，用户自己勾选——选 Agent 就跟该 Agent 一对一
+     * 直连对话；选模型就由该模型对话并在对话中执行任务。没有自动
+     * 推荐行、没有背后的路由计算（原「★ 建议」行与建议计算已摘除）。
+     */
+    private fun showPartnerPicker(
         agents: List<AgentRecord>,
-        suggestion: AgentPickerRow.Suggested?,
+        models: List<BrainConfig>,
         allDisabled: Boolean = false,
     ) {
-        if (agents.isEmpty()) {
+        if (agents.isEmpty() && models.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle("选 Agent")
+                .setTitle("选择对话方")
                 .setMessage(
-                    if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选。"
-                    else "暂无已添加 Agent",
+                    if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选；也可以先配置一个模型来对话。"
+                    else "暂无可选对话方：先添加 Agent，或在「全部功能 → 大脑管理」里配置一个模型。",
                 )
                 .setPositiveButton("去 Agent 页添加") { _, _ -> showEntry(DrawerController.ID_AGENTS_TEAM) }
+                .setNeutralButton("去配置模型") { _, _ -> showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
                 .setNegativeButton("取消", null)
                 .show()
             return
         }
-        val rows = mutableListOf<AgentPickerRow>()
-        suggestion?.let { rows += it }
-        agents.forEach { rows += AgentPickerRow.Plain(it) }
+        val rows = mutableListOf<PartnerRow>()
+        agents.forEach { rows += PartnerRow.Agent(it) }
+        models.forEach { rows += PartnerRow.Model(it.brainId, modelRowLabel(it)) }
         val labels = rows.map { row ->
             when (row) {
-                is AgentPickerRow.Suggested ->
-                    "★ 建议：${row.agent.displayName} —— ${row.decision.shortReason}"
-                is AgentPickerRow.Plain ->
+                is PartnerRow.Agent ->
                     row.agent.displayName + if (row.agent.dispatchable) "" else "（仅对话）"
+                is PartnerRow.Model -> row.label
             }
         }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("选 Agent")
+            .setTitle("选择对话方")
             .setItems(labels) { _, which ->
                 when (val row = rows[which]) {
-                    is AgentPickerRow.Suggested -> {
-                        // 点建议行 = 确认建议：记下决策，下一条任务建行时绑定。
-                        chatViewModel.acceptSuggestedAgent(row.decision.decisionId, row.agent.agentId)
-                        openAgentSession(row.agent)
-                    }
-                    is AgentPickerRow.Plain -> {
-                        // 点普通行 = 改派/手动选：建议作废，不再绑定。
+                    is PartnerRow.Agent -> {
                         chatViewModel.clearPendingRouting()
                         openAgentSession(row.agent)
                     }
+                    is PartnerRow.Model -> selectModelPartner(row.brainId)
                 }
             }
             .setNegativeButton("取消", null)
             .show()
     }
 
+    /** 模型行文案：配置名 + 模型名（有才带），当前所选模型带 ●。 */
+    private fun modelRowLabel(config: BrainConfig): String {
+        val current = brainComponents?.configStore?.currentBrainId() == config.brainId
+        val model = config.model?.takeIf { it.isNotBlank() }
+        val base = if (model != null) "模型：${config.label}（$model）" else "模型：${config.label}"
+        return if (current) "● $base" else base
+    }
+
     /**
-     * P1 建议：按当前聊天项目 + 开发任务类型跑一遍确定性路由。
-     * 任何一步失败都返回 null（无建议、对话框照旧），绝不因建议
-     * 算不出来就挡住选 Agent。路由决策记进日志（供 eval 回看），
-     * 只有算出首选时才返回。
+     * 选模型作对话方（自选模式）：把该模型设为当前模型后开新对话——
+     * send() 每轮重读 currentBrainId，下一句即由所选模型回答与执行；
+     * 不经任何自动路由。
      */
-    private fun suggestAgentForCurrentChat(agents: List<AgentRecord>): AgentPickerRow.Suggested? {
-        if (agents.isEmpty()) return null
-        return try {
-            val comps = brainComponents
-            val evalLogStore = comps?.evalLogStore ?: SharedPreferencesEvalLogStore(this)
-            val routingLog = comps?.routingDecisionLog ?: SharedPreferencesRoutingDecisionLog(this)
-            val cardStore = comps?.capabilityCardStore ?: SharedPreferencesCapabilityCardStore(this)
-            val devices = try {
-                remoteDeviceStore.listDevices()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            val pairedDeviceIds = devices.mapNotNull { device ->
-                device.deviceId.takeIf {
-                    pairingSnapshot.load(it)?.state == PairingState.CONFIRMED
-                }
-            }.toSet()
-            val projectId = try {
-                chatViewModel.currentProjectId()
-            } catch (_: Exception) {
-                null
-            }
-            val projectLocations = if (projectId != null) {
-                try {
-                    projectStore.locationsForProject(projectId)
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            } else {
-                emptyList()
-            }
-            val allLocations = try {
-                projectStore.listProjects().flatMap { project ->
-                    projectStore.locationsForProject(project.projectId)
-                }
-            } catch (_: Exception) {
-                emptyList()
-            }
-            val tasks = try {
-                comps?.taskStore?.listTasks() ?: emptyList()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            val evalEntries = try {
-                evalLogStore.listEntries()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            val now = System.currentTimeMillis() / 1000
-            val cards = CapabilityCards.build(
-                agents = agents,
-                devices = devices,
-                pairedDeviceIds = pairedDeviceIds,
-                allLocations = allLocations,
-                tasks = tasks,
-                evalEntries = evalEntries,
-                helloRepos = try {
-                    cardStore.helloRepos()
-                } catch (_: Exception) {
-                    emptyMap()
-                },
-                nowEpochSeconds = now,
-            )
-            val requirement = RoutingRequirement(
-                projectId = projectId,
-                taskType = TaskType.CODE,
-                allowMetered = false,
-                nowEpochSeconds = now,
-            )
-            val cooldowns = EvalScorecard.consecutiveFailures(evalEntries, now)
-            val decision = CapabilityRouter.route(
-                cards = cards,
-                requirement = requirement,
-                cooldowns = cooldowns,
-                projectHasDeviceLocation = projectLocations.any { it.homeKind == ProjectHomeKind.DEVICE },
-            )
-            try {
-                routingLog.record(decision)
-            } catch (_: Exception) {
-                // 决策日志记失败不影响建议本身。
-            }
-            val chosenId = decision.chosenAgentId ?: return null
-            val agent = agents.firstOrNull { it.agentId == chosenId } ?: return null
-            AgentPickerRow.Suggested(decision, agent)
-        } catch (_: Exception) {
-            null
+    private fun selectModelPartner(brainId: String) {
+        val components = brainComponents ?: run {
+            toast("模型还在加载，请稍候再选。")
+            return
         }
+        components.configStore.setCurrentBrainId(brainId)
+        refreshBrainStatus()
+        newConversationAndShow()
     }
 
     /**
@@ -4750,10 +4695,33 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
                 "open_feature_center" -> showFeatureCenterDialog()
+                "open_brain_hub" -> showBrainHubDialog()
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
         }
+    }
+
+    /**
+     * 大脑枢纽（大脑降级，2026-11-17）：「全部功能」里「大脑」一条的
+     * 落点——模型对话与大脑管理两路都在这里，主界面/主线不再另设
+     * 大脑入口。模型对话 = 开新对话（未选 Agent 的会话，对话方是
+     * 用户当前选定的模型）；大脑管理 = 设置页大脑分节（工具与连接
+     * 入口，与设置共用同一屏、分节在页首）：大脑列表切换、增删改、
+     * 登录与高级配置都在那一页，本体不删。
+     */
+    private fun showBrainHubDialog() {
+        val labels = arrayOf("模型对话", "大脑管理")
+        AlertDialog.Builder(this)
+            .setTitle("大脑")
+            .setItems(labels) { _, which ->
+                when (which) {
+                    0 -> newConversationAndShow()
+                    else -> showEntry(DrawerController.ID_TOOLS_CONNECTIONS)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /**
@@ -9619,12 +9587,13 @@ class MainActivity : AppCompatActivity() {
         chatRouteBanner.text = spannable
         chatRouteBanner.movementMethod = LinkMovementMethod.getInstance()
         chatRouteBanner.visibility = View.VISIBLE
-        // V5 聊天清理 20261111：输入框里的设备/Agent 胶囊与横幅同源刷新——
-        // 未选 Agent 显示“团队 ⌄”，选了显示当前对话方展示名 + ⌄；点按
-        // 开选 Agent 对话框（见 buttonAgentSelect 的点击监听）。
+        // 输入框里的对话方胶囊与横幅同源刷新——未选 Agent 显示当前
+        // 所选模型名 + ⌄（自选模式，2026-11-17：原“团队 ⌄”会误导成
+        // 在跟团队说话），选了 Agent 显示其展示名 + ⌄；点按开对话方
+        // 选择器（见 buttonAgentSelect 的点击监听）。
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
-                "团队 ⌄"
+                "${brainShortLabel()} ⌄"
             } else {
                 "${agent.displayName} ⌄"
             }

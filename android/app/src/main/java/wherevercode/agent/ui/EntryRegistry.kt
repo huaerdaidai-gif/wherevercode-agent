@@ -24,7 +24,7 @@ object EntryRegistry {
     enum class Group {
         /** 首页问候区建议 pill（点按填输入框）。 */
         HOME_SUGGESTION,
-        /** 首页顶栏（搜索 / 大脑 / 新建）。 */
+        /** 首页顶栏（搜索 / 新建）。大脑降级（2026-11-17）：大脑不在首页顶栏露出，只从「全部功能」进入。 */
         HOME_TOP,
         /** V5 默认一级入口。 */
         DRAWER_TOP,
@@ -97,9 +97,6 @@ object EntryRegistry {
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_HISTORY_SEARCH,
             "搜", "ic_search", null, null,
             "快捷入口：与 nav_history 同一目标（会话历史），不重复计数；会话也可从对话入口内访问。"),
-        Entry("home_brain", "大脑", Group.HOME_TOP,
-            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TOOLS_CONNECTIONS,
-            "●", null, null, null, "快捷入口：与 nav_tools 同一目标，不重复计数；点按进模型与连接（设置页工具与连接分节）。"),
         Entry("home_new", "新建", Group.HOME_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_NEW_CONVERSATION,
             "＋", null, null, null, null),
@@ -187,6 +184,13 @@ object EntryRegistry {
             Status.IMPLEMENTED, TargetKind.ACTION, "open_feature_center",
             "功", null, null, null, "打开「全部功能」列表：集中列出全部注册表入口；待开发项点开只给诚实提示。"),
         // ── 非导航功能（从父入口进入）──
+        // 大脑降级（Funk 2026-11-17 定）：大脑从主界面/主线撤下，只保留
+        // 在「全部功能」表里这一条入口；点开是枢纽（模型对话 / 大脑管理），
+        // 大脑适配器与管理页本体不删（管理页 = 设置页大脑分节）。
+        Entry("feature_brain", "大脑", Group.FEATURE,
+            Status.IMPLEMENTED, TargetKind.ACTION, "open_brain_hub",
+            "脑", null, "nav_feature_center", null,
+            "大脑降级后唯一入口（2026-11-17）：枢纽分模型对话与大脑管理两路；主界面/主线不再露出大脑。"),
         Entry("feature_task_detail", "任务详情", Group.FEATURE,
             Status.IMPLEMENTED, TargetKind.SCREEN, "task_detail",
             "任", null, "nav_running_tasks", null,
