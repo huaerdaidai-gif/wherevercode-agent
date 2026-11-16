@@ -169,8 +169,14 @@ class V5RuntimeInstrumentation : Instrumentation() {
 
     private fun allWindowNodes(): List<android.view.accessibility.AccessibilityNodeInfo> {
         val out = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-        for (window in uiAutomation.windows) {
-            window.root?.let { collectNodes(it, out) }
+        // getWindows() returns an empty list in this instrumentation
+        // setup (diagnostics run: windows=0); the active window root —
+        // the dialog while one is open — is the reliable tree.
+        uiAutomation.rootInActiveWindow?.let { collectNodes(it, out) }
+        if (out.isEmpty()) {
+            for (window in uiAutomation.windows) {
+                window.root?.let { collectNodes(it, out) }
+            }
         }
         return out
     }
@@ -208,7 +214,7 @@ class V5RuntimeInstrumentation : Instrumentation() {
         val nodes = allWindowNodes()
         val texts = nodes.mapNotNull { it.text?.toString() }.take(60)
         val classes = nodes.mapNotNull { it.className?.toString() }.distinct().take(20)
-        return "windows=${uiAutomation.windows.size} nodes=${nodes.size} " +
+        return "windows=${uiAutomation.windows.size} activeRoot=${uiAutomation.rootInActiveWindow != null} nodes=${nodes.size} " +
             "hasListView=${nodes.any { it.className?.toString() == "android.widget.ListView" }} " +
             "classes=$classes texts=$texts"
     }
