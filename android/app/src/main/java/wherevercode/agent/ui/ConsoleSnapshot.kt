@@ -262,7 +262,7 @@ object ConsoleSnapshot {
             displayName = "本机 App",
             isSelf = true,
             statusLabel = "在线（本 App 正在运行）",
-            detail = "本地大脑 · 自研核心引擎",
+            detail = "本地核心 · 自研核心引擎",
             taskCount = selfTasks.size,
             lastActivityEpochSeconds = selfTasks.maxOfOrNull { it.updatedAt },
         )

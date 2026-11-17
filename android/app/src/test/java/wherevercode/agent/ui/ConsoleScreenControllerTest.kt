@@ -128,7 +128,7 @@ class ConsoleScreenControllerTest {
         assertContains(texts, "等待审批：write_file")
         // App 自身行在场（首位），成员 Agent 其后。
         assertContains(texts, "本机 App")
-        assertContains(texts, "本地大脑")
+        assertContains(texts, "本地核心")
         assertContains(texts, "Example Agent")
         assertContains(texts, "remote-host")
         assertContains(texts, "已配对")

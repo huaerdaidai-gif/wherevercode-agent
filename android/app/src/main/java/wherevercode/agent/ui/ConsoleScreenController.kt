@@ -650,7 +650,7 @@ class ConsoleScreenController(
                 UiKit.text(
                     context,
                     (if (agent.isSelf) "本机 App" else agent.displayName) +
-                        if (agent.isSelf) " · 本地大脑" else "",
+                        if (agent.isSelf) " · 本地核心" else "",
                     13f,
                     R.color.text_primary,
                     bold = true,
