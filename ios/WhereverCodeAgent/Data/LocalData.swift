@@ -318,6 +318,9 @@ public final class LocalChatModel: ObservableObject {
         } else if let bid = cfg?.brainId, !bid.isEmpty {
             selectedBrain = bid
             selectedAgent = nil
+        } else if let convId = conversationID, let conv = try? data.conversations.getConversation(id: convId), let bid = conv.brainId, !bid.isEmpty {
+            selectedBrain = bid
+            selectedAgent = nil
         } else if let defAid = defaultAgentId, !defAid.isEmpty, let ag = try? data.agents.getAgent(agentId: defAid) {
             selectedAgent = ag
             selectedBrain = defaultBrainId
