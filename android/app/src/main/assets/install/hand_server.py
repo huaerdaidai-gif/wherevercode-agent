@@ -1659,7 +1659,7 @@ class HandServer:
             self._error(conn, session_key, envelope, seq + 1, ERR_WRONG_TARGET,
                         "连接凭证不属于本设备，请重新选择设备。")
             return
-        if self.agent_config(agent_id) is None:
+        if action == "run" and self.agent_config(agent_id) is None:
             self._error(conn, session_key, envelope, seq + 1, ERR_AGENT_NOT_FOUND,
                         f"该设备上没有这个 Agent（{agent_id}）：请先在设备上确认 Agent 已安装。")
             return
