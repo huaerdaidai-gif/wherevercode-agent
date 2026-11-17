@@ -2770,9 +2770,9 @@ public struct ChannelsHomeView: View {
                     V5ChannelItem(
                         id: c.id,
                         name: c.displayName,
-                        topic: c.topic ?? "团队频道",
+                        topic: "团队频道",
                         isPrivate: false,
-                        memberCount: c.memberCount ?? 0,
+                        memberCount: c.participants.count,
                         unreadCount: 0
                     )
                 }
