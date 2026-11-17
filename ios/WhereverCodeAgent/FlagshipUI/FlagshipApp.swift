@@ -467,7 +467,7 @@ public struct FlagshipDrawerView: View {
                     .overlay(Capsule().stroke(Color(red: 0.85, green: 0.84, blue: 0.82), lineWidth: 1))
                 }
                 .accessibilityIdentifier("drawer.newChat")
-                .accessibilityIdentifier("drawer.route.chat")
+                .accessibilityLabel("新对话")
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -602,6 +602,9 @@ public struct FlagshipShellView: View {
                             .accessibilityLabel("打开导航抽屉")
                         }
                     }
+                }
+                .onChange(of: selectedMenu) { _ in
+                    activeRoute = nil
                 }
             }
             .sheet(isPresented: $isSettingsOpen) {

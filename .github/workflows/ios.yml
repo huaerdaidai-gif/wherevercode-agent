@@ -169,6 +169,21 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: Package simulator app
+        run: |
+          set -euo pipefail
+          rm -f WhereverCodeAgent-simulator-app.zip
+          (cd .build/derived/Build/Products/Debug-iphonesimulator && /usr/bin/zip -r -y "${GITHUB_WORKSPACE}/WhereverCodeAgent-simulator-app.zip" WhereverCodeAgent.app)
+          ls -lh WhereverCodeAgent-simulator-app.zip
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: WhereverCodeAgent-simulator-app.zip
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Test navigation on iOS Simulator
         run: |
           set -euo pipefail

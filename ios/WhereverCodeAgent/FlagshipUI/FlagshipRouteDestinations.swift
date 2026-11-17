@@ -4747,6 +4747,19 @@ public struct AccountSettingsView: View {
                 .padding(.vertical, 6)
             }
 
+            // 平台连接（静态呈现预置地址与有效状态，定版行为）
+            Section("平台连接") {
+                LabeledContent("平台地址", value: appState.settings.platformBaseURLString)
+                    .accessibilityIdentifier("settings.address")
+                HStack {
+                    Text("地址状态")
+                    Spacer()
+                    Text("地址有效。")
+                        .font(.subheadline)
+                        .foregroundStyle(.green)
+                }
+            }
+
             // 分组一：账户
             Section("账户") {
                 NavigationLink {
