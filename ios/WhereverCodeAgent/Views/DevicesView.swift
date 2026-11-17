@@ -1234,7 +1234,7 @@ private struct DeviceDetailSheet: View {
 
         let cleanAgentId: String = {
             if let targetDev = device.deviceId {
-                if let ag = (try? localData.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.agentId != targetDev }) {
+                if let ag = (try? LocalData.shared.agents.listAgents())?.first(where: { $0.deviceId == targetDev && $0.agentId != targetDev }) {
                     let aid = ag.agentId
                     return aid.contains(":") ? String(aid.split(separator: ":").last!) : aid
                 }
