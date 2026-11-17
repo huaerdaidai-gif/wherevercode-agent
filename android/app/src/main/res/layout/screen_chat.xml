@@ -22,23 +22,6 @@
         android:textSize="12sp"
         android:visibility="gone" />
 
-    <!-- 阶段 A（V5 紧急开发）：聊天顶部“当前设备 · 对话方”横幅。
-         选了 Agent 却不知道消息发给谁就是本次 bug 的表象；横幅由
-         MainActivity.updateChatRouteBanner() 每次渲染时刷新。
-         内标题行已删（C2 双顶栏），这行是状态显示，不是标题。 -->
-    <TextView
-        android:id="@+id/chatRouteBanner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="14dp"
-        android:layout_marginEnd="14dp"
-        android:layout_marginTop="4dp"
-        android:background="@drawable/bg_chip_home"
-        android:padding="10dp"
-        android:textColor="@color/home_text"
-        android:textSize="12sp"
-        android:visibility="gone" />
-
     <!-- 阶段 3（U4）：聊天页内控制行。运行中显示暂停/停止/改目标/控制台；
          已暂停显示继续/改目标/控制台；空闲时隐藏。
          V5 C2-3-R1: 照 v2-02 / V5 原型图，一行等宽 pill；停止红字红边。 -->
