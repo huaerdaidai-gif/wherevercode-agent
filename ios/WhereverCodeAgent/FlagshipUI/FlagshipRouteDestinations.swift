@@ -189,7 +189,7 @@ private struct HistoryConversationsScreen: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(conv.title).font(.headline)
-                                Text("模型：\(conv.brainId ?? "默认") · ID: \(conv.id.prefix(8))")
+                                Text("模型：\(conv.brainId ?? "默认") · ID: \(String(conv.id.prefix(8)))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

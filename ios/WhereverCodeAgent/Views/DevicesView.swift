@@ -132,7 +132,7 @@ public struct DevicesView: View {
                                     Text("\(peer.displayName) (\(peer.host):\(String(peer.port)))")
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.primary)
-                                    Text("指纹: \(peer.fingerprintSha256.prefix(16))… · \(peer.agents.count) 个 Agent")
+                                    Text("指纹: \(String(peer.fingerprintSha256.prefix(16)))… · \(peer.agents.count) 个 Agent")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
