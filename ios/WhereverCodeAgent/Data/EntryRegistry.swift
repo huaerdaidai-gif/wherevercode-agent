@@ -101,7 +101,7 @@ public enum EntryRegistry {
         Entry(id: "feature_message_center", title: "消息中心", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "消息中心待开发（尚未开发）", routeId: "notifications"),
 
         // MARK: - 四、控制分组 (35 条)
-        Entry(id: "home_brain", title: "大脑", group: .homeTop, status: .implemented, parentId: nil, todoMessage: nil, routeId: "models"),
+        Entry(id: "feature_brain", title: "大脑", group: .feature, status: .implemented, parentId: "nav_feature_center", todoMessage: nil, routeId: "models"),
         Entry(id: "nav_control", title: "控制", group: .drawerTop, status: .implemented, parentId: nil, todoMessage: nil, routeId: "control"),
         Entry(id: "nav_team", title: "Agent 与团队", group: .drawerWorkspace, status: .implemented, parentId: nil, todoMessage: nil, routeId: "agents"),
         Entry(id: "nav_devices", title: "设备", group: .drawerWorkspace, status: .implemented, parentId: nil, todoMessage: nil, routeId: "devices"),
@@ -158,6 +158,8 @@ public enum EntryRegistry {
         }
         // 兼容别名映射
         switch id {
+        case "home_brain":
+            return ENTRIES.first { $0.id == "feature_brain" }
         case "nav_console":
             return ENTRIES.first { $0.id == "nav_control" }
         case "feature_team_chat":

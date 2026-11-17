@@ -407,13 +407,13 @@ public final class LocalChatModel: ObservableObject {
         if let first = usable.first { return (first.brainId, nil) }
         if let cfg = appState.brainSettingsModel.configs.first(where: { $0.brainId == selectedBrain }),
            let reason = appState.brainSettingsModel.unusableReason(for: cfg) {
-            return (nil, "「\(cfg.label)」不可用：\(reason)。请到 设置 › 模型 连接一个可用的大脑。")
+            return (nil, "「\(cfg.label)」不可用：\(reason)。请到 设置 › 模型 连接一个可用的模型。")
         }
         if let cfg = appState.brainRegistry.configFor(selectedBrain),
            appState.brainRegistry.get(cfg.adapterId) != nil {
             return (selectedBrain, nil)
         }
-        return (nil, "还没有可用的大脑：请到 设置 › 模型 填写 API Key 并设为当前大脑。")
+        return (nil, "还没有可用的模型：请到 设置 › 模型 填写 API Key 并设为当前模型。")
     }
 
     public func reload() {
@@ -1084,7 +1084,6 @@ public struct LocalChatHomeView: View {
     public var onSelectRoute: (String) -> Void
 
     @State private var greetingDismissed = false
-    @State private var showAgentSelectorSheet = false
     @State private var query = ""
     @FocusState private var inputFocused: Bool
 
@@ -1116,7 +1115,7 @@ public struct LocalChatHomeView: View {
         case .failed: platformLabel = "平台未连接（离线/本地模式）"
         case .unknown: platformLabel = "平台未检查"
         }
-        return "模式：大脑对话 · 当前设备：本机 · \(platformLabel)"
+        return "模式：模型对话 · 当前设备：本机 · \(platformLabel)"
     }
 
     private var filteredHistory: [Conversation] {
@@ -1127,7 +1126,7 @@ public struct LocalChatHomeView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // 顶部极简按钮栏（左：四父级抽屉按钮；右：搜索会话 / 新对话 / 模型上下文切换）
+            // 顶部极简按钮栏（左：四父级抽屉按钮；右：搜索会话 / 删除会话 / 新对话）
             HStack(spacing: 8) {
                 Button(action: onOpenDrawer) {
                     Image(systemName: "line.3.horizontal")
@@ -1139,21 +1138,6 @@ public struct LocalChatHomeView: View {
                 }
                 .accessibilityIdentifier("navigation.menu")
                 .accessibilityLabel("打开导航")
-
-                Spacer()
-
-                if model.selectedBrain.isEmpty {
-                    Button {
-                        onSelectRoute("models")
-                    } label: {
-                        Text("还没有连接 AI 模型　连接 ›")
-                            .font(.caption)
-                            .foregroundStyle(Color(red: 0.72, green: 0.34, blue: 0.16))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color(red: 0.98, green: 0.94, blue: 0.90), in: Capsule())
-                    }
-                }
 
                 Spacer()
 
@@ -1198,19 +1182,6 @@ public struct LocalChatHomeView: View {
                         .overlay(Circle().stroke(Color(red: 0.87, green: 0.86, blue: 0.84), lineWidth: 1))
                 }
                 .accessibilityLabel("新对话")
-
-                Button {
-                    showAgentSelectorSheet = true
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                        .frame(width: 44, height: 44)
-                        .background(Color.white, in: Circle())
-                        .overlay(Circle().stroke(Color(red: 0.87, green: 0.86, blue: 0.84), lineWidth: 1))
-                }
-                .accessibilityIdentifier("home.agentSelectorButton")
-                .accessibilityLabel("切换大脑模型与 Agent 上下文")
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -1344,7 +1315,7 @@ public struct LocalChatHomeView: View {
                                             Text(conv.title.isEmpty ? conv.id : conv.title)
                                                 .font(.headline)
                                                 .foregroundStyle(.primary)
-                                            Text("大脑：\(conv.brainId ?? "未指定")")
+                                            Text("模型：\(conv.brainId ?? "未指定")")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
@@ -1392,11 +1363,6 @@ public struct LocalChatHomeView: View {
                     Button("完成") { model.showHistory = false }
                 }
             }
-        }
-        .sheet(isPresented: $showAgentSelectorSheet) {
-            ModelAndAgentSheet(model: model, onManage: { onSelectRoute("models") })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -1978,6 +1944,7 @@ private struct ProjectSourceTargetList: View {
 public struct ModelAndAgentSheet: View {
     @ObservedObject var model: LocalChatModel
     var onManage: () -> Void
+    var onManageAgents: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var models: [ModelInfo] = []
     @State private var loading = false
@@ -1987,12 +1954,74 @@ public struct ModelAndAgentSheet: View {
         model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
     }
 
+    private var availableAgents: [AgentRecord] {
+        let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
+        let childDeviceIds = Set(allAgents.filter { $0.kind == .device && $0.access == .cli }.compactMap { $0.deviceId })
+        return allAgents.filter { ag in
+            guard ag.enabled else { return false }
+            if ag.kind == .device && ag.access == .app && ag.agentId == ag.deviceId && childDeviceIds.contains(ag.agentId) {
+                return false
+            }
+            return true
+        }
+    }
+
     public var body: some View {
         NavigationStack {
             List {
                 Section {
+                    if availableAgents.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("暂无已启用的 Agent：可在「Agent 与团队」中添加，或在设备配对后连接。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Button("前往 Agent 与团队管理") {
+                                dismiss()
+                                onManageAgents?()
+                            }
+                            .font(.caption)
+                        }
+                        .padding(.vertical, 2)
+                    } else {
+                        ForEach(availableAgents) { ag in
+                            let isSelected = (model.selectedAgent?.agentId == ag.agentId)
+                            HStack {
+                                Button {
+                                    model.selectAgentInCurrentSession(ag)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(ag.displayName + (ag.dispatchable ? "" : "（仅对话）"))
+                                            .foregroundStyle(.primary)
+                                        let kindDesc = ag.kind == .device ? "设备 Agent" : (ag.platformAgentId != nil ? "平台 Agent" : "云端 Agent")
+                                        Text("\(kindDesc) · \(ag.deviceId ?? (ag.platformHost ?? "本地/云端"))")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        if model.defaultSelectionId == "agent:\(ag.agentId)" {
+                                            Text("默认 Agent").font(.caption2).foregroundStyle(.green)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                if isSelected {
+                                    Image(systemName: "checkmark").foregroundStyle(.blue)
+                                }
+                                if model.defaultSelectionId != "agent:\(ag.agentId)" {
+                                    Button("设为默认") {
+                                        model.setDefaultSelection(type: .agent, id: ag.agentId)
+                                    }
+                                    .font(.caption2)
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("可选 Agent（设备 / 平台 / 云端）")
+                }
+
+                Section {
                     if model.usableBrains.isEmpty {
-                        Text("还没有可用的大脑（需填写 API Key）。会员登录与 API Key 是两种不同授权，ChatGPT 会员在 iOS 尚未接入。")
+                        Text("还没有可用的模型（需填写 API Key）。会员登录与 API Key 是两种不同授权，ChatGPT 会员在 iOS 尚未接入。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     ForEach(model.usableBrains) { cfg in
@@ -2003,7 +2032,8 @@ public struct ModelAndAgentSheet: View {
                                 Task { await loadModels() }
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(cfg.label).foregroundStyle(.primary)
+                                    let modelSuffix = cfg.model.isEmpty ? "" : "（\(cfg.model)）"
+                                    Text("\(cfg.label)\(modelSuffix)").foregroundStyle(.primary)
                                     if model.defaultSelectionId == "brain:\(cfg.brainId)" {
                                         Text("默认模型").font(.caption2).foregroundStyle(.green)
                                     }
@@ -2024,50 +2054,13 @@ public struct ModelAndAgentSheet: View {
                     }
                     Button("管理模型与连接") { dismiss(); onManage() }
                 } header: {
-                    Text("AI 大脑模型 (Brain / LLM)")
-                }
-
-                let availableAgents = ((try? LocalData.shared.agents.listAgents()) ?? []).filter {
-                    !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.enabled
-                }
-                if !availableAgents.isEmpty {
-                    Section {
-                        ForEach(availableAgents) { ag in
-                            let isSelected = (model.selectedAgent?.agentId == ag.agentId)
-                            HStack {
-                                Button {
-                                    model.selectAgentInCurrentSession(ag)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(ag.displayName).foregroundStyle(.primary)
-                                        Text("类型: \(ag.kind.rawValue) · 设备: \(ag.deviceId ?? "本机")").font(.caption2).foregroundStyle(.secondary)
-                                        if model.defaultSelectionId == "agent:\(ag.agentId)" {
-                                            Text("默认 Agent").font(.caption2).foregroundStyle(.green)
-                                        }
-                                    }
-                                }
-                                Spacer()
-                                if isSelected {
-                                    Image(systemName: "checkmark").foregroundStyle(.blue)
-                                }
-                                if model.defaultSelectionId != "agent:\(ag.agentId)" {
-                                    Button("设为默认") {
-                                        model.setDefaultSelection(type: .agent, id: ag.agentId)
-                                    }
-                                    .font(.caption2)
-                                    .buttonStyle(.bordered)
-                                }
-                            }
-                        }
-                    } header: {
-                        Text("独立 Agent（设备 / 云端）")
-                    } footer: {
-                        Text("单选规则：对话框仅保留一个勾选的 Agent 或模型，不再搞大脑和普通 Agent 并排。")
-                    }
+                    Text("已配置模型")
+                } footer: {
+                    Text("单选规则：对话框仅保留一个勾选的 Agent 或模型，由用户自选对话方。")
                 }
 
                 if model.selectedAgent == nil, let cfg = currentConfig {
-                    Section("模型规格（当前大脑：\(cfg.label)）") {
+                    Section("模型规格（当前模型：\(cfg.label)）") {
                         if loading { ProgressView() }
                         if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
                         ForEach(models) { m in
@@ -2088,8 +2081,8 @@ public struct ModelAndAgentSheet: View {
                 }
 
                 Section {
-                    LabeledContent("智能等级", value: "该大脑接口未提供")
-                    LabeledContent("速度", value: "该大脑接口未提供")
+                    LabeledContent("智能等级", value: "该模型接口未提供")
+                    LabeledContent("速度", value: "该模型接口未提供")
                 } header: { Text("高级") } footer: {
                     Text("仅显示当前接入实际支持的参数。")
                 }
@@ -2112,7 +2105,7 @@ public struct ModelAndAgentSheet: View {
                     Text("当前对话通道不执行命令，仅「只读对话」可用；执行需在已配对设备上通过审批中心逐项批准。")
                 }
             }
-            .navigationTitle("模型与 Agent 选择")
+            .navigationTitle("选择对话方")
             .navigationBarTitleDisplayMode(.inline)
             .task { await loadModels() }
         }
@@ -2141,9 +2134,9 @@ public struct ChatComposerBar: View {
     @State private var showFileImporter = false
     @State private var showCamera = false
 
-    private var brainLabel: String {
+    private var partnerLabel: String {
         if let ag = model.selectedAgent {
-            return "Agent: \(ag.displayName)"
+            return ag.displayName + (ag.dispatchable ? "" : "（仅对话）")
         }
         let cfg = model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
         guard let cfg else { return "选择模型 / Agent" }
@@ -2196,7 +2189,7 @@ public struct ChatComposerBar: View {
 
                     Button { showModelSheet = true } label: {
                         HStack(spacing: 3) {
-                            Text(brainLabel).lineLimit(1)
+                            Text(partnerLabel).lineLimit(1)
                             Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                         }
                         .font(.system(size: 13, weight: .medium))
@@ -2246,9 +2239,13 @@ public struct ChatComposerBar: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .sheet(isPresented: $showModelSheet) {
-            ModelAndAgentSheet(model: model, onManage: { onSelectRoute("models") })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            ModelAndAgentSheet(
+                model: model,
+                onManage: { onSelectRoute("models") },
+                onManageAgents: { onSelectRoute("agents") }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems, maxSelectionCount: 5, matching: .images)
         .onChange(of: photoItems) { _, items in

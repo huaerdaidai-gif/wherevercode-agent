@@ -4608,14 +4608,6 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "模型提供方与智能路由",
-                subtitle: "配置模型 API Key、拉取模型列表与设置默认大脑",
-                icon: "cpu",
-                badge: appState.brainSettingsModel.currentBrainId ?? "待选择",
-                routeId: "models"
-            )
-
-            controlCard(
                 title: "MCP 工具与平台 Token",
                 subtitle: "保存或签发平台 Token、探测远端工具清单",
                 icon: "cable.connector.horizontal",
