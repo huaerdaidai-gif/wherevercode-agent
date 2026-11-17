@@ -161,6 +161,14 @@ jobs:
           sleep 5
           xcrun simctl io "$UDID" screenshot .build/live-launch/ios-home.png
 
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: .build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Upload live simulator launch
         uses: actions/upload-artifact@v4
         with:
