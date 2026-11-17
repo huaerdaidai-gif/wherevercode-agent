@@ -125,7 +125,24 @@ final class Walkthrough89UITests: XCTestCase {
         continueAfterFailure = true
     }
 
-    func testWalkthrough89() {
+    func testWalkthrough89Part1() { runChunk(0..<15) }
+    func testWalkthrough89Part2() { runChunk(15..<30) }
+    func testWalkthrough89Part3() { runChunk(30..<45) }
+    func testWalkthrough89Part4() { runChunk(45..<60) }
+    func testWalkthrough89Part5() { runChunk(60..<75) }
+    func testWalkthrough89Part6() { runChunk(75..<89) }
+
+    /// One chunk per test method with a FRESH app launch: a page with
+    /// a perpetual animation (e.g. an endless ProgressView on an
+    /// unreachable-platform page) makes every later XCTest interaction
+    /// wait 60 s for an idle that never comes (run 43980772008:
+    /// entries slowed to 18-53 min each after entry 8). Chunking +
+    /// relaunch contains that poison to one chunk. Every verdict is
+    /// also printed (WALK89_RESULT) so the tee'd job log — uploaded
+    /// as an artifact file — preserves results even if a later chunk
+    /// is killed by the job timeout.
+    private func runChunk(_ range: Range<Int>) {
+        results = []
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(
@@ -133,16 +150,17 @@ final class Walkthrough89UITests: XCTestCase {
             "chat home did not appear after launch"
         )
         var sheetOpen = false
-        for (index, entry) in Self.entries.enumerated() {
+        for index in range {
+            let entry = Self.entries[index]
             print("WALK89_PROGRESS \(index + 1)/89 \(entry.id)")
             sheetOpen = walk(app, entry, sheetAlreadyOpen: sheetOpen)
         }
         let pass = results.filter { $0.contains("|PASS|") }.count
         let todoOk = results.filter { $0.contains("|TODO_OK|") }.count
         let fail = results.filter { $0.contains("|FAIL|") }.count
-        results.append("WALKTHROUGH89_DONE total=\(results.count) pass=\(pass) todo_ok=\(todoOk) fail=\(fail)")
+        results.append("WALKTHROUGH89_CHUNK_DONE range=\(range.lowerBound)-\(range.upperBound - 1) total=\(results.count - 1) pass=\(pass) todo_ok=\(todoOk) fail=\(fail)")
         let attachment = XCTAttachment(string: results.joined(separator: "\n"))
-        attachment.name = "walkthrough89-results"
+        attachment.name = "walkthrough89-results-\(range.lowerBound)"
         attachment.lifetime = .keepAlways
         add(attachment)
     }
@@ -197,7 +215,9 @@ final class Walkthrough89UITests: XCTestCase {
     }
 
     private func record(_ entry: WEntry, _ status: String, _ verdict: String, _ note: String) {
-        results.append("\(entry.id)|\(status)|\(verdict)|\(note)")
+        let line = "\(entry.id)|\(status)|\(verdict)|\(note)"
+        results.append(line)
+        print("WALK89_RESULT \(line)")
     }
 
     // MARK: - Navigation helpers
@@ -245,12 +265,20 @@ final class Walkthrough89UITests: XCTestCase {
         if close.exists {
             close.tap()
             Thread.sleep(forTimeInterval: 0.6)
-            return
+        } else {
+            let back = app.navigationBars.buttons.firstMatch
+            if back.exists {
+                back.tap()
+                Thread.sleep(forTimeInterval: 0.6)
+            }
         }
-        let back = app.navigationBars.buttons.firstMatch
-        if back.exists {
-            back.tap()
-            Thread.sleep(forTimeInterval: 0.6)
+        // If the shell menu is unreachable we are stuck on a page the
+        // walk cannot leave (possibly one whose perpetual animation
+        // poisons every later interaction): reset with a fresh launch.
+        if !app.buttons["navigation.menu"].firstMatch.exists {
+            app.terminate()
+            app.launch()
+            _ = app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 20)
         }
     }
 
