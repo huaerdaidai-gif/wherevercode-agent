@@ -780,24 +780,12 @@ public struct FeatureCenterSheet: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Text(entry.title)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    Text(entry.id)
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                                HStack(spacing: 6) {
-                                    Text(entry.group.rawValue)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    if let p = entry.parentId {
-                                        Text("父级: \(p)")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
+                                Text(entry.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text(entry.group.rawValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
                             Text(entry.status.rawValue)

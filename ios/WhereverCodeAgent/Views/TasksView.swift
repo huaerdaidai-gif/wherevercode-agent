@@ -169,12 +169,6 @@ struct TasksView: View {
                                 }
                             }
                         }
-                        Section("任务工作流快捷入口") {
-                            HStack { Text("#T-104 · 统一聊天执行流"); Spacer(); Button("详情") { if let nav = appState.onSelectRoute { nav("taskdetail") } else { onNavigateRoute("taskdetail") } }.buttonStyle(.bordered) }
-                            HStack { Text("#T-105 · 代码审查"); Spacer(); Button("审查") { if let nav = appState.onSelectRoute { nav("review") } else { onNavigateRoute("review") } }.buttonStyle(.bordered) }
-                            HStack { Text("#T-106 · 修复 MCP 派工"); Spacer(); Button("查看") { if let nav = appState.onSelectRoute { nav("taskdetail") } else { onNavigateRoute("taskdetail") } }.buttonStyle(.bordered) }
-                            HStack { Text("#T-107 · UI 视觉验收"); Spacer(); Button("证据") { if let nav = appState.onSelectRoute { nav("preview") } else { onNavigateRoute("preview") } }.buttonStyle(.bordered) }
-                        }
                     }
                 } else if !appState.isConfigured {
                     TasksNotConnectedContentView(

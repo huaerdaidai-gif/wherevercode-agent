@@ -276,7 +276,7 @@ private struct VoiceMultimodalScreen: View {
     var body: some View {
         Form {
             Section("iOS 多模态附件与语音权限边界") {
-                Text("• 文件与代码导入：通过 iOS UIDocumentPickerViewController 及 Security-Scoped Bookmark 访问授权沙盒文件。\n• 语音输入：使用 iOS Speech / AVAudioSession 系统听写与语音转文字入口（需 Info.plist 声明 NSMicrophoneUsageDescription 与 NSSpeechRecognitionUsageDescription）。\n• 视觉能力校验：当所选大脑（如 DeepSeek 文本模型）不支持 vision 时，BrainEngine 自动注入诚实提示，绝不伪造看图结果。")
+                Text("• 文件与代码导入：通过系统文件选择器及安全书签访问授权沙盒文件。\n• 语音输入：使用系统麦克风与语音识别入口。\n• 视觉能力校验：当所选模型（纯文本模型）不支持视觉能力时，系统自动注入诚实提示，绝不伪造看图结果。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -535,7 +535,7 @@ private struct ArtifactsDeliveryScreen: View {
         let completed = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "completed" || $0.result != nil }
         List {
             Section("交付成果聚合说明") {
-                Text("平台任务交付通过 TaskService.submitResult 提交 branch / commit / pr_url；本地任务交付记录在 SQLite tasks.result 字段。")
+                Text("平台任务交付通过服务接口提交分支、提交哈希与 PR 链接；本地任务交付成果保存在本地任务记录中。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1014,7 +1014,7 @@ public struct ProjectWorkspaceDetailView: View {
                             if let repo = projectItem.project.repoUrl {
                                 LabeledContent("仓库地址", value: repo)
                             }
-                            LabeledContent("来源属性", value: projectItem.project.origin)
+                            LabeledContent("来源属性", value: projectItem.project.origin == "LOCAL_SANDBOX" ? "本地沙盒" : projectItem.project.origin)
                         }
                         Section("工作区位置") {
                             ForEach(projectItem.homes) { loc in
@@ -1083,7 +1083,7 @@ private struct SandboxFileBrowserScreen: View {
     var body: some View {
         List {
             Section("iOS 沙盒文件权限边界") {
-                Text("iOS 采用应用沙盒机制：本页直接读写 App Documents 容器目录，跨应用文件通过 UIDocumentPickerViewController 安全书签导入。")
+                Text("iOS 采用应用沙盒机制：本页直接读写应用沙盒 Documents 目录，跨应用文件通过系统文件选择器安全书签导入。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack {
@@ -1096,13 +1096,19 @@ private struct SandboxFileBrowserScreen: View {
                 }
             }
             Section("App 沙盒 Documents 目录文件 (\(files.count))") {
-                ForEach(files, id: \.self) { f in
-                    HStack {
-                        Image(systemName: f.hasSuffix(".db") || f.hasSuffix(".sqlite") ? "cylinder.split.1x2" : "doc.text")
-                        Text(f).font(.subheadline)
-                        Spacer()
-                        Button("编辑") { onOpenEditor() }
-                            .font(.caption)
+                if files.isEmpty {
+                    Text("暂无沙盒文件，可在上方新建文件。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(files, id: \.self) { f in
+                        HStack {
+                            Image(systemName: f.hasSuffix(".db") || f.hasSuffix(".sqlite") ? "cylinder.split.1x2" : "doc.text")
+                            Text(f).font(.subheadline)
+                            Spacer()
+                            Button("编辑") { onOpenEditor() }
+                                .font(.caption)
+                        }
                     }
                 }
             }
@@ -1132,7 +1138,7 @@ private struct SandboxCodeEditorScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
                 TextField("文件名", text: $fileName)
                     .textFieldStyle(.roundedBorder)
                 Button("读取") {
@@ -1142,6 +1148,7 @@ private struct SandboxCodeEditorScreen: View {
                         statusMsg = "已从沙盒读取 \(fileName)"
                     }
                 }
+                .buttonStyle(.bordered)
                 Button("保存") {
                     do {
                         try content.write(to: fileURL, atomically: true, encoding: .utf8)
@@ -1154,24 +1161,31 @@ private struct SandboxCodeEditorScreen: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                Button("查看变更") {
-                    try? LocalData.shared.kv.set("editor.lastContent", content)
-                    if savedSnapshot.isEmpty { savedSnapshot = content }
-                    try? LocalData.shared.kv.set("editor.prevContent", savedSnapshot)
-                    onOpenDiff()
-                }
-                .buttonStyle(.bordered)
-                Button("局部编辑") {
-                    statusMsg = "已进入局部编辑草稿模式"
-                }
-                .buttonStyle(.bordered)
-                Button("询问 Agent") {
-                    onNavigateRoute("conversation")
-                }
-                .buttonStyle(.bordered)
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button("查看变更") {
+                        try? LocalData.shared.kv.set("editor.lastContent", content)
+                        if savedSnapshot.isEmpty { savedSnapshot = content }
+                        try? LocalData.shared.kv.set("editor.prevContent", savedSnapshot)
+                        onOpenDiff()
+                    }
+                    .buttonStyle(.bordered)
+                    Button("局部编辑") {
+                        statusMsg = "已进入局部编辑草稿模式"
+                    }
+                    .buttonStyle(.bordered)
+                    Button("询问 Agent") {
+                        onNavigateRoute("conversation")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .lineLimit(1)
+                .padding(.horizontal, 16)
+            }
 
             if let msg = statusMsg {
                 Text(msg).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16)
@@ -1191,29 +1205,38 @@ private struct UnifiedDiffScreen: View {
     @ObservedObject var appState: AppState = AppState()
     var onNavigateRoute: (String) -> Void = { _ in }
     var body: some View {
-        let prev = (try? LocalData.shared.kv.get("editor.prevContent")) ?? "// 原始版本\nfunc greet() {}"
-        let curr = (try? LocalData.shared.kv.get("editor.lastContent")) ?? "// 修改后版本\nfunc greet() -> String { return \"V5\" }"
+        let storedPrev = try? LocalData.shared.kv.get("editor.prevContent")
+        let storedCurr = try? LocalData.shared.kv.get("editor.lastContent")
+        let hasDiff = storedPrev != nil && storedCurr != nil && storedPrev != storedCurr
+        let prev = storedPrev ?? ""
+        let curr = storedCurr ?? ""
         let prevLines = prev.components(separatedBy: "\n")
         let currLines = curr.components(separatedBy: "\n")
 
         List {
             Section("逐行变更对比 (Line Diff)") {
-                ForEach(Array(prevLines.enumerated()), id: \.offset) { idx, line in
-                    if !currLines.contains(line) {
-                        Text("- \(line)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.red)
+                if !hasDiff {
+                    Text("暂无代码变更对比记录。可在代码编辑器中修改并保存文件后查看逐行 Diff。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(prevLines.enumerated()), id: \.offset) { idx, line in
+                        if !currLines.contains(line) {
+                            Text("- \(line)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.red)
+                        }
                     }
-                }
-                ForEach(Array(currLines.enumerated()), id: \.offset) { idx, line in
-                    if !prevLines.contains(line) {
-                        Text("+ \(line)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.green)
-                    } else {
-                        Text("  \(line)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                    ForEach(Array(currLines.enumerated()), id: \.offset) { idx, line in
+                        if !prevLines.contains(line) {
+                            Text("+ \(line)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.green)
+                        } else {
+                            Text("  \(line)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -1253,7 +1276,7 @@ private struct TerminalAndExecutionTargetScreen: View {
                         Label("iPhone 本地真实执行（仅限进程内沙盒工具与 SQLite）", systemImage: "iphone")
                             .font(.subheadline.bold())
                             .foregroundStyle(.blue)
-                        Text("本机真实可执行范围：SQLite WAL 事务（wherevercode-tasks.db）、Keychain 凭据存取、沙盒 Documents 文件读写、统一 Diff 计算、BrainEngine 多轮推理与流解析。")
+                        Text("本机真实可执行范围：本地任务数据库事务、安全凭据存取、沙盒文档读写、统一 Diff 计算、核心多轮推理与流解析。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1302,8 +1325,15 @@ private struct GitWorktreeInspectorScreen: View {
     var body: some View {
         let projects = (try? LocalData.shared.projects.listProjects()) ?? []
         List {
-            Section("Git 协作与分支元数据边界") {
-                Text("iOS 本机不包含 git CLI 子进程；Git 分支（defaultBranch）、canonicalCommit 与 PR 链接通过 ProjectStore、GitHub API 工具或远端 Hand 协议的 repos 字段（git rev-parse 12位短哈希）真实同步。")
+            Section("Git 协作与工作树") {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(.orange)
+                    Text("【待开发】Git 与工作树待开发（iOS 无本地 CLI，远端 Hand 同步待接入）。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("iOS 本机不包含 git CLI 子进程；Git 分支、提交哈希与 PR 链接需通过项目管理、GitHub 服务接口或远端 Hand 协议同步。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1336,7 +1366,18 @@ private struct WorkbenchDevExtendedScreen: View {
             Section("\(route.title)") {
                 switch route.id {
                 case "preview":
-                    Text("运行预览：支持查看构建与验收产物预览；真机或模拟器截图生成后在此汇总。")
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .foregroundStyle(.orange)
+                            Text("【待开发】运行预览待开发（真机/模拟器产物查看通道待后续批次接入）。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("支持查看构建产物与验收截图汇总，目前通道正在接入中。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 case "browser":
                     Text("浏览器工作台：联网检索已通过 WebSearchClient 接入；受控网页快照与录制待服务端接入。")
                 case "testmatrix":
@@ -1929,9 +1970,20 @@ private struct ConnectionExtendedScreen: View {
             Section("\(route.title)") {
                 switch route.id {
                 case "modelroute":
-                    Text("智能模型路由与故障切换：当前默认模型 \(appState.brainSettingsModel.currentBrainId ?? "自动选择 / 未设置")，支持按任务类型与备用大脑链切换。")
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .foregroundStyle(.orange)
+                            Text("【待开发】智能模型路由待开发（尚未开发）。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("当前可通过模型设置手动选择或切换默认模型。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 case "agentimport":
-                    Text("导入现有 Agent：支持将 Codex、Claude Code、OpenCode、DeepSeek Harness 等外部 Agent 登记至本机 Agent 目录。")
+                    Text("导入现有 Agent：支持将 Codex、Claude Code、OpenCode 等外部 Agent 登记至本机 Agent 目录。")
                 case "network", "routes":
                     Text("通信网络与路径详情：仅使用受系统保护的 HTTPS 与安全信封传输；断线期间操作保存在本地数据库，确认回执后才更新送达状态。")
                 default:
@@ -2296,9 +2348,6 @@ public struct ChannelsHomeView: View {
                     Button("协作编排") { onNavigateRoute("delegate") }.buttonStyle(.bordered)
                     Button("可视化编排") { onNavigateRoute("orchestrator") }.buttonStyle(.bordered)
                     Button("跨设备接力") { onNavigateRoute("handoff") }.buttonStyle(.bordered)
-                    Button("# 产品开发 · 3 条未读") { if let first = channels.first { activeWorkspaceChannel = first } }.buttonStyle(.bordered)
-                    Button("# 代码审查 · 1 条未读") { if let first = channels.first { activeWorkspaceChannel = first } }.buttonStyle(.bordered)
-                    Button("# 发布与运维") { if let first = channels.first { activeWorkspaceChannel = first } }.buttonStyle(.bordered)
                 }
                 .font(.caption)
                 .padding(.horizontal, 16)
@@ -2312,6 +2361,8 @@ public struct ChannelsHomeView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
+        .navigationTitle("频道与协作")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: loadData)
         .sheet(isPresented: $showCreateChannelSheet) {
             CreateChannelSheet(appState: appState) { newChannel in
@@ -2383,7 +2434,8 @@ public struct ChannelsHomeView: View {
                 .accessibilityIdentifier("channels.action.createChannel")
 
                 Button {
-                    showCreateDMSheet = true
+                    policyAlertMessage = "【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）"
+                    showPolicyAlert = true
                 } label: {
                     Label("发起私聊", systemImage: "person.2")
                 }
@@ -2572,20 +2624,20 @@ public struct ChannelsHomeView: View {
         ScrollView {
             LazyVStack(spacing: 8) {
                 if filteredDMs.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "bubble.left.and.bubble.right")
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.2.slash")
                             .font(.system(size: 40))
                             .foregroundStyle(.secondary.opacity(0.6))
-                        Text(searchQuery.isEmpty ? "暂无私聊会话" : "未找到匹配的私聊")
+                        Text("私聊服务待开发")
                             .font(.headline)
                             .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                        Text("点击右上角「＋」可发起与成员或 Agent 的 1:1 私聊\n（平台规范：严格禁止 Agent ↔ Agent 直连私聊）")
+                        Text("与指定人员/Agent 独立私聊通道尚未开放\n团队成员与 Agent 间协同请使用频道或任务工作流")
                             .font(.caption)
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, 60)
                 } else {
                     ForEach(filteredDMs) { dm in
                         Button {
@@ -2712,96 +2764,23 @@ public struct ChannelsHomeView: View {
 
     private func loadData() {
         if channels.isEmpty {
-            channels = [
-                V5ChannelItem(
-                    id: "ch-general",
-                    name: "全员协作",
-                    topic: "WhereverCode 全平台项目总线与 Agent 协同讨论",
-                    isPrivate: false,
-                    associatedProjectId: "proj-wherevercode",
-                    associatedProjectName: "WhereverCode V5",
-                    memberCount: 5,
-                    agentCount: 3,
-                    lastMessageText: "@Codex 请确认当前 iOS 端 7 处核心 UI 截图与编译状态",
-                    lastMessageTime: "12:45",
-                    unreadCount: 2
-                ),
-                V5ChannelItem(
-                    id: "ch-frontend",
-                    name: "前端开发",
-                    topic: "SwiftUI 与 Compose 原生端对齐及路由一致性审查",
-                    isPrivate: false,
-                    associatedProjectId: "proj-ios",
-                    associatedProjectName: "iOS Native",
-                    memberCount: 4,
-                    agentCount: 2,
-                    lastMessageText: "已完成左侧抽屉严格 4 菜单改造，正在运行 XCTest",
-                    lastMessageTime: "12:30",
-                    unreadCount: 0
-                ),
-                V5ChannelItem(
-                    id: "ch-arch",
-                    name: "架构设计",
-                    topic: "BrainEngine、17 模型适配器、Task 10 状态机边界",
-                    isPrivate: true,
-                    associatedProjectId: "proj-brain",
-                    associatedProjectName: "Brain Engine",
-                    memberCount: 3,
-                    agentCount: 1,
-                    lastMessageText: "已合入 PR #13 安全修复，ATS 与 Keychain 策略严格保留",
-                    lastMessageTime: "11:15",
-                    unreadCount: 0
-                ),
-                V5ChannelItem(
-                    id: "ch-qa",
-                    name: "QA 验证",
-                    topic: "自动化 CI、真机端到端验收与截图交付审查",
-                    isPrivate: false,
-                    associatedProjectId: nil,
-                    associatedProjectName: nil,
-                    memberCount: 6,
-                    agentCount: 2,
-                    lastMessageText: "模拟器与真机运行产物均已打标并归档",
-                    lastMessageTime: "10:20",
-                    unreadCount: 0
-                )
-            ]
+            let cached = ChannelListCache().load()
+            if !cached.isEmpty {
+                channels = cached.map { c in
+                    V5ChannelItem(
+                        id: c.id,
+                        name: c.displayName,
+                        topic: c.topic ?? "团队频道",
+                        isPrivate: false,
+                        memberCount: c.memberCount ?? 0,
+                        unreadCount: 0
+                    )
+                }
+            }
         }
 
-        if directMessages.isEmpty {
-            directMessages = [
-                V5DirectMessageItem(
-                    id: "dm-codex",
-                    targetId: "agent-codex",
-                    targetName: "Codex",
-                    isAgent: true,
-                    targetRole: "设备 Agent · 代码实现与构建",
-                    lastMessageText: "收到任务，正在执行 70 屏契约校验与截图导出。",
-                    lastMessageTime: "12:44",
-                    unreadCount: 1
-                ),
-                V5DirectMessageItem(
-                    id: "dm-claude",
-                    targetId: "agent-claude",
-                    targetName: "Claude Code",
-                    isAgent: true,
-                    targetRole: "云端 Agent · 架构规划与重构",
-                    lastMessageText: "建议将频道分为消息、文件、任务三个独立内部分区。",
-                    lastMessageTime: "12:10",
-                    unreadCount: 0
-                ),
-                V5DirectMessageItem(
-                    id: "dm-user-lead",
-                    targetId: "user-lead",
-                    targetName: "项目主管",
-                    isAgent: false,
-                    targetRole: "平台管理员 · 审批中心",
-                    lastMessageText: "验收标准以最终定稿为准，严禁自行合并 main 分支。",
-                    lastMessageTime: "09:30",
-                    unreadCount: 0
-                )
-            ]
-        }
+        // 诚实空态：私聊服务未开发，严禁注入虚假种子私聊会话
+        directMessages = []
     }
 }
 
@@ -2831,6 +2810,7 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var showChannelSettingsSheet = false
     @State private var showSendErrorAlert = false
     @State private var sendErrorMessage = ""
+    @Environment(\.dismiss) private var dismiss
 
     private var currentChannelId: String {
         channelItem?.id ?? dmItem?.id ?? "ch-general"
@@ -2874,10 +2854,6 @@ public struct ChannelDetailWorkspaceView: View {
                     Button("任务详情") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered)
                     Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
                     Button("从消息创建任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
-                    Button("发送演示消息") {
-                        let msg = V5ChannelMessage(id: UUID().uuidString, senderId: "me", senderName: "我", isAgent: false, text: "收到。已将执行结果和审查卡片嵌入会话。", timestamp: "刚刚")
-                        messages.append(msg)
-                    }.buttonStyle(.bordered)
                 }
                 .font(.caption2)
                 .padding(.horizontal, 16)
@@ -2895,9 +2871,22 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
-        .navigationTitle("")
+        .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("返回")
+                    }
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                }
+                .accessibilityIdentifier("channel.backButton")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showChannelSettingsSheet = true
@@ -2982,16 +2971,32 @@ public struct ChannelDetailWorkspaceView: View {
     // MARK: - 消息分区
     private var messagesTab: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(messages) { msg in
-                            messageRow(msg)
-                                .id(msg.id)
+            if messages.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                    Text("暂无频道消息")
+                        .font(.headline)
+                        .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                    Text("在下方输入框发送消息开始协同讨论")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.vertical, 60)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(messages) { msg in
+                                messageRow(msg)
+                                    .id(msg.id)
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                 }
             }
 
@@ -3297,51 +3302,58 @@ public struct ChannelDetailWorkspaceView: View {
                         Spacer()
                     }
 
-                    ForEach(files) { file in
-                        HStack(spacing: 12) {
-                            Image(systemName: fileIcon(file.fileType))
-                                .font(.system(size: 20))
-                                .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
-                                .frame(width: 32)
+                    if files.isEmpty {
+                        Text("暂无共享文件")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    } else {
+                        ForEach(files) { file in
+                            HStack(spacing: 12) {
+                                Image(systemName: fileIcon(file.fileType))
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                                    .frame(width: 32)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(file.fileName)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                                HStack(spacing: 6) {
-                                    Text("\(file.fileSize) · \(file.uploaderName) · \(file.uploadTime)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    if let p = file.associatedProjectName {
-                                        Text(p)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(file.fileName)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                    HStack(spacing: 6) {
+                                        Text("\(file.fileSize) · \(file.uploaderName) · \(file.uploadTime)")
                                             .font(.caption2)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                                            .foregroundStyle(.secondary)
+                                        if let p = file.associatedProjectName {
+                                            Text(p)
+                                                .font(.caption2)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Color.secondary.opacity(0.1), in: Capsule())
+                                        }
                                     }
                                 }
-                            }
-                            Spacer()
+                                Spacer()
 
-                            Menu {
-                                Button("预览文件") {}
-                                Button("下载至本地") {}
-                                Button("分享链接") {}
-                                Divider()
-                                Button(role: .destructive) {
-                                    files.removeAll { $0.id == file.id }
+                                Menu {
+                                    Button("预览文件") {}
+                                    Button("下载至本地") {}
+                                    Button("分享链接") {}
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        files.removeAll { $0.id == file.id }
+                                    } label: {
+                                        Label("从频道移除", systemImage: "trash")
+                                    }
                                 } label: {
-                                    Label("从频道移除", systemImage: "trash")
+                                    Image(systemName: "ellipsis")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 30, height: 30)
                                 }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 30, height: 30)
                             }
+                            .padding(10)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(red: 0.92, green: 0.91, blue: 0.89), lineWidth: 1))
                         }
-                        .padding(10)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(red: 0.92, green: 0.91, blue: 0.89), lineWidth: 1))
                     }
                 }
             }
@@ -3852,80 +3864,6 @@ public struct ChannelDetailWorkspaceView: View {
     private func loadWorkspaceData() {
         members = ChannelMemberManager.loadMembers(channelId: currentChannelId)
         reloadWorkspaceTasks()
-
-        if messages.isEmpty {
-            messages = [
-                V5ChannelMessage(
-                    id: "msg-1",
-                    senderId: "agent-codex",
-                    senderName: "Codex",
-                    isAgent: true,
-                    text: "已完成 WhereverCode V5 iOS 导航重构基线，目前左侧抽屉严格包含「对话」「项目」「频道」「控制」四项一级入口。",
-                    timestamp: "12:40",
-                    fullDateTime: "2026-11-15 12:40:15",
-                    linkedTaskId: "task-nav-1",
-                    linkedTaskTitle: "iOS V5 导航整改",
-                    linkedTaskState: "working"
-                ),
-                V5ChannelMessage(
-                    id: "msg-2",
-                    senderId: "user-lead",
-                    senderName: "项目主管",
-                    isAgent: false,
-                    text: "@Codex 请确认频道内输入框是否严格保留单一「＋」入口并提供附件、网盘与任务关联？",
-                    timestamp: "12:42",
-                    fullDateTime: "2026-11-15 12:42:01",
-                    replyToId: "msg-1",
-                    replyToText: "已完成 WhereverCode V5 iOS 导航重构基线…"
-                ),
-                V5ChannelMessage(
-                    id: "msg-3",
-                    senderId: "agent-codex",
-                    senderName: "Codex",
-                    isAgent: true,
-                    text: "确认完毕！输入框左侧为单一「＋」按钮，支持展开：上传附件、从项目选择、从网盘选择、关联任务。同时已在服务端与客户端强制校验 Agent ↔ Agent 私聊拦截。",
-                    timestamp: "12:45",
-                    fullDateTime: "2026-11-15 12:45:30",
-                    attachmentName: "FlagshipApp.swift",
-                    attachmentType: "code",
-                    attachmentSize: "28 KB"
-                )
-            ]
-        }
-
-        if files.isEmpty {
-            files = [
-                V5ChannelFile(
-                    id: "file-1",
-                    fileName: "WhereverCodeAgent-unsigned.ipa",
-                    fileSize: "18.4 MB",
-                    fileType: "zip",
-                    uploaderName: "GitHub Actions",
-                    uploadTime: "11-15 12:45",
-                    associatedProjectName: "WhereverCode V5",
-                    sourceKind: "project"
-                ),
-                V5ChannelFile(
-                    id: "file-2",
-                    fileName: "routes_wiring.json",
-                    fileSize: "42 KB",
-                    fileType: "code",
-                    uploaderName: "Codex",
-                    uploadTime: "11-15 12:30",
-                    associatedProjectName: "Contracts",
-                    sourceKind: "project"
-                ),
-                V5ChannelFile(
-                    id: "file-3",
-                    fileName: "design_spec_claude_ui.pdf",
-                    fileSize: "1.2 MB",
-                    fileType: "pdf",
-                    uploaderName: "主管",
-                    uploadTime: "11-15 10:00",
-                    sourceKind: "google_drive"
-                )
-            ]
-        }
     }
 }
 
@@ -4667,14 +4605,25 @@ public struct ControlHomeView: View {
 
     @ViewBuilder
     private var dashboardQuickRowsCard: some View {
+        let activeTasks = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "working" || $0.state == "queued" }
         VStack(alignment: .leading, spacing: 8) {
-            Text("运行脉络快捷处理")
+            Text("运行脉络")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            HStack { Text("任务 #T-104").font(.caption); Spacer(); Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered).controlSize(.mini) }
-            HStack { Text("等待批准 · 文件写入").font(.caption); Spacer(); Button("处理") { onNavigateRoute("approvals") }.buttonStyle(.bordered).controlSize(.mini) }
-            HStack { Text("设备能力核查").font(.caption); Spacer(); Button("查看") { onNavigateRoute("devices") }.buttonStyle(.bordered).controlSize(.mini) }
-            HStack { Text("事件记录").font(.caption); Spacer(); Button("查看") { onNavigateRoute("activity") }.buttonStyle(.bordered).controlSize(.mini) }
+            if activeTasks.isEmpty {
+                Text("暂无运行中的任务与活动脉络")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(activeTasks.prefix(3), id: \.taskId) { t in
+                    HStack {
+                        Text(t.title.isEmpty ? t.taskId : t.title).font(.caption).lineLimit(1)
+                        Spacer()
+                        Button("查看") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered).controlSize(.mini)
+                    }
+                }
+            }
         }
         .padding(14)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
@@ -5471,7 +5420,7 @@ public enum PrototypeCatalog {
             lines: [],
             steps: [],
             selectors: [],
-            rows: [("#T-104 · 统一聊天执行流", "详情", "taskdetail"), ("#T-105 · 代码审查", "审查", "review"), ("#T-106 · 修复 MCP 派工", "查看", "taskdetail"), ("#T-107 · UI 视觉验收", "证据", "preview")],
+            rows: [],
             navBtns: [("＋ 新建任务", "compose")],
             actBtns: []
         ),
@@ -5519,7 +5468,7 @@ public enum PrototypeCatalog {
             lines: [],
             steps: [],
             selectors: [],
-            rows: [("▤ 代码补丁 · 2 文件", "查看", "diff"), ("◩ UI 截图与视觉证据", "查看", "preview"), ("✓ 测试报告", "查看", "terminal"), ("⌘ 提交记录", "查看", "git")],
+            rows: [],
             navBtns: [],
             actBtns: []
         ),
@@ -5543,7 +5492,7 @@ public enum PrototypeCatalog {
             lines: [],
             steps: [],
             selectors: [],
-            rows: [("▾ android/", "打开", "editor"), ("　▾ app/src/main/", "打开", "editor"), ("　　▤ ChatScreen.kt", "编辑", "editor"), ("　　▤ TaskRunner.kt", "编辑", "editor"), ("▤ README.md", "预览", "editor"), ("▤ LICENSE", "预览", "editor")],
+            rows: [],
             navBtns: [],
             actBtns: []
         ),
@@ -5556,7 +5505,7 @@ public enum PrototypeCatalog {
             actBtns: [("局部编辑", "toast(\"演示：编辑草稿\")")]
         ),
         "diff": PrototypeSpecItem(
-            lines: [("ChatScreen.kt", "+38 / -12")],
+            lines: [],
             steps: [],
             selectors: [],
             rows: [],
@@ -5687,7 +5636,7 @@ public enum PrototypeCatalog {
             lines: [],
             steps: [],
             selectors: [],
-            rows: [("任务 #T-104", "执行流", "conversation"), ("等待批准 · 文件写入", "处理", "approvals"), ("设备能力核查", "查看", "devices"), ("事件记录", "查看", "activity")],
+            rows: [],
             navBtns: [],
             actBtns: []
         ),
@@ -5695,7 +5644,7 @@ public enum PrototypeCatalog {
             lines: [("任务完成", "开启"), ("需要审批", "开启"), ("一般频道消息", "静默")],
             steps: [],
             selectors: [],
-            rows: [("09:07 · 任务 #T-104 更新", "查看", "taskdetail"), ("09:04 · Agent 领取任务", "查看", "taskdetail"), ("09:03 · 审批请求", "处理", "approvals"), ("昨天 · GitHub PR 更新", "查看", "git")],
+            rows: [],
             navBtns: [],
             actBtns: []
         ),
@@ -5719,7 +5668,7 @@ public enum PrototypeCatalog {
             lines: [("认证", "未连接"), ("模型列表", "未检测"), ("工具调用", "未检测"), ("安全提示", "凭据不写入聊天记录")],
             steps: [],
             selectors: [],
-            rows: [("官方账号 / OAuth · 仅支持提供方开放的授权方式", "查看", "connections"), ("API Key · 自定义兼容接口", "设置", "models"), ("本地模型 · 设备推理", "设备", "devices"), ("已有 CLI 会话 · Codex / Claude / DeepSeek Harness", "导入", "agentimport")],
+            rows: [("官方账号 / OAuth · 仅支持提供方开放的授权方式", "查看", "connections"), ("API Key · 自定义兼容接口", "设置", "models"), ("本地模型 · 设备推理", "设备", "devices"), ("已有 CLI 会话 · Codex / Claude 等外部 Agent", "导入", "agentimport")],
             navBtns: [],
             actBtns: [("测试连接", "toast(\"演示：需要真实凭据和提供方接口\")")]
         ),
@@ -5735,7 +5684,7 @@ public enum PrototypeCatalog {
             lines: [("安装位置", "设备或云端"), ("认证", "独立授权"), ("会话恢复", "按适配器能力"), ("工具事件", "标准化展示"), ("能力声明", "动态检测")],
             steps: [],
             selectors: [],
-            rows: [("Codex CLI / App", "适配", "agents"), ("Claude Code / App", "适配", "agents"), ("OpenCode / OpenHands", "适配", "agents"), ("DeepSeek Harness", "适配", "agents"), ("Orca / Hermes 兼容接入", "评估", "agents")],
+            rows: [("Codex CLI / App", "适配", "agents"), ("Claude Code / App", "适配", "agents"), ("OpenCode / OpenHands", "适配", "agents"), ("外部 Agent", "适配", "agents"), ("Orca / Hermes 兼容接入", "评估", "agents")],
             navBtns: [],
             actBtns: []
         ),
@@ -5743,7 +5692,7 @@ public enum PrototypeCatalog {
             lines: [],
             steps: [],
             selectors: [],
-            rows: [("Android · 任务 T-104 · 已挂起", "恢复", "conversation"), ("Mac · 代码审查 · 运行中", "查看", "review"), ("云端 · 文档研究 · 等待授权", "审批", "approvals")],
+            rows: [],
             navBtns: [],
             actBtns: []
         ),
@@ -5855,7 +5804,7 @@ public enum PrototypeCatalog {
             lines: [("App 内", "开启"), ("系统推送", "未授权"), ("邮件 / Webhook", "可选配置")],
             steps: [],
             selectors: [],
-            rows: [("任务已接单 · T-104", "详情", "taskdetail"), ("代码变更等待审批", "处理", "approvals"), ("Agent 连接异常", "排查", "connections"), ("自动化巡检报告", "查看", "activity")],
+            rows: [],
             navBtns: [],
             actBtns: []
         ),
@@ -5959,7 +5908,7 @@ public enum PrototypeCatalog {
             lines: [("来源", "官方 / 社区 / 本地包"), ("安装前", "展示能力与权限"), ("执行", "隔离沙箱"), ("生命周期", "安装 / 禁用 / 升级 / 回滚")],
             steps: [],
             selectors: [],
-            rows: [("Agent 适配器", "Codex / Claude / DeepSeek", "harness"), ("工具与 MCP", "GitHub / 文件 / 终端", "mcp"), ("Skills 与工作流", "审查 / 修复 / 测试", "skills"), ("事件与网络适配器", "Webhook / 消息 / VPN", "network")],
+            rows: [("Agent 适配器", "Codex / Claude 等模型", "harness"), ("工具与 MCP", "GitHub / 文件 / 终端", "mcp"), ("Skills 与工作流", "审查 / 修复 / 测试", "skills"), ("事件与网络适配器", "Webhook / 消息 / VPN", "network")],
             navBtns: [("插件详情", "extensiondetail"), ("Harness 运行时", "harness")],
             actBtns: []
         ),
@@ -5975,7 +5924,7 @@ public enum PrototypeCatalog {
             lines: [("能力声明", "动态探测"), ("会话续接", "可选"), ("取消/暂停", "能力差异明确提示"), ("工具事件", "标准化封装")],
             steps: [],
             selectors: [],
-            rows: [("Codex CLI", "CLI 会话、工具流、代码变更", "agentdetail"), ("Claude Code", "会话、工具、审批适配", "agentdetail"), ("OpenCode", "多模型代码工作流", "agentdetail"), ("OpenHands", "云端/本地开发运行时", "agentdetail"), ("DeepSeek Harness", "能力发现后按需接入", "agentdetail")],
+            rows: [("Codex CLI", "CLI 会话、工具流、代码变更", "agentdetail"), ("Claude Code", "会话、工具、审批适配", "agentdetail"), ("OpenCode", "多模型代码工作流", "agentdetail"), ("OpenHands", "云端/本地开发运行时", "agentdetail"), ("外部 Agent", "能力发现后按需接入", "agentdetail")],
             navBtns: [],
             actBtns: []
         ),
@@ -6101,10 +6050,7 @@ public struct PrototypeRouteSections: View {
                 Section("功能入口与关联项") {
                     ForEach(Array(spec.rows.enumerated()), id: \.offset) { _, row in
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.0).font(.subheadline)
-                                Text("目标路由：\(row.2)").font(.caption2).foregroundStyle(.secondary)
-                            }
+                            Text(row.0).font(.subheadline)
                             Spacer()
                             Button(row.1) {
                                 onNavigateRoute(row.2)

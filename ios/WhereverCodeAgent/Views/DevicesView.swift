@@ -129,7 +129,7 @@ public struct DevicesView: View {
                                 Image(systemName: "desktopcomputer")
                                     .foregroundStyle(.green)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(peer.displayName) (\(peer.host):\(peer.port))")
+                                    Text("\(peer.displayName) (\(peer.host):\(String(peer.port)))")
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.primary)
                                     Text("指纹: \(peer.fingerprintSha256.prefix(16))… · \(peer.agents.count) 个 Agent")
@@ -466,7 +466,7 @@ private struct AddDeviceSheet: View {
                                 .foregroundStyle(.blue)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(peer.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                                Text("\(peer.host):\(peer.port) · \(peer.agents.count) 个 Agent").font(.caption2).foregroundStyle(.secondary)
+                                Text("\(peer.host):\(String(peer.port)) · \(peer.agents.count) 个 Agent").font(.caption2).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Text("连接")
