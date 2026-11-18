@@ -5,6 +5,7 @@ import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
 import wherevercode.agent.brain.generic.CustomFreeProviders
 import wherevercode.agent.brain.generic.FreeProviderPresets
+import wherevercode.agent.brain.generic.GenericOpenAiPresets
 
 /**
  * 模型页“已添加模型”的行数据（纯逻辑，无 Android 依赖，可单测）。
@@ -58,6 +59,31 @@ object ModelListRows {
     fun isCustomProvider(config: BrainConfig): Boolean =
         config.extra[FreeProviderPresets.EXTRA_PRESET]
             ?.startsWith(CustomFreeProviders.ID_PREFIX) == true
+
+    /** 手工表单新建条目写入的来源标记值（[CustomFreeProviders.ID_PREFIX] 前缀，[isCustomProvider] 据此认出）。 */
+    const val MANUAL_PRESET_ID: String = "custom-manual"
+
+    /**
+     * 模型页手工表单新建条目要写入的来源 extra：表单本身不记来源，
+     * 保存时按服务地址反查内置名单区分。常用预设点选只是把名称与
+     * 服务地址预填进同一张表单（见 MainActivity 的常用服务商选择
+     * 器），地址命中任一内置名单（常用组 [GenericOpenAiPresets] /
+     * 免费组 [FreeProviderPresets]）就是名单内服务商，不标；两边
+     * 都查不到 = 名单外手打条目，写 [MANUAL_PRESET_ID] 让
+     * [isCustomProvider] 认得出、与内置条目分开呈现。
+     * 免费预设的独立落配置流程自带预设 id 标记、不经本函数；
+     * 编辑已有条目走 copy 保留原 extra，也不经本函数。
+     */
+    fun newFormEntryExtra(baseUrl: String?): Map<String, String> {
+        val url = baseUrl.orEmpty()
+        val inBuiltinLists = GenericOpenAiPresets.presetForBaseUrl(url) != null ||
+            FreeProviderPresets.presetForBaseUrl(url) != null
+        return if (inBuiltinLists) {
+            emptyMap()
+        } else {
+            mapOf(FreeProviderPresets.EXTRA_PRESET to MANUAL_PRESET_ID)
+        }
+    }
 
     /**
      * 模型页管理单的详情：与大脑侧详情同底（模型 + 服务地址，只读

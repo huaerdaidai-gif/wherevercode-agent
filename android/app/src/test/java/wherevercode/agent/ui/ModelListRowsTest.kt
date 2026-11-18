@@ -178,6 +178,24 @@ class ModelListRowsTest {
     }
 
     @Test
+    fun `manual form entries are marked custom unless the url is a builtin preset`() {
+        // 名单外手打地址：新建 extra 带自定义来源标记，isCustomProvider 认得出。
+        val manual = ModelListRows.newFormEntryExtra("https://api.example.com/v1")
+        assertEquals(ModelListRows.MANUAL_PRESET_ID, manual["provider_preset"])
+        assertTrue(
+            ModelListRows.isCustomProvider(
+                config("manual", extra = manual),
+            ),
+        )
+        // 常用预设点选只把名称+地址预填进同一张表单：地址命中常用
+        // 名单（尾斜杠宽容）就不写标记，不误标成自定义。
+        assertTrue(ModelListRows.newFormEntryExtra("https://api.openai.com/v1").isEmpty())
+        assertTrue(ModelListRows.newFormEntryExtra("https://api.openai.com/v1/").isEmpty())
+        // 免费组内置名单的地址手打进表单，同样是名单内服务商：不标。
+        assertTrue(ModelListRows.newFormEntryExtra("https://api.groq.com/openai/v1").isEmpty())
+    }
+
+    @Test
     fun `manage detail marks custom provider only`() {
         val custom = config(
             "my-cloud",

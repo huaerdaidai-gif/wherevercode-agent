@@ -11257,6 +11257,10 @@ class MainActivity : AppCompatActivity() {
      * 设为当前大脑（同设置页口径）。校验文案经 [ModelListRows.formErrors]
      * 在本页侧换口径：名称为空报「请填写模型名称」，不借大脑文案
      * （红线：不改 BrainLoginRows 的原字符串与行为）。
+     * 新建条目的来源标记由 [ModelListRows.newFormEntryExtra] 按服务
+     * 地址反查内置名单决定：名单外手打条目标「自定义」，预设预填
+     * （地址命中名单）不误标；编辑已有条目走 copy 保留原 extra，
+     * 不覆盖其来源标记。
      */
     private fun saveModel() {
         val components = brainComponents ?: run {
@@ -11294,6 +11298,7 @@ class MainActivity : AppCompatActivity() {
                     baseUrl = baseUrl,
                     model = model,
                     authRef = authRef,
+                    extra = ModelListRows.newFormEntryExtra(baseUrl),
                     fallbackBrainIds = emptyList(),
                 )
             val saved = current.copy(
