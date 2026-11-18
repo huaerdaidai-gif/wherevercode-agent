@@ -73,6 +73,10 @@ public struct BrainConfig: Equatable, Codable, Identifiable, Sendable {
         self.lastTestSummary = lastTestSummary
         self.cliBinary = cliBinary
     }
+
+    public static func isLocalModelUrl(_ url: String) -> Bool {
+        BrainConfigValidator.isLocalModelUrl(url)
+    }
 }
 
 public enum BaseUrlSource {
@@ -144,7 +148,7 @@ public enum BrainConfigValidator {
                     errors.append("服务地址只能来自用户配置，不能来自任务内容或聊天消息")
                 }
                 if !isAllowedBaseUrl(url!) {
-                    errors.append("服务地址只允许 https（本地模型允许 http://127.0.0.1 或 http://localhost）：\(url!)")
+                    errors.append("服务地址只允许 https（本机/局域网模型可用 http）：\(url!)")
                 }
             }
         }
@@ -184,28 +188,56 @@ public enum BrainConfigValidator {
         return errors
     }
 
-    /// Local-model URL: the host must be exactly 127.0.0.1 or
-    /// localhost (optionally with a port / path) — the same rule as
-    /// the local exception in `isAllowedBaseUrl`.
+    /// Local-model URL: 127.0.0.1, localhost, or private-LAN IPv4 (RFC 1918 / RFC 6598 100.64/10 Tailscale).
     public static func isLocalModelUrl(_ url: String) -> Bool {
         let lower = url.trimmingCharacters(in: .whitespaces).lowercased()
-        return lower == "http://127.0.0.1" || lower == "http://localhost"
+        if lower == "http://127.0.0.1" || lower == "http://localhost"
             || lower.hasPrefix("http://127.0.0.1/") || lower.hasPrefix("http://127.0.0.1:")
-            || lower.hasPrefix("http://localhost/") || lower.hasPrefix("http://localhost:")
+            || lower.hasPrefix("http://localhost/") || lower.hasPrefix("http://localhost:") {
+            return true
+        }
+        if lower.hasPrefix("http://") {
+            let withoutScheme = lower.dropFirst("http://".count)
+            let host = String(withoutScheme.prefix { !["/", ":", "?", "#"].contains($0) })
+            return isPrivateLanIpv4(host)
+        }
+        return false
+    }
+
+    /// Non-public IPv4 a model server may legitimately sit on:
+    /// RFC 1918 private (10/8, 172.16/12, 192.168/16) plus RFC 6598
+    /// shared address space (100.64/10 — Tailscale/mesh peers).
+    public static func isPrivateLanIpv4(_ host: String) -> Bool {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        var nums: [Int] = []
+        for p in parts {
+            guard !p.isEmpty, p.count <= 3, let n = Int(p), n >= 0, n <= 255 else { return false }
+            nums.append(n)
+        }
+        let a = nums[0], b = nums[1]
+        if a == 10 { return true }
+        if a == 172 && b >= 16 && b <= 31 { return true }
+        if a == 192 && b == 168 { return true }
+        if a == 100 && b >= 64 && b <= 127 { return true }
+        return false
     }
 
     public static func isAllowedBaseUrl(_ url: String) -> Bool {
         let lower = url.trimmingCharacters(in: .whitespaces).lowercased()
         if lower.hasPrefix("https://") { return true }
-        // Local-model exception: the host must be exactly 127.0.0.1 or
-        // localhost (optionally with a port / path), never a longer
-        // host that merely starts with those strings.
+        // Local/LAN-model exception:
         for host in ["http://127.0.0.1", "http://localhost"] {
             if lower == host { return true }
             if lower.hasPrefix(host + "/") || lower.hasPrefix(host + ":")
                 || lower.hasPrefix(host + "?") || lower.hasPrefix(host + "#") {
                 return true
             }
+        }
+        if lower.hasPrefix("http://") {
+            let withoutScheme = lower.dropFirst("http://".count)
+            let host = String(withoutScheme.prefix { !["/", ":", "?", "#"].contains($0) })
+            if isPrivateLanIpv4(host) { return true }
         }
         return false
     }

@@ -102,7 +102,7 @@ public struct FlagshipRouteDestinationView: View {
         // MARK: - 二、工作台 · 连接 (11 路由)
         case "devices", "devicedetail":
             DevicesView(appState: appState, onNavigateRoute: onNavigateRoute)
-        case "models", "connectmodel":
+        case "models", "connectmodel", "modelroute":
             BrainSettingsView(model: appState.brainSettingsModel)
         case "mcp":
             McpToolsInspectorScreen(appState: appState, onNavigateRoute: onNavigateRoute)
@@ -110,7 +110,7 @@ public struct FlagshipRouteDestinationView: View {
             SkillsManagementScreen(routeId: "skills", appState: appState, onNavigateRoute: onNavigateRoute)
         case "connections":
             SettingsView(appState: appState, onNavigateRoute: onNavigateRoute)
-        case "modelroute", "agentimport", "network", "routes":
+        case "agentimport", "network", "routes":
             ConnectionExtendedScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 三、控制 · 系统与自动化 (17 路由)
@@ -1398,15 +1398,12 @@ private struct CollaborationAndAgentsScreen: View {
     var onNavigateRoute: (String) -> Void
 
     @State private var agents: [AgentRecord] = []
-    @State private var newAgentId = ""
-    @State private var newAgentName = ""
-    @State private var newAgentKind: AgentKind = .cloud
-    @State private var newAgentAccess: AgentAccess = .cli
-    @State private var newAgentDeviceId = ""
-    @State private var newAgentEndpoint = ""
+    @State private var showAddAgentSheet = false
     @State private var bannerMsg: String? = nil
     @State private var testingAgentId: String? = nil
     @State private var testResultMsg: String? = nil
+    @State private var agentPendingDelete: AgentRecord? = nil
+    @State private var showDeleteAgentConfirm = false
 
     var body: some View {
         List {
@@ -1426,63 +1423,22 @@ private struct CollaborationAndAgentsScreen: View {
                 }
             }
 
-            Section("添加自定义 Agent") {
-                TextField("Agent 标识（如 my-codex）", text: $newAgentId)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                TextField("显示名称（如 Codex 工作节点）", text: $newAgentName)
-                Picker("类型", selection: $newAgentKind) {
-                    Text("云端 Agent").tag(AgentKind.cloud)
-                    Text("设备 Agent").tag(AgentKind.device)
+            // 块一：添加 Agent
+            Section("添加 Agent") {
+                Button {
+                    showAddAgentSheet = true
+                } label: {
+                    Label("＋ 添加 Agent", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
                 }
-                if newAgentKind == .device {
-                    let registeredDevices = (try? LocalData.shared.agents.listAgents())?.filter { $0.kind == .device && $0.access == .app } ?? []
-                    Picker("绑定执行设备", selection: $newAgentDeviceId) {
-                        Text("未绑定设备").tag("")
-                        ForEach(registeredDevices) { dev in
-                            Text(dev.displayName).tag(dev.deviceId ?? dev.agentId)
-                        }
-                    }
-                }
-                Picker("接入方式", selection: $newAgentAccess) {
-                    ForEach(AgentAccess.allCases, id: \.self) { a in
-                        Text(a.rawValue).tag(a)
-                    }
-                }
-                TextField("服务或 Webhook 地址（可选）", text: $newAgentEndpoint)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("添加并保存 Agent") {
-                    let cleanName = newAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let rawId = newAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let finalId = rawId.isEmpty ? "agent-\(UUID().uuidString.prefix(6).lowercased())" : rawId
-                    guard !cleanName.isEmpty || !rawId.isEmpty else { return }
-                    var rec = AgentRecord(
-                        agentId: finalId,
-                        displayName: cleanName.isEmpty ? finalId : cleanName,
-                        kind: newAgentKind,
-                        access: newAgentAccess,
-                        baseUrl: newAgentEndpoint.isEmpty ? nil : newAgentEndpoint,
-                        lastTestSummary: "本地已登记",
-                        memberConnectionState: "NOT_CONNECTED"
-                    )
-                    if newAgentKind == .device && !newAgentDeviceId.isEmpty {
-                        rec.deviceId = newAgentDeviceId
-                    }
-                    try? LocalData.shared.agents.saveAgent(rec)
-                    newAgentId = ""
-                    newAgentName = ""
-                    newAgentDeviceId = ""
-                    newAgentEndpoint = ""
-                    reload()
-                    bannerMsg = "已添加 Agent「\(rec.displayName)」。"
-                }
-                .disabled(newAgentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && newAgentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            Section("已登记 Agent（\(agents.count)）") {
+            // 块二：已添加的 Agent
+            Section("已添加的 Agent（\(agents.count)）") {
                 if agents.isEmpty {
-                    Text("暂无已登记 Agent，可从上方一键添加或自定义登记。").foregroundStyle(.secondary)
+                    Text("还没有添加 Agent。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(agents) { ag in
                         VStack(alignment: .leading, spacing: 6) {
@@ -1524,8 +1480,8 @@ private struct CollaborationAndAgentsScreen: View {
                                 Button("工具权限") { onNavigateRoute("mcp") }.buttonStyle(.bordered).controlSize(.mini)
                                 Spacer()
                                 Button("删除", role: .destructive) {
-                                    try? LocalData.shared.agents.deleteAgent(agentId: ag.agentId)
-                                    reload()
+                                    agentPendingDelete = ag
+                                    showDeleteAgentConfirm = true
                                 }.font(.caption2)
                             }
                         }
@@ -1533,9 +1489,38 @@ private struct CollaborationAndAgentsScreen: View {
                 }
             }
 
-            PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
+            if route.id != "agents" && route.id != "team" {
+                PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
+            }
         }
+        .navigationTitle(route.id == "team" ? "团队空间" : "Agent")
         .onAppear(perform: reload)
+        .alert("移除 Agent", isPresented: $showDeleteAgentConfirm) {
+            Button("取消", role: .cancel) { agentPendingDelete = nil }
+            Button("移除", role: .destructive) {
+                if let ag = agentPendingDelete {
+                    try? LocalData.shared.agents.deleteAgent(agentId: ag.agentId)
+                    agentPendingDelete = nil
+                    reload()
+                }
+            }
+        } message: {
+            if let ag = agentPendingDelete {
+                Text("确定移除 \(ag.displayName) 吗？它的独立会话与已指派任务不受影响。")
+            }
+        }
+        .sheet(isPresented: $showAddAgentSheet) {
+            AddAgentSheet(
+                onSaved: { addedName in
+                    reload()
+                    bannerMsg = "已添加 Agent「\(addedName)」。"
+                },
+                onBatchAdded: { count in
+                    reload()
+                    bannerMsg = "已添加 \(count) 个 Agent。"
+                }
+            )
+        }
     }
 
     private func executeSingleAgentTest(_ ag: AgentRecord) {
@@ -1582,6 +1567,338 @@ private struct CollaborationAndAgentsScreen: View {
         let all = (try? LocalData.shared.agents.listAgents()) ?? []
         // 过滤掉纯设备记录与模型记录，确保 Agent 列表中只有纯正智能体，不与设备和模型混淆
         agents = all.filter { !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.kind != .localModel }
+    }
+}
+
+private struct AddAgentSheet: View {
+    var onSaved: (String) -> Void
+    var onBatchAdded: (Int) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var newAgentId = ""
+    @State private var newAgentName = ""
+    @State private var newAgentKind: AgentKind = .cloud
+    @State private var newAgentAccess: AgentAccess = .cli
+    @State private var newAgentDeviceId = ""
+    @State private var newAgentEndpoint = ""
+
+    // 自动发现子状态
+    @State private var showScanDevicePicker = false
+    @State private var scanErrorMessage: String?
+    @State private var pairedDevices: [AgentRecord] = []
+    @State private var checkedDeviceIndices: Set<Int> = []
+    @State private var isScanningDevices = false
+
+    @State private var showDiscoveredAgentsPicker = false
+    @State private var discoveredItems: [(device: AgentRecord, info: RemoteAgentInfo)] = []
+    @State private var checkedDiscoveredIndices: Set<Int> = []
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Button {
+                        startDiscoveryFlow()
+                    } label: {
+                        HStack {
+                            Label("自动发现设备上的 Agent", systemImage: "sparkles")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                } header: {
+                    Text("自动发现")
+                } footer: {
+                    Text("从已配对的设备中批量扫描并一键勾选添加 Agent。")
+                }
+
+                Section("手动配置 Agent") {
+                    TextField("Agent 标识（如 my-codex）", text: $newAgentId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("显示名称（如 Codex 工作节点）", text: $newAgentName)
+                    Picker("类型", selection: $newAgentKind) {
+                        Text("云端 Agent").tag(AgentKind.cloud)
+                        Text("设备 Agent").tag(AgentKind.device)
+                    }
+                    if newAgentKind == .device {
+                        let registeredDevices = (try? LocalData.shared.agents.listAgents())?.filter { $0.kind == .device && $0.access == .app } ?? []
+                        Picker("绑定执行设备", selection: $newAgentDeviceId) {
+                            Text("未绑定设备").tag("")
+                            ForEach(registeredDevices) { dev in
+                                Text(dev.displayName).tag(dev.deviceId ?? dev.agentId)
+                            }
+                        }
+                    }
+                    Picker("接入方式", selection: $newAgentAccess) {
+                        ForEach(AgentAccess.allCases, id: \.self) { a in
+                            Text(a.rawValue).tag(a)
+                        }
+                    }
+                    TextField("服务或 Webhook 地址（可选）", text: $newAgentEndpoint)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Button("保存 Agent") {
+                        saveManualAgent()
+                    }
+                    .disabled(newAgentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && newAgentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                if let scanErrorMessage {
+                    Section {
+                        Text(scanErrorMessage).font(.caption).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("添加 Agent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("自动发现") {
+                        startDiscoveryFlow()
+                    }
+                }
+            }
+            .sheet(isPresented: $showScanDevicePicker) {
+                scanDevicePickerSheet
+            }
+            .sheet(isPresented: $showDiscoveredAgentsPicker) {
+                discoveredAgentsPickerSheet
+            }
+        }
+    }
+
+    private func startDiscoveryFlow() {
+        let all = (try? LocalData.shared.agents.listAgents()) ?? []
+        let devices = all.filter { $0.kind == .device && $0.access == .app }
+        guard !devices.isEmpty else {
+            scanErrorMessage = "还没加设备：先去设备页添加设备并完成配对。"
+            return
+        }
+        let paired = devices.filter { $0.memberConnectionState == "CONNECTED" || $0.authRef != nil }
+        guard !paired.isEmpty else {
+            scanErrorMessage = "设备还没配对完成：先在设备页完成配对。"
+            return
+        }
+        pairedDevices = paired
+        // 自动发现第一步：勾选要扫描的设备（默认一个都不勾，勾几个扫几个）
+        checkedDeviceIndices = []
+        scanErrorMessage = nil
+        showScanDevicePicker = true
+    }
+
+    private var scanDevicePickerSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Array(pairedDevices.enumerated()), id: \.offset) { idx, dev in
+                        Button {
+                            if checkedDeviceIndices.contains(idx) {
+                                checkedDeviceIndices.remove(idx)
+                            } else {
+                                checkedDeviceIndices.insert(idx)
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(dev.displayName).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                                    Text(dev.baseUrl ?? "未填地址").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if checkedDeviceIndices.contains(idx) {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
+                                } else {
+                                    Image(systemName: "circle").foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("选择要扫描的设备")
+                } footer: {
+                    Text("勾选要扫描的已配对设备（默认不勾，勾几个扫几个）。")
+                }
+
+                if isScanningDevices {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("正在扫描设备上的 Agent…").font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button("扫描") {
+                        executeDeviceScan()
+                    }
+                    .disabled(checkedDeviceIndices.isEmpty)
+                }
+
+                if let scanErrorMessage {
+                    Text(scanErrorMessage).font(.caption).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("选择要扫描的设备")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { showScanDevicePicker = false }
+                }
+            }
+        }
+    }
+
+    private func executeDeviceScan() {
+        guard !checkedDeviceIndices.isEmpty else {
+            scanErrorMessage = "先勾选要扫描的设备。"
+            return
+        }
+        let targets = checkedDeviceIndices.sorted().map { pairedDevices[$0] }
+        isScanningDevices = true
+        scanErrorMessage = nil
+
+        Task {
+            let existingAgents = (try? LocalData.shared.agents.listAgents()) ?? []
+            let existingIds = Set(existingAgents.map(\.agentId))
+
+            var found: [(device: AgentRecord, info: RemoteAgentInfo)] = []
+            for dev in targets {
+                guard let raw = dev.baseUrl, !raw.isEmpty else { continue }
+                let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+                let parts = clean.split(separator: ":")
+                let host = String(parts[0])
+                let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
+
+                do {
+                    let hello = try await HandClient.shared.probeHello(host: host, port: port)
+                    let devId = dev.deviceId ?? dev.agentId
+                    for ag in hello.agents where ag.available && !ag.folder.isEmpty {
+                        let fullAgentId = "\(devId):\(ag.agentId)"
+                        if !existingIds.contains(fullAgentId) && !existingIds.contains(ag.agentId) {
+                            found.append((device: dev, info: ag))
+                        }
+                    }
+                } catch {
+                    continue
+                }
+            }
+
+            let finalDiscovered = found
+            await MainActor.run {
+                self.isScanningDevices = false
+                if finalDiscovered.isEmpty {
+                    self.scanErrorMessage = "扫描完成：没有可添加的 Agent。"
+                } else {
+                    self.discoveredItems = finalDiscovered
+                    // 自动发现第三步：一张勾选单选要添加的 Agent（可添加项预勾，默认全选）
+                    self.checkedDiscoveredIndices = Set(0..<finalDiscovered.count)
+                    self.showScanDevicePicker = false
+                    self.showDiscoveredAgentsPicker = true
+                }
+            }
+        }
+    }
+
+    private var discoveredAgentsPickerSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Array(discoveredItems.enumerated()), id: \.offset) { idx, item in
+                        Button {
+                            if checkedDiscoveredIndices.contains(idx) {
+                                checkedDiscoveredIndices.remove(idx)
+                            } else {
+                                checkedDiscoveredIndices.insert(idx)
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(item.info.displayName)（\(item.info.folder)）· \(item.device.displayName)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                    Text("ID: \(item.info.agentId)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if checkedDiscoveredIndices.contains(idx) {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
+                                } else {
+                                    Image(systemName: "circle").foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("发现的 Agent（\(discoveredItems.count)）")
+                } footer: {
+                    Text("已存在的 Agent 不重复列出；勾选需要添加的条目后确认。")
+                }
+
+                Section {
+                    Button("添加所选 (\(checkedDiscoveredIndices.count))") {
+                        saveDiscoveredAgents()
+                    }
+                    .disabled(checkedDiscoveredIndices.isEmpty)
+                }
+            }
+            .navigationTitle("发现的 Agent（\(discoveredItems.count)）")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { showDiscoveredAgentsPicker = false }
+                }
+            }
+        }
+    }
+
+    private func saveDiscoveredAgents() {
+        var count = 0
+        for idx in checkedDiscoveredIndices.sorted() {
+            let item = discoveredItems[idx]
+            let devId = item.device.deviceId ?? item.device.agentId
+            let fullId = "\(devId):\(item.info.agentId)"
+            let rec = AgentRecord(
+                agentId: fullId,
+                displayName: "\(item.info.displayName) (\(item.device.displayName))",
+                kind: .device,
+                access: .cli,
+                baseUrl: item.device.baseUrl,
+                lastTestSummary: "设备 Agent · \(item.info.folder)",
+                memberConnectionState: "CONNECTED",
+                deviceId: devId,
+                deviceFolder: item.info.folder
+            )
+            try? LocalData.shared.agents.saveAgent(rec)
+            count += 1
+        }
+        showDiscoveredAgentsPicker = false
+        dismiss()
+        onBatchAdded(count)
+    }
+
+    private func saveManualAgent() {
+        let cleanName = newAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawId = newAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalId = rawId.isEmpty ? "agent-\(UUID().uuidString.prefix(6).lowercased())" : rawId
+        guard !cleanName.isEmpty || !rawId.isEmpty else { return }
+        var rec = AgentRecord(
+            agentId: finalId,
+            displayName: cleanName.isEmpty ? finalId : cleanName,
+            kind: newAgentKind,
+            access: newAgentAccess,
+            baseUrl: newAgentEndpoint.isEmpty ? nil : newAgentEndpoint,
+            lastTestSummary: "本地已登记",
+            memberConnectionState: "NOT_CONNECTED"
+        )
+        if newAgentKind == .device && !newAgentDeviceId.isEmpty {
+            rec.deviceId = newAgentDeviceId
+        }
+        try? LocalData.shared.agents.saveAgent(rec)
+        dismiss()
+        onSaved(rec.displayName)
     }
 }
 
@@ -1969,19 +2286,6 @@ private struct ConnectionExtendedScreen: View {
         List {
             Section("\(route.title)") {
                 switch route.id {
-                case "modelroute":
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .foregroundStyle(.orange)
-                            Text("【待开发】智能模型路由待开发（尚未开发）。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text("当前可通过模型设置手动选择或切换默认模型。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 case "agentimport":
                     Text("导入现有 Agent：支持将 Codex、Claude Code、OpenCode 等外部 Agent 登记至本机 Agent 目录。")
                 case "network", "routes":
@@ -4528,7 +4832,7 @@ public struct ControlHomeView: View {
     private func controlModulesList(devicesCount: Int, agentsCount: Int, queuedCount: Int, pendingApprovals: Int) -> some View {
         VStack(spacing: 12) {
             controlCard(
-                title: "设备管理与配对",
+                title: "设备",
                 subtitle: "添加局域网电脑、远程设备、VPS 及授权工作目录",
                 icon: "desktopcomputer",
                 badge: "\(devicesCount) 台设备",
@@ -4536,7 +4840,7 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "Agent 管理与协作编排",
+                title: "Agent",
                 subtitle: "添加云端、设备或 CLI Agent，配置角色与分工",
                 icon: "person.2.badge.gearshape",
                 badge: "\(agentsCount) 个 Agent",
@@ -4544,7 +4848,7 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "MCP 工具与平台 Token",
+                title: "MCP",
                 subtitle: "保存或签发平台 Token、探测远端工具清单",
                 icon: "cable.connector.horizontal",
                 badge: appState.hasToken ? "已配置 Token" : "未配 Token",
@@ -4552,7 +4856,7 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "Webhook 唤醒与自动化中心",
+                title: "Webhook",
                 subtitle: "配置 Webhook、定时巡检、触发器与自主执行护栏",
                 icon: "bolt.badge.clock",
                 badge: "触发与唤醒",
@@ -4560,7 +4864,7 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "任务队列与审批中心",
+                title: "任务",
                 subtitle: "查看排队任务、调整优先级与批准敏感写入操作",
                 icon: "checklist.checked",
                 badge: pendingApprovals > 0 ? "\(pendingApprovals) 待审批" : "队列 \(queuedCount)",
@@ -4568,7 +4872,7 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "事件提醒与通知中心",
+                title: "事件",
                 subtitle: "查看任务派发、审批请求与完成回执",
                 icon: "bell.badge",
                 badge: "动态",
@@ -4576,7 +4880,7 @@ public struct ControlHomeView: View {
             )
 
             controlCard(
-                title: "用量统计与预算额度",
+                title: "用量",
                 subtitle: "查看模型调用消耗与任务预算策略",
                 icon: "chart.xyaxis.line",
                 badge: "用量",

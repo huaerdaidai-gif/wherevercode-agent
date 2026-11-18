@@ -4,7 +4,8 @@ import Foundation
 /// 严格遵守契约：
 /// 1. 脚本从可信发布地址获取，提供 SHA-256 校验和；
 /// 2. 支持重复安装、平滑升级和干净卸载（带时间戳备份）；
-/// 3. 不要求用户编造配对码或端口（默认统一使用 18743，启动后自动打印 6 位配对码与指纹）。
+/// 3. 不要求用户编造配对码或端口（默认统一使用 18743，启动后自动打印 6 位配对码与指纹）；
+/// 4. 安装步骤全终端通用：任意终端可跑、装后自动发现、配对后授权新老项目、与 Paseo 等工具并行不冲突；云端走适配器/连接器。
 public enum DeviceTargetOs: String, CaseIterable, Identifiable, Sendable {
     case mac = "Mac"
     case linux = "Linux"
@@ -36,7 +37,7 @@ public enum DeviceTargetOs: String, CaseIterable, Identifiable, Sendable {
         case .vps: return "云端 VPS / 远程 Linux 主机"
         case .android: return "移动端算力节点 · Termux 执行宿主 / Tailscale 专网"
         case .ios: return "本机沙盒与审批中心"
-        case .cloud: return "API / Bot / MCP 适配器，无需安装 Hand"
+        case .cloud: return "API / Bot / MCP 适配器或连接器，无需安装 Hand"
         }
     }
 }
@@ -66,7 +67,7 @@ public struct DeviceInstallGuide: Sendable {
         case .ios:
             return "iOS 作为控制端和审批中心，在沙盒内运行，无需安装 Hand 服务端。"
         case .cloud:
-            return "云端 Agent 走 API / MCP 适配器直连，无需在远端安装 Hand 服务。"
+            return "云端 Agent 走 API / Bot / MCP 等适配器或连接器接入，无需在远端安装 Hand 服务。"
         }
     }
 
@@ -94,41 +95,40 @@ public struct DeviceInstallGuide: Sendable {
         }
     }
 
-    /// 安装与配对说明
+    /// 安装与配对说明（全终端通用化：兼容系统终端/iTerm/VSCode/SSH、新老项目、Paseo、适配器与连接器）
     public static func stepInstructions(for os: DeviceTargetOs) -> [String] {
         switch os {
         case .mac:
             return [
-                "在 Mac 打开「终端（Terminal）」，复制并运行上方的一键安装命令。",
-                "脚本会自动检查 Python 3.10+、配置隔离环境并注册 LaunchAgent 后台守护服务。",
-                "安装完成后，终端最后一行将输出当前设备的「6 位数字配对码」与「SHA-256 指纹」。",
-                "回到 iPhone，系统将自动发现该 Mac；核对指纹无误后填入终端显示的配对码即可。"
+                "在 Mac 任意终端（系统终端、iTerm、VS Code 终端或 SSH）运行安装命令。",
+                "脚本自动配置 Python 环境与 LaunchAgent 守护服务；与 Paseo 等工具并行运行互不冲突。",
+                "装好后 Hand 会自动在局域网广播，回到 App 即可自动发现；配对后可授权新老项目。"
             ]
         case .linux, .vps:
             return [
-                "在 Linux 主机或 VPS 终端通过 SSH 连接后运行安装命令。",
-                "脚本会自动配置 systemd 用户服务，并监听 18743 端口。",
-                "输出末尾会打印设备 ID、6 位配对码与公钥指纹。",
-                "在 iPhone 上确认局域网发现或在高级设置填入 VPS IP，输入配对码完成双向授权。"
+                "在 Linux 主机或 VPS 终端（SSH 会话、tmux 或控制台）运行安装命令。",
+                "脚本配置 systemd 用户服务监听 18743 端口；与 Paseo 等工具并行运行不冲突。",
+                "输出末尾打印 6 位配对码与指纹；在 App 确认局域网发现或填入 IP 配对，可授权新老项目。"
             ]
         case .windows:
             return [
-                "以普通用户身份打开 PowerShell，粘贴并执行安装命令。",
-                "脚本自动配置 Windows 后台计划任务或服务。",
-                "运行完成后展示配对码与指纹，在 iPhone 上填入配对码完成连接。"
+                "在 Windows PowerShell 或终端中粘贴并执行安装命令。",
+                "脚本自动配置后台服务；与 Paseo 等工具并行运行不冲突。",
+                "运行完成后展示配对码与指纹，回到 App 填入配对码完成连接；配对后可授权新老项目。"
             ]
         case .android:
             return [
-                "在 Android 手机（如 Redmi K70 / 小米）上安装并打开 Termux 终端应用。",
-                "在 Termux 中粘贴并运行上方的一键安装命令。",
-                "脚本会自动申请唤醒锁 (termux-wake-lock) 防止休眠，并启动 Hand 18743 服务。",
-                "安装完成后，终端会打印设备指纹、6 位配对码以及 Tailscale 专网 / 局域网 IP。",
-                "回到 iPhone，输入终端显示的 Tailscale 专网 IP（如 100.x.x.x）或局域网 IP 及配对码即可秒级完成连接。"
+                "在 Android 手机（如 Redmi K70 / 小米）打开 Termux 终端运行安装命令。",
+                "脚本自动申请唤醒锁防休眠，启动 Hand 18743 服务；与 Paseo 等工具并行不冲突。",
+                "装好后打印配对码与 IP（含 Tailscale 专网），回到 App 输入配对码秒级连接，可授权新老项目。"
             ]
-        case .ios, .cloud:
+        case .ios:
             return [
-                "无需在远程设备部署 Hand 服务端。",
-                "直接在「模型与连接」中添加 API Key 或 MCP 服务地址。"
+                "iOS 作为控制端和审批中心在沙盒内运行，无需部署 Hand 服务端。"
+            ]
+        case .cloud:
+            return [
+                "云端 Agent 不装 Hand，走 API / Bot / MCP 等适配器或连接器接入。在 Agent 页添加对应 Agent 即可。"
             ]
         }
     }

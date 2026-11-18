@@ -75,6 +75,7 @@
 			00600EE2EA71EC2F6623B155,
 			AF29026DEB46CEBD6478E0B0,
 			DA000000000000000000D301,
+			DA000000000000000000E501,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
 		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
@@ -210,6 +211,10 @@
 			DA000000000000000000003A,
 			DA000000000000000000D102,
 			DA000000000000000000D202,
+			DA000000000000000000E102,
+			DA000000000000000000E202,
+			DA000000000000000000E302,
+			DA000000000000000000E402,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		6D2652F5D197BA7CCF479CE7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatView.swift; sourceTree = "<group>"; };
 		6E49E94E4D6DA0B155C63BBD = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
@@ -280,6 +285,7 @@
 			844C8F533FE271C19FE543DF,
 			7667F7CA498D0ED82757FFC2,
 			DA000000000000000000D302,
+			DA000000000000000000E502,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
@@ -363,6 +369,16 @@
 		DA000000000000000000D202 = {isa = PBXBuildFile; fileRef = DA000000000000000000D201; };
 		DA000000000000000000D301 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandClientTests.swift; sourceTree = "<group>"; };
 		DA000000000000000000D302 = {isa = PBXBuildFile; fileRef = DA000000000000000000D301; };
+		DA000000000000000000E101 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeProviderPresets.swift; sourceTree = "<group>"; };
+		DA000000000000000000E102 = {isa = PBXBuildFile; fileRef = DA000000000000000000E101; };
+		DA000000000000000000E201 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomFreeProviders.swift; sourceTree = "<group>"; };
+		DA000000000000000000E202 = {isa = PBXBuildFile; fileRef = DA000000000000000000E201; };
+		DA000000000000000000E301 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouting.swift; sourceTree = "<group>"; };
+		DA000000000000000000E302 = {isa = PBXBuildFile; fileRef = DA000000000000000000E301; };
+		DA000000000000000000E401 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceModelDiscovery.swift; sourceTree = "<group>"; };
+		DA000000000000000000E402 = {isa = PBXBuildFile; fileRef = DA000000000000000000E401; };
+		DA000000000000000000E501 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriadFeaturesTests.swift; sourceTree = "<group>"; };
+		DA000000000000000000E502 = {isa = PBXBuildFile; fileRef = DA000000000000000000E501; };
 		A1B2C3D4E5F6000000000010 = {isa = PBXGroup; children = (
 			A1B2C3D4E5F6000000000011,
 		); name = WhereverCodeAgentUITests; path = WhereverCodeAgentUITests; sourceTree = "<group>"; };
@@ -505,6 +521,10 @@
 			DA0000000000000000000067,
 			DA0000000000000000000069,
 			DA000000000000000000006D,
+			DA000000000000000000E101,
+			DA000000000000000000E201,
+			DA000000000000000000E301,
+			DA000000000000000000E401,
 		); name = Brain; path = Brain; sourceTree = "<group>"; };
 		DA000000000000000000003D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekStreamParser.swift; sourceTree = "<group>"; };
 		DA000000000000000000003E = {isa = PBXBuildFile; fileRef = DA000000000000000000003D; };

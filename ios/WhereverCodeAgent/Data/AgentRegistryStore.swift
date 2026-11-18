@@ -228,7 +228,13 @@ public final class AgentRegistryStore {
                 return deleted.contains(ag.agentId) || (ag.deviceId != nil && deleted.contains(ag.deviceId!))
             }
         }
-        var modified = false
+        // 概念分离硬规则：agy 是 Agent，不得登记为一台设备
+        let beforeCount = agents.count
+        agents.removeAll { ag in
+            ag.kind == .device && (ag.access == .app || ag.agentId == ag.deviceId) &&
+            (ag.agentId.lowercased() == "agy" || ag.displayName.lowercased() == "agy")
+        }
+        var modified = agents.count != beforeCount
         for i in 0..<agents.count {
             guard agents[i].kind == .device else { continue }
             // 稳定身份回填

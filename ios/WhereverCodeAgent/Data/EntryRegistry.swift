@@ -126,7 +126,7 @@ public enum EntryRegistry {
         Entry(id: "feature_network", title: "通信网络", group: .feature, status: .todo, parentId: "nav_tools", todoMessage: "通信网络待开发（传输路径与离线队列尚未开发）", routeId: "network"),
         Entry(id: "feature_network_path", title: "网络路径详情", group: .feature, status: .todo, parentId: "nav_tools", todoMessage: "网络路径详情待开发（尚未开发）", routeId: "routes"),
         Entry(id: "feature_model_wizard", title: "连接模型向导", group: .feature, status: .todo, parentId: "nav_tools", todoMessage: "连接模型向导待开发（尚未开发）", routeId: "connectmodel"),
-        Entry(id: "feature_model_routing", title: "智能模型路由", group: .feature, status: .todo, parentId: "nav_tools", todoMessage: "智能模型路由待开发（尚未开发）", routeId: "modelroute"),
+        Entry(id: "feature_model_routing", title: "智能模型路由", group: .feature, status: .implemented, parentId: "nav_tools", todoMessage: nil, routeId: "modelroute"),
         Entry(id: "feature_plugin_install", title: "插件权限与安装", group: .feature, status: .todo, parentId: "nav_mcp_plugins", todoMessage: "插件权限与安装待开发（插件启停已有，权限与安装页尚未开发）", routeId: "extensiondetail"),
         Entry(id: "feature_harness_runtime", title: "Harness 运行时", group: .feature, status: .todo, parentId: "nav_mcp_plugins", todoMessage: "Harness 运行时待开发（尚未开发）", routeId: "harness"),
         Entry(id: "feature_extension_manifest", title: "扩展 Manifest 导入", group: .feature, status: .todo, parentId: "nav_mcp_plugins", todoMessage: "扩展 Manifest 导入待开发（通过 Manifest 规范导入自定义能力）", routeId: "extensions"),

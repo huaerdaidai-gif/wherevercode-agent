@@ -229,6 +229,10 @@ public final class BrainEngine {
     /// Test clock seam: defaults to system time.
     private let nowMillisProvider: () -> Int64
     private let failoverPolicy: FailoverPolicy
+    /// 三件套之三·智能路由：按本轮当前大脑动态给出故障切换政策
+    /// （设置实时读取，改完下一轮即生效）。返回 nil = 用静态
+    /// [failoverPolicy]，既有行为一字不变。
+    private let failoverPolicyProvider: ((String) -> FailoverPolicy?)?
     /// Optional session ledger. Default is the no-op ledger, so
     /// existing callers and tests are untouched. When a real ledger
     /// is injected, every turn is classified first: CONTROL
@@ -262,6 +266,7 @@ public final class BrainEngine {
         controlState: @escaping () -> TurnControlState = { .running },
         nowMillis: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
         failoverPolicy: FailoverPolicy = FailoverPolicy(),
+        failoverPolicyProvider: ((String) -> FailoverPolicy?)? = nil,
         sessionLedger: SessionLedger = NoOpSessionLedger(),
         gitHostProjectContext: @escaping () -> (project: Project, location: ProjectLocation)? = { nil },
         webSearch: WebSearchClient = WebSearchClient()
@@ -281,6 +286,7 @@ public final class BrainEngine {
         self.controlStateProvider = controlState
         self.nowMillisProvider = nowMillis
         self.failoverPolicy = failoverPolicy
+        self.failoverPolicyProvider = failoverPolicyProvider
         self.sessionLedger = sessionLedger
         self.gitHostProjectContextProvider = gitHostProjectContext
         self.webSearch = webSearch
@@ -1020,8 +1026,9 @@ public final class BrainEngine {
             }
             if let err = roundError {
                 log(conversation.id, "error", "\(err.code): \(err.message)")
+                let policy = failoverPolicyProvider?(brainId) ?? failoverPolicy
                 if Failover.shouldRetry(
-                    error: err, attemptsSoFar: sameBrainAttempts, policy: failoverPolicy) {
+                    error: err, attemptsSoFar: sameBrainAttempts, policy: policy) {
                     sameBrainAttempts += 1
                     log(conversation.id, "failover_retry", "同大脑重试第 \(sameBrainAttempts) 次")
                     continue outer
@@ -1035,7 +1042,7 @@ public final class BrainEngine {
                 // another billing party.
                 let next = (allowFailover && err.retryable)
                     ? Failover.nextFallback(
-                        currentBrainId: brainId, policy: failoverPolicy, tried: triedBrains)
+                        currentBrainId: brainId, policy: policy, tried: triedBrains)
                     : nil
                 if let next {
                     brainId = next
