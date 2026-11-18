@@ -73,6 +73,10 @@ public struct BrainConfig: Equatable, Codable, Identifiable, Sendable {
         self.lastTestSummary = lastTestSummary
         self.cliBinary = cliBinary
     }
+
+    public static func isLocalModelUrl(_ url: String) -> Bool {
+        BrainConfigValidator.isLocalModelUrl(url)
+    }
 }
 
 public enum BaseUrlSource {

@@ -856,7 +856,7 @@ private struct DeviceDetailSheet: View {
     @State private var remoteHello: RemoteHello?
     @State private var isAuthorizingFolder = false
     @State private var authResult: String?
-    @State private var directoryFiles: [RemoteDirectoryEntry] = []
+    @State private var directoryFiles: [RemoteFileEntry] = []
     @State private var isListingFiles = false
     @State private var showUnpairConfirm = false
     @State private var showDeleteConfirm = false

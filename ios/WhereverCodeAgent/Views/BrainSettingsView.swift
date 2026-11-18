@@ -356,6 +356,19 @@ public struct BrainSettingsView: View {
 
     // MARK: - 3. 已添加的模型（分类呈现）
 
+    private var modelApis: [BrainConfig] {
+        model.configs.filter { $0.kind == .modelApi && !BrainConfigValidator.isLocalModelUrl($0.baseUrl ?? "") }
+    }
+    private var localModels: [BrainConfig] {
+        model.configs.filter { $0.kind == .modelApi && BrainConfigValidator.isLocalModelUrl($0.baseUrl ?? "") }
+    }
+    private var cliBrains: [BrainConfig] {
+        model.configs.filter { $0.kind == .agentRuntime }
+    }
+    private var subscriptions: [BrainConfig] {
+        model.configs.filter { $0.kind == .subscription }
+    }
+
     @ViewBuilder
     private var addedModelsSection: some View {
         Section("已添加的模型") {
@@ -364,11 +377,6 @@ public struct BrainSettingsView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                let modelApis = model.configs.filter { $0.kind == .modelApi }
-                let cliBrains = model.configs.filter { $0.kind == .cliBinary || $0.kind == .agentRuntime }
-                let subscriptions = model.configs.filter { $0.kind == .subscription }
-                let localModels = model.configs.filter { $0.kind == .localModel }
-
                 if !modelApis.isEmpty {
                     SectionHeaderView(title: "模型 API")
                     ForEach(modelApis, id: \.brainId) { config in

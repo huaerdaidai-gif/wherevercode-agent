@@ -1769,14 +1769,15 @@ private struct AddAgentSheet: View {
                 }
             }
 
+            let finalDiscovered = found
             await MainActor.run {
                 self.isScanningDevices = false
-                if found.isEmpty {
+                if finalDiscovered.isEmpty {
                     self.scanErrorMessage = "扫描完成：没有可添加的 Agent。"
                 } else {
-                    self.discoveredItems = found
+                    self.discoveredItems = finalDiscovered
                     // 自动发现第三步：一张勾选单选要添加的 Agent（可添加项预勾，默认全选）
-                    self.checkedDiscoveredIndices = Set(0..<found.count)
+                    self.checkedDiscoveredIndices = Set(0..<finalDiscovered.count)
                     self.showScanDevicePicker = false
                     self.showDiscoveredAgentsPicker = true
                 }
@@ -1882,53 +1883,6 @@ private struct AddAgentSheet: View {
         try? LocalData.shared.agents.saveAgent(rec)
         dismiss()
         onSaved(rec.displayName)
-    }
-}
-
-    private func executeSingleAgentTest(_ ag: AgentRecord) {
-        guard let raw = ag.baseUrl else { return }
-        testingAgentId = ag.agentId
-        testResultMsg = "正在向 \(ag.displayName) 下发单兵冒烟测试指令…"
-        let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
-        let parts = clean.split(separator: ":")
-        let host = String(parts[0])
-        let port = parts.count >= 2 ? (Int(parts[1]) ?? 18743) : 18743
-        let targetDev = ag.deviceId ?? ""
-        let folder = ag.deviceFolder ?? ""
-        let realAgentId = ag.agentId.contains(":") ? String(ag.agentId.split(separator: ":").last!) : ag.agentId
-
-        Task {
-            do {
-                let output = try await HandClient.shared.runAgent(
-                    host: host,
-                    port: port,
-                    targetDeviceId: targetDev,
-                    folder: folder,
-                    agentId: realAgentId,
-                    prompt: "echo SINGLE_AGENT_SMOKE_PASS",
-                    timeoutSeconds: 30.0
-                ) { progress in
-                    Task { @MainActor in
-                        self.testResultMsg = "进度：\(progress)"
-                    }
-                }
-                await MainActor.run {
-                    self.testingAgentId = nil
-                    self.testResultMsg = "单兵测试成功！输出：\(output.trimmingCharacters(in: .whitespacesAndNewlines))"
-                }
-            } catch {
-                await MainActor.run {
-                    self.testingAgentId = nil
-                    self.testResultMsg = "单兵测试失败：\(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func reload() {
-        let all = (try? LocalData.shared.agents.listAgents()) ?? []
-        // 过滤掉纯设备记录与模型记录，确保 Agent 列表中只有纯正智能体，不与设备和模型混淆
-        agents = all.filter { !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.kind != .localModel }
     }
 }
 
