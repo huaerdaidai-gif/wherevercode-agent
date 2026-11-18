@@ -1835,7 +1835,7 @@ class MainActivity : AppCompatActivity() {
             if (devicesOnly) View.VISIBLE else View.GONE
         deviceInfo.visibility = if (devicesOnly) View.VISIBLE else View.GONE
         screenAgents.findViewById<TextView>(R.id.deviceSectionTitle).text =
-            if (devicesOnly) "设备与授权" else "本机设备"
+            if (devicesOnly) "设备" else "本机设备"
         if (devicesOnly) {
             screenAgents.post { (screenAgents as ScrollView).scrollTo(0, 0) }
         }
