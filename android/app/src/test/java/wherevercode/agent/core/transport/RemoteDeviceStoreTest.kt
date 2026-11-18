@@ -301,4 +301,86 @@ class RemoteDeviceStoreTest {
         assertEquals(0L, vps().lastSeenEpochSeconds)
         assertEquals("", vps().lastServerStatus)
     }
+
+    // ── 双记录合并（2026-11-19，197/199 真机复现） ──────────────────
+
+    private fun pairing(deviceId: String, name: String, state: PairingState = PairingState.CONFIRMED) =
+        PairingRecord(deviceId, name, "aa".repeat(32), state = state, updatedAtEpochSeconds = 1L)
+
+    @Test
+    fun `standalonePairings drops pairings that have a remote device record`() {
+        // 同一台小米 12：配对记录与远程设备记录 deviceId 相同（都是
+        // hello 报的服务端 id）→ 配对记录并入远程卡，不再单独出卡。
+        val devices = listOf(vps().copy(deviceId = "Android-x", displayName = "小米 12"))
+        val pairings = listOf(pairing("Android-x", "小米 12"))
+        assertTrue(standalonePairings(pairings, devices).isEmpty())
+    }
+
+    @Test
+    fun `standalonePairings keeps pairings without a remote device record`() {
+        val devices = listOf(vps().copy(deviceId = "Android-x", displayName = "小米 12"))
+        val pairings = listOf(
+            pairing("Android-x", "小米 12"),
+            pairing("mac-host", "Mac", PairingState.PENDING),
+        )
+        val standalone = standalonePairings(pairings, devices)
+        assertEquals(1, standalone.size)
+        assertEquals("mac-host", standalone[0].deviceId)
+    }
+
+    @Test
+    fun `agentCountsByDevice counts per device and ignores cloud agents`() {
+        val counts = agentCountsByDevice(listOf("Android-x", "Android-x", "mac-host", null, null))
+        assertEquals(2, counts["Android-x"])
+        assertEquals(1, counts["mac-host"])
+        assertEquals(2, counts.size)
+        assertTrue(agentCountsByDevice(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `buildRemoteDeviceRows carries agent counts with zero default`() {
+        val devices = listOf(
+            vps().copy(deviceId = "Android-x", displayName = "小米 12"),
+            vps().copy(deviceId = "mac-host", displayName = "Mac"),
+        )
+        val rows = buildRemoteDeviceRows(devices, emptyList(), agentCounts = mapOf("Android-x" to 3))
+        assertEquals(3, rows[0].agentCount)
+        // 没登记 Agent 的设备照实 0（卡片显示“0 个 Agent”），不缺省成未知。
+        assertEquals(0, rows[1].agentCount)
+    }
+
+    @Test
+    fun `deleteDeviceRecords removes device and pairing but never agents`() {
+        val devices: RemoteDeviceStore = InMemoryRemoteDeviceStore()
+        val pairings = wherevercode.agent.core.security.InMemoryPairingTrustStore()
+        val agents = wherevercode.agent.core.agent.InMemoryAgentStore()
+        devices.saveDevice(vps().copy(deviceId = "Android-x", displayName = "小米 12"))
+        devices.saveDevice(vps().copy(deviceId = "mac-host", displayName = "Mac"))
+        pairings.save(pairing("Android-x", "小米 12"))
+        pairings.save(pairing("mac-host", "Mac"))
+        // 这台设备承载的 Agent：删设备绝不级联删它（概念分离硬规则）。
+        agents.saveAgent(
+            wherevercode.agent.core.agent.AgentRecord(
+                agentId = "agy-on-mi12",
+                displayName = "AGY",
+                kind = wherevercode.agent.core.agent.AgentKind.DEVICE,
+                access = wherevercode.agent.core.agent.AgentAccess.CLI,
+                brainKind = wherevercode.agent.brain.BrainKind.AGENT_RUNTIME,
+                adapterId = "cli",
+                binary = "agy",
+                deviceId = "Android-x",
+            ),
+        )
+        assertTrue(deleteDeviceRecords("Android-x", devices, pairings))
+        assertNull(devices.getDevice("Android-x"))
+        assertNull(pairings.load("Android-x"))
+        // 别的设备两条记录都不动。
+        assertEquals("Mac", devices.getDevice("mac-host")?.displayName)
+        assertEquals("Mac", pairings.load("mac-host")?.displayName)
+        // Agent 记录原样保留，仍按 deviceId 归这台（已删的）设备。
+        assertEquals(1, agents.listAgents().size)
+        assertEquals("Android-x", agents.listAgents()[0].deviceId)
+        // 重复删不报错，返回 false（本来就没有设备条目）。
+        assertFalse(deleteDeviceRecords("Android-x", devices, pairings))
+    }
 }

@@ -9,8 +9,11 @@ import wherevercode.agent.core.task.TaskEvent
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStep
+import wherevercode.agent.core.security.PairingRecord
+import wherevercode.agent.core.security.PairingState
 import wherevercode.agent.core.team.MemberConnectionState
 import wherevercode.agent.core.transport.RemoteDevice
+import wherevercode.agent.core.transport.standalonePairings
 
 /**
  * V5 控制台快照（2026-11-11，控制台第一版）。
@@ -268,6 +271,13 @@ object ConsoleSnapshot {
         agents: List<AgentRecord>,
         generatedAtEpochSeconds: Long,
         taskEvents: List<TaskEvent> = emptyList(),
+        /**
+         * 全部配对记录（2026-11-19 双记录修复）：与设备页同一份合并
+         * 口径——只有配对记录、没有远程设备条目的设备也算一台（出
+         * 一行，地址为空）；同 deviceId 两边都有的只算一次。缺省空 =
+         * 旧调用方行为不变（只数远程设备）。
+         */
+        pairings: List<PairingRecord> = emptyList(),
     ): Snapshot {
         val sortedTasks = tasks.sortedByDescending { it.updatedAt }
         val selfTasks = sortedTasks.filter { executorOf(it) is TaskExecutor.Self }
@@ -306,7 +316,7 @@ object ConsoleSnapshot {
                 lastActivityEpochSeconds = mine.maxOfOrNull { it.updatedAt },
             )
         }.sortedBy { it.displayName }
-        val deviceRows = devices.map { device ->
+        val remoteDeviceRows = devices.map { device ->
             ConsoleDeviceRow(
                 deviceId = device.deviceId,
                 displayName = device.displayName.ifBlank { device.deviceId },
@@ -315,7 +325,21 @@ object ConsoleSnapshot {
                 paired = device.deviceId in pairedDeviceIds,
                 agentCount = agents.count { it.deviceId == device.deviceId },
             )
-        }.sortedBy { it.displayName }
+        }
+        // 只有配对记录的设备（没有远程条目）：与设备页的配对单卡同一
+        // 台设备，控制台角标必须同数。地址从未登记，host/port 留空，
+        // 渲染层据此显示“无地址记录”，不编造地址。
+        val pairingOnlyRows = standalonePairings(pairings, devices).map { record ->
+            ConsoleDeviceRow(
+                deviceId = record.deviceId,
+                displayName = record.displayName.ifBlank { record.deviceId },
+                host = "",
+                port = 0,
+                paired = record.state == PairingState.CONFIRMED,
+                agentCount = agents.count { it.deviceId == record.deviceId },
+            )
+        }
+        val deviceRows = (remoteDeviceRows + pairingOnlyRows).sortedBy { it.displayName }
         return Snapshot(
             tasks = sortedTasks,
             stepsByTask = stepsByTask,
