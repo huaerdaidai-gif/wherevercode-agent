@@ -3019,9 +3019,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 批量扫描的勾选集（存本机）：从未存过 = 全部已配对设备默认
-     * 勾选；存过就以存的为准（与当前设备清单取交集，删掉的设备
-     * 不再出现）。勾选只是选择，不是关联：不勾的设备照常在册。
+     * 批量扫描的勾选集（存本机）：默认一个都不勾——批量是可选项，
+     * 先由用户明确勾选要扫的设备才扫（Funk 2026-11-19）；勾过的
+     * 记住（与当前设备清单取交集，删掉的设备不再出现）。勾选
+     * 只是选择，不是关联：不勾的设备照常在册。
      */
     private fun batchCheckedDeviceIds(pairedIds: Set<String>): Set<String> {
         val stored = try {
@@ -3030,7 +3031,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             null
         }
-        return if (stored == null) pairedIds else stored.intersect(pairedIds)
+        return stored?.intersect(pairedIds) ?: emptySet()
     }
 
     private fun setBatchDeviceChecked(device: RemoteDevice, checked: Boolean, pairedIds: Set<String>) {
@@ -11949,8 +11950,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         // 先勾选、再扫描（Funk 2026-11-19，与 Agent 批量发现同口径）：
-        // 只探勾中的来源，不勾的不探。
-        val checked = BooleanArray(sources.size) { true }
+        // 默认一个都不勾，用户明确勾了哪个来源才探哪个。
+        val checked = BooleanArray(sources.size) { false }
         AlertDialog.Builder(this)
             .setTitle("勾选要扫描的设备")
             .setMultiChoiceItems(
