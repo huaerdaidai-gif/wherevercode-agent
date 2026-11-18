@@ -36,6 +36,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/settingsTitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="设置"
@@ -45,6 +46,7 @@
                     android:fontFamily="sans-serif-medium" />
 
                 <TextView
+                    android:id="@+id/settingsSubtitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="大脑、密钥与本机配置；密钥只存 Android Keystore。"
@@ -54,6 +56,7 @@
         </LinearLayout>
 
         <HorizontalScrollView
+            android:id="@+id/settingsJumpBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -74,6 +77,7 @@
 
         <!-- 阶段 3（U6）：设置分节——大脑 / 工作区 / 关于。 -->
         <TextView
+            android:id="@+id/brainSectionTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -83,6 +87,7 @@
             android:textStyle="bold" />
 
         <LinearLayout
+            android:id="@+id/brainStatusCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -125,6 +130,7 @@
         <!-- V5 C3-C：SIWC 换号 / 取消登录。切换账号只在已登录时显示；
              取消登录只在登录等待中显示（见 MainActivity.updateSiwcSignInButtons）。 -->
         <LinearLayout
+            android:id="@+id/siwcAccountRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -159,6 +165,7 @@
         <!-- V5 C3-C：统一大脑列表（点按一行切换）。行由 MainActivity
              按 BrainLoginRows.buildRows() 程序化渲染，状态取真实值。 -->
         <TextView
+            android:id="@+id/brainListTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
@@ -177,6 +184,7 @@
         <!-- V5 C3-C：SIWC 模型选择器。目录来自账号 GET /v1/models
             （SiwcM2BrainAdapter.listModels），选后写回 BrainConfig.model。 -->
         <LinearLayout
+            android:id="@+id/siwcModelRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -255,6 +263,12 @@
              常用（选一家把地址填进下面的手工表单）与免费 token（填
              注册好的免费 Key，拉回模型阵列勾选添加）。两入口、两份
              预设数据，绝不合并；与下方手工表单并列，互不替代。 -->
+        <LinearLayout
+            android:id="@+id/presetModelBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -344,6 +358,7 @@
             android:textAllCaps="false"
             android:textColor="@color/text_primary"
             android:textSize="11sp" />
+        </LinearLayout>
 
 
         <!-- 设置清理 2（2026-11-11，Claude 极简标准）：高级配置折叠——

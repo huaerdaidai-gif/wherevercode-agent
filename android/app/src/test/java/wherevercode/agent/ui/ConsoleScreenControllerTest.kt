@@ -206,6 +206,28 @@ class ConsoleScreenControllerTest {
     }
 
     @Test
+    fun `control list has a models card with the added models count`() {
+        // V5 三件套（2026-11-19）：控制菜单下设备 / Agent / 模型三卡并列，
+        // 模型卡角标与总览行都写真实已添加数，不编数字。
+        val c = ConsoleScreenController(
+            RuntimeEnvironment.getApplication(),
+            onOpenTask = {},
+            onOpenFile = {},
+            onOpenChat = {},
+            onOpenDevices = {},
+            onOpenAgents = {},
+            onRefresh = {},
+            modelsCount = { 3 },
+        )
+        c.setLevel(3)
+        c.render(snapshot())
+        val texts = allTexts(c.root)
+        assertContains(texts, "模型")
+        assertContains(texts, "3 个模型")
+        assertContains(texts, "模型 3 个")
+    }
+
+    @Test
     fun `loading state says loading and never fakes an empty overview`() {
         val c = controller()
         c.renderLoading()
