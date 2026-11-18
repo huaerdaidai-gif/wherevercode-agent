@@ -111,9 +111,11 @@ class DeviceTapRefreshTest {
      */
     private fun openDevicesViaControl(activity: MainActivity) {
         clickDrawerRow(activity, "nav_control")
+        // 控制页快照靠大脑组件就绪后后台线程组装（refreshConsole），
+        // Robolectric 下组件引导要数秒，放宽到 20 秒等卡片渲染出来。
         assertTrue(
             "控制页应出现「设备管理与配对」入口",
-            waitForText(activity, "设备管理与配对", timeoutMs = 3000),
+            waitForText(activity, "设备管理与配对", timeoutMs = 20000),
         )
         val title = findTextView(activity.window.decorView, "设备管理与配对")
         assertNotNull("控制页应有「设备管理与配对」入口", title)
