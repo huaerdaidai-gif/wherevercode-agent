@@ -2963,12 +2963,19 @@ class MainActivity : AppCompatActivity() {
     private fun scanDevicesForAgents(devices: List<RemoteDevice>) {
         toast("正在扫描 ${devices.size} 台设备…")
         Thread {
-            val existingIds = try {
-                agentStore.listAgents().map { it.agentId }.toSet()
+            val existingById = try {
+                agentStore.listAgents().associateBy { it.agentId }
+            } catch (_: Exception) {
+                emptyMap()
+            }
+            val knownDeviceIds = try {
+                remoteDeviceStore.listDevices().map { it.deviceId }.toSet()
             } catch (_: Exception) {
                 emptySet()
             }
             val found = mutableListOf<Pair<RemoteDevice, RemoteAgentInfo>>()
+            // 已属另一台现存设备的 Agent 不进勾选单，但计数明示，不静默吞。
+            val conflictIds = mutableSetOf<String>()
             var scanned = 0
             for (device in devices) {
                 try {
@@ -2995,8 +3002,22 @@ class MainActivity : AppCompatActivity() {
                     }
                     noteHelloForCapabilityCards(hello)
                     hello.agents
-                        .filter { it.available && it.folder.isNotBlank() && it.agentId !in existingIds }
-                        .forEach { found += device to it }
+                        .filter { it.available && it.folder.isNotBlank() }
+                        .forEach { info ->
+                            val boundDeviceId = existingById[info.agentId]?.deviceId
+                            when {
+                                // 还没有记录 → 新发现，进勾选单。
+                                info.agentId !in existingById -> found += device to info
+                                // 已绑在本台设备上 → 已在，不重复列。
+                                boundDeviceId == device.deviceId -> Unit
+                                // 没绑设备、或绑的设备已删 → 改绑候选，进
+                                // 勾选单（确认时由 DeviceAgentDiscovery 改绑）。
+                                boundDeviceId == null || boundDeviceId !in knownDeviceIds ->
+                                    found += device to info
+                                // 绑在另一台现存设备上 → 冲突，不列，明示。
+                                else -> conflictIds += info.agentId
+                            }
+                        }
                     scanned++
                 } catch (_: Exception) {
                     // 单台连不上就跳过，不把整批卡死。
@@ -3006,8 +3027,15 @@ class MainActivity : AppCompatActivity() {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when {
                     scanned == 0 -> toast("没有连上任何一台设备。")
+                    found.isEmpty() && conflictIds.isNotEmpty() ->
+                        toast("扫描完成：没有可添加的 Agent；另有 ${conflictIds.size} 个 Agent 已属于其他设备，未列出。")
                     found.isEmpty() -> toast("扫描完成：没有可添加的 Agent。")
-                    else -> showDiscoveredAgentsPicker(found)
+                    else -> {
+                        if (conflictIds.isNotEmpty()) {
+                            toast("另有 ${conflictIds.size} 个 Agent 已属于其他设备，未列出。")
+                        }
+                        showDiscoveredAgentsPicker(found)
+                    }
                 }
             }
         }.start()
@@ -3031,19 +3059,27 @@ class MainActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
                 Thread {
-                    var createdTotal = 0
+                    val knownDeviceIds = try {
+                        remoteDeviceStore.listDevices().map { it.deviceId }.toSet()
+                    } catch (_: Exception) {
+                        emptySet()
+                    } + selected.map { it.first.deviceId }
+                    val summaries = mutableListOf<String>()
                     selected.groupBy({ it.first }, { it.second })
                         .forEach { (device, infos) ->
-                            val (created, _) = DeviceAgentDiscovery.discover(
+                            val (toSave, result) = DeviceAgentDiscovery.discover(
                                 device.deviceId,
                                 infos,
                                 agentStore.listAgents(),
+                                knownDeviceIds,
                             )
-                            created.forEach { agentStore.saveAgent(it) }
-                            createdTotal += created.size
+                            toSave.forEach { agentStore.saveAgent(it) }
+                            summaries += DeviceAgentDiscovery.summarize(result)
                         }
                     runOnUiThread {
-                        toast("已添加 $createdTotal 个 Agent。")
+                        // 结果明示：新建/改绑/已在/重名跳过都报实话，
+                        // 不只报一个总数（冲突不许静默吞）。
+                        toast(summaries.joinToString("；"))
                         refreshAgents()
                     }
                 }.start()
