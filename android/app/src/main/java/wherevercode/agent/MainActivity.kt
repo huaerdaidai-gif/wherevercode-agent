@@ -1643,9 +1643,9 @@ class MainActivity : AppCompatActivity() {
 
         var dialog: AlertDialog? = null
 
-        val categories = EntryCategory.values()
+        val categories = EntryRegistry.Group.values()
         categories.forEach { category ->
-            val entries = EntryRegistry.ENTRIES.filter { it.category == category }
+            val entries = EntryRegistry.ENTRIES.filter { it.group == category }
             if (entries.isNotEmpty()) {
                 root.addView(
                     UiKit.text(this, "${category.label} (${entries.size})", 14f, R.color.accent, bold = true).apply {
@@ -1689,7 +1689,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     textCol.addView(titleRow)
                     textCol.addView(
-                        UiKit.text(this, entry.subtitle, 11f, R.color.text_secondary)
+                        UiKit.text(this, entry.note.orEmpty(), 11f, R.color.text_secondary)
                     )
                     row.addView(textCol)
                     row.addView(

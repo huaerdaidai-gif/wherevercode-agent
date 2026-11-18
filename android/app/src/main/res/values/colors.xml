@@ -40,6 +40,7 @@
          values-night（原型图深色霓虹）。日志面板两档都用深色（v2-02）。 -->
     <color name="home_bg">#FAF8F5</color>
     <color name="home_card">#FFFFFF</color>
+    <color name="bg_card">#FFFFFF</color>
     <color name="home_card_border">#E6E1D8</color>
     <color name="home_text">#15181E</color>
     <color name="home_text_secondary">#5A6270</color>

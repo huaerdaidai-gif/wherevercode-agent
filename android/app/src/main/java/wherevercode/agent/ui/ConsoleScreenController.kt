@@ -1,6 +1,7 @@
 package wherevercode.agent.ui
 
 import android.content.Context
+import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
