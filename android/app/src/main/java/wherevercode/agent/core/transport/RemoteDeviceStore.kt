@@ -329,6 +329,82 @@ fun standalonePairings(
 }
 
 /**
+ * 聊天「选设备」对话框的一行（组装级纯数据，主 Activity 只负责渲染）。
+ * [remoteDeviceId] 与对话框点击回调一一对应：null = 局域网/配对行，
+ * [DEVICE_PICKER_ADD_ID] = 添加远程设备入口，其余 = 远程设备 id。
+ */
+data class DevicePickerRow(
+    val label: String,
+    val enabled: Boolean,
+    val remoteDeviceId: String?,
+)
+
+/** 「＋ 添加远程设备…」行的 [DevicePickerRow.remoteDeviceId] 标记。 */
+const val DEVICE_PICKER_ADD_ID = "ADD"
+
+/**
+ * 聊天「选设备」对话框的名单组装（与设备页同一合并口径）：配对记录
+ * 与远程设备记录是同一台设备的两份名单——有远程设备记录的配对不再
+ * 单独出行（由远程设备行承载，它同样按 deviceId 关联配对状态），
+ * 只有配对单有的设备才出配对行（[standalonePairings]）；局域网发现
+ * 的设备若已在配对/远程名单里也不重复出行。同 deviceId 只出一行。
+ * 状态文案不伪造在线态：未配对/待确认/已拒绝一律标“不可用”。
+ * 纯函数，不读存储；调用方取名单失败时传空名单即可。
+ */
+fun buildDevicePickerRows(
+    pairings: List<PairingRecord>,
+    discovered: List<DiscoveredPeer>,
+    devices: List<RemoteDevice>,
+): List<DevicePickerRow> {
+    val rows = mutableListOf<DevicePickerRow>()
+    standalonePairings(pairings, devices).forEach { record ->
+        val stateLabel = when (record.state) {
+            PairingState.CONFIRMED -> "已配对"
+            PairingState.PENDING -> "待确认（不可用）"
+            else -> "已拒绝（不可用）"
+        }
+        rows += DevicePickerRow(
+            label = "${record.displayName} · $stateLabel",
+            enabled = record.state == PairingState.CONFIRMED,
+            remoteDeviceId = null,
+        )
+    }
+    val pairedIds = pairings.map { it.deviceId }.toSet()
+    val remoteIds = devices.map { it.deviceId }.toSet()
+    discovered
+        .filter { it.deviceId !in pairedIds && it.deviceId !in remoteIds }
+        .forEach { peer ->
+            rows += DevicePickerRow(
+                label = "${peer.displayName} · 未配对（不可用）",
+                enabled = false,
+                remoteDeviceId = null,
+            )
+        }
+    devices.forEach { device ->
+        val record = pairings.firstOrNull { it.deviceId == device.deviceId }
+        val stateLabel = when (record?.state) {
+            PairingState.CONFIRMED -> "已配对"
+            PairingState.PENDING -> "待确认（不可用）"
+            else -> "未配对（不可用）"
+        }
+        // V5 公网直连（2026-11-11）：列表只标走线（公网/内网），
+        // 不贴完整 IP；两个地址在设备页“编辑地址”里看改。
+        val route = if (device.hasPublicAddress()) "公网" else "内网"
+        rows += DevicePickerRow(
+            label = "${device.displayName} · $stateLabel（远程·$route）",
+            enabled = record?.state == PairingState.CONFIRMED,
+            remoteDeviceId = device.deviceId,
+        )
+    }
+    rows += DevicePickerRow(
+        label = "＋ 添加远程设备…",
+        enabled = true,
+        remoteDeviceId = DEVICE_PICKER_ADD_ID,
+    )
+    return rows
+}
+
+/**
  * 按设备归属数 Agent：入参是全部 Agent 记录的 deviceId（云端/平台
  * Agent 为 null，不归任何设备）。口径与 Agent 页按设备过滤、控制台
  * ConsoleDeviceRow.agentCount 一致：AgentRecord.deviceId 与设备
