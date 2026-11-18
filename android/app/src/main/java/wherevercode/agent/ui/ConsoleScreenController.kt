@@ -139,6 +139,7 @@ class ConsoleScreenController(
         content.addView(refreshRow)
         content.addView(modulesContainer)
         refreshLevelChips()
+        renderLoading()
     }
 
     /** 大脑未建好时：只说暂不可读，不伪造空总览。 */
@@ -147,6 +148,8 @@ class ConsoleScreenController(
         loadError = false
         snapshot = null
         modulesContainer.removeAllViews()
+        modulesContainer.addView(buildServiceOverviewCard(null))
+        modulesContainer.addView(buildControlModulesList(null))
         modulesContainer.addView(note("大脑加载中，控制台暂不可读。"))
     }
 
@@ -156,6 +159,8 @@ class ConsoleScreenController(
         loadError = true
         snapshot = null
         modulesContainer.removeAllViews()
+        modulesContainer.addView(buildServiceOverviewCard(null))
+        modulesContainer.addView(buildControlModulesList(null))
         modulesContainer.addView(note("读取持久任务库失败；详见运行事件/日志。"))
     }
 
@@ -205,16 +210,17 @@ class ConsoleScreenController(
         val current = snapshot
         modulesContainer.removeAllViews()
         moduleHeaders.clear()
+
+        // V5 控制页对齐 iOS 控制页结构：服务连接与运行概览 + 控制模块入口列表（常驻）
+        modulesContainer.addView(buildServiceOverviewCard(current))
+        modulesContainer.addView(buildControlModulesList(current))
+
         if (current == null) {
-            // 大脑未建好 / 读库失败时保持提示，不渲染空模块。
+            // 大脑未建好 / 读库失败时保持提示，不渲染空任务模块。
             if (loading) modulesContainer.addView(note("大脑加载中，控制台暂不可读。"))
             if (loadError) modulesContainer.addView(note("读取持久任务库失败；详见运行事件/日志。"))
             return
         }
-
-        // V5 控制页对齐 iOS 控制页结构：服务连接与运行概览 + 控制模块入口列表
-        modulesContainer.addView(buildServiceOverviewCard(current))
-        modulesContainer.addView(buildControlModulesList(current))
 
         val visible = ConsoleSnapshot.visibleModules(freedomLevel, hiddenModules)
         visible.forEach { module ->
@@ -246,7 +252,7 @@ class ConsoleScreenController(
         }
     }
 
-    private fun buildServiceOverviewCard(snapshot: Snapshot): View {
+    private fun buildServiceOverviewCard(snapshot: Snapshot?): View {
         val card = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
             setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -293,16 +299,16 @@ class ConsoleScreenController(
             })
             return col
         }
-        statsRow.addView(stat("已登记 Agent", "${snapshot.agents.size}"))
-        statsRow.addView(stat("执行中任务", "${snapshot.activeTasks.size}"))
-        statsRow.addView(stat("排队/待审", "${snapshot.queuedTasks.size}"))
-        statsRow.addView(stat("待决审批", "${if (snapshot.pendingApproval != null) 1 else 0}"))
+        statsRow.addView(stat("已登记 Agent", snapshot?.let { "${it.agents.size}" } ?: "-"))
+        statsRow.addView(stat("执行中任务", snapshot?.let { "${it.activeTasks.size}" } ?: "-"))
+        statsRow.addView(stat("排队/待审", snapshot?.let { "${it.queuedTasks.size}" } ?: "-"))
+        statsRow.addView(stat("待决审批", snapshot?.let { if (it.pendingApproval != null) "1" else "0" } ?: "-"))
         card.addView(statsRow)
 
         return card
     }
 
-    private fun buildControlModulesList(snapshot: Snapshot): View {
+    private fun buildControlModulesList(snapshot: Snapshot?): View {
         val container = UiKit.vertical(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -357,11 +363,20 @@ class ConsoleScreenController(
             return card
         }
 
+        val devicesBadge = if (snapshot != null) "${snapshot.devices.size} 台设备" else "设备与配对"
+        val agentsBadge = if (snapshot != null) "${snapshot.agents.size} 个 Agent" else "Agent 管理"
+        val pendingCount = if (snapshot?.pendingApproval != null) 1 else 0
+        val tasksBadge = when {
+            snapshot == null -> "队列与审批"
+            pendingCount > 0 -> "$pendingCount 待审批"
+            else -> "队列 ${snapshot.queuedTasks.size}"
+        }
+
         container.addView(controlCard(
             title = "设备管理与配对",
             subtitle = "添加局域网电脑、远程设备、VPS 及授权工作目录",
             iconRes = R.drawable.ic_device,
-            badge = "${snapshot.devices.size} 台设备",
+            badge = devicesBadge,
             isTodo = false,
             onClick = { onOpenDevices() },
         ))
@@ -369,7 +384,7 @@ class ConsoleScreenController(
             title = "Agent 管理与协作编排",
             subtitle = "添加云端、设备或 CLI Agent，配置角色与分工",
             iconRes = R.drawable.ic_team,
-            badge = "${snapshot.agents.size} 个 Agent",
+            badge = agentsBadge,
             isTodo = false,
             onClick = { onOpenAgents() },
         ))
@@ -389,12 +404,11 @@ class ConsoleScreenController(
             isTodo = true,
             onClick = { onToast("【待开发】Webhook 唤醒与自动化中心尚未开发") },
         ))
-        val pendingCount = if (snapshot.pendingApproval != null) 1 else 0
         container.addView(controlCard(
             title = "任务队列与审批中心",
             subtitle = "查看排队任务、调整优先级与批准敏感写入操作",
             iconRes = R.drawable.ic_approval,
-            badge = if (pendingCount > 0) "$pendingCount 待审批" else "队列 ${snapshot.queuedTasks.size}",
+            badge = tasksBadge,
             isTodo = false,
             onClick = { onOpenTasks() },
         ))
