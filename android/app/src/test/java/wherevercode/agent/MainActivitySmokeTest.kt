@@ -80,6 +80,7 @@ class MainActivitySmokeTest {
         assertTrue(texts.contains("WhereverCode"))
         assertTrue(texts.contains("今天想做什么？"))
         assertTrue(texts.contains("项目 · 选择或切换 ›"))
+        // 收敛后首页建议 chips = 注册表四条（EntryRegistry.homeSuggestions）。
         assertTrue(texts.contains("开发一个 App"))
         assertTrue(texts.contains("导入项目并交付"))
         assertTrue(texts.contains("组织多 Agent 团队"))

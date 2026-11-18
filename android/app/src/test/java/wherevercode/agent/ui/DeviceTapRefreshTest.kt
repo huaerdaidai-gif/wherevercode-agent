@@ -50,7 +50,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        clickDrawerRow(activity, "nav_devices")
+        openDevicesViaControl(activity)
 
         val shown = waitForText(activity, "dev-0", timeoutMs = 3000)
         assertTrue("点进设备页 3 秒内应已看到本地添加的设备 dev-0（不等 5 秒 mDNS）", shown)
@@ -68,7 +68,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        clickDrawerRow(activity, "nav_devices")
+        openDevicesViaControl(activity)
         assertTrue(waitForText(activity, "dev-7", timeoutMs = 3000))
 
         val scrollView = activity.findViewById<FrameLayout>(R.id.screenContainer)
@@ -101,6 +101,39 @@ class DeviceTapRefreshTest {
         }
         app.getSharedPreferences("wherevercode_remote_devices", Context.MODE_PRIVATE)
             .edit().putString("devices_json", json).apply()
+    }
+
+    /**
+     * 收敛后抽屉没有 nav_devices 行：设备入口在「控制」页的
+     * 「设备管理与配对」卡片里（onOpenDevices → ID_DEVICES，
+     * 仍是 screenAgents 的 devicesOnly 形态）。按真实用户路径进：
+     * 抽屉点「控制」→ 点该卡片。
+     */
+    private fun openDevicesViaControl(activity: MainActivity) {
+        clickDrawerRow(activity, "nav_control")
+        assertTrue(
+            "控制页应出现「设备管理与配对」入口",
+            waitForText(activity, "设备管理与配对", timeoutMs = 3000),
+        )
+        val title = findTextView(activity.window.decorView, "设备管理与配对")
+        assertNotNull("控制页应有「设备管理与配对」入口", title)
+        var target: View? = title
+        while (target != null && !target.isClickable) {
+            target = target.parent as? View
+        }
+        assertNotNull("「设备管理与配对」卡片应可点击", target)
+        target!!.performClick()
+        idleMain()
+    }
+
+    private fun findTextView(root: View, text: String): TextView? {
+        if (root is TextView && root.text.toString() == text) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                findTextView(root.getChildAt(i), text)?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun clickDrawerRow(activity: MainActivity, tag: String) {

@@ -23,14 +23,14 @@ import wherevercode.agent.core.agent.AgentKind
 import wherevercode.agent.core.agent.AgentRecord
 
 /**
- * 输入框大脑胶囊（maintainer 2026-11-11：能清理就清理掉）：
- * 只在跟大脑对话时显示；跟远程 Agent 对话时隐藏——推理不走全局大脑，
- * 显示 DeepSeek 是误导。Agent 下拉已显示对话方，信息不丢。
+ * 输入框大脑胶囊（2026-11-17 定版 supersede 2026-11-11 旧口径）：
+ * 大脑已砍出主线——对话改用户自选 Agent/模型，没有大脑在背后路由，
+ * 主线聊天里不存在「大脑会话」，胶囊一律不显示（refreshBrainCapsule
+ * 恒 GONE）。对话方只由「选择模型 / Agent」选择器呈现，信息不丢。
  *
- * 三条回归：
- * - 大脑会话（默认，未选 Agent）：胶囊可见。
- * - 切到 Agent 会话：胶囊隐藏（GONE，不占位）。
- * - 切回新对话（大脑）：胶囊重新可见，状态跟着对话方变。
+ * 两条回归：
+ * - 默认新对话：胶囊隐藏（GONE）。
+ * - 切到 Agent 会话、再切回新对话：胶囊始终隐藏；选择器文案随对话方变。
  *
  * Agent 切换走真实 ChatViewModel.switchSession / newConversation，不
  * mock 行为；publish 是 postValue，主线程 idle 后断言（带 3 秒轮询，
@@ -48,7 +48,7 @@ class BrainCapsuleVisibilityTest {
     }
 
     @Test
-    fun `brain session shows brain capsule`() {
+    fun `mainline conversation never shows brain capsule`() {
         val controller = Robolectric.buildActivity(MainActivity::class.java)
             .create().start().resume().visible()
         val activity = controller.get()
@@ -62,7 +62,7 @@ class BrainCapsuleVisibilityTest {
     }
 
     @Test
-    fun `agent session hides brain capsule and new conversation shows it again`() {
+    fun `agent session and new conversation keep brain capsule hidden`() {
         val controller = Robolectric.buildActivity(MainActivity::class.java)
             .create().start().resume().visible()
         val activity = controller.get()
@@ -70,21 +70,36 @@ class BrainCapsuleVisibilityTest {
 
         val capsule = activity.findViewById<TextView>(R.id.brainCapsule)
         assertNotNull(capsule)
-        assertEquals(View.GONE, capsule.visibility)
+        assertTrue(
+            "默认新对话不应显示大脑胶囊",
+            waitForCapsuleVisibility(activity, View.GONE),
+        )
 
         // 切到 Agent 会话：走真实 switchSession + publish → renderChat →
         // updateChatRouteBanner → refreshBrainCapsule。
         val viewModel = chatViewModelOf(activity)
         assertTrue(viewModel.switchSession("session-agy", "Antigravity (agy)", fakeAgent()))
-        assertEquals(View.GONE, capsule.visibility)
+        assertTrue(
+            "Agent 会话不应显示大脑胶囊",
+            waitForCapsuleVisibility(activity, View.GONE),
+        )
         assertEquals(
+            "Agent 会话里 Agent 下拉仍应显示对话方",
             "Antigravity (agy) ⌄",
             activity.findViewById<TextView>(R.id.buttonAgentSelect).text.toString(),
         )
 
-        // 切回新对话（大脑）：收敛界面下胶囊同样保持 GONE。
+        // 切回新对话：胶囊仍隐藏，选择器回到未选态文案。
         assertTrue(viewModel.newConversation())
-        assertEquals(View.GONE, capsule.visibility)
+        assertTrue(
+            "切回新对话仍不应显示大脑胶囊",
+            waitForCapsuleVisibility(activity, View.GONE),
+        )
+        assertEquals(
+            "新对话里选择器应回到未选态",
+            "选择模型 / Agent ⌄",
+            activity.findViewById<TextView>(R.id.buttonAgentSelect).text.toString(),
+        )
 
         controller.pause().stop().destroy()
     }
