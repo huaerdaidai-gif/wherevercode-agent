@@ -11542,7 +11542,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** LIVE 组：用刚填的 Key 拉 /models（只读探针，不推理不计费）。 */
-    private fun fetchFreeProviderModels(preset: FreeProviderPreset, baseUrl: String, key: String
+    private fun fetchFreeProviderModels(preset: FreeProviderPreset, baseUrl: String, key: String) {
         note("正在从 ${preset.displayName} 读取模型列表…")
         Thread {
             val result = runBlocking { GenericOpenAiApiClient().listModels(key, baseUrl) }
@@ -11564,7 +11564,7 @@ class MainActivity : AppCompatActivity() {
     private fun showFreeModelPicker(
         preset: FreeProviderPreset,
         baseUrl: String,
-        key: String
+        key: String,
         models: List<String>,
     ) {
         val checked = BooleanArray(models.size)
@@ -11593,7 +11593,7 @@ class MainActivity : AppCompatActivity() {
     private fun saveFreeModels(
         preset: FreeProviderPreset,
         baseUrl: String,
-        key: String
+        key: String,
         models: List<String>,
     ) {
         val components = brainComponents ?: run {
