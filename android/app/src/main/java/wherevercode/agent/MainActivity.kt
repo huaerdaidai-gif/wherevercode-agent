@@ -8729,10 +8729,15 @@ class MainActivity : AppCompatActivity() {
         checkModelAutoDiscovery.setOnCheckedChangeListener { _, isChecked ->
             getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
                 .edit().putBoolean("auto_discovery_models", isChecked).apply()
-            note(
-                if (isChecked) "自动发现已打开：点“发现设备上的模型”开始探测。"
-                else "自动发现已关闭。",
-            )
+            if (isChecked) {
+                // Funk 口径（2026-11-18 23:58）：打开开关才扫描——
+                // 打开的那一刻先把已安装的设备全扫一遍；之后新装
+                // 设备配对成功时也自动扫（见 autoDiscoverModelsOnDevice）。
+                note("自动发现已打开：正在扫描已安装的设备…")
+                discoverDeviceModels()
+            } else {
+                note("自动发现已关闭。")
+            }
         }
         val routingStore = SharedPreferencesModelRoutingStore(applicationContext)
         val routingSettingsNow = routingStore.load()
