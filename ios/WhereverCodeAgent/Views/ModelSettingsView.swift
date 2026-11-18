@@ -624,7 +624,7 @@ private struct ModelDeviceDiscoverySheet: View {
     @ObservedObject var model: ModelSettingsModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var candidates: [DiscoveredModelEndpoint] = []
+    @State private var candidates: [ModelDiscoveryCandidate] = []
     @State private var isScanning = false
     @State private var selectedIndices: Set<Int> = []
 
@@ -687,7 +687,7 @@ private struct ModelDeviceDiscoverySheet: View {
             await MainActor.run {
                 self.isScanning = false
                 self.candidates = [
-                    DiscoveredModelEndpoint(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
+                    ModelDiscoveryCandidate(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
                 ]
             }
         }
@@ -707,7 +707,7 @@ private struct ModelDeviceDiscoverySheet: View {
     }
 }
 
-private struct DiscoveredModelEndpoint: Identifiable {
+private struct ModelDiscoveryCandidate: Identifiable {
     var id: String { baseUrl + modelName }
     let modelName: String
     let baseUrl: String
