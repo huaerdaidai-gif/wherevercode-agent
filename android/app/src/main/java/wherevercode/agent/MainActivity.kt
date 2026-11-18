@@ -227,7 +227,9 @@ import wherevercode.agent.core.transport.RemoteDeviceStore
 import wherevercode.agent.core.transport.RemoteDeviceValidation
 import wherevercode.agent.core.transport.RemoteHello
 import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
+import wherevercode.agent.core.transport.DEVICE_PICKER_ADD_ID
 import wherevercode.agent.core.transport.agentCountsByDevice
+import wherevercode.agent.core.transport.buildDevicePickerRows
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
 import wherevercode.agent.core.transport.deleteDeviceRecords
 import wherevercode.agent.core.security.SecretRedactor
@@ -2499,53 +2501,24 @@ class MainActivity : AppCompatActivity() {
         discovered: List<DiscoveredPeer>,
         pairings: List<PairingRecord>,
     ) {
-        val pairedIds = pairings.map { it.deviceId }.toSet()
-        val rows = mutableListOf<Pair<String, Boolean>>()
-        // rowRemoteDeviceIds 与 rows 一一对应：null = 局域网/已配对设备，
-        // "ADD" = 添加远程设备入口，其余 = 远程设备 id。
-        val rowRemoteDeviceIds = mutableListOf<String?>()
-        pairings.forEach { record ->
-            val stateLabel = when (record.state) {
-                PairingState.CONFIRMED -> "已配对"
-                PairingState.PENDING -> "待确认（不可用）"
-                else -> "已拒绝（不可用）"
-            }
-            rows += "${record.displayName} · $stateLabel" to (record.state == PairingState.CONFIRMED)
-            rowRemoteDeviceIds += null
-        }
-        discovered.filter { it.deviceId !in pairedIds }.forEach { peer ->
-            rows += "${peer.displayName} · 未配对（不可用）" to false
-            rowRemoteDeviceIds += null
-        }
-        // 阶段 B：已添加的远程设备（手动添加的 VPS 等）也列出来；
-        // 状态以配对记录为准，未配对一律标“不可用”，不伪造在线态。
-        try {
-            remoteDeviceStore.listDevices().forEach { device ->
-                val record = pairings.firstOrNull { it.deviceId == device.deviceId }
-                val stateLabel = when (record?.state) {
-                    PairingState.CONFIRMED -> "已配对"
-                    PairingState.PENDING -> "待确认（不可用）"
-                    else -> "未配对（不可用）"
-                }
-                // V5 公网直连（2026-11-11）：列表只标走线（公网/内网），
-                // 不贴完整 IP；两个地址在设备页“编辑地址”里看改。
-                val route = if (device.hasPublicAddress()) "公网" else "内网"
-                rows += "${device.displayName} · $stateLabel（远程·$route）" to (record?.state == PairingState.CONFIRMED)
-                rowRemoteDeviceIds += device.deviceId
-            }
+        // 名单组装走 buildDevicePickerRows（与设备页同一合并口径：
+        // 配对记录与远程设备记录按 deviceId 合并，同机只出一行）。
+        // 取远程设备名单失败时按空名单组装，不让整张对话框打不开。
+        val devices = try {
+            remoteDeviceStore.listDevices()
         } catch (_: Exception) {
+            emptyList()
         }
-        rows += "＋ 添加远程设备…" to true
-        rowRemoteDeviceIds += "ADD"
+        val rows = buildDevicePickerRows(pairings, discovered, devices)
         AlertDialog.Builder(this)
             .setTitle("选设备")
-            .setItems(rows.map { it.first }.toTypedArray()) { _, which ->
-                val remoteId = rowRemoteDeviceIds[which]
-                if (remoteId == "ADD") {
+            .setItems(rows.map { it.label }.toTypedArray()) { _, which ->
+                val remoteId = rows[which].remoteDeviceId
+                if (remoteId == DEVICE_PICKER_ADD_ID) {
                     showAddRemoteDeviceDialog()
                     return@setItems
                 }
-                if (rows[which].second) {
+                if (rows[which].enabled) {
                     showEntry(DrawerController.ID_DEVICES)
                     toast(
                         if (remoteId != null) "远程设备已接入，可在 Agent 页选它的 Agent 对话"

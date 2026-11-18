@@ -328,6 +328,65 @@ class RemoteDeviceStoreTest {
         assertEquals("mac-host", standalone[0].deviceId)
     }
 
+    // ── 聊天「选设备」对话框名单组装（与设备页同一合并口径） ──────
+
+    private fun peer(deviceId: String, name: String) = DiscoveredPeer(
+        deviceId = deviceId,
+        displayName = name,
+        host = "192.0.2.20",
+        port = 18743,
+        fingerprintSha256 = "bb".repeat(32),
+        capabilities = listOf("hand"),
+    )
+
+    @Test
+    fun `device picker shows one row when pairing and remote record are the same device`() {
+        // 同一台小米 12：配对记录 + 远程设备记录 + 局域网发现三处都有它，
+        // 对话框只出一行，且是远程设备行（按 deviceId 关联配对状态）。
+        val devices = listOf(vps().copy(deviceId = "Android-x", displayName = "小米 12"))
+        val pairings = listOf(pairing("Android-x", "小米 12"))
+        val discovered = listOf(peer("Android-x", "小米 12"))
+        val rows = buildDevicePickerRows(pairings, discovered, devices)
+        val deviceRows = rows.filter { it.remoteDeviceId != DEVICE_PICKER_ADD_ID }
+        assertEquals(1, deviceRows.size)
+        assertEquals("Android-x", deviceRows[0].remoteDeviceId)
+        assertTrue(deviceRows[0].enabled)
+        assertTrue(deviceRows[0].label.contains("已配对"))
+        assertTrue(deviceRows[0].label.contains("远程"))
+        // 末行恒为添加入口。
+        assertEquals(DEVICE_PICKER_ADD_ID, rows.last().remoteDeviceId)
+    }
+
+    @Test
+    fun `device picker keeps pairing-only device as one selectable row`() {
+        // 只有配对记录、没有远程设备记录的设备照常出行且可选。
+        val pairings = listOf(pairing("mac-host", "Mac"))
+        val rows = buildDevicePickerRows(pairings, emptyList(), emptyList())
+        val deviceRows = rows.filter { it.remoteDeviceId != DEVICE_PICKER_ADD_ID }
+        assertEquals(1, deviceRows.size)
+        assertNull(deviceRows[0].remoteDeviceId)
+        assertTrue(deviceRows[0].enabled)
+        assertTrue(deviceRows[0].label.startsWith("Mac"))
+        assertTrue(deviceRows[0].label.contains("已配对"))
+    }
+
+    @Test
+    fun `device picker shows two rows for two different devices`() {
+        // 一台配对单有 + 一台远程设备（含自己的配对记录）= 两行，不互相吞。
+        val devices = listOf(vps().copy(deviceId = "remote-host", displayName = "远程设备"))
+        val pairings = listOf(
+            pairing("mac-host", "Mac"),
+            pairing("remote-host", "远程设备"),
+        )
+        val rows = buildDevicePickerRows(pairings, emptyList(), devices)
+        val deviceRows = rows.filter { it.remoteDeviceId != DEVICE_PICKER_ADD_ID }
+        assertEquals(2, deviceRows.size)
+        assertNull(deviceRows[0].remoteDeviceId)
+        assertTrue(deviceRows[0].label.startsWith("Mac"))
+        assertEquals("remote-host", deviceRows[1].remoteDeviceId)
+        assertTrue(deviceRows[1].enabled)
+    }
+
     @Test
     fun `agentCountsByDevice counts per device and ignores cloud agents`() {
         val counts = agentCountsByDevice(listOf("Android-x", "Android-x", "mac-host", null, null))
