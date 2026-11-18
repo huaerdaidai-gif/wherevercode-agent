@@ -329,14 +329,14 @@ class BrainLoginSettingsTest {
             generic, isCurrent = true, agentNames = listOf("zhipu"),
         )
         assertTrue(warning.contains("Key"))
-        assertTrue(warning.contains("当前大脑清空"))
+        assertTrue(warning.contains("当前模型清空"))
         assertTrue(warning.contains("不会自动切到别的脑"))
         assertTrue(warning.contains("zhipu"))
         val plain = BrainLoginRows.deleteWarning(
             generic, isCurrent = false, agentNames = emptyList(),
         )
         assertTrue(plain.contains("Key"))
-        assertFalse(plain.contains("当前大脑"))
+        assertFalse(plain.contains("当前模型"))
         assertFalse(plain.contains("Agent"))
     }
 

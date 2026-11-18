@@ -207,11 +207,11 @@ class SettingsCleanupTest {
         )
         val warning = BrainLoginRows.deleteWarning(generic, isCurrent = true, agentNames = listOf("智谱助手"))
         assertTrue(warning.contains("配置与它存在本机 Keystore 里的 Key 会一起删除"))
-        assertTrue(warning.contains("当前大脑清空，不会自动切到别的脑"))
+        assertTrue(warning.contains("当前模型清空，不会自动切到别的"))
         assertTrue(warning.contains("智谱助手"))
         assertTrue(warning.contains("Agent 记录本身不动"))
         val plain = BrainLoginRows.deleteWarning(generic, isCurrent = false, agentNames = emptyList())
-        assertFalse(plain.contains("当前大脑清空"))
+        assertFalse(plain.contains("当前模型清空"))
     }
 
     @Test
