@@ -301,7 +301,7 @@ class ConsoleScreenController(
             })
             return col
         }
-        statsRow.addView(stat("已登记 Agent", snapshot?.let { "${it.agents.size}" } ?: "-"))
+        statsRow.addView(stat("已登记 Agent", snapshot?.let { "${it.memberAgentCount}" } ?: "-"))
         statsRow.addView(stat("执行中任务", snapshot?.let { "${it.activeTasks.size}" } ?: "-"))
         statsRow.addView(stat("排队/待审", snapshot?.let { "${it.queuedTasks.size}" } ?: "-"))
         statsRow.addView(stat("待决审批", snapshot?.let { if (it.pendingApproval != null) "1" else "0" } ?: "-"))
@@ -366,7 +366,7 @@ class ConsoleScreenController(
         }
 
         val devicesBadge = if (snapshot != null) "${snapshot.devices.size} 台设备" else "设备"
-        val agentsBadge = if (snapshot != null) "${snapshot.agents.size} 个 Agent" else "Agent"
+        val agentsBadge = if (snapshot != null) "${snapshot.memberAgentCount} 个 Agent" else "Agent"
         val modelsBadge = modelsCount().let { if (it > 0) "$it 个模型" else "模型" }
         val pendingCount = if (snapshot?.pendingApproval != null) 1 else 0
         val tasksBadge = when {
@@ -538,7 +538,7 @@ class ConsoleScreenController(
             section.addView(pendingApprovalRow(pending))
         }
         section.addView(sectionLabel("设备与 Agent 状态"))
-        if (snapshot.devices.isEmpty() && snapshot.agents.size <= 1) {
+        if (snapshot.devices.isEmpty() && snapshot.memberAgentCount == 0) {
             section.addView(noteText("暂无远程设备；本机 App 在运行。"))
         }
         snapshot.devices.forEach { device ->
