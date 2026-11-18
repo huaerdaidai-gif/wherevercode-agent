@@ -5,6 +5,7 @@
 // - 「已添加」分组列表完全基于独立 ModelRegistry / ModelConfigStore，绝不读写 brain.configs_json；
 // - 增删改查全走新存储，与大脑彻底脱钩。
 
+import Foundation
 import SwiftUI
 
 public struct ModelSettingsView: View {
@@ -262,8 +263,6 @@ private struct ModelEditorView: View {
     @State private var baseUrl: String
     @State private var modelName: String
     @State private var apiKey: String = ""
-    @State private var isTesting = false
-    @State private var testResult: String?
     @State private var showDeleteConfirm = false
 
     init(model: ModelSettingsModel, config: ModelConfig) {
@@ -292,18 +291,6 @@ private struct ModelEditorView: View {
                     Text("API Key 安全保存在本机 Keychain 中，绝不上传至任何云端。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-
-                Section("连通性测试") {
-                    Button(isTesting ? "正在测试…" : "测试模型连通性") {
-                        Task { await testConnection() }
-                    }
-                    .disabled(isTesting)
-                    if let testResult {
-                        Text(testResult)
-                            .font(.caption)
-                            .foregroundStyle(testResult.contains("成功") ? .primary : .red)
-                    }
                 }
 
                 Section {
@@ -346,21 +333,6 @@ private struct ModelEditorView: View {
         }
         model.saveConfig(updated)
         dismiss()
-    }
-
-    @MainActor
-    private func testConnection() async {
-        isTesting = true
-        testResult = nil
-        let targetUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: targetUrl.isEmpty ? "https://api.openai.com/v1" : targetUrl) else {
-            isTesting = false
-            testResult = "服务地址格式无效"
-            return
-        }
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        isTesting = false
-        testResult = "连接成功：服务响应正常（\(url.host ?? targetUrl)）"
     }
 }
 
@@ -688,16 +660,10 @@ private struct ModelDeviceDiscoverySheet: View {
     }
 
     private func scanEndpoints() {
-        isScanning = true
-        Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            await MainActor.run {
-                self.isScanning = false
-                self.candidates = [
-                    Candidate(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
-                ]
-            }
-        }
+        isScanning = false
+        candidates = [
+            Candidate(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
+        ]
     }
 
     private func addSelected() {
