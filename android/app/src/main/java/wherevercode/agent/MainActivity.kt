@@ -10623,7 +10623,7 @@ class MainActivity : AppCompatActivity() {
                     refreshBrainList()
                     val modelHint =
                         if (components.configStore.getConfig(brainId)?.model.isNullOrBlank()) {
-                            "再在“···”→“编辑模型…”里填好模型，即可设为当前模型。"
+                            "再在“···”→“编辑模型…”里填好模型，即可设为当前大脑。"
                         } else {
                             "现在发一句话即可。"
                         }
@@ -10707,7 +10707,7 @@ class MainActivity : AppCompatActivity() {
                 components.configStore.saveConfig(updated)
                 BrainAdapterRegistry.registerConfig(updated)
                 refreshBrainStatus()
-                note(if (model.isBlank()) "模型已清空：填好模型后才能设为当前模型。" else "模型已保存为 $model。")
+                note(if (model.isBlank()) "模型已清空：填好模型后才能设为当前大脑。" else "模型已保存为 $model。")
             }
             .setNegativeButton("取消", null)
             .show()
@@ -10734,7 +10734,7 @@ class MainActivity : AppCompatActivity() {
         // 可见的添加入口（2026-11-11，maintainer：大脑增删改添要看得见）：
         // 列表末尾“＋ 添加大脑…”，点即进下方通用大脑添加表单（新增模式）。
         brainListContainer.addView(
-            UiKit.text(this, "＋ 添加模型…", 13f, R.color.text_primary, bold = true).apply {
+            UiKit.text(this, "＋ 添加大脑…", 13f, R.color.text_primary, bold = true).apply {
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 setBackgroundResource(R.drawable.bg_card)
                 setOnClickListener { addGenericBrain() }
@@ -10879,7 +10879,7 @@ class MainActivity : AppCompatActivity() {
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(genericBrainLabel, InputMethodManager.SHOW_IMPLICIT)
         }
-        note("添加模型：在下方通用表单里填名称、服务地址、模型、Key，点保存。")
+        note("添加大脑：在下方通用表单里填名称、服务地址、模型、Key，点保存。")
     }
 
     /**
@@ -10896,7 +10896,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (row.isCurrent) {
-            note("已经是当前模型：${row.title}。")
+            note("已经是当前大脑：${row.title}。")
             return
         }
         when (val decision = BrainLoginRows.switchDecision(row)) {
@@ -11132,7 +11132,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (editingGenericBrainId == config.brainId) exitGenericEditMode()
                 refreshBrainStatus()
-                val currentNote = if (wasCurrent) "当前模型已清空，请在列表里另选一个模型。" else ""
+                val currentNote = if (wasCurrent) "当前大脑已清空，请在列表里另选一个大脑。" else ""
                 val restoreNote = if (isSeedable) "列表末尾可重新添加。" else ""
                 val keyNote = if (config.authRef.isNullOrBlank()) "配置已删" else "配置与 Key 已删"
                 note("已删除 ${config.label}（$keyNote）。$restoreNote$currentNote")

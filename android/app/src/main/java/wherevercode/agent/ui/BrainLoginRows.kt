@@ -67,7 +67,7 @@ object BrainLoginRows {
 
     /** Gemini 仅登录行的说明（登录不能当大脑用推理）。 */
     const val GEMINI_LOGIN_ONLY_NOTE: String =
-        "仅登录，不能当模型用推理：会员 token 调不了 Gemini API；" +
+        "仅登录，不能当大脑用推理：会员 token 调不了 Gemini API；" +
             "稳妥路线是 API Key（AI Studio）或 Vertex AI。"
 
     /**
@@ -93,13 +93,13 @@ object BrainLoginRows {
 
     /** 设备码大脑“编辑模型…”的弹框提示：模型名以厂商模型目录为准，不写死。 */
     const val DEVICE_CODE_MODEL_EDIT_HINT: String =
-        "填厂商模型目录里的模型名（不要凭印象编）；留空表示未选择，未选择时不能切换为当前模型。"
+        "填厂商模型目录里的模型名（不要凭印象编）；留空表示未选择，未选择时不能切换为当前大脑。"
 
     /** 通用 MODEL_API 保存后的诚实说明：已接线，可设为全局大脑执行任务，
      * 也可以去 Agent 页添加同名 Agent 对话；写操作会先请用户确认。
      * 工具调用尚未在真机上验证。 */
     const val GENERIC_SAVED_NOTE: String =
-        "通用模型 API 已接线：可在模型列表里点按设为当前模型，可执行改文件、跑命令等任务" +
+        "通用模型 API 已接线：可在大脑列表里点按设为当前大脑，可执行改文件、跑命令等任务" +
             "（写操作会先请你确认），或去 Agent 页添加同名 Agent 对话。" +
             "工具调用尚未在真机上验证。"
 
@@ -226,7 +226,7 @@ object BrainLoginRows {
         hasStoredKey: Boolean,
     ): List<String> {
         val errors = mutableListOf<String>()
-        if (label.isBlank()) errors += "请填写名称"
+        if (label.isBlank()) errors += "请填写大脑名称"
         val brainId = genericBrainId(label)
         val config = BrainConfig(
             brainId = brainId,
@@ -303,15 +303,15 @@ object BrainLoginRows {
         agentNames: List<String>,
     ): String = buildString {
         if (config.authRef.isNullOrBlank()) {
-            append("删除模型“${config.label}”？配置会彻底删除，删后无法恢复。\n")
+            append("删除大脑“${config.label}”？配置会彻底删除，删后无法恢复。\n")
         } else {
-            append("删除模型“${config.label}”？配置与它存在本机 Keystore 里的 Key 会一起删除，删后无法恢复。\n")
+            append("删除大脑“${config.label}”？配置与它存在本机 Keystore 里的 Key 会一起删除，删后无法恢复。\n")
         }
         if (isCurrent) {
-            append("它是当前模型：删除后当前模型清空，不会自动切到别的，请在列表里另选一个。\n")
+            append("它是当前大脑：删除后当前大脑清空，不会自动切到别的脑，请在列表里另选一个。\n")
         }
         if (agentNames.isNotEmpty()) {
-            append("以下 Agent 正用这个模型：${agentNames.joinToString("、")}。删除后它们发消息时会提示未接入（Agent 记录本身不动，重新添加模型或改选 Agent 即可恢复）。")
+            append("以下 Agent 正用这个大脑：${agentNames.joinToString("、")}。删除后它们发消息时会提示未接入（Agent 记录本身不动，重新添加大脑或改选 Agent 即可恢复）。")
         }
     }
 

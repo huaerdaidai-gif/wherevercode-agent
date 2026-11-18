@@ -47,7 +47,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="模型、密钥与本机配置；密钥只存 Android Keystore。"
+                    android:text="大脑、密钥与本机配置；密钥只存 Android Keystore。"
                     android:textColor="@color/text_tertiary"
                     android:textSize="10sp" />
             </LinearLayout>
@@ -77,7 +77,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="模型"
+            android:text="大脑"
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -96,7 +96,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="模型：加载中…"
+                android:text="大脑：加载中…"
                 android:textColor="@color/text_primary"
                 android:textSize="12sp" />
 
@@ -162,7 +162,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:text="已添加的模型（点按一行切换）"
+            android:text="已添加的大脑（点按一行切换）"
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -956,7 +956,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="添加模型 API（OpenAI 兼容）"
+            android:text="添加模型 API 大脑（OpenAI 兼容）"
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -975,7 +975,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:background="@drawable/bg_input"
-            android:hint="名称，如 自建模型"
+            android:hint="大脑名称，如 自建模型"
             android:inputType="textNoSuggestions"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"

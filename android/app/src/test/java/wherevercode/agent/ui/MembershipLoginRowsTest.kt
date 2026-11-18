@@ -103,8 +103,8 @@ class MembershipLoginRowsTest {
         val gemini = rows.first { it.brainId == "gemini" }
         assertFalse(gemini.canSwitch)
         assertFalse(gemini.isCurrent)
-        assertTrue(gemini.statusText.contains("不能当模型用推理"))
-        assertTrue(gemini.switchHint.contains("不能当模型用推理"))
+        assertTrue(gemini.statusText.contains("不能当大脑用推理"))
+        assertTrue(gemini.switchHint.contains("不能当大脑用推理"))
     }
 
     @Test

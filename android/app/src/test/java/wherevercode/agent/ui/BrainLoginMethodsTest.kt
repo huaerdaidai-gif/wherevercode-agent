@@ -131,7 +131,7 @@ class BrainLoginMethodsTest {
             isCurrent = true,
             agentNames = listOf("Codex"),
         )
-        assertTrue(warning.contains("当前模型清空"))
+        assertTrue(warning.contains("当前大脑清空"))
         assertTrue(warning.contains("不会自动切到别的脑"))
         assertTrue(warning.contains("Codex"))
     }
