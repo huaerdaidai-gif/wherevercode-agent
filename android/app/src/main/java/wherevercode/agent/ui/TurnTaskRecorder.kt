@@ -131,7 +131,11 @@ class TurnTaskRecorder(
             }
             currentTaskId = taskId
             taskId
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // 不再静默吞：建行失败必须留痕，否则真机上只剩一句
+            // “任务库不可用”、无从定位（2026-11-18 真机 P0 教训：
+            // 主线程 Room 异常被吞数周无人察觉）。契约不变，仍回 null。
+            System.err.println("TurnTaskRecorder: open task row failed: $e")
             currentTaskId = null
             null
         }
@@ -186,7 +190,11 @@ class TurnTaskRecorder(
             }
             currentTaskId = taskId
             taskId
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // 不再静默吞：建行失败必须留痕，否则真机上只剩一句
+            // “任务库不可用”、无从定位（2026-11-18 真机 P0 教训：
+            // 主线程 Room 异常被吞数周无人察觉）。契约不变，仍回 null。
+            System.err.println("TurnTaskRecorder: open task row failed: $e")
             currentTaskId = null
             null
         }
