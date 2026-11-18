@@ -4646,10 +4646,12 @@ class MainActivity : AppCompatActivity() {
         // 同一做法：UiKit.text 的 "∞" + home_gradient_start，见
         // DrawerView.addBrandHeader）+ WhereverCode + 副标题（已是
         // 问候保持轻量；产品名已在顶栏显示。
-        // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
-        // 不显示真人名字（见 HomeScreenController.greeting）。
+        // 问候语（2026-11-16 照 iOS 统一定版）：固定“今天想做什么？”
+        // （HomeScreenController.greeting），不读已存身份、不显示真人
+        // 名字。首页只此一行问候，与 iOS 首页同形（∞ + 问候 + chips），
+        // 不再另加“你好”行（旧 R4c“问候固定你好”口径已被 11-16 定版取代）。
         val greetingView =
-            UiKit.text(this, "你好", 28f, R.color.home_text, bold = true).apply {
+            UiKit.text(this, HomeScreenController.greeting(), 28f, R.color.home_text, bold = true).apply {
                 gravity = android.view.Gravity.CENTER
             }
         card.addView(UiKit.text(this, "∞", 34f, R.color.home_gradient_start).apply {
@@ -4657,12 +4659,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, dp(20), 0, dp(12))
         })
         card.addView(greetingView)
-        card.addView(
-            UiKit.text(this, HomeScreenController.greeting(), 14f, R.color.home_text_secondary).apply {
-                gravity = android.view.Gravity.CENTER
-                setPadding(0, dp(4), 0, dp(10))
-            },
-        )
         card.addView(UiKit.text(this, "项目 · 选择或切换 ›", 12f, R.color.home_text_secondary).apply {
             minHeight = dp(48)
             gravity = android.view.Gravity.CENTER
