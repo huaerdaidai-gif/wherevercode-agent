@@ -918,7 +918,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="打开后，设备配对成功会自动探它上面的模型并添加；也可以点下面按钮随时手动探、勾选添加。不限局域网：Tailscale 与远程设备同样探（私有网段走 http、公网走 https）。"
+            android:text="默认关。打开的那一刻先扫描已安装的设备、勾选添加；与设备配对不关联，新装设备不会自动触发。关着时只有手动点下面按钮才探。不限局域网：Tailscale 与远程设备同样探（私有网段走 http、公网走 https）。"
             android:textColor="@color/text_tertiary"
             android:textSize="10sp" />
 

@@ -2906,9 +2906,6 @@ class MainActivity : AppCompatActivity() {
                     agentStore.listAgents(),
                 )
                 created.forEach { agentStore.saveAgent(it) }
-                // 设备装好即发现（Funk 2026-11-18 23:56）：开关开着时
-                // 同步自动发现这台设备上的模型（Agent 在上、模型在此）。
-                autoDiscoverModelsOnDevice(device)
                 runOnUiThread {
                     toast(
                         "已配对 $displayName：${DeviceAgentDiscovery.summarize(discovery)}。",
@@ -2968,7 +2965,6 @@ class MainActivity : AppCompatActivity() {
                     agentStore.listAgents(),
                 )
                 created.forEach { agentStore.saveAgent(it) }
-                autoDiscoverModelsOnDevice(device)
                 runOnUiThread {
                     toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
                     refreshAgents()
@@ -8730,9 +8726,10 @@ class MainActivity : AppCompatActivity() {
             getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
                 .edit().putBoolean("auto_discovery_models", isChecked).apply()
             if (isChecked) {
-                // Funk 口径（2026-11-18 23:58）：打开开关才扫描——
-                // 打开的那一刻先把已安装的设备全扫一遍；之后新装
-                // 设备配对成功时也自动扫（见 autoDiscoverModelsOnDevice）。
+                // Funk 口径（2026-11-19 00:00）：打开开关才扫描——
+                // 打开的那一刻把已安装的设备全扫一遍；发现与配对
+                // 不关联，新装设备配对成功不触发扫描；关着时只有
+                // 手动点按钮才探。
                 note("自动发现已打开：正在扫描已安装的设备…")
                 discoverDeviceModels()
             } else {
@@ -11818,47 +11815,6 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     showDiscoveredModelsPicker(found)
                 }
-            }
-        }.start()
-    }
-
-    /**
-     * 设备装好即自动发现模型（Funk 2026-11-18 23:56）：开关打开时，
-     * 设备配对成功（或重新发现）后顺手探它上面的本地模型端点并
-     * 自动添加——与 Agent 的配对后自动发现同一步、同一口径（设备
-     * 只是来源，添加的模型不与设备关联，删设备不删模型）。开关
-     * 关着不探，用户可用模型页按钮手动发现。探不到不报错。
-     */
-    private fun autoDiscoverModelsOnDevice(device: RemoteDevice) {
-        val enabled = try {
-            getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
-                .getBoolean("auto_discovery_models", false)
-        } catch (_: Exception) {
-            false
-        }
-        if (!enabled) return
-        val hosts = listOf(device.host, device.publicHost?.trim().orEmpty())
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-        if (hosts.isEmpty()) return
-        Thread {
-            val found = mutableListOf<Triple<String, String, String>>()
-            runBlocking {
-                for (host in hosts) {
-                    for (endpoint in DeviceModelDiscovery.probeHost(host)) {
-                        for (model in endpoint.models) {
-                            found += Triple(
-                                "${device.displayName} · ${endpoint.serviceName}",
-                                endpoint.baseUrl,
-                                model,
-                            )
-                        }
-                    }
-                }
-            }
-            if (found.isNotEmpty()) {
-                saveDiscoveredModels(found)
             }
         }.start()
     }
