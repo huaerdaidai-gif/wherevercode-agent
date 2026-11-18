@@ -73,7 +73,17 @@ class AgentScreenController(
         list.removeAllViews()
     }
 
-    fun renderAddedAgents(agents: List<AgentRecord>) {
+    fun renderAddedAgents(
+        agents: List<AgentRecord>,
+        onAddFromDevice: (() -> Unit)? = null,
+    ) {
+        // 三件套之二（2026-11-18）：「从设备添加」= 自动发现快捷入口，
+        // 与手工表单并列；发现与去重口径和设备页“重新发现 Agent”一致。
+        if (onAddFromDevice != null) {
+            val addRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(10)) }
+            addRow.addView(actionButton("＋ 从设备添加（自动发现）") { onAddFromDevice() })
+            list.addView(addRow)
+        }
         list.addView(sectionTitle("已添加的 Agent（${agents.size}）"))
         if (agents.isEmpty()) {
             list.addView(
@@ -136,6 +146,13 @@ class AgentScreenController(
          * onAddRemote 必须是最后一个函数参数（见 onRediscover 注释）。
          */
         onUpdateHand: ((RemoteDevice) -> Unit)? = null,
+        /**
+         * 远程设备卡片上的“删除设备”（三件套之二，2026-11-18）：
+         * 只删设备记录本身，不级联删 Agent 与项目（确认文案由调用方
+         * 写明）。放在 onAddRemote 之前——onAddRemote 必须是最后一个
+         * 函数参数（见 onRediscover 注释）。
+         */
+        onDeleteRemote: ((RemoteDevice) -> Unit)? = null,
         onAddRemote: (() -> Unit)? = null,
     ) {
         list.addView(
@@ -159,7 +176,7 @@ class AgentScreenController(
         // 根本不传远程设备，加完也看不见。状态文案与选设备对话框一致。
         if (remoteDevices.isNotEmpty()) {
             list.addView(sectionTitle("远程设备（手动添加，${remoteDevices.size}）"))
-            remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand)) }
+            remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote)) }
         }
         if (onAddRemote != null) {
             val row = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
@@ -191,6 +208,7 @@ class AgentScreenController(
         onRediscover: ((RemoteDevice) -> Unit)? = null,
         onEditRemote: ((RemoteDevice) -> Unit)? = null,
         onUpdateHand: ((RemoteDevice) -> Unit)? = null,
+        onDeleteRemote: ((RemoteDevice) -> Unit)? = null,
     ): LinearLayout {
         val card = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
@@ -285,13 +303,16 @@ class AgentScreenController(
                     setPadding(0, dp(4), 0, 0)
                 },
             )
-            if (onResumePairing != null || onEditRemote != null) {
+            if (onResumePairing != null || onEditRemote != null || onDeleteRemote != null) {
                 val actions = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
                 if (onResumePairing != null) {
                     actions.addView(actionButton("输入配对码完成配对") { onResumePairing(row.device) })
                 }
                 if (onEditRemote != null) {
                     actions.addView(actionButton("编辑地址") { onEditRemote(row.device) })
+                }
+                if (onDeleteRemote != null) {
+                    actions.addView(actionButton("删除设备") { onDeleteRemote(row.device) })
                 }
                 card.addView(actions)
             }
@@ -301,7 +322,7 @@ class AgentScreenController(
             // 补建服务端新增的 Agent 记录；已有的按去重口径保留不动。
             // Hand 自更新（2026-11-12）：“更新 Hand”只在已配对时出，
             // 落后或未知（旧版）时才出，最新时不出。
-            if (onEditRemote != null || onRediscover != null || (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank()))) {
+            if (onEditRemote != null || onRediscover != null || onDeleteRemote != null || (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank()))) {
                 val actions = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
                 if (onEditRemote != null) {
                     actions.addView(actionButton("编辑地址") { onEditRemote(row.device) })
@@ -311,6 +332,9 @@ class AgentScreenController(
                 }
                 if (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank())) {
                     actions.addView(actionButton("更新 Hand") { onUpdateHand(row.device) })
+                }
+                if (onDeleteRemote != null) {
+                    actions.addView(actionButton("删除设备") { onDeleteRemote(row.device) })
                 }
                 card.addView(actions)
             }

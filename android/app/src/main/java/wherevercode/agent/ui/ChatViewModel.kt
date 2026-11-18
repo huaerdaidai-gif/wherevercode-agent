@@ -15,6 +15,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import wherevercode.agent.AgentRunner
 import wherevercode.agent.AndroidApprovalGate
 import wherevercode.agent.brain.AgentChatRoute
@@ -849,6 +851,15 @@ class ChatViewModel : ViewModel() {
      * 一定按任务处理、建派活任务行，不受意图分类与直连开关影响。
      * 默认 false（由意图分类决定）。
      */
+    /**
+     * 在 IO 线程同步执行 [block] 并把结果带回调用线程。send 路径的
+     * 同步序章跑在调用方（主）线程，而轮次建行是 Room 写、主线程
+     * 禁止——2026-11-18 真机 P0 的根因。需要“先建行、成功才继续”
+     * 这一同步契约的调用点经此执行建行，其余序章行为不变。
+     */
+    private fun <T> runOnIoBlocking(block: () -> T): T =
+        runBlocking { withContext(Dispatchers.IO) { block() } }
+
     fun send(
         prompt: String,
         attachments: List<ChatAttachment> = emptyList(),
@@ -1466,17 +1477,32 @@ class ChatViewModel : ViewModel() {
         // 真机事故：两次 run 调用 e7690865 / 21504781 在 K70 任务
         // 表里无行）。建行失败时中止轮次、如实报错，绝不发 Hand。
         // 任务行的 goalVersion/authEpoch 即本次调用的栅栏快照。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
-        if (taskId == null) {
+        // 线程修复（2026-11-18 真机 P0）：beginRemoteRound 与 getTask
+        // 快照都是 Room 访问，在本序章的主线程上必抛
+        // IllegalStateException——旧代码在此恒失败（异常被记录器
+        // 静默吞掉），远端轮次在真机上从来发不出去。建行+快照整段
+        // 经 IO 线程执行后回主线程继续，同步契约不变。
+        val opened = runOnIoBlocking {
+            val id = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+            id?.let {
+                it to try {
+                    comps.taskStore.getTask(it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+        if (opened == null) {
             active.set(false)
             val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
             timeline.beginSystemTurn(message)
             publish(true)
             return SendResult(false, message)
         }
+        val taskId = opened.first
         // 大脑/Agent 边界修订：镜像按真正干活的远端 Agent 认领，本轮挂任务归属。
         timeline.setTaskAttribution(turnId, taskId, prompt)
-        val snapshot = comps.taskStore.getTask(taskId)
+        val snapshot = opened.second
         val goalVersion = snapshot?.goalVersion ?: 1L
         val epoch = snapshot?.authEpoch ?: 1L
         remoteTurnTaskId = taskId
@@ -1984,7 +2010,10 @@ class ChatViewModel : ViewModel() {
         // 用 beginRemoteRound 只建行、不经调度器认领门禁；建不出行
         // 就中止轮次、如实报错，绝不让回复没有任务行可归属。
         // 镜像按 Manus 认领、本轮挂归属（大脑/Agent 边界修订）。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+        // 建行是 Room 写：经 IO 线程执行（同 startRemoteTurn 的线程修复）。
+        val taskId = runOnIoBlocking {
+            turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+        }
         if (taskId == null) {
             active.set(false)
             val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"
@@ -2131,7 +2160,10 @@ class ChatViewModel : ViewModel() {
         // 同款，用 beginRemoteRound 只建行、不经调度器认领门禁；
         // 建不出行就中止轮次、如实报错，绝不让回复没有任务行可归属。
         // 镜像按该平台 Agent 认领、本轮挂归属（大脑/Agent 边界修订）。
-        val taskId = turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+        // 建行是 Room 写：经 IO 线程执行（同 startRemoteTurn 的线程修复）。
+        val taskId = runOnIoBlocking {
+            turnRecorder?.beginRemoteRound(prompt, convId, agent.agentId, currentProjectId())
+        }
         if (taskId == null) {
             active.set(false)
             val message = "轮次任务建行失败，消息未发出（任务库不可用），请重试。"

@@ -102,7 +102,7 @@ class ConsoleScreenController(
     init {
         root.addView(content)
         content.addView(
-            UiKit.text(context, "控制台", 20f, R.color.text_primary, bold = true).apply {
+            UiKit.text(context, "控制", 20f, R.color.text_primary, bold = true).apply {
                 setPadding(0, dp(4), 0, dp(2))
             },
         )
@@ -363,17 +363,17 @@ class ConsoleScreenController(
             return card
         }
 
-        val devicesBadge = if (snapshot != null) "${snapshot.devices.size} 台设备" else "设备与配对"
-        val agentsBadge = if (snapshot != null) "${snapshot.agents.size} 个 Agent" else "Agent 管理"
+        val devicesBadge = if (snapshot != null) "${snapshot.devices.size} 台设备" else "设备"
+        val agentsBadge = if (snapshot != null) "${snapshot.agents.size} 个 Agent" else "Agent"
         val pendingCount = if (snapshot?.pendingApproval != null) 1 else 0
         val tasksBadge = when {
-            snapshot == null -> "队列与审批"
+            snapshot == null -> "任务"
             pendingCount > 0 -> "$pendingCount 待审批"
             else -> "队列 ${snapshot.queuedTasks.size}"
         }
 
         container.addView(controlCard(
-            title = "设备管理与配对",
+            title = "设备",
             subtitle = "添加局域网电脑、远程设备、VPS 及授权工作目录",
             iconRes = R.drawable.ic_device,
             badge = devicesBadge,
@@ -381,7 +381,7 @@ class ConsoleScreenController(
             onClick = { onOpenDevices() },
         ))
         container.addView(controlCard(
-            title = "Agent 管理与协作编排",
+            title = "Agent",
             subtitle = "添加云端、设备或 CLI Agent，配置角色与分工",
             iconRes = R.drawable.ic_team,
             badge = agentsBadge,
@@ -389,7 +389,7 @@ class ConsoleScreenController(
             onClick = { onOpenAgents() },
         ))
         container.addView(controlCard(
-            title = "MCP 工具与平台 Token",
+            title = "MCP",
             subtitle = "保存或签发平台 Token、探测远端工具清单",
             iconRes = R.drawable.ic_puzzle,
             badge = "已配置",
@@ -397,15 +397,15 @@ class ConsoleScreenController(
             onClick = { onOpenMcp() },
         ))
         container.addView(controlCard(
-            title = "Webhook 唤醒与自动化中心",
+            title = "Webhook",
             subtitle = "配置 Webhook、定时巡检、触发器与自主执行护栏",
             iconRes = R.drawable.ic_clock,
             badge = "待开发",
             isTodo = true,
-            onClick = { onToast("【待开发】Webhook 唤醒与自动化中心尚未开发") },
+            onClick = { onToast("【待开发】Webhook 尚未开发") },
         ))
         container.addView(controlCard(
-            title = "任务队列与审批中心",
+            title = "任务",
             subtitle = "查看排队任务、调整优先级与批准敏感写入操作",
             iconRes = R.drawable.ic_approval,
             badge = tasksBadge,
@@ -413,7 +413,7 @@ class ConsoleScreenController(
             onClick = { onOpenTasks() },
         ))
         container.addView(controlCard(
-            title = "事件提醒与通知中心",
+            title = "事件",
             subtitle = "查看任务派发、审批请求与完成回执",
             iconRes = R.drawable.ic_results,
             badge = "动态",
@@ -421,12 +421,12 @@ class ConsoleScreenController(
             onClick = { scrollToSection(ConsoleSection.LOGS) },
         ))
         container.addView(controlCard(
-            title = "用量统计与预算额度",
+            title = "用量",
             subtitle = "查看模型调用消耗与任务预算策略",
             iconRes = R.drawable.ic_settings,
             badge = "待开发",
             isTodo = true,
-            onClick = { onToast("【待开发】用量与成本待开发（只是界面，不产生计费调用）") },
+            onClick = { onToast("【待开发】用量尚未开发（只是界面，不产生计费调用）") },
         ))
 
         return container
