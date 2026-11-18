@@ -232,9 +232,10 @@ final class TriadFeaturesTests: XCTestCase {
     }
 
     // MARK: - 6. 控制台三件套卡片并列测试 (设备 / Agent / 模型)
-    func testControlModulesListIncludesModelsCard() {
-        let kv = InMemoryKeyValueStore()
-        let store = KeyValueBrainConfigStore(kv: kv)
+    func testControlModulesListIncludesModelsCard() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let data = try LocalData(root: tempDir)
+        let store = KeyValueBrainConfigStore(kv: data.kv)
         let countBefore = store.listConfigs().count
         XCTAssertEqual(countBefore, 0)
         let badgeBefore = countBefore > 0 ? "\(countBefore) 个模型" : "模型"
