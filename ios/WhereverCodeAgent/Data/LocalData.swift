@@ -1076,7 +1076,7 @@ public struct AgentTaskInlineCard: View {
     }
 }
 
-/// Claude 极简风格对话首页（严格遵循设计冻结要求：顶部圆按钮、中部 ✳ 星号与问候、底部悬浮胶囊输入栏，无底部 Tab Bar、无功能宫格、无首页统计卡片）
+/// Claude 极简风格对话首页（严格遵循设计冻结要求：顶部圆按钮、中部 ∞ 品牌字标与问候、底部悬浮胶囊输入栏，无底部 Tab Bar、无功能宫格、无首页统计卡片）
 public struct LocalChatHomeView: View {
     @ObservedObject public var appState: AppState
     @ObservedObject public var model: LocalChatModel
@@ -1195,9 +1195,9 @@ public struct LocalChatHomeView: View {
                         if model.visibleMessages.isEmpty && !model.isSending && !greetingDismissed {
                             Spacer(minLength: 88)
                             VStack(spacing: 14) {
-                                Text("✳")
-                                    .font(.system(size: 52))
-                                    .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                                Text("∞")
+                                    .font(.system(size: 52, weight: .medium))
+                                    .foregroundStyle(Color(red: 123 / 255.0, green: 92 / 255.0, blue: 1.0))
 
                                 Text("今天想做什么？")
                                     .font(.system(size: 27, weight: .regular, design: .serif))
@@ -1942,18 +1942,12 @@ private struct ProjectSourceTargetList: View {
     }
 }
 
+/// 对话方选择器（严格遵循定版规范：仅列出可选 Agent，整节移除已配置模型，单选规则仅提 Agent）
 public struct ModelAndAgentSheet: View {
     @ObservedObject var model: LocalChatModel
     var onManage: () -> Void
     var onManageAgents: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
-    @State private var models: [ModelInfo] = []
-    @State private var loading = false
-    @State private var loadError: String?
-
-    private var currentConfig: BrainConfig? {
-        model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
-    }
 
     private var availableAgents: [AgentRecord] {
         let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
@@ -2021,106 +2015,13 @@ public struct ModelAndAgentSheet: View {
                 }
 
                 Section {
-                    if model.usableBrains.isEmpty {
-                        Text("还没有可用的模型（需填写 API Key）。会员登录与 API Key 是两种不同授权，ChatGPT 会员在 iOS 尚未接入。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(model.usableBrains) { cfg in
-                        let isSelected = (model.selectedAgent == nil && cfg.brainId == model.selectedBrain)
-                        HStack {
-                            Button {
-                                model.selectBrainInCurrentSession(cfg.brainId)
-                                Task { await loadModels() }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    let modelSuffix = cfg.model.isEmpty ? "" : "（\(cfg.model)）"
-                                    Text("\(cfg.label)\(modelSuffix)").foregroundStyle(.primary)
-                                    if model.defaultSelectionId == "brain:\(cfg.brainId)" {
-                                        Text("默认模型").font(.caption2).foregroundStyle(.green)
-                                    }
-                                }
-                            }
-                            Spacer()
-                            if isSelected {
-                                Image(systemName: "checkmark").foregroundStyle(.blue)
-                            }
-                            if model.defaultSelectionId != "brain:\(cfg.brainId)" {
-                                Button("设为默认") {
-                                    model.setDefaultSelection(type: .brain, id: cfg.brainId)
-                                }
-                                .font(.caption2)
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                    }
                     Button("管理模型与连接") { dismiss(); onManage() }
-                } header: {
-                    Text("已配置模型")
                 } footer: {
-                    Text("单选规则：对话框仅保留一个勾选的 Agent 或模型，由用户自选对话方。")
-                }
-
-                if model.selectedAgent == nil, let cfg = currentConfig {
-                    Section("模型规格（当前模型：\(cfg.label)）") {
-                        if loading { ProgressView() }
-                        if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
-                        ForEach(models) { m in
-                            Button {
-                                if var c = currentConfig {
-                                    c.model = m.id
-                                    model.appState.brainSettingsModel.save(config: c, apiKey: "")
-                                }
-                            } label: {
-                                HStack {
-                                    Text(m.displayName.isEmpty ? m.id : m.displayName).foregroundStyle(.primary)
-                                    Spacer()
-                                    if currentConfig?.model == m.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Section {
-                    LabeledContent("智能等级", value: "该模型接口未提供")
-                    LabeledContent("速度", value: "该模型接口未提供")
-                } header: { Text("高级") } footer: {
-                    Text("仅显示当前接入实际支持的参数。")
-                }
-
-                Section {
-                    ForEach(ChatPermissionMode.allCases) { mode in
-                        Button {
-                            model.permissionMode = mode
-                            model.persistSessionConfig()
-                        } label: {
-                            HStack {
-                                Text(mode.title).foregroundStyle(mode == .readOnly ? .primary : .secondary)
-                                Spacer()
-                                if model.permissionMode == mode { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                            }
-                        }
-                        .disabled(mode != .readOnly)
-                    }
-                } header: { Text("执行权限") } footer: {
-                    Text("当前对话通道不执行命令，仅「只读对话」可用；执行需在已配对设备上通过审批中心逐项批准。")
+                    Text("单选规则：对话框仅保留一个勾选的 Agent，由用户自选对话方。")
                 }
             }
             .navigationTitle("选择对话方")
             .navigationBarTitleDisplayMode(.inline)
-            .task { await loadModels() }
-        }
-    }
-
-    private func loadModels() async {
-        guard let cfg = currentConfig, let adapter = model.appState.brainRegistry.get(cfg.adapterId) else {
-            models = []; return
-        }
-        loading = true; loadError = nil
-        defer { loading = false }
-        switch await adapter.listModels() {
-        case .success(let list): models = list
-        case .failure(let e): models = []; loadError = SecretRedactor.redact(e.localizedDescription)
         }
     }
 }

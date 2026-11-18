@@ -2361,8 +2361,6 @@ public struct ChannelsHomeView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
-        .navigationTitle("频道与协作")
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: loadData)
         .sheet(isPresented: $showCreateChannelSheet) {
             CreateChannelSheet(appState: appState) { newChannel in
@@ -2420,7 +2418,7 @@ public struct ChannelsHomeView: View {
             .accessibilityLabel("打开导航抽屉")
 
             Text("频道与协作")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold, design: .serif))
                 .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
 
             Spacer()

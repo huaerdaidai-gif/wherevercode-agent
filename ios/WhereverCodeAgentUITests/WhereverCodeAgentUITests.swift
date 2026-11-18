@@ -91,7 +91,7 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        XCTAssertTrue(app.navigationBars["频道与协作"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["频道与协作"].firstMatch.waitForExistence(timeout: 10))
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
@@ -209,6 +209,34 @@ final class WhereverCodeAgentUITests: XCTestCase {
         newChatBtn.tap()
         XCTAssertTrue(app.descendants(matching: .any)["chat.input"].exists)
         XCTAssertFalse(app.tabBars.firstMatch.exists)
+    }
+
+    func testAgentSelectorContainsOnlyAgentsAndManageLink() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 15))
+        let selectorBtn = app.buttons["home.agentSelectorButton"].firstMatch
+        XCTAssertTrue(selectorBtn.waitForExistence(timeout: 10), "Agent selector button must exist")
+        selectorBtn.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["选择对话方"].waitForExistence(timeout: 5) ||
+            app.navigationBars["选择对话方"].waitForExistence(timeout: 5),
+            "选择对话方 sheet 应展示"
+        )
+        XCTAssertFalse(app.staticTexts["已配置模型"].exists, "选择对话方不得包含「已配置模型」节")
+        XCTAssertTrue(
+            app.staticTexts["可选 Agent（设备 / 平台 / 云端）"].firstMatch.waitForExistence(timeout: 5),
+            "选择器必须保留可选 Agent 列表"
+        )
+        let manageBtn = app.buttons["管理模型与连接"].firstMatch
+        XCTAssertTrue(manageBtn.waitForExistence(timeout: 5), "选择器必须保留「管理模型与连接」入口")
+        let ruleText = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "单选规则：对话框仅保留一个勾选的 Agent")
+        ).firstMatch
+        XCTAssertTrue(ruleText.waitForExistence(timeout: 5), "单选规则文案应只提 Agent")
+
+        snap(app, "ui-03-agent-selector")
     }
 
     /// Scroll the settings form until `element` is in the hierarchy
