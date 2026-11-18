@@ -80,6 +80,8 @@ import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
 import wherevercode.agent.brain.ModelRouting
 import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
+import wherevercode.agent.brain.generic.CustomFreeProviders
+import wherevercode.agent.brain.generic.SharedPreferencesCustomFreeProviderStore
 import wherevercode.agent.brain.generic.DeviceModelDiscovery
 import wherevercode.agent.brain.generic.FreeModelListMode
 import wherevercode.agent.brain.generic.FreeProviderPreset
@@ -11471,15 +11473,27 @@ class MainActivity : AppCompatActivity() {
      * （[FreeProviderPresets]），绝不合并。
      */
     private fun showFreeProviderPicker() {
-        val presets = FreeProviderPresets.PRESETS
+        val customs = try {
+            SharedPreferencesCustomFreeProviderStore(applicationContext).list()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val presets = CustomFreeProviders.merged(FreeProviderPresets.PRESETS, customs)
+        val labels = presets.map { preset ->
+            if (CustomFreeProviders.isCustom(preset)) preset.displayName + "（自定义）" else preset.displayName
+        } + "＋ 添加自定义服务商（名单上没有的）"
         AlertDialog.Builder(this)
             .setTitle("免费 token 模型服务商")
-            .setItems(presets.map { it.displayName }.toTypedArray()) { _, which ->
-                val preset = presets[which]
-                if (preset.needsAccountId) {
-                    promptFreeAccountId(preset)
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (which >= presets.size) {
+                    promptCustomFreeProvider()
                 } else {
-                    promptFreeApiKey(preset, null)
+                    val preset = presets[which]
+                    if (preset.needsAccountId) {
+                        promptFreeAccountId(preset)
+                    } else {
+                        promptFreeApiKey(preset, null)
+                    }
                 }
             }
             .setNegativeButton("取消", null)
@@ -11646,6 +11660,109 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }
+
+    /**
+     * 自定义免费服务商（预留扩展口，Funk 2026-11-18 23:43）：名单
+     * 上没有的免费服务商，用户填名称 + 地址 + 名单形态即可加，
+     * 存本机后与内置预设走同一条流程。内置名单（官方核验）与
+     * 自定义（用户自加）分开存储、呈现标注，不合并。
+     */
+    private fun promptCustomFreeProvider() {
+        val nameInput = EditText(this).apply {
+            hint = "服务商名称，如 某某云"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        val urlInput = EditText(this).apply {
+            hint = "服务地址 Base URL，如 https://api.example.com/v1"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 8, 48, 0)
+            addView(nameInput)
+            addView(urlInput)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("添加自定义免费服务商")
+            .setMessage("名单上没有的免费服务商可以在这里加；加完与内置预设走同一条添加流程。")
+            .setView(container)
+            .setPositiveButton("下一步") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val url = urlInput.text.toString().trim().trimEnd('/')
+                if (name.isBlank() || url.isBlank()) {
+                    note("名称与服务地址都要填。")
+                } else if (!BrainConfigValidator.isAllowedBaseUrl(url)) {
+                    note("服务地址只允许 https（本机/局域网模型可用 http）。")
+                } else {
+                    promptCustomFreeProviderMode(name, url)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptCustomFreeProviderMode(name: String, url: String) {
+        val modes = arrayOf("拉取模型列表（服务商有 /models 接口）", "固定名单（我填模型 ID）")
+        AlertDialog.Builder(this)
+            .setTitle("模型名单怎么来")
+            .setItems(modes) { _, which ->
+                if (which == 0) {
+                    finishCustomFreeProvider(name, url, FreeModelListMode.LIVE, emptyList())
+                } else {
+                    promptCustomFreeProviderModels(name, url)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptCustomFreeProviderModels(name: String, url: String) {
+        val input = EditText(this).apply {
+            hint = "每行一个模型 ID"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            minLines = 4
+        }
+        AlertDialog.Builder(this)
+            .setTitle("固定模型名单")
+            .setMessage("把这家免费可用的模型 ID 逐行填进来（以实际调用为准）。")
+            .setView(input)
+            .setPositiveButton("保存并继续") { _, _ ->
+                val models = input.text.toString().lines().map { it.trim() }.filter { it.isNotBlank() }
+                if (models.isEmpty()) {
+                    note("固定名单至少填一个模型 ID。")
+                } else {
+                    finishCustomFreeProvider(name, url, FreeModelListMode.FIXED, models)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun finishCustomFreeProvider(
+        name: String,
+        url: String,
+        mode: FreeModelListMode,
+        fixedModels: List<String>,
+    ) {
+        val store = SharedPreferencesCustomFreeProviderStore(applicationContext)
+        val existingIds = (FreeProviderPresets.PRESETS.map { it.id } + store.list().map { it.id }).toSet()
+        val preset = FreeProviderPreset(
+            id = CustomFreeProviders.customId(name, existingIds),
+            displayName = name,
+            fixedModels = fixedModels,
+            listMode = mode,
+            baseUrlTemplate = url,
+            keyHelp = "填你在这家注册好的免费 API Key（只存本机 Keystore）。",
+            note = "自定义服务商：不在内置核验名单内，可用性以实际调用为准。",
+        )
+        store.add(preset)
+        note("已保存自定义服务商「$name」，接着填 Key 添加模型。")
+        promptFreeApiKey(preset, null)
     }
 
     /**
