@@ -77,6 +77,11 @@ import wherevercode.agent.brain.cloudflare.CloudflareBrainAdapter
 import wherevercode.agent.brain.deepseek.DeepSeekApiClient
 import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
+import wherevercode.agent.brain.generic.FreeModelListMode
+import wherevercode.agent.brain.generic.FreeProviderPreset
+import wherevercode.agent.brain.generic.FreeProviderPresets
+import wherevercode.agent.brain.generic.GenericOpenAiApiClient
+import wherevercode.agent.brain.generic.GenericOpenAiPresets
 import wherevercode.agent.brain.grok.GrokBrainAdapter
 import wherevercode.agent.brain.muse.MuseBrainAdapter
 import wherevercode.agent.brain.siwc.BrainBootstrap
@@ -8702,6 +8707,12 @@ class MainActivity : AppCompatActivity() {
         screenSettings.findViewById<View>(R.id.buttonSaveGenericBrain).setOnClickListener {
             saveGenericBrain()
         }
+        screenSettings.findViewById<View>(R.id.buttonCommonProviders).setOnClickListener {
+            showCommonProviderPicker()
+        }
+        screenSettings.findViewById<View>(R.id.buttonFreeProviders).setOnClickListener {
+            showFreeProviderPicker()
+        }
         buttonVerifyCli.setOnClickListener { verifyCliBrain() }
         // 设置清理 2（2026-11-11，Claude 极简标准）：Cloudflare /
         // DeepSeek / Grok / Muse Spark / Claude / 通用表单 / CLI 七节收到“高级配置”折叠里，默认不
@@ -11380,6 +11391,213 @@ class MainActivity : AppCompatActivity() {
                 val keySaved = apiKey.isNotEmpty() || hasStoredKey
                 val keyNote = if (keySaved) "（Key 已存本机 Keystore）" else "（本机模型，无需 Key）"
                 note("已保存 $label$keyNote。${BrainLoginRows.GENERIC_SAVED_NOTE}")
+            }
+        }.start()
+    }
+
+    /**
+     * 三件套之三·入口 A「常用模型服务商」（2026-11-18）：预设只把
+     * 名称与服务地址填进通用表单，Key 与模型仍由用户在表单里完成
+     * （测试连接拉 /models）。与入口 B 独立，数据走
+     * [GenericOpenAiPresets]，不与免费组混排。
+     */
+    private fun showCommonProviderPicker() {
+        val presets = GenericOpenAiPresets.PRESETS
+        AlertDialog.Builder(this)
+            .setTitle("常用模型服务商")
+            .setItems(presets.map { it.displayName }.toTypedArray()) { _, which ->
+                val preset = presets[which]
+                genericBrainLabel.setText(preset.displayName)
+                genericBaseUrl.setText(preset.baseUrl)
+                if (preset.note.isNotBlank()) genericModels.text = preset.note
+                note("已填入 ${preset.displayName} 的服务地址；填你的 API Key 后点“测试连接”拉模型列表，再保存。")
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 三件套之三·入口 B「免费 token 模型服务商」（2026-11-18，Funk
+     * 定案：以免费为主、项目主打开源免费）：选一家 → 填自己注册好
+     * 的免费 Key → LIVE 组拉 /models、FIXED 组用内置官方免费名单
+     * → 勾选 → 逐个生成 MODEL_API 配置（extra 标 tier=free 供智能
+     * 路由守卫）。与入口 A 独立入口、独立数据
+     * （[FreeProviderPresets]），绝不合并。
+     */
+    private fun showFreeProviderPicker() {
+        val presets = FreeProviderPresets.PRESETS
+        AlertDialog.Builder(this)
+            .setTitle("免费 token 模型服务商")
+            .setItems(presets.map { it.displayName }.toTypedArray()) { _, which ->
+                val preset = presets[which]
+                if (preset.needsAccountId) {
+                    promptFreeAccountId(preset)
+                } else {
+                    promptFreeApiKey(preset, null)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** Cloudflare 专用：服务地址里含 Account ID，先收这一项。 */
+    private fun promptFreeAccountId(preset: FreeProviderPreset) {
+        val input = EditText(this).apply {
+            hint = "Account ID（Cloudflare 控制台可查）"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        AlertDialog.Builder(this)
+            .setTitle(preset.displayName)
+            .setMessage("这家的服务地址里要带你的 Account ID。")
+            .setView(input)
+            .setPositiveButton("下一步") { _, _ ->
+                val accountId = input.text.toString().trim()
+                if (accountId.isBlank()) {
+                    note("未填 Account ID，无法继续。")
+                } else {
+                    promptFreeApiKey(preset, accountId)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptFreeApiKey(preset: FreeProviderPreset, accountId: String?) {
+        val input = EditText(this).apply {
+            hint = "API Key（只存本机 Keystore）"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val message = buildString {
+            append(preset.keyHelp)
+            if (preset.note.isNotBlank()) append("\n").append(preset.note)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(preset.displayName)
+            .setMessage(message)
+            .setView(input)
+            .setPositiveButton("下一步") { _, _ ->
+                val apiKey = <redacted>
+                if (apiKey.isBlank()) {
+                    note("未填 API Key，无法继续。")
+                } else {
+                    val baseUrl = preset.resolveBaseUrl(accountId)
+                    when (preset.listMode) {
+                        FreeModelListMode.FIXED ->
+                            showFreeModelPicker(preset, baseUrl, apiKey, preset.fixedModels)
+                        FreeModelListMode.LIVE ->
+                            fetchFreeProviderModels(preset, baseUrl, apiKey)
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** LIVE 组：用刚填的 Key 拉 /models（只读探针，不推理不计费）。 */
+    private fun fetchFreeProviderModels(preset: FreeProviderPreset, baseUrl: String, apiKey: <redacted>
+        note("正在从 ${preset.displayName} 读取模型列表…")
+        Thread {
+            val result = runBlocking { GenericOpenAiApiClient().listModels(apiKey, baseUrl) }
+            runOnUiThread {
+                result.onSuccess { models ->
+                    if (models.isEmpty()) {
+                        note("${preset.displayName} 没有返回任何模型；请确认 Key 可用，或改用手工表单填写模型 ID。")
+                    } else {
+                        showFreeModelPicker(preset, baseUrl, apiKey, models.map { it.id })
+                    }
+                }.onFailure { e ->
+                    note("读取模型列表失败：${e.message}")
+                }
+            }
+        }.start()
+    }
+
+    /** 勾选要添加的模型（一个模型一条配置，与既有模型连接同形态）。 */
+    private fun showFreeModelPicker(
+        preset: FreeProviderPreset,
+        baseUrl: String,
+        apiKey: <redacted>
+        models: List<String>,
+    ) {
+        val checked = BooleanArray(models.size)
+        AlertDialog.Builder(this)
+            .setTitle("${preset.displayName}：选择要添加的模型")
+            .setMultiChoiceItems(models.toTypedArray(), checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("添加所选") { _, _ ->
+                val selected = models.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    note("没有勾选任何模型，未添加。")
+                } else {
+                    saveFreeModels(preset, baseUrl, apiKey, selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 逐个落配置：Key 只进 Keystore（每条配置自己的 authRef），
+     * 配置只存引用名 + tier=free 标记；保存后注册进引擎注册表，
+     * 与手工保存同路（只存不注册要等下次启动才生效）。
+     */
+    private fun saveFreeModels(
+        preset: FreeProviderPreset,
+        baseUrl: String,
+        apiKey: <redacted>
+        models: List<String>,
+    ) {
+        val components = brainComponents ?: run {
+            note("大脑还在加载，请稍候再添加。")
+            return
+        }
+        val keyStore = try {
+            BrainKeyStore(applicationContext)
+        } catch (e: Exception) {
+            note("无法打开本机 Keystore，未添加：${e.message}")
+            return
+        }
+        Thread {
+            var added = 0
+            val savedConfigs = mutableListOf<BrainConfig>()
+            for (model in models) {
+                val label = preset.displayName + " · " + model
+                // 模型名 slug 截断可能撞 id：缀 4 位哈希保唯一，且同一
+                // 模型重加时稳定落回同一条配置（upsert）。
+                val hash = (model.hashCode() and 0xFFFF).toString(16).padStart(4, '0')
+                val brainId = BrainLoginRows.genericBrainId(label) + "-" + hash
+                val authRef = BrainLoginRows.genericAuthRef(brainId)
+                val config = BrainConfig(
+                    brainId = brainId,
+                    kind = BrainKind.MODEL_API,
+                    adapterId = BrainLoginRows.GENERIC_ADAPTER_ID,
+                    label = label,
+                    baseUrl = baseUrl,
+                    model = model,
+                    authRef = authRef,
+                    extra = mapOf(
+                        FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
+                        FreeProviderPresets.EXTRA_PRESET to preset.id,
+                    ),
+                    fallbackBrainIds = emptyList(),
+                )
+                if (BrainConfigValidator.validate(config).isNotEmpty()) continue
+                keyStore.putSecret(authRef, apiKey)
+                components.configStore.saveConfig(config)
+                savedConfigs += config
+                added++
+            }
+            runOnUiThread {
+                savedConfigs.forEach { BrainAdapterRegistry.registerConfig(it) }
+                refreshBrainStatus()
+                if (added > 0) {
+                    note("已添加 $added 个「${preset.displayName}」免费模型（Key 已存本机 Keystore）。${BrainLoginRows.GENERIC_SAVED_NOTE}")
+                } else {
+                    note("没有添加成功：配置校验未通过，请改用手工表单添加。")
+                }
             }
         }.start()
     }

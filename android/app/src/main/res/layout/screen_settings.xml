@@ -851,6 +851,57 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <!-- 三件套之三（2026-11-18）：模型服务商预设两个独立入口——
+             常用（选一家把地址填进下面的手工表单）与免费 token（填
+             注册好的免费 Key，拉回模型阵列勾选添加）。两入口、两份
+             预设数据，绝不合并；与下方手工表单并列，互不替代。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="从服务商预设添加模型"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="常用服务商：选一家把服务地址填进下面的表单，再填你的 Key。免费 token 服务商：填你自己注册好的免费 Key，拉回模型阵列勾选添加；项目主打开源免费，注册领 Key 即可开始干活。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/buttonCommonProviders"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:text="常用模型服务商"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonFreeProviders"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:text="免费 token 模型服务商"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
         <!-- V5 C3-C：通用 MODEL_API 添加表单（OpenAI 兼容）。Cloudflare /
              DeepSeek 两节保持不动；通用表单是第四路及以后的唯一入口。
              Key 只存本机 Keystore，配置只存 authRef 引用名；推理已接线
