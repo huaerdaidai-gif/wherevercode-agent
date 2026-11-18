@@ -1181,6 +1181,7 @@ public struct LocalChatHomeView: View {
                         .background(Color.white, in: Circle())
                         .overlay(Circle().stroke(Color(red: 0.87, green: 0.86, blue: 0.84), lineWidth: 1))
                 }
+                .accessibilityIdentifier("chat.newConversation")
                 .accessibilityLabel("新对话")
             }
             .padding(.horizontal, 16)

@@ -213,7 +213,7 @@ struct BrainSettingsView: View {
                 LabeledContent("官方账号 / OAuth · 仅支持提供方开放的授权方式", value: "ChatGPT 会员登录接入开发中")
                 LabeledContent("API Key · 自定义兼容接口", value: "已支持（存本机 Keychain）")
                 LabeledContent("本地模型 · 设备推理", value: "通过已配对设备接入")
-                LabeledContent("已有 CLI 会话 · Codex / Claude / DeepSeek Harness", value: "通过 Agent 导入登记")
+                LabeledContent("已有 CLI 会话 · Codex / Claude / 外部 Agent", value: "通过 Agent 导入登记")
                 Button(isTestingConnection ? "正在测试连接…" : "测试连接") {
                     Task { await runConnectionProbe() }
                 }
