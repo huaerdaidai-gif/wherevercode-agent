@@ -80,6 +80,31 @@ class ModelPageLayoutTest {
         assertTrue(texts.indexOf("添加模型") < texts.indexOf("已添加模型"))
     }
 
+    /**
+     * 197 缺陷 #2 的布局面锁死：旧页把预设要填的表单藏在
+     * visibility=gone 的折叠容器里，点选填了个寂寞。新页表单必须
+     * 从字段到根整条祖先链全可见——谁再把表单包进折叠区，此测试
+     * 先红。
+     */
+    @Test
+    fun `model form fields are not hidden inside a collapsed container`() {
+        val root = LayoutInflater.from(themed()).inflate(R.layout.screen_models, null)
+        for (id in listOf(
+            R.id.modelFormLabel, R.id.modelFormBaseUrl, R.id.modelFormModel,
+            R.id.modelFormApiKey, R.id.buttonSaveModel,
+        )) {
+            var v: View? = root.findViewById(id)
+            assertNotNull(v)
+            while (v != null) {
+                assertTrue(
+                    "模型表单字段及其祖先必须可见（id=$id）",
+                    v.visibility == View.VISIBLE,
+                )
+                v = v.parent as? View
+            }
+        }
+    }
+
     @Test
     fun `settings page restored preset block after advanced config and brain list title intact`() {
         val root = LayoutInflater.from(themed()).inflate(R.layout.screen_settings, null)
