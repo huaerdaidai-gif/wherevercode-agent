@@ -89,7 +89,7 @@ class AgentScreenController(
         if (onBatchDeviceChecked != null) {
             // 先勾设备、再开开关（Funk 2026-11-19）：要批量扫描的
             // 已安装设备先在这里勾好，开关只扫勾中的。
-            list.addView(sectionTitle("批量扫描的设备（勾选）"))
+            list.addView(sectionTitle("选择设备"))
             if (batchDevices.isEmpty()) {
                 list.addView(
                     UiKit.text(context, "还没有已配对的设备：先去设备页添加并完成配对，设备会出现在这里供勾选。", 10f, R.color.text_tertiary).apply {
@@ -119,7 +119,7 @@ class AgentScreenController(
             list.addView(
                 UiKit.text(
                     context,
-                    "默认关。打开时批量扫描上方勾选的设备，把上面的 Agent 添加进来；关着时只有下面“从设备添加”和设备页“重新发现”才发现。",
+                    "打开后扫描上面勾选的设备，添加上面的 Agent。",
                     10f,
                     R.color.text_tertiary,
                 ).apply { setPadding(0, 0, 0, dp(10)) },

@@ -2990,7 +2990,7 @@ class MainActivity : AppCompatActivity() {
                 val selected = paired.filter { it.deviceId in checkedIds }
                 if (selected.isEmpty()) {
                     runOnUiThread {
-                        toast("没有勾选要扫描的设备：请先在 Agent 页勾选设备，再打开开关。")
+                        toast("先勾选要扫描的设备，再打开开关。")
                     }
                 } else {
                     batchDiscoverAgentsOnDevices(selected)
