@@ -67,6 +67,7 @@ class DrawerView(
     private var renderedRowList: List<RenderedRow> = emptyList()
     private var badges: DrawerBadges = DrawerBadges()
     private var searchQuery: String = ""
+    private var searchInputField: EditText? = null
     private val collapsedGroups: MutableSet<String> = mutableSetOf()
 
     // 必须声明在 init 之前：init 会调用 refresh()，refresh() 读本表；
@@ -133,7 +134,7 @@ class DrawerView(
         "nav_team" -> R.drawable.ic_team
         "nav_devices" -> R.drawable.ic_device
         "nav_tools" -> R.drawable.ic_tools
-        "nav_workbench" -> R.drawable.ic_settings
+        "nav_workbench", "settings" -> R.drawable.ic_settings
         "nav_theme" -> R.drawable.ic_theme
         "nav_running_tasks" -> R.drawable.ic_clock
         "nav_pending_approval" -> R.drawable.ic_approval
@@ -317,14 +318,15 @@ class DrawerView(
         searchBox.addView(UiKit.icon(context, R.drawable.ic_search, R.color.text_secondary).apply {
             layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(8) }
         })
-        val searchInput = EditText(context).apply {
+        // 搜索输入框常驻复用同一个实例：refresh() 重建抽屉时不再销毁重建
+        // （旧做法每次刷新新建 EditText，占位文字重影、焦点与光标全丢）。
+        val searchInput = searchInputField ?: EditText(context).apply {
             hint = "搜索会话与消息…"
             textSize = 13f
             setTextColor(UiKit.color(context, R.color.text_primary))
             setHintTextColor(UiKit.color(context, R.color.text_tertiary))
             background = null
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setText(searchQuery)
+            isSingleLine = true
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -335,7 +337,10 @@ class DrawerView(
                     refresh()
                 }
             })
-        }
+        }.also { searchInputField = it }
+        (searchInput.parent as? android.view.ViewGroup)?.removeView(searchInput)
+        searchInput.layoutParams =
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         searchBox.addView(searchInput)
         content.addView(searchBox)
 
@@ -412,7 +417,7 @@ class DrawerView(
         val userLabel = userLabelProvider()
         val isSettingsActive = (DrawerController.ID_SETTINGS == activeTargetProvider())
         rows += RenderedRow(
-            id = "nav_workbench",
+            id = DrawerController.ID_SETTINGS,
             label = userLabel,
             indent = 0,
             group = "bottom",
@@ -430,10 +435,10 @@ class DrawerView(
 
         // 左侧：头像 + 设置入口
         val accountBtn = UiKit.horizontal(context).apply {
-            tag = "nav_workbench"
+            tag = DrawerController.ID_SETTINGS
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             gravity = Gravity.CENTER_VERTICAL
-            setOnClickListener { onEntrySelected("nav_workbench") }
+            setOnClickListener { onEntrySelected(DrawerController.ID_SETTINGS) }
         }
         accountBtn.addView(
             UiKit.text(context, "W", 15f, R.color.white, bold = true).apply {
