@@ -181,6 +181,12 @@ class BrainEngine(
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
     private val failoverPolicy: FailoverPolicy = FailoverPolicy(),
     /**
+     * 三件套之三·智能路由（2026-11-18）：按本轮当前大脑动态给出故障
+     * 切换政策（设置实时读取，改完下一轮即生效，不用重启）。返回
+     * null = 用静态 [failoverPolicy]，既有行为一字不变。
+     */
+    private val failoverPolicyProvider: ((String) -> FailoverPolicy?)? = null,
+    /**
      * M2 M9: optional session ledger. Default is the no-op ledger, so
      * existing callers and tests are untouched. When a real ledger is
      * injected, every turn is classified by S3 first: CONTROL
@@ -875,7 +881,8 @@ class BrainEngine(
             if (roundError != null) {
                 val err = roundError!!
                 log(conversation.id, "error", "${err.code}: ${err.message}")
-                if (Failover.shouldRetry(err, sameBrainAttempts, failoverPolicy)) {
+                val policy = failoverPolicyProvider?.invoke(brainId) ?: failoverPolicy
+                if (Failover.shouldRetry(err, sameBrainAttempts, policy)) {
                     sameBrainAttempts += 1
                     log(conversation.id, "failover_retry", "同大脑重试第 $sameBrainAttempts 次")
                     continue@outer
@@ -886,7 +893,7 @@ class BrainEngine(
                 // 阶段 A：allowFailover=false 的轮次（选中 Agent）也不回落：
                 // 可重试失败直接报出，绝不悄悄换一个大脑/换一个计费方。
                 val next = if (allowFailover && err.retryable) {
-                    Failover.nextFallback(brainId, failoverPolicy, triedBrains)
+                    Failover.nextFallback(brainId, policy, triedBrains)
                 } else {
                     null
                 }

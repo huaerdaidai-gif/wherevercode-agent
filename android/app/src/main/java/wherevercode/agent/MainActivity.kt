@@ -78,6 +78,8 @@ import wherevercode.agent.brain.cloudflare.CloudflareBrainAdapter
 import wherevercode.agent.brain.deepseek.DeepSeekApiClient
 import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
+import wherevercode.agent.brain.ModelRouting
+import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
 import wherevercode.agent.brain.generic.DeviceModelDiscovery
 import wherevercode.agent.brain.generic.FreeModelListMode
 import wherevercode.agent.brain.generic.FreeProviderPreset
@@ -8727,6 +8729,29 @@ class MainActivity : AppCompatActivity() {
                 else "自动发现已关闭。",
             )
         }
+        val routingStore = SharedPreferencesModelRoutingStore(applicationContext)
+        val routingSettingsNow = routingStore.load()
+        val checkModelRouting = screenSettings.findViewById<CheckBox>(R.id.checkModelRouting)
+        checkModelRouting.isChecked = routingSettingsNow.enabled
+        checkModelRouting.setOnCheckedChangeListener { _, isChecked ->
+            routingStore.save(routingStore.load().copy(enabled = isChecked))
+            note(
+                if (isChecked) "智能路由已打开：模型失败时按路由池顺序自动切换（下一轮生效）。"
+                else "智能路由已关闭。",
+            )
+        }
+        val checkRoutingAllowPaid = screenSettings.findViewById<CheckBox>(R.id.checkRoutingAllowPaid)
+        checkRoutingAllowPaid.isChecked = routingSettingsNow.allowPaid
+        checkRoutingAllowPaid.setOnCheckedChangeListener { _, isChecked ->
+            routingStore.save(routingStore.load().copy(allowPaid = isChecked))
+            note(
+                if (isChecked) "已允许路由切到付费模型。"
+                else "路由只在免费模型之间切换。",
+            )
+        }
+        screenSettings.findViewById<View>(R.id.buttonRoutingPool).setOnClickListener {
+            showRoutingPoolPicker()
+        }
         screenSettings.findViewById<View>(R.id.buttonDiscoverDeviceModels).setOnClickListener {
             if (checkModelAutoDiscovery.isChecked) {
                 discoverDeviceModels()
@@ -11736,6 +11761,53 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }.start()
+    }
+
+    /**
+     * 三件套之三·智能路由池选择（2026-11-18）：列出全部 MODEL_API
+     * 模型连接（标注免费/付费），勾选进池；池顺序按现有顺序保留、
+     * 新勾选的按列表顺序追加。切换规则：可重试失败（额度/限流/
+     * 5xx）按池顺序切，401/400 不切；默认只在免费之间切，「允许
+     * 付费」打开后付费才进池（Funk 定案：以免费为主、付费可选）。
+     */
+    private fun showRoutingPoolPicker() {
+        val components = brainComponents ?: run {
+            note("大脑还在加载，请稍候再设置路由池。")
+            return
+        }
+        val store = SharedPreferencesModelRoutingStore(applicationContext)
+        val settings = store.load()
+        val models = components.configStore.listConfigs().filter { it.kind == BrainKind.MODEL_API }
+        if (models.isEmpty()) {
+            note("还没有任何模型连接：先从预设或手工表单添加模型，再来选路由池。")
+            return
+        }
+        val labels = models.map { config ->
+            val tier = if (ModelRouting.isFree(config)) "免费" else "付费"
+            "${config.label}（$tier）"
+        }.toTypedArray()
+        val checked = BooleanArray(models.size) { index ->
+            models[index].brainId in settings.orderedBrainIds
+        }
+        AlertDialog.Builder(this)
+            .setTitle("智能路由池（按顺序切换）")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("保存") { _, _ ->
+                val chosenIds = models.filterIndexed { index, _ -> checked[index] }.map { it.brainId }
+                // 已在池里的保持原相对顺序，新进池的按列表顺序追加。
+                val kept = settings.orderedBrainIds.filter { it in chosenIds }
+                val added = chosenIds.filter { it !in kept }
+                val newOrder = kept + added
+                store.save(settings.copy(orderedBrainIds = newOrder))
+                note(
+                    if (newOrder.isEmpty()) "路由池已清空：没有模型参与自动切换。"
+                    else "路由池已保存：${newOrder.size} 个模型参与切换（排在前面的先切）。",
+                )
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /** CLI 大脑行：身份是 cliBinary，状态取上次验证的写回值。

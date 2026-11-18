@@ -18,6 +18,8 @@ import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.brain.EngineEvent
 import wherevercode.agent.brain.EventLog
 import wherevercode.agent.brain.FailoverPolicy
+import wherevercode.agent.brain.ModelRouting
+import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
 import wherevercode.agent.brain.cli.CliMembershipBrainAdapter
 import wherevercode.agent.brain.cli.CliRunner
 import wherevercode.agent.brain.devicecode.DeviceCodeBrainAdapter
@@ -1351,6 +1353,19 @@ object BrainBootstrap {
             approvalGate = approvalGate,
             currentBrainId = { configStore.currentBrainId() },
             failoverPolicy = FailoverPolicy(fallbackBrainIds = cloudflareFallback),
+            // 三件套之三·智能路由（2026-11-18）：总开关打开时，MODEL_API
+            // 模型连接的轮次改走路由池政策（实时读设置，下一轮即生效）；
+            // 关或非模型大脑时返回 null，沿用上面的静态政策不变。
+            failoverPolicyProvider = { brainId ->
+                val routingSettings = SharedPreferencesModelRoutingStore(appContext).load()
+                if (!routingSettings.enabled) {
+                    null
+                } else {
+                    configStore.getConfig(brainId)
+                        ?.takeIf { it.kind == BrainKind.MODEL_API }
+                        ?.let { ModelRouting.policyFor(routingSettings, configStore.listConfigs(), brainId) }
+                }
+            },
             controlState = { turnController.snapshot() },
             sessionLedger = sessionLedger,
             // git 家（2026-11-11）：当前聊天项目的 git 家。

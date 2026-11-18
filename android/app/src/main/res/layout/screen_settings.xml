@@ -933,6 +933,45 @@
             android:textColor="@color/text_primary"
             android:textSize="11sp" />
 
+        <!-- 三件套之三（2026-11-18）：智能路由——总开关默认关；
+             默认只在免费模型之间切，付费须用户主动开启才进池。 -->
+        <CheckBox
+            android:id="@+id/checkModelRouting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="智能路由：额度耗尽/限流时自动切到下一个模型（开关）"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/checkRoutingAllowPaid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="允许切到付费模型（默认只在免费模型之间切）"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="在路由池里按顺序切换：额度不足（402）、限流（429）、服务出错（5xx）时自动切下一个并重发，你不用管；密钥错（401）、请求错（400）不切、直接报。改完下一轮对话即生效。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/buttonRoutingPool"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="选择路由池模型"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
         <!-- V5 C3-C：通用 MODEL_API 添加表单（OpenAI 兼容）。Cloudflare /
              DeepSeek 两节保持不动；通用表单是第四路及以后的唯一入口。
              Key 只存本机 Keystore，配置只存 authRef 引用名；推理已接线
