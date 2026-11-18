@@ -4717,6 +4717,7 @@ public struct ControlHomeView: View {
         let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
         let agentsCount = allAgents.count
         let devicesCount = allAgents.filter { $0.kind == .device }.count
+        let modelsCount = appState.brainConfigStore.listConfigs().count
         let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
 
         VStack(spacing: 0) {
@@ -4735,6 +4736,7 @@ public struct ControlHomeView: View {
                     controlModulesList(
                         devicesCount: devicesCount,
                         agentsCount: agentsCount,
+                        modelsCount: modelsCount,
                         queuedCount: queuedCount,
                         pendingApprovals: pendingApprovals
                     )
@@ -4829,7 +4831,7 @@ public struct ControlHomeView: View {
     }
 
     @ViewBuilder
-    private func controlModulesList(devicesCount: Int, agentsCount: Int, queuedCount: Int, pendingApprovals: Int) -> some View {
+    private func controlModulesList(devicesCount: Int, agentsCount: Int, modelsCount: Int, queuedCount: Int, pendingApprovals: Int) -> some View {
         VStack(spacing: 12) {
             controlCard(
                 title: "设备",
@@ -4845,6 +4847,14 @@ public struct ControlHomeView: View {
                 icon: "person.2.badge.gearshape",
                 badge: "\(agentsCount) 个 Agent",
                 routeId: "agents"
+            )
+
+            controlCard(
+                title: "模型",
+                subtitle: "添加模型服务商与免费 Token，配置智能路由",
+                icon: "cube",
+                badge: modelsCount > 0 ? "\(modelsCount) 个模型" : "模型",
+                routeId: "models"
             )
 
             controlCard(

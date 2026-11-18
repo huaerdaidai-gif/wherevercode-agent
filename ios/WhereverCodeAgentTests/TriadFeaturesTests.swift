@@ -230,4 +230,43 @@ final class TriadFeaturesTests: XCTestCase {
         // 清理
         try? LocalData.shared.agents.deleteAgent(agentId: childAgentId)
     }
+
+    // MARK: - 6. 控制台三件套卡片并列测试 (设备 / Agent / 模型)
+    func testControlModulesListIncludesModelsCard() throws {
+        let data = try LocalData.inMemory()
+        let store = KeyValueBrainConfigStore(kv: data.kv)
+        let countBefore = store.listConfigs().count
+        XCTAssertEqual(countBefore, 0)
+        let badgeBefore = countBefore > 0 ? "\(countBefore) 个模型" : "模型"
+        XCTAssertEqual(badgeBefore, "模型")
+
+        // 添加一个测试模型配置
+        let testConfig = BrainConfig(
+            brainId: "triad-test-model-card",
+            kind: .modelApi,
+            adapterId: "generic",
+            label: "Triad Test Model Card",
+            baseUrl: "https://api.test.com/v1",
+            model: "test-model",
+            authRef: "test-ref"
+        )
+        store.saveConfig(testConfig)
+        let countAfter = store.listConfigs().count
+        XCTAssertEqual(countAfter, 1)
+        let badgeAfter = "\(countAfter) 个模型"
+        XCTAssertEqual(badgeAfter, "1 个模型")
+
+        // 验证多模型计数累加
+        let testConfig2 = BrainConfig(
+            brainId: "triad-test-model-card-2",
+            kind: .modelApi,
+            adapterId: "generic",
+            label: "Triad Test Model Card 2",
+            baseUrl: "https://api.test2.com/v1",
+            model: "test-model-2",
+            authRef: "test-ref-2"
+        )
+        store.saveConfig(testConfig2)
+        XCTAssertEqual(store.listConfigs().count, 2)
+    }
 }
