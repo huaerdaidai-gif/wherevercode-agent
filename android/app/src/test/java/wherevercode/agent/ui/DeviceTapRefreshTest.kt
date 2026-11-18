@@ -56,7 +56,7 @@ class DeviceTapRefreshTest {
         val shown = waitForText(activity, "dev-0", timeoutMs = 3000)
         assertTrue("点进设备页 3 秒内应已看到本地添加的设备 dev-0（不等 5 秒 mDNS）", shown)
         assertTrue(
-            collectTexts(activity.window.decorView).any { it.contains("远程设备（手动添加，1）") },
+            collectTexts(activity.window.decorView).any { it.contains("已添加设备") },
         )
 
         controller.pause().stop().destroy()

@@ -37,13 +37,6 @@
                     android:textStyle="bold"
                     android:fontFamily="sans-serif-medium" />
 
-                <TextView
-                    android:id="@+id/agentIntro"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="已添加的 Agent 在此管理；远程设备上的 Agent 需先在设备页添加设备。"
-                    android:textColor="@color/text_tertiary"
-                    android:textSize="10sp" />
             </LinearLayout>
 
             <ImageView
@@ -68,14 +61,6 @@
             android:textSize="12sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/agentAddIntro"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="添加云端模型 API、订阅授权 Agent 或本机 CLI Agent；角色不固定，可对话、指派、测试、编辑、移除。"
-            android:textColor="@color/text_tertiary"
-            android:textSize="10sp" />
 
         <LinearLayout
             android:id="@+id/agentList"

@@ -73,21 +73,11 @@ class AgentScreenController(
         list.removeAllViews()
     }
 
-    fun renderAddedAgents(
-        agents: List<AgentRecord>,
-        onAddFromDevice: (() -> Unit)? = null,
-    ) {
-        // 三件套之二（2026-11-18）：「从设备添加」= 自动发现快捷入口，
-        // 与手工表单并列；发现与去重口径和设备页“重新发现 Agent”一致。
-        if (onAddFromDevice != null) {
-            val addRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(10)) }
-            addRow.addView(actionButton("＋ 从设备添加（自动发现）") { onAddFromDevice() })
-            list.addView(addRow)
-        }
+    fun renderAddedAgents(agents: List<AgentRecord>) {
         list.addView(sectionTitle("已添加的 Agent（${agents.size}）"))
         if (agents.isEmpty()) {
             list.addView(
-                UiKit.text(context, "还没有添加 Agent。点上方“添加 Agent”，可加云端模型 API、订阅授权 Agent、本机 CLI Agent 或设备上的 Agent。", 11f, R.color.text_tertiary).apply {
+                UiKit.text(context, "还没有添加 Agent。", 11f, R.color.text_tertiary).apply {
                     setBackgroundResource(R.drawable.bg_system_note)
                     setPadding(dp(12), dp(10), dp(12), dp(10))
                 },
@@ -155,44 +145,30 @@ class AgentScreenController(
         onDeleteRemote: ((RemoteDevice) -> Unit)? = null,
         onAddRemote: (() -> Unit)? = null,
     ) {
-        list.addView(
-            sectionTitle(
-                "设备（${discovered.size} 已发现 · ${pairings.size} 配对记录 · ${remoteDevices.size} 远程）",
-            ),
-        )
-        if (discovered.isEmpty() && pairings.isEmpty() && remoteDevices.isEmpty()) {
+        // 设备页只留两块（Funk 2026-11-19，与 Agent 页同逻辑）：
+        // 添加设备 + 已添加设备；附近发现的设备是添加流程的一部分。
+        if (onAddRemote != null) {
+            val addRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(10)) }
+            addRow.addView(actionButton("＋ 添加设备") { onAddRemote() })
+            list.addView(addRow)
+        }
+        if (discovered.isNotEmpty()) {
+            list.addView(sectionTitle("附近的设备"))
+            discovered.forEach { peer -> list.addView(deviceCard(peer, onPair)) }
+        }
+        list.addView(sectionTitle("已添加设备"))
+        if (pairings.isEmpty() && remoteDevices.isEmpty()) {
             list.addView(
-                UiKit.text(context, "未发现设备：局域网内没有 _wherevercode._tcp 服务。", 12f, R.color.text_secondary).apply {
+                UiKit.text(context, "还没有添加设备。", 12f, R.color.text_secondary).apply {
                     setBackgroundResource(R.drawable.bg_card)
                     setPadding(dp(14), dp(14), dp(14), dp(14))
                 },
             )
         }
-        discovered.forEach { peer -> list.addView(deviceCard(peer, onPair)) }
         pairings.forEach { record ->
             list.addView(pairingCard(record, onConfirm, onReject, onRevoke))
         }
-        // V5 加设备修复（2026-11-11）：远程设备单列区段——此前设备页
-        // 根本不传远程设备，加完也看不见。状态文案与选设备对话框一致。
-        if (remoteDevices.isNotEmpty()) {
-            list.addView(sectionTitle("远程设备（手动添加，${remoteDevices.size}）"))
-            remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote)) }
-        }
-        if (onAddRemote != null) {
-            val row = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
-            row.addView(actionButton("＋ 添加远程设备…") { onAddRemote() })
-            list.addView(row)
-        }
-        list.addView(
-            UiKit.text(
-                context,
-                "配对记录已持久化，重启后仍在；已配对的远程设备可用于跨设备对话与任务。",
-                10f,
-                R.color.text_tertiary,
-            ).apply {
-                setPadding(0, dp(6), 0, 0)
-            },
-        )
+        remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote)) }
     }
 
     /**

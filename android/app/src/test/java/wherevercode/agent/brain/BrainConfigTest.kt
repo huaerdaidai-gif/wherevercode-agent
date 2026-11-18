@@ -325,4 +325,31 @@ class BrainConfigTest {
         )
         assertTrue(errors.any { it.contains("需要已登录的 CLI") })
     }
+    @Test
+    fun `lan http model urls are allowed, public http is not`() {
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://192.168.1.4:11434/v1")).isEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://10.0.0.5:1234/v1")).isEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://172.16.0.9:8000/v1")).isEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://172.31.255.255/v1")).isEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://172.32.0.1/v1")).isNotEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://100.75.41.0:11434/v1")).isEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://100.128.0.1/v1")).isNotEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://203.0.113.10/v1")).isNotEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://192.168.1.1.evil.example/v1")).isNotEmpty())
+        assertTrue(BrainConfigValidator.validate(config(baseUrl = "http://192.168.1.1@evil.example/v1")).isNotEmpty())
+    }
+
+    @Test
+    fun `private lan ipv4 classification`() {
+        assertTrue(BrainConfigValidator.isPrivateLanIpv4("192.168.0.1"))
+        assertTrue(BrainConfigValidator.isPrivateLanIpv4("10.255.255.255"))
+        assertTrue(BrainConfigValidator.isPrivateLanIpv4("172.20.1.1"))
+        assertFalse(BrainConfigValidator.isPrivateLanIpv4("172.32.1.1"))
+        assertTrue(BrainConfigValidator.isPrivateLanIpv4("100.100.1.1"))
+        assertFalse(BrainConfigValidator.isPrivateLanIpv4("100.128.1.1"))
+        assertFalse(BrainConfigValidator.isPrivateLanIpv4("8.8.8.8"))
+        assertFalse(BrainConfigValidator.isPrivateLanIpv4("192.168.1"))
+        assertFalse(BrainConfigValidator.isPrivateLanIpv4("192.168.1.256"))
+        assertFalse(BrainConfigValidator.isPrivateLanIpv4("localhost"))
+    }
 }

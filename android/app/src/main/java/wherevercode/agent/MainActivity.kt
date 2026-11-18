@@ -77,6 +77,16 @@ import wherevercode.agent.brain.cloudflare.CloudflareBrainAdapter
 import wherevercode.agent.brain.deepseek.DeepSeekApiClient
 import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
+import wherevercode.agent.brain.ModelRouting
+import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
+import wherevercode.agent.brain.generic.CustomFreeProviders
+import wherevercode.agent.brain.generic.SharedPreferencesCustomFreeProviderStore
+import wherevercode.agent.brain.generic.DeviceModelDiscovery
+import wherevercode.agent.brain.generic.FreeModelListMode
+import wherevercode.agent.brain.generic.FreeProviderPreset
+import wherevercode.agent.brain.generic.FreeProviderPresets
+import wherevercode.agent.brain.generic.GenericOpenAiApiClient
+import wherevercode.agent.brain.generic.GenericOpenAiPresets
 import wherevercode.agent.brain.grok.GrokBrainAdapter
 import wherevercode.agent.brain.muse.MuseBrainAdapter
 import wherevercode.agent.brain.siwc.BrainBootstrap
@@ -1816,7 +1826,6 @@ class MainActivity : AppCompatActivity() {
         val agentOnlyIds = listOf(
             R.id.agentHeader,
             R.id.buttonAddAgent,
-            R.id.agentAddIntro,
         )
         agentOnlyIds.forEach { id ->
             screenAgents.findViewById<View>(id).visibility =
@@ -1826,7 +1835,7 @@ class MainActivity : AppCompatActivity() {
             if (devicesOnly) View.VISIBLE else View.GONE
         deviceInfo.visibility = if (devicesOnly) View.VISIBLE else View.GONE
         screenAgents.findViewById<TextView>(R.id.deviceSectionTitle).text =
-            if (devicesOnly) "设备与授权" else "本机设备"
+            if (devicesOnly) "设备" else "本机设备"
         if (devicesOnly) {
             screenAgents.post { (screenAgents as ScrollView).scrollTo(0, 0) }
         }
@@ -2884,22 +2893,14 @@ class MainActivity : AppCompatActivity() {
                 refreshPairingSnapshot()
                 // P1 能力卡：hello 成功，存仓库快照。
                 noteHelloForCapabilityCards(hello)
-                // V5 自动发现（2026-11-11）：配对 + hello 成功后按 hello
-                // 列表自动建 Agent 记录。去重按 deviceId + agentId：手工
-                // 已加的保留不动（不覆盖测试结果与登录态），同 agentId 属
-                // 别台设备的跳过（AgentStore 全局按 agentId 存，覆盖会毁
-                // 掉另一台设备的 Agent）。只存可用的；不可用的跳过并如实说明。
+                // 添加设备独立（Funk 2026-11-19）：配对只完成配对，
+                // 不再顺带建 Agent 记录——发现 Agent 由 Agent 页的
+                // 批量自动发现开关与手动入口独立触发，互不关联。
+                // hello 报的 Agent 文件夹仍作下面添加项目的候选
+                // （那是项目添加流程自己的事，不建 Agent 记录）。
                 val available = hello.agents.filter { it.available && it.folder.isNotBlank() }
-                val (created, discovery) = DeviceAgentDiscovery.discover(
-                    hello.deviceId,
-                    hello.agents,
-                    agentStore.listAgents(),
-                )
-                created.forEach { agentStore.saveAgent(it) }
                 runOnUiThread {
-                    toast(
-                        "已配对 $displayName：${DeviceAgentDiscovery.summarize(discovery)}。",
-                    )
+                    toast("已配对 $displayName。")
                     refreshAgents()
                     // V5 项目添加：配对成功后问一句要不要顺手加项目
                     //（列出刚发现的 Agent 文件夹作候选；不强制，可暂不添加）。
@@ -2912,68 +2913,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 重新发现某台已配对设备上的 Agent（V5，2026-11-11）：设备页每台已
-     * 配对远程设备卡片上的“重新发现 Agent”。场景：设备是在自动发现上
-     * 线前加的，或服务端后来又装了新 Agent——重拉一次 hello，按同一
-     * 去重口径补建缺失的记录，已有的不动。只读 hello，不改配对、不删记录。
+     * 自动发现（集成在「添加 Agent」里，全 App 唯一的 Agent 发现
+     * 入口）：勾选要扫描的已配对设备（勾几个扫几个）→ 批量拉
+     * hello → 发现的 Agent 汇成一张勾选单 → 添加。设备页不再另设
+     * 发现入口，避免同一功能多个门。发现只是添加的快捷方式：建
+     * 出的记录与手工添加没有区别，删设备不删 Agent、删 Agent 不
+     * 删设备。去重与 [DeviceAgentDiscovery.discover] 一致。
      */
-    private fun rediscoverDeviceAgents(device: RemoteDevice) {
-        toast("正在重新发现 ${device.displayName} 上的 Agent…")
-        Thread {
-            try {
-                val pairing = loadPairingRecord(
-                    device.deviceId,
-                    brainComponents?.pairingTrustStore,
-                    pairingStore,
-                )
-                if (pairing == null || pairing.state != PairingState.CONFIRMED) {
-                    runOnUiThread { toast("${device.displayName} 未配对：请先完成配对，再重新发现 Agent。") }
-                    return@Thread
-                }
-                val identity = deviceIdentityStore.getOrCreate()
-                val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
-                val hello = runBlocking {
-                    directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
-                }
-                // hello 成功：记最后在线与服务端批准状态（列表如实显示）。
-                // Hand 自更新（2026-11-12）：顺手记远端 Hand 版本。
-                try {
-                    remoteDeviceStore.saveDevice(
-                        device.copy(
-                            lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
-                            lastServerStatus = hello.clientStatus,
-                            handVersion = hello.handVersion,
-                        ),
-                    )
-                } catch (_: Exception) {
-                }
-                // P1 能力卡：hello 成功，存仓库快照。
-                noteHelloForCapabilityCards(hello)
-                val (created, discovery) = DeviceAgentDiscovery.discover(
-                    device.deviceId,
-                    hello.agents,
-                    agentStore.listAgents(),
-                )
-                created.forEach { agentStore.saveAgent(it) }
-                runOnUiThread {
-                    toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
-                    refreshAgents()
-                }
-            } catch (e: Exception) {
-                runOnUiThread { toast("重新发现失败：${e.message}") }
-            }
-        }.start()
-    }
-
-    /**
-     * 从设备添加 Agent（三件套之二，2026-11-18）：Agent 页的自动发现
-     * 快捷入口——选一台已配对设备 → 拉 hello → 列出它上面的 Agent →
-     * 勾选直接添加。只是省手工填表单的步骤，不建立设备对 Agent 的
-     * 归属：建出的记录与手工添加的没有区别，删设备不删 Agent、删
-     * Agent 不删设备。去重口径与配对后自动发现、“重新发现 Agent”
-     * 完全一致（[DeviceAgentDiscovery.discover]）。
-     */
-    private fun addAgentsFromDevice() {
+    private fun discoverAgentsFromDevices() {
         Thread {
             val devices = try {
                 remoteDeviceStore.listDevices()
@@ -2991,106 +2938,126 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when {
-                    devices.isEmpty() -> toast("还没加设备：请先去设备页添加远程设备并完成配对，再回来从设备添加 Agent。")
-                    paired.isEmpty() -> toast("设备还没配对完成：请先在设备页完成配对，再回来从设备添加 Agent。")
-                    paired.size == 1 -> fetchDeviceAgentsForAdd(paired.first())
-                    else -> {
-                        AlertDialog.Builder(this)
-                            .setTitle("从哪台设备添加 Agent")
-                            .setItems(paired.map { it.displayName }.toTypedArray()) { _, which ->
-                                fetchDeviceAgentsForAdd(paired[which])
-                            }
-                            .setNegativeButton("取消", null)
-                            .show()
-                    }
+                    devices.isEmpty() -> toast("还没加设备：先去设备页添加设备并完成配对。")
+                    paired.isEmpty() -> toast("设备还没配对完成：先在设备页完成配对。")
+                    else -> showScanDevicePicker(paired)
                 }
             }
         }.start()
     }
 
-    /** 拉一台已配对设备的 hello，把可选 Agent 交给勾选对话框。 */
-    private fun fetchDeviceAgentsForAdd(device: RemoteDevice) {
-        toast("正在连接 ${device.displayName}…")
+    /** 自动发现第一步：勾选要扫描的设备（默认不勾，勾几个扫几个）。 */
+    private fun showScanDevicePicker(devices: List<RemoteDevice>) {
+        val labels = devices.map { it.displayName }.toTypedArray()
+        val checked = BooleanArray(devices.size) { false }
+        AlertDialog.Builder(this)
+            .setTitle("选择要扫描的设备")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("扫描") { _, _ ->
+                val selected = devices.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    toast("先勾选要扫描的设备。")
+                } else {
+                    scanDevicesForAgents(selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 自动发现第二步：批量扫描勾中的设备，汇总还没添加的 Agent。 */
+    private fun scanDevicesForAgents(devices: List<RemoteDevice>) {
+        toast("正在扫描 ${devices.size} 台设备…")
         Thread {
-            try {
-                val pairing = loadPairingRecord(
-                    device.deviceId,
-                    brainComponents?.pairingTrustStore,
-                    pairingStore,
-                )
-                if (pairing == null || pairing.state != PairingState.CONFIRMED) {
-                    runOnUiThread { toast("${device.displayName} 未配对：请先完成配对，再从设备添加 Agent。") }
-                    return@Thread
-                }
-                val identity = deviceIdentityStore.getOrCreate()
-                val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
-                val hello = runBlocking {
-                    directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
-                }
+            val existingIds = try {
+                agentStore.listAgents().map { it.agentId }.toSet()
+            } catch (_: Exception) {
+                emptySet()
+            }
+            val found = mutableListOf<Pair<RemoteDevice, RemoteAgentInfo>>()
+            var scanned = 0
+            for (device in devices) {
                 try {
-                    remoteDeviceStore.saveDevice(
-                        device.copy(
-                            lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
-                            lastServerStatus = hello.clientStatus,
-                            handVersion = hello.handVersion,
-                        ),
+                    val pairing = loadPairingRecord(
+                        device.deviceId,
+                        brainComponents?.pairingTrustStore,
+                        pairingStore,
                     )
+                    if (pairing == null || pairing.state != PairingState.CONFIRMED) continue
+                    val identity = deviceIdentityStore.getOrCreate()
+                    val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
+                    val hello = runBlocking {
+                        directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
+                    }
+                    try {
+                        remoteDeviceStore.saveDevice(
+                            device.copy(
+                                lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
+                                lastServerStatus = hello.clientStatus,
+                                handVersion = hello.handVersion,
+                            ),
+                        )
+                    } catch (_: Exception) {
+                    }
+                    noteHelloForCapabilityCards(hello)
+                    hello.agents
+                        .filter { it.available && it.folder.isNotBlank() && it.agentId !in existingIds }
+                        .forEach { found += device to it }
+                    scanned++
                 } catch (_: Exception) {
+                    // 单台连不上就跳过，不把整批卡死。
                 }
-                noteHelloForCapabilityCards(hello)
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    showAddAgentsFromDeviceDialog(device, hello.agents)
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when {
+                    scanned == 0 -> toast("没有连上任何一台设备。")
+                    found.isEmpty() -> toast("扫描完成：没有可添加的 Agent。")
+                    else -> showDiscoveredAgentsPicker(found)
                 }
-            } catch (e: Exception) {
-                runOnUiThread { toast("连接 ${device.displayName} 失败：${e.message}") }
             }
         }.start()
     }
 
-    /** 勾选要添加的 Agent（不可用的不列出，只在说明里计数）。 */
-    private fun showAddAgentsFromDeviceDialog(device: RemoteDevice, infos: List<RemoteAgentInfo>) {
-        val addable = infos.filter { it.available && it.folder.isNotBlank() }
-        val skipped = infos.size - addable.size
-        if (addable.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("${device.displayName} 上的 Agent")
-                .setMessage("没有可添加的 Agent：这台设备上报的 Agent 都不可用或没有工作文件夹（共 ${infos.size} 个）。")
-                .setPositiveButton("知道了", null)
-                .show()
-            return
-        }
-        val labels = addable.map { "${it.displayName}（${it.folder}）" }.toTypedArray()
-        val checked = BooleanArray(addable.size) { true }
-        val builder = AlertDialog.Builder(this)
-            .setTitle("从 ${device.displayName} 添加 Agent")
+    /** 自动发现第三步：一张勾选单选要添加的 Agent（跨设备汇总）。 */
+    private fun showDiscoveredAgentsPicker(found: List<Pair<RemoteDevice, RemoteAgentInfo>>) {
+        val labels = found.map { (device, info) ->
+            "${info.displayName}（${info.folder}）· ${device.displayName}"
+        }.toTypedArray()
+        val checked = BooleanArray(found.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle("发现的 Agent（${found.size}）")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
             .setPositiveButton("添加所选") { _, _ ->
-                val selected = addable.filterIndexed { index, _ -> checked[index] }
+                val selected = found.filterIndexed { index, _ -> checked[index] }
                 if (selected.isEmpty()) {
                     toast("没有勾选任何 Agent。")
                     return@setPositiveButton
                 }
                 Thread {
-                    val (created, discovery) = DeviceAgentDiscovery.discover(
-                        device.deviceId,
-                        selected,
-                        agentStore.listAgents(),
-                    )
-                    created.forEach { agentStore.saveAgent(it) }
+                    var createdTotal = 0
+                    selected.groupBy({ it.first }, { it.second })
+                        .forEach { (device, infos) ->
+                            val (created, _) = DeviceAgentDiscovery.discover(
+                                device.deviceId,
+                                infos,
+                                agentStore.listAgents(),
+                            )
+                            created.forEach { agentStore.saveAgent(it) }
+                            createdTotal += created.size
+                        }
                     runOnUiThread {
-                        toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
+                        toast("已添加 $createdTotal 个 Agent。")
                         refreshAgents()
                     }
                 }.start()
             }
             .setNegativeButton("取消", null)
-        if (skipped > 0) {
-            builder.setMessage("另有 $skipped 个 Agent 不可用（未就绪或没有工作文件夹），未列出。")
-        }
-        builder.show()
+            .show()
     }
 
     /**
@@ -7229,7 +7196,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Hand 自更新（2026-11-12）：设备卡“更新 Hand”与设置页入口。
         // 管理调用走密封通道（HandClient.requestHandAdmin），hello 探针
-        // 走 DirectTransport.fetchHello（与 rediscoverDeviceAgents 同款）。
+        // 走 DirectTransport.fetchHello（与自动发现同款）。
         handUpdateController = HandUpdateController(
             activity = this,
             scope = lifecycleScope,
@@ -7359,7 +7326,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
-                    agentController.renderAddedAgents(added, onAddFromDevice = { addAgentsFromDevice() })
+                    agentController.renderAddedAgents(added)
                 }
             }
         }.start()
@@ -7394,7 +7361,6 @@ class MainActivity : AppCompatActivity() {
                 probeAndAddRemoteDevice(device.displayName, device.host, device.port)
             },
             onAddRemote = { showAddRemoteDeviceDialog() },
-            onRediscover = { device -> rediscoverDeviceAgents(device) },
             onEditRemote = { device -> showEditRemoteDeviceDialog(device) },
             onUpdateHand = { device -> handUpdateController?.updateDevice(device) },
             onDeleteRemote = { device -> deleteRemoteDevice(device) },
@@ -7857,12 +7823,15 @@ class MainActivity : AppCompatActivity() {
         refreshVisibility()
 
         val scroll = ScrollView(this).apply { addView(form) }
-        val dialog = AlertDialog.Builder(this)
+        val formBuilder = AlertDialog.Builder(this)
             .setTitle(if (existing == null) "添加 Agent" else "编辑 Agent")
             .setView(scroll)
             .setPositiveButton("保存", null)
             .setNegativeButton("取消", null)
-            .create()
+        if (existing == null) {
+            formBuilder.setNeutralButton("自动发现") { _, _ -> discoverAgentsFromDevices() }
+        }
+        val dialog = formBuilder.create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val kind = currentKind()
@@ -8701,6 +8670,38 @@ class MainActivity : AppCompatActivity() {
         }
         screenSettings.findViewById<View>(R.id.buttonSaveGenericBrain).setOnClickListener {
             saveGenericBrain()
+        }
+        screenSettings.findViewById<View>(R.id.buttonCommonProviders).setOnClickListener {
+            showCommonProviderPicker()
+        }
+        screenSettings.findViewById<View>(R.id.buttonFreeProviders).setOnClickListener {
+            showFreeProviderPicker()
+        }
+        val routingStore = SharedPreferencesModelRoutingStore(applicationContext)
+        val routingSettingsNow = routingStore.load()
+        val checkModelRouting = screenSettings.findViewById<CheckBox>(R.id.checkModelRouting)
+        checkModelRouting.isChecked = routingSettingsNow.enabled
+        checkModelRouting.setOnCheckedChangeListener { _, isChecked ->
+            routingStore.save(routingStore.load().copy(enabled = isChecked))
+            note(
+                if (isChecked) "智能路由已打开：模型失败时按路由池顺序自动切换（下一轮生效）。"
+                else "智能路由已关闭。",
+            )
+        }
+        val checkRoutingAllowPaid = screenSettings.findViewById<CheckBox>(R.id.checkRoutingAllowPaid)
+        checkRoutingAllowPaid.isChecked = routingSettingsNow.allowPaid
+        checkRoutingAllowPaid.setOnCheckedChangeListener { _, isChecked ->
+            routingStore.save(routingStore.load().copy(allowPaid = isChecked))
+            note(
+                if (isChecked) "已允许路由切到付费模型。"
+                else "路由只在免费模型之间切换。",
+            )
+        }
+        screenSettings.findViewById<View>(R.id.buttonRoutingPool).setOnClickListener {
+            showRoutingPoolPicker()
+        }
+        screenSettings.findViewById<View>(R.id.buttonDiscoverDeviceModels).setOnClickListener {
+            discoverDeviceModels()
         }
         buttonVerifyCli.setOnClickListener { verifyCliBrain() }
         // 设置清理 2（2026-11-11，Claude 极简标准）：Cloudflare /
@@ -11279,7 +11280,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!BrainConfigValidator.isAllowedBaseUrl(baseUrl)) {
-            note("Base URL 只允许 https（本地模型可用 http://127.0.0.1 或 http://localhost）。")
+            note("Base URL 只允许 https（本机/局域网模型可用 http）。")
             return
         }
         genericModels.text = "正在读取可用模型…"
@@ -11382,6 +11383,526 @@ class MainActivity : AppCompatActivity() {
                 note("已保存 $label$keyNote。${BrainLoginRows.GENERIC_SAVED_NOTE}")
             }
         }.start()
+    }
+
+    /**
+     * 三件套之三·入口 A「常用模型服务商」（2026-11-18）：预设只把
+     * 名称与服务地址填进通用表单，Key 与模型仍由用户在表单里完成
+     * （测试连接拉 /models）。与入口 B 独立，数据走
+     * [GenericOpenAiPresets]，不与免费组混排。
+     */
+    private fun showCommonProviderPicker() {
+        val presets = GenericOpenAiPresets.PRESETS
+        AlertDialog.Builder(this)
+            .setTitle("常用模型服务商")
+            .setItems(presets.map { it.displayName }.toTypedArray()) { _, which ->
+                val preset = presets[which]
+                genericBrainLabel.setText(preset.displayName)
+                genericBaseUrl.setText(preset.baseUrl)
+                if (preset.note.isNotBlank()) genericModels.text = preset.note
+                note("已填入 ${preset.displayName} 的服务地址；填你的 API Key 后点“测试连接”拉模型列表，再保存。")
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 三件套之三·入口 B「免费 token 模型服务商」（2026-11-18，Funk
+     * 定案：以免费为主、项目主打开源免费）：选一家 → 填自己注册好
+     * 的免费 Key → LIVE 组拉 /models、FIXED 组用内置官方免费名单
+     * → 勾选 → 逐个生成 MODEL_API 配置（extra 标 tier=free 供智能
+     * 路由守卫）。与入口 A 独立入口、独立数据
+     * （[FreeProviderPresets]），绝不合并。
+     */
+    private fun showFreeProviderPicker() {
+        val customs = try {
+            SharedPreferencesCustomFreeProviderStore(applicationContext).list()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val presets = CustomFreeProviders.merged(FreeProviderPresets.PRESETS, customs)
+        val labels = presets.map { preset ->
+            if (CustomFreeProviders.isCustom(preset)) preset.displayName + "（自定义）" else preset.displayName
+        } + "＋ 添加自定义服务商（名单上没有的）"
+        AlertDialog.Builder(this)
+            .setTitle("免费 token 模型服务商")
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (which >= presets.size) {
+                    promptCustomFreeProvider()
+                } else {
+                    val preset = presets[which]
+                    if (preset.needsAccountId) {
+                        promptFreeAccountId(preset)
+                    } else {
+                        promptFreeApiKey(preset, null)
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** Cloudflare 专用：服务地址里含 Account ID，先收这一项。 */
+    private fun promptFreeAccountId(preset: FreeProviderPreset) {
+        val input = EditText(this).apply {
+            hint = "Account ID（Cloudflare 控制台可查）"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        AlertDialog.Builder(this)
+            .setTitle(preset.displayName)
+            .setMessage("这家的服务地址里要带你的 Account ID。")
+            .setView(input)
+            .setPositiveButton("下一步") { _, _ ->
+                val accountId = input.text.toString().trim()
+                if (accountId.isBlank()) {
+                    note("未填 Account ID，无法继续。")
+                } else {
+                    promptFreeApiKey(preset, accountId)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptFreeApiKey(preset: FreeProviderPreset, accountId: String?) {
+        val input = EditText(this).apply {
+            hint = "API Key（只存本机 Keystore）"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val message = buildString {
+            append(preset.keyHelp)
+            if (preset.note.isNotBlank()) append("\n").append(preset.note)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(preset.displayName)
+            .setMessage(message)
+            .setView(input)
+            .setPositiveButton("下一步") { _, _ ->
+                val key = input.text.toString().trim()
+                if (key.isBlank()) {
+                    note("未填 API Key，无法继续。")
+                } else {
+                    val baseUrl = preset.resolveBaseUrl(accountId)
+                    when (preset.listMode) {
+                        FreeModelListMode.FIXED ->
+                            showFreeModelPicker(preset, baseUrl, key, preset.fixedModels)
+                        FreeModelListMode.LIVE ->
+                            fetchFreeProviderModels(preset, baseUrl, key)
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** LIVE 组：用刚填的 Key 拉 /models（只读探针，不推理不计费）。 */
+    private fun fetchFreeProviderModels(preset: FreeProviderPreset, baseUrl: String, key: String) {
+        note("正在从 ${preset.displayName} 读取模型列表…")
+        Thread {
+            val result = runBlocking { GenericOpenAiApiClient().listModels(key, baseUrl) }
+            runOnUiThread {
+                result.onSuccess { models ->
+                    if (models.isEmpty()) {
+                        note("${preset.displayName} 没有返回任何模型；请确认 Key 可用，或改用手工表单填写模型 ID。")
+                    } else {
+                        showFreeModelPicker(preset, baseUrl, key, models.map { it.id })
+                    }
+                }.onFailure { e ->
+                    note("读取模型列表失败：${e.message}")
+                }
+            }
+        }.start()
+    }
+
+    /** 勾选要添加的模型（一个模型一条配置，与既有模型连接同形态）。 */
+    private fun showFreeModelPicker(
+        preset: FreeProviderPreset,
+        baseUrl: String,
+        key: String,
+        models: List<String>,
+    ) {
+        val checked = BooleanArray(models.size)
+        AlertDialog.Builder(this)
+            .setTitle("${preset.displayName}：选择要添加的模型")
+            .setMultiChoiceItems(models.toTypedArray(), checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("添加所选") { _, _ ->
+                val selected = models.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    note("没有勾选任何模型，未添加。")
+                } else {
+                    saveFreeModels(preset, baseUrl, key, selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 逐个落配置：Key 只进 Keystore（每条配置自己的 authRef），
+     * 配置只存引用名 + tier=free 标记；保存后注册进引擎注册表，
+     * 与手工保存同路（只存不注册要等下次启动才生效）。
+     */
+    private fun saveFreeModels(
+        preset: FreeProviderPreset,
+        baseUrl: String,
+        key: String,
+        models: List<String>,
+    ) {
+        val components = brainComponents ?: run {
+            note("大脑还在加载，请稍候再添加。")
+            return
+        }
+        val keyStore = try {
+            BrainKeyStore(applicationContext)
+        } catch (e: Exception) {
+            note("无法打开本机 Keystore，未添加：${e.message}")
+            return
+        }
+        Thread {
+            var added = 0
+            val savedConfigs = mutableListOf<BrainConfig>()
+            for (model in models) {
+                val label = preset.displayName + " · " + model
+                // 模型名 slug 截断可能撞 id：缀 4 位哈希保唯一，且同一
+                // 模型重加时稳定落回同一条配置（upsert）。
+                val hash = (model.hashCode() and 0xFFFF).toString(16).padStart(4, '0')
+                val brainId = BrainLoginRows.genericBrainId(label) + "-" + hash
+                val authRef = BrainLoginRows.genericAuthRef(brainId)
+                val config = BrainConfig(
+                    brainId = brainId,
+                    kind = BrainKind.MODEL_API,
+                    adapterId = BrainLoginRows.GENERIC_ADAPTER_ID,
+                    label = label,
+                    baseUrl = baseUrl,
+                    model = model,
+                    authRef = authRef,
+                    extra = mapOf(
+                        FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
+                        FreeProviderPresets.EXTRA_PRESET to preset.id,
+                    ),
+                    fallbackBrainIds = emptyList(),
+                )
+                if (BrainConfigValidator.validate(config).isNotEmpty()) continue
+                keyStore.putSecret(authRef, key)
+                components.configStore.saveConfig(config)
+                savedConfigs += config
+                added++
+            }
+            runOnUiThread {
+                savedConfigs.forEach { BrainAdapterRegistry.registerConfig(it) }
+                refreshBrainStatus()
+                if (added > 0) {
+                    note("已添加 $added 个「${preset.displayName}」免费模型（Key 已存本机 Keystore）。${BrainLoginRows.GENERIC_SAVED_NOTE}")
+                } else {
+                    note("没有添加成功：配置校验未通过，请改用手工表单添加。")
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * 自定义免费服务商（预留扩展口，Funk 2026-11-18 23:43）：名单
+     * 上没有的免费服务商，用户填名称 + 地址 + 名单形态即可加，
+     * 存本机后与内置预设走同一条流程。内置名单（官方核验）与
+     * 自定义（用户自加）分开存储、呈现标注，不合并。
+     */
+    private fun promptCustomFreeProvider() {
+        val nameInput = EditText(this).apply {
+            hint = "服务商名称，如 某某云"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        val urlInput = EditText(this).apply {
+            hint = "服务地址 Base URL，如 https://api.example.com/v1"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 8, 48, 0)
+            addView(nameInput)
+            addView(urlInput)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("添加自定义免费服务商")
+            .setMessage("名单上没有的免费服务商可以在这里加；加完与内置预设走同一条添加流程。")
+            .setView(container)
+            .setPositiveButton("下一步") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val url = urlInput.text.toString().trim().trimEnd('/')
+                if (name.isBlank() || url.isBlank()) {
+                    note("名称与服务地址都要填。")
+                } else if (!BrainConfigValidator.isAllowedBaseUrl(url)) {
+                    note("服务地址只允许 https（本机/局域网模型可用 http）。")
+                } else {
+                    promptCustomFreeProviderMode(name, url)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptCustomFreeProviderMode(name: String, url: String) {
+        val modes = arrayOf("拉取模型列表（服务商有 /models 接口）", "固定名单（我填模型 ID）")
+        AlertDialog.Builder(this)
+            .setTitle("模型名单怎么来")
+            .setItems(modes) { _, which ->
+                if (which == 0) {
+                    finishCustomFreeProvider(name, url, FreeModelListMode.LIVE, emptyList())
+                } else {
+                    promptCustomFreeProviderModels(name, url)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptCustomFreeProviderModels(name: String, url: String) {
+        val input = EditText(this).apply {
+            hint = "每行一个模型 ID"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            minLines = 4
+        }
+        AlertDialog.Builder(this)
+            .setTitle("固定模型名单")
+            .setMessage("把这家免费可用的模型 ID 逐行填进来（以实际调用为准）。")
+            .setView(input)
+            .setPositiveButton("保存并继续") { _, _ ->
+                val models = input.text.toString().lines().map { it.trim() }.filter { it.isNotBlank() }
+                if (models.isEmpty()) {
+                    note("固定名单至少填一个模型 ID。")
+                } else {
+                    finishCustomFreeProvider(name, url, FreeModelListMode.FIXED, models)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun finishCustomFreeProvider(
+        name: String,
+        url: String,
+        mode: FreeModelListMode,
+        fixedModels: List<String>,
+    ) {
+        val store = SharedPreferencesCustomFreeProviderStore(applicationContext)
+        val existingIds = (FreeProviderPresets.PRESETS.map { it.id } + store.list().map { it.id }).toSet()
+        val preset = FreeProviderPreset(
+            id = CustomFreeProviders.customId(name, existingIds),
+            displayName = name,
+            fixedModels = fixedModels,
+            listMode = mode,
+            baseUrlTemplate = url,
+            keyHelp = "填你在这家注册好的免费 API Key（只存本机 Keystore）。",
+            note = "自定义服务商：不在内置核验名单内，可用性以实际调用为准。",
+        )
+        store.add(preset)
+        note("已保存自定义服务商「$name」，接着填 Key 添加模型。")
+        promptFreeApiKey(preset, null)
+    }
+
+    /**
+     * 三件套之三·自动发现（2026-11-18）：探本机（127.0.0.1）与每台
+     * 已登记远程设备的常用本地模型端点（Ollama 11434 / LM Studio
+     * 1234 / vLLM 8000 的 /v1/models），列出发现的模型勾选添加。
+     * 设备只是来源：添加的配置不与设备建归属，删设备不删模型
+     * （与 Agent 从设备添加同口径）。局域网端点多无鉴权：Key 存
+     * 占位值 local 进 Keystore（服务端忽略），不假装有真 Key。
+     */
+    private fun discoverDeviceModels() {
+        // 来源 = 本机 + 每台已登记远程设备（含其公网/远程地址）。
+        val sources = mutableListOf("本机" to "127.0.0.1")
+        try {
+            remoteDeviceStore.listDevices().forEach { device ->
+                sources += device.displayName to device.host
+                // 发现不限于局域网：设备登记的公网/远程地址同样探。
+                val pub = device.publicHost?.trim().orEmpty()
+                if (pub.isNotBlank() && pub != device.host) {
+                    sources += device.displayName to pub
+                }
+            }
+        } catch (_: Exception) {
+            // 设备清单读不到时只探本机，不把发现整体卡死。
+        }
+        if (sources.size <= 1) {
+            probeModelSources(sources)
+            return
+        }
+        // 先勾选、再扫描（Funk 2026-11-19，与 Agent 批量发现同口径）：
+        // 默认一个都不勾，用户明确勾了哪个来源才探哪个。
+        val checked = BooleanArray(sources.size) { false }
+        AlertDialog.Builder(this)
+            .setTitle("勾选要扫描的设备")
+            .setMultiChoiceItems(
+                sources.map { it.first }.toTypedArray(),
+                checked,
+            ) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("开始扫描") { _, _ ->
+                val selected = sources.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    note("没有勾选任何设备，未扫描。")
+                } else {
+                    probeModelSources(selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun probeModelSources(targets: List<Pair<String, String>>) {
+        note("正在探测 ${targets.size} 个来源的模型端点…")
+        Thread {
+            // Triple = 来源标签（含服务名）、baseUrl、模型 ID。
+            val found = mutableListOf<Triple<String, String, String>>()
+            runBlocking {
+                for ((sourceLabel, host) in targets) {
+                    for (endpoint in DeviceModelDiscovery.probeHost(host)) {
+                        for (model in endpoint.models) {
+                            found += Triple(
+                                "$sourceLabel · ${endpoint.serviceName}",
+                                endpoint.baseUrl,
+                                model,
+                            )
+                        }
+                    }
+                }
+            }
+            runOnUiThread {
+                if (found.isEmpty()) {
+                    note("没有发现模型端点：勾选的来源上都没有 Ollama / LM Studio / vLLM 在常用端口返回模型。")
+                } else {
+                    showDiscoveredModelsPicker(found)
+                }
+            }
+        }.start()
+    }
+
+    private fun showDiscoveredModelsPicker(found: List<Triple<String, String, String>>) {
+        val labels = found.map { "${it.first}：${it.third}" }.toTypedArray()
+        val checked = BooleanArray(found.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle("发现的模型（${found.size}）")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("添加所选") { _, _ ->
+                val selected = found.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    note("没有勾选任何模型，未添加。")
+                } else {
+                    saveDiscoveredModels(selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun saveDiscoveredModels(selected: List<Triple<String, String, String>>) {
+        val components = brainComponents ?: run {
+            note("大脑还在加载，请稍候再添加。")
+            return
+        }
+        val keyStore = try {
+            BrainKeyStore(applicationContext)
+        } catch (e: Exception) {
+            note("无法打开本机 Keystore，未添加：${e.message}")
+            return
+        }
+        Thread {
+            var added = 0
+            val savedConfigs = mutableListOf<BrainConfig>()
+            for ((sourceLabel, baseUrl, model) in selected) {
+                val label = "$sourceLabel · $model"
+                val hash = (model.hashCode() and 0xFFFF).toString(16).padStart(4, '0')
+                val brainId = BrainLoginRows.genericBrainId(label) + "-" + hash
+                val authRef = BrainLoginRows.genericAuthRef(brainId)
+                val config = BrainConfig(
+                    brainId = brainId,
+                    kind = BrainKind.MODEL_API,
+                    adapterId = BrainLoginRows.GENERIC_ADAPTER_ID,
+                    label = label,
+                    baseUrl = baseUrl,
+                    model = model,
+                    authRef = authRef,
+                    extra = mapOf(
+                        FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
+                        "discovery" to "device",
+                    ),
+                    fallbackBrainIds = emptyList(),
+                )
+                if (BrainConfigValidator.validate(config).isNotEmpty()) continue
+                keyStore.putSecret(authRef, "local")
+                components.configStore.saveConfig(config)
+                savedConfigs += config
+                added++
+            }
+            runOnUiThread {
+                savedConfigs.forEach { BrainAdapterRegistry.registerConfig(it) }
+                refreshBrainStatus()
+                note(
+                    if (added > 0) {
+                        "已添加 $added 个发现的模型。${BrainLoginRows.GENERIC_SAVED_NOTE}"
+                    } else {
+                        "没有添加成功：配置校验未通过。"
+                    },
+                )
+            }
+        }.start()
+    }
+
+    /**
+     * 三件套之三·智能路由池选择（2026-11-18）：列出全部 MODEL_API
+     * 模型连接（标注免费/付费），勾选进池；池顺序按现有顺序保留、
+     * 新勾选的按列表顺序追加。切换规则：可重试失败（额度/限流/
+     * 5xx）按池顺序切，401/400 不切；默认只在免费之间切，「允许
+     * 付费」打开后付费才进池（Funk 定案：以免费为主、付费可选）。
+     */
+    private fun showRoutingPoolPicker() {
+        val components = brainComponents ?: run {
+            note("大脑还在加载，请稍候再设置路由池。")
+            return
+        }
+        val store = SharedPreferencesModelRoutingStore(applicationContext)
+        val settings = store.load()
+        val models = components.configStore.listConfigs().filter { it.kind == BrainKind.MODEL_API }
+        if (models.isEmpty()) {
+            note("还没有任何模型连接：先从预设或手工表单添加模型，再来选路由池。")
+            return
+        }
+        val labels = models.map { config ->
+            val tier = if (ModelRouting.isFree(config)) "免费" else "付费"
+            "${config.label}（$tier）"
+        }.toTypedArray()
+        val checked = BooleanArray(models.size) { index ->
+            models[index].brainId in settings.orderedBrainIds
+        }
+        AlertDialog.Builder(this)
+            .setTitle("智能路由池（按顺序切换）")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("保存") { _, _ ->
+                val chosenIds = models.filterIndexed { index, _ -> checked[index] }.map { it.brainId }
+                // 已在池里的保持原相对顺序，新进池的按列表顺序追加。
+                val kept = settings.orderedBrainIds.filter { it in chosenIds }
+                val added = chosenIds.filter { it !in kept }
+                val newOrder = kept + added
+                store.save(settings.copy(orderedBrainIds = newOrder))
+                note(
+                    if (newOrder.isEmpty()) "路由池已清空：没有模型参与自动切换。"
+                    else "路由池已保存：${newOrder.size} 个模型参与切换（排在前面的先切）。",
+                )
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /** CLI 大脑行：身份是 cliBinary，状态取上次验证的写回值。
@@ -11535,6 +12056,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toast(message: String) {
+        // Toast 只能在主线程发：后台线程调用时转投主线程，避免
+        // Looper 缺失直接崩进程（194 批量发现实证）。
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread { toast(message) }
+            return
+        }
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
