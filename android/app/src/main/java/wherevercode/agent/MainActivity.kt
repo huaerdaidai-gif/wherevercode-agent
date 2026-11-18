@@ -2966,6 +2966,161 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 从设备添加 Agent（三件套之二，2026-11-18）：Agent 页的自动发现
+     * 快捷入口——选一台已配对设备 → 拉 hello → 列出它上面的 Agent →
+     * 勾选直接添加。只是省手工填表单的步骤，不建立设备对 Agent 的
+     * 归属：建出的记录与手工添加的没有区别，删设备不删 Agent、删
+     * Agent 不删设备。去重口径与配对后自动发现、“重新发现 Agent”
+     * 完全一致（[DeviceAgentDiscovery.discover]）。
+     */
+    private fun addAgentsFromDevice() {
+        Thread {
+            val devices = try {
+                remoteDeviceStore.listDevices()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val pairings = try {
+                pairingStore.all()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
+                .map { it.deviceId }.toSet()
+            val paired = devices.filter { it.deviceId in confirmedIds }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when {
+                    devices.isEmpty() -> toast("还没加设备：请先去设备页添加远程设备并完成配对，再回来从设备添加 Agent。")
+                    paired.isEmpty() -> toast("设备还没配对完成：请先在设备页完成配对，再回来从设备添加 Agent。")
+                    paired.size == 1 -> fetchDeviceAgentsForAdd(paired.first())
+                    else -> {
+                        AlertDialog.Builder(this)
+                            .setTitle("从哪台设备添加 Agent")
+                            .setItems(paired.map { it.displayName }.toTypedArray()) { _, which ->
+                                fetchDeviceAgentsForAdd(paired[which])
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    /** 拉一台已配对设备的 hello，把可选 Agent 交给勾选对话框。 */
+    private fun fetchDeviceAgentsForAdd(device: RemoteDevice) {
+        toast("正在连接 ${device.displayName}…")
+        Thread {
+            try {
+                val pairing = loadPairingRecord(
+                    device.deviceId,
+                    brainComponents?.pairingTrustStore,
+                    pairingStore,
+                )
+                if (pairing == null || pairing.state != PairingState.CONFIRMED) {
+                    runOnUiThread { toast("${device.displayName} 未配对：请先完成配对，再从设备添加 Agent。") }
+                    return@Thread
+                }
+                val identity = deviceIdentityStore.getOrCreate()
+                val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
+                val hello = runBlocking {
+                    directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
+                }
+                try {
+                    remoteDeviceStore.saveDevice(
+                        device.copy(
+                            lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
+                            lastServerStatus = hello.clientStatus,
+                            handVersion = hello.handVersion,
+                        ),
+                    )
+                } catch (_: Exception) {
+                }
+                noteHelloForCapabilityCards(hello)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    showAddAgentsFromDeviceDialog(device, hello.agents)
+                }
+            } catch (e: Exception) {
+                runOnUiThread { toast("连接 ${device.displayName} 失败：${e.message}") }
+            }
+        }.start()
+    }
+
+    /** 勾选要添加的 Agent（不可用的不列出，只在说明里计数）。 */
+    private fun showAddAgentsFromDeviceDialog(device: RemoteDevice, infos: List<RemoteAgentInfo>) {
+        val addable = infos.filter { it.available && it.folder.isNotBlank() }
+        val skipped = infos.size - addable.size
+        if (addable.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("${device.displayName} 上的 Agent")
+                .setMessage("没有可添加的 Agent：这台设备上报的 Agent 都不可用或没有工作文件夹（共 ${infos.size} 个）。")
+                .setPositiveButton("知道了", null)
+                .show()
+            return
+        }
+        val labels = addable.map { "${it.displayName}（${it.folder}）" }.toTypedArray()
+        val checked = BooleanArray(addable.size) { true }
+        val builder = AlertDialog.Builder(this)
+            .setTitle("从 ${device.displayName} 添加 Agent")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("添加所选") { _, _ ->
+                val selected = addable.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    toast("没有勾选任何 Agent。")
+                    return@setPositiveButton
+                }
+                Thread {
+                    val (created, discovery) = DeviceAgentDiscovery.discover(
+                        device.deviceId,
+                        selected,
+                        agentStore.listAgents(),
+                    )
+                    created.forEach { agentStore.saveAgent(it) }
+                    runOnUiThread {
+                        toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
+                        refreshAgents()
+                    }
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+        if (skipped > 0) {
+            builder.setMessage("另有 $skipped 个 Agent 不可用（未就绪或没有工作文件夹），未列出。")
+        }
+        builder.show()
+    }
+
+    /**
+     * 删除设备（三件套之二，2026-11-18）：只删这条设备记录本身。
+     * 概念分离硬规则：删设备只删设备——该设备上的 Agent 记录、项目
+     * 与会话都不删（Agent 在设备重新添加前会如实显示连不上）；配对
+     * 记录也不动（撤销配对是设备卡上另一条既有动作）。
+     */
+    private fun deleteRemoteDevice(device: RemoteDevice) {
+        AlertDialog.Builder(this)
+            .setTitle("删除设备")
+            .setMessage("确定删除设备 ${device.displayName} 吗？只删这条设备记录：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
+            .setPositiveButton("删除") { _, _ ->
+                Thread {
+                    try {
+                        remoteDeviceStore.deleteDevice(device.deviceId)
+                        runOnUiThread {
+                            toast("已删除设备 ${device.displayName}。")
+                            refreshAgents()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { toast("删除设备失败：${e.message}") }
+                    }
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
      * 远程设备地址详情/编辑（V5 公网直连，2026-11-11）：设备页卡片上
      * 的“编辑地址”。两个地址都能看能改：内网地址（Tailnet/LAN）与
      * 公网直连地址（可选，留空 = 清空，只走内网）。连接优先走公网，
@@ -7204,7 +7359,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
-                    agentController.renderAddedAgents(added)
+                    agentController.renderAddedAgents(added, onAddFromDevice = { addAgentsFromDevice() })
                 }
             }
         }.start()
@@ -7242,6 +7397,7 @@ class MainActivity : AppCompatActivity() {
             onRediscover = { device -> rediscoverDeviceAgents(device) },
             onEditRemote = { device -> showEditRemoteDeviceDialog(device) },
             onUpdateHand = { device -> handUpdateController?.updateDevice(device) },
+            onDeleteRemote = { device -> deleteRemoteDevice(device) },
         )
         scrollView.post { scrollView.scrollTo(0, savedY) }
     }
