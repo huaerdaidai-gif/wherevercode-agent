@@ -89,14 +89,15 @@ public final class AppState: ObservableObject {
             configStore: configStore, keyStore: keyStore)
         let model = BrainSettingsModel(configStore: configStore, keyStore: keyStore)
         self.brainSettingsModel = model
-        model.registryProvider = { [weak self] in
-            self?.brainRegistry ?? BrainAdapterRegistry()
-        }
-        model.onChange = { [weak self] in self?.rebuildBrainStack() }
 
         let modelStore = KeyValueModelConfigStore(kv: data.kv)
         self.modelConfigStore = modelStore
         self.modelSettingsModel = ModelSettingsModel(configStore: modelStore, keyStore: keyStore)
+
+        model.registryProvider = { [weak self] in
+            self?.brainRegistry ?? BrainAdapterRegistry()
+        }
+        model.onChange = { [weak self] in self?.rebuildBrainStack() }
 
         repairCurrentBrainReference()
     }

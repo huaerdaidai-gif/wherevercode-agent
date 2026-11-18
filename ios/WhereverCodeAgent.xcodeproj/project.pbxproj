@@ -348,26 +348,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 			}; name = Release; };
 		D2F8A62EC32897E7406C54CD = {isa = PBXBuildFile; fileRef = 09B55E412B3CD3EA22477AB8; };
-		DA000000000000000000F901 = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Diagnostic Swift Check";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set +e\nSWIFT_FILES=$(find WhereverCodeAgent -name \"*.swift\")\nERR=$(xcrun --sdk iphoneos swiftc -typecheck -target arm64-apple-ios17.0 -sdk $(xcrun --show-sdk-path --sdk iphoneos) $SWIFT_FILES 2>&1)\nif [ -n \"$ERR\" ]; then\n  echo \"::error title=SwiftcCompilation::$(echo \"$ERR\" | tr '\\n' ' ')\"\nelse\n  echo \"::notice title=DiagnosticCheck::All Swift files typechecked cleanly\"\nfi\n";
-		};
 		DAA35294198AB5749AF56D9F = {isa = PBXNativeTarget; buildConfigurationList = C6036759D6AA8FB498EF9EC9; buildPhases = (
-			DA000000000000000000F901,
 			624CBBBAADC0F2E4F66F1DBB, 6E49E94E4D6DA0B155C63BBD, 1A43B4FB7BCFBC9D8720311E,
 		); buildRules = (); dependencies = (); name = WhereverCodeAgent; productName = WhereverCodeAgent; productReference = 71E728FFB566FEED3128BAEF; productType = "com.apple.product-type.application"; };
 		DD5FF8DD89D9D8B920AF7867 = {isa = PBXBuildFile; fileRef = 0EC43C27AE6A9F51433ABA31; };
