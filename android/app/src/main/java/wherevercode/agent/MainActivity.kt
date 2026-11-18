@@ -277,7 +277,6 @@ import wherevercode.agent.ui.ChatSessionRestore
 import wherevercode.agent.ui.ChatTurnView
 import wherevercode.agent.ui.ChatUiState
 import wherevercode.agent.ui.ChatViewModel
-import wherevercode.agent.ui.ChatMode
 import wherevercode.agent.ui.ChatAttachment
 import wherevercode.agent.ui.ChatAttachmentKind
 import wherevercode.agent.ui.ChatAttachments
@@ -445,6 +444,7 @@ class MainActivity : AppCompatActivity() {
     private var webSearchEnabled: Boolean = false
     /** V5 C2-3-R1：输入行 Agent 选择器（原型图输入行，点开已有选 Agent 对话框）。 */
     private lateinit var buttonAgentSelect: TextView
+    private lateinit var contextPill: TextView
     private lateinit var buttonTaskMark: TextView
     /** 设置清理 2（2026-11-11，Claude 标准）：聊天输入框里的当前大脑胶囊。 */
     private lateinit var brainCapsule: TextView
@@ -625,6 +625,7 @@ class MainActivity : AppCompatActivity() {
      */
     private val drawerController = DrawerController()
     private var drawerView: DrawerView? = null
+    private var cachedRecentSessions: List<DrawerView.SessionItem> = emptyList()
     private var drawerPrefsStore: RoomDrawerPrefsStore? = null
     private var drawerOpen = false
     private lateinit var drawerContainer: android.widget.FrameLayout
@@ -1197,6 +1198,10 @@ class MainActivity : AppCompatActivity() {
             activeTargetProvider = { currentEntry },
             userLabelProvider = { drawerUserLabel() },
             themeLabelProvider = { currentThemeLabel() },
+            recentSessionsProvider = { cachedRecentSessions },
+            onDeleteSession = { sessionId -> confirmDeleteSession(sessionId, "") },
+            onNewConversation = { newConversationAndShow() },
+            onOpenFeatureCenter = { showFeatureCenterDialog() },
         ).also { view ->
             drawerContainer.addView(view.root)
         }
@@ -1253,6 +1258,7 @@ class MainActivity : AppCompatActivity() {
     private fun openDrawer() {
         if (drawerOpen) return
         drawerOpen = true
+        refreshSessionList()
         drawerView?.refresh()
         refreshDrawerBadges()
         drawerContainer.visibility = View.VISIBLE
@@ -1290,6 +1296,21 @@ class MainActivity : AppCompatActivity() {
      * 的自定义入口）按旧路由兜底。
      */
     private fun onDrawerEntrySelected(registryId: String) {
+        if (registryId == "drawer_close") {
+            closeDrawer()
+            return
+        }
+        if (registryId.startsWith("session:")) {
+            closeDrawer()
+            val sid = registryId.removePrefix("session:")
+            openSession(sid, "")
+            return
+        }
+        if (registryId == "nav_feature_center") {
+            closeDrawer()
+            showFeatureCenterDialog()
+            return
+        }
         val entry = EntryRegistry.find(registryId)
         if (entry == null) {
             closeDrawer()
@@ -1525,6 +1546,10 @@ class MainActivity : AppCompatActivity() {
             onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
             onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onRefresh = { refreshConsole() },
+            onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
+            onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
+            onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
+            onToast = { msg -> toast(msg) },
         )
         screenConsole = consoleController.root
         container.addView(screenConsole)
@@ -1588,7 +1613,7 @@ class MainActivity : AppCompatActivity() {
         val sections = listOf(
             "聊天" to "在首页输入框发一句话，${brainDisplayName()}会推理并调用工具。写文件与命令执行前会弹审批，通过才执行；拒绝或界面销毁后授权立即作废。",
             "暂停 / 停止 / 改目标" to "运行中的轮次可在聊天页控制行点“暂停/停止”，或在任务页点“暂停/停止/改目标”。停止会二次确认；停止后本轮不会自动续跑。",
-            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、团队、设备、工具与连接、控制台，工作空间与扩展与资源分组里有工作台与设置、界面与主题、运行中的任务、待审批、成果、帮助与 MCP / 插件。运行中任务与待审批的角标是真实数量，没有就不显示；标“待开发”的入口点按只给提示。长按已实现的入口可隐藏或收藏。",
+            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（89 项全表）」。",
             "项目" to "项目页可浏览工作区文件、查看与编辑代码（保存前二次确认，可撤销/保留）、问 Agent。终端页未实现，不在项目页里伪装。",
             "Agent 与团队" to "Agent 页可添加云端模型 API、订阅授权 Agent、本机 CLI Agent、设备上的 Agent、平台 Agent（webhook 唤醒）或云端 Agent（MCP 连接器），可对话、指派、测试、编辑、移除。设备管理在独立的设备页；未配对设备标“不可用”。",
             "教我使用" to "交互式导师尚未实现。先按上面几节用；遇到问题回首页直接问${brainDisplayName()}。",
@@ -1602,6 +1627,85 @@ class MainActivity : AppCompatActivity() {
             root.addView(UiKit.text(this, body, 12f, R.color.text_secondary))
         }
         return scroll
+    }
+
+    private fun showFeatureCenterDialog() {
+        val dialogView = ScrollView(this).apply {
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        val root = UiKit.vertical(this)
+        dialogView.addView(root)
+        root.addView(
+            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项全表）", 18f, R.color.text_primary, bold = true).apply {
+                setPadding(0, 0, 0, dp(12))
+            }
+        )
+
+        var dialog: AlertDialog? = null
+
+        val categories = EntryCategory.values()
+        categories.forEach { category ->
+            val entries = EntryRegistry.ENTRIES.filter { it.category == category }
+            if (entries.isNotEmpty()) {
+                root.addView(
+                    UiKit.text(this, "${category.label} (${entries.size})", 14f, R.color.accent, bold = true).apply {
+                        setPadding(0, dp(12), 0, dp(6))
+                    }
+                )
+                entries.forEach { entry ->
+                    val row = UiKit.horizontal(this).apply {
+                        setPadding(dp(8), dp(8), dp(8), dp(8))
+                        background = UiKit.rounded(this@MainActivity, R.color.bg_card, 8)
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            bottomMargin = dp(4)
+                        }
+                        setOnClickListener {
+                            dialog?.dismiss()
+                            closeDrawer()
+                            openRegistryEntry(entry.id)
+                        }
+                    }
+                    row.addView(
+                        UiKit.text(this, entry.iconGlyph, 16f, R.color.text_primary).apply {
+                            layoutParams = LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT)
+                        }
+                    )
+                    val textCol = UiKit.vertical(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    val titleRow = UiKit.horizontal(this)
+                    titleRow.addView(
+                        UiKit.text(this, entry.title, 14f, R.color.text_primary, bold = true)
+                    )
+                    if (entry.status == EntryRegistry.Status.TODO) {
+                        titleRow.addView(
+                            UiKit.text(this, " 待开发", 11f, R.color.home_text_secondary).apply {
+                                setPadding(dp(4), 0, 0, 0)
+                            }
+                        )
+                    }
+                    textCol.addView(titleRow)
+                    textCol.addView(
+                        UiKit.text(this, entry.subtitle, 11f, R.color.text_secondary)
+                    )
+                    row.addView(textCol)
+                    row.addView(
+                        UiKit.text(this, "›", 14f, R.color.text_tertiary).apply {
+                            setPadding(dp(4), 0, 0, 0)
+                        }
+                    )
+                    root.addView(row)
+                }
+            }
+        }
+
+        dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setPositiveButton("关闭", null)
+            .show()
     }
 
     /**
@@ -1968,6 +2072,11 @@ class MainActivity : AppCompatActivity() {
                     titles[session.sessionId] = "暂时无法读取"
                 }
             }
+            val recentList = sessions.map { session ->
+                val title = titles[session.sessionId] ?: session.name
+                DrawerView.SessionItem(session.sessionId, title)
+            }
+            cachedRecentSessions = recentList
             val items = buildSessionListItems(
                 sessions,
                 titleOverrides = titles,
@@ -1982,6 +2091,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 sessionListController.render(defaultSubtitle, items)
+                drawerView?.refresh()
             }
         }.start()
     }
@@ -2003,15 +2113,12 @@ class MainActivity : AppCompatActivity() {
         buttonChatChangeGoal = screenChat.findViewById(R.id.buttonChatChangeGoal)
         buttonChatConsole = screenChat.findViewById(R.id.buttonChatConsole)
         buttonAgentSelect = screenChat.findViewById(R.id.buttonAgentSelect)
+        contextPill = screenChat.findViewById(R.id.contextPill)
+        contextPill.setOnClickListener { showChatProjectPicker() }
+        updateContextPill()
         brainCapsule = screenChat.findViewById(R.id.brainCapsule)
         buttonTaskMark = screenChat.findViewById(R.id.buttonTaskMark)
-        buttonTaskMark.setOnClickListener {
-            // 大脑/Agent 边界（maintainer 2026-11-12）：显式标任务开关——点按
-            // 切换下一条消息是否按任务处理；置起时发完自动复位（见
-            // sendPrompt）。开关状态在输入框里看得见、点得到。
-            chatViewModel.toggleForceTaskNext()
-            updateTaskMarkChip()
-        }
+        buttonTaskMark.visibility = View.GONE
         updateTaskMarkChip()
         buttonScrollBottom = screenChat.findViewById(R.id.buttonScrollBottom)
         buttonSend = screenChat.findViewById(R.id.buttonSend)
@@ -2076,9 +2183,8 @@ class MainActivity : AppCompatActivity() {
             inputPrompt.requestFocus()
         }
         buttonChatConsole.setOnClickListener {
-            // V5 C2-3-R1d：控制台是注册表里的待开发入口（去重后六大页面
-            // 一份，后续批次做）——点按只给提示，不再把工具与连接冒充成控制台。
-            openRegistryEntry("nav_console")
+            // 控制父级落地：已实现并接现有 ConsoleScreenController。
+            showEntry(DrawerController.ID_CONSOLE)
         }
         // V5 C2-3-R1：原型图输入行里的 Agent 选择器（已有选 Agent 对话框）。
         buttonAgentSelect.setOnClickListener { showSelectAgentDialog() }
@@ -2149,36 +2255,6 @@ class MainActivity : AppCompatActivity() {
      * 选 Agent 仍是功能，不是缺口。建议只按当前聊天项目 + 开发任务
      * 类型算（还没输入任务内容，类型未知时按开发任务算）。
      */
-    /**
-     * 三个对话模式（maintainer 2026-11-12 06:46）：模式切换——点横幅的模式段
-     * 打开。三项各是一句话说明（不另加 setMessage：AlertDialog 配
-     * description 会悄悄丢选项列表，见 update8 的空对话框 bug）。
-     * - 大脑对话 → 开新对话（跟大脑说，像 Codex/Claude App）。
-     * - 单兵对话 → 选 Agent 对话框（挑一个 Agent 一对一，不分同设备/
-     *   远程设备）。
-     * - 团队对话 → 频道屏（跟所有设备、所有 Agent）。
-     * 当前模式在标题里标出（“当前：大脑对话”）。
-     */
-    private fun showChatModePicker() {
-        val current = ChatMode.forConversation(chatViewModel.selectedAgent)
-        val modes = ChatMode.values()
-        val labels = modes.map { mode ->
-            val mark = if (mode == current) "● " else ""
-            "$mark${mode.label} —— ${mode.description}"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("切换对话模式（当前：${current.label}）")
-            .setItems(labels) { _, which ->
-                when (modes[which]) {
-                    ChatMode.BRAIN -> newConversationAndShow()
-                    ChatMode.SINGLE_AGENT -> showSelectAgentDialog()
-                    ChatMode.TEAM -> showEntry(DrawerController.ID_TEAM_CHANNEL)
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
     private fun showSelectAgentDialog() {
         Thread {
             val agents = try {
@@ -2210,12 +2286,13 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (agents.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle("选 Agent")
+                .setTitle("选择模型 / Agent")
                 .setMessage(
                     if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选。"
                     else "暂无已添加 Agent",
                 )
                 .setPositiveButton("去 Agent 页添加") { _, _ -> showEntry(DrawerController.ID_AGENTS_TEAM) }
+                .setNeutralButton("配置模型") { _, _ -> showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
                 .setNegativeButton("取消", null)
                 .show()
             return
@@ -2232,7 +2309,7 @@ class MainActivity : AppCompatActivity() {
             }
         }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("选 Agent")
+            .setTitle("选择模型 / Agent")
             .setItems(labels) { _, which ->
                 when (val row = rows[which]) {
                     is AgentPickerRow.Suggested -> {
@@ -4562,23 +4639,6 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(8); bottomMargin = dp(12) }
         }
-        card.addView(
-            UiKit.text(this, "✕ 关闭问候", 11f, R.color.home_text_secondary).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                )
-                gravity = android.view.Gravity.END
-                setPadding(0, 0, 0, dp(4))
-                setOnClickListener {
-                    // V5 C2（批 2）：问候可关闭，关闭后不再出现。
-                    homeScreenController.dismissGreeting()
-                    welcomeView?.let { messageList.removeView(it) }
-                    welcomeView = null
-                    renderChat(chatViewModel.stateNow())
-                }
-            },
-        )
         // V5 C2-3-R4 (v4.3-01)：中央品牌——紫色 ∞ 标志（与抽屉品牌头
         // 同一做法：UiKit.text 的 "∞" + home_gradient_start，见
         // DrawerView.addBrandHeader）+ WhereverCode + 副标题（已是
@@ -4610,7 +4670,7 @@ class MainActivity : AppCompatActivity() {
         // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
         // 连接设备/Agent 团队/任务中心）由抽屉承接（R2）。
         if (homeScreenController.suggestionsVisible()) {
-            EntryRegistry.homeSuggestions().take(3).chunked(2).forEach { rowSuggestions ->
+            EntryRegistry.homeSuggestions().chunked(2).forEach { rowSuggestions ->
                 val row = UiKit.horizontal(this).apply {
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
@@ -4784,6 +4844,9 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
+        screenProjects.findViewById<View>(R.id.buttonNewProject)?.setOnClickListener {
+            showOpenFolderEntry()
+        }
         screenProjects.findViewById<View>(R.id.buttonProjectRefresh).setOnClickListener {
             projectController.refresh()
         }
@@ -9200,20 +9263,40 @@ class MainActivity : AppCompatActivity() {
      * 每次聊天渲染都刷新（切换会话/新对话/改名都会经过 renderChat
      * 或 refreshBrainStatus），绝不让顶部显示与实际路由脱节。
      */
+    private fun updateContextPill() {
+        if (!::contextPill.isInitialized) return
+        val binding = chatProjectBinding.projectId
+        if (binding == null) {
+            contextPill.text = "本机 · App 沙盒 ⌄"
+        } else {
+            val name = try {
+                projectStore.getProject(binding)?.name
+            } catch (_: Exception) {
+                null
+            } ?: binding
+            val home = try {
+                projectStore.getActiveHome(binding)
+            } catch (_: Exception) {
+                null
+            }
+            val homeLabel = when {
+                home == null -> "未指定家"
+                home.gitHost() != null -> "${home.gitHost()?.displayName} · ${home.workspacePath}"
+                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · ${home.workspacePath}"
+                else -> "设备 · ${deviceDisplayName(home.hostId)}"
+            }
+            contextPill.text = "$name（$homeLabel）⌄"
+        }
+    }
+
     /**
      * 大脑/Agent 边界（maintainer 2026-11-12）：显式标任务开关的状态——置起
      * 时“任务 ✓”且用正文色（醒目），放下时“任务”且用次要色。只影响
      * 下一条消息，发完自动复位（见 sendPrompt）。
      */
     private fun updateTaskMarkChip() {
-        if (!::buttonTaskMark.isInitialized || !::chatViewModel.isInitialized) return
-        if (chatViewModel.isForceTaskNext()) {
-            buttonTaskMark.text = "任务 ✓"
-            buttonTaskMark.setTextColor(getColor(R.color.home_text))
-        } else {
-            buttonTaskMark.text = "任务"
-            buttonTaskMark.setTextColor(getColor(R.color.home_text_secondary))
-        }
+        if (!::buttonTaskMark.isInitialized) return
+        buttonTaskMark.visibility = View.GONE
     }
 
     private fun updateChatRouteBanner() {
@@ -9252,14 +9335,8 @@ class MainActivity : AppCompatActivity() {
         } else {
             ""
         }
-        // 三个对话模式（maintainer 2026-11-12 06:46）：横幅开头明确标出当前
-        // 是哪个模式（大脑对话 / 单兵对话），用户一眼看得出在跟谁说
-        // 话；模式段可点，点开模式切换（大脑/单兵/团队）。团队对话
-        // 是频道屏（TEAM_CHANNEL），不在聊天屏。
-        val mode = ChatMode.forConversation(agent)
-        val modePrefix = "模式：${mode.label}"
         val text = if (agent == null) {
-            "$modePrefix · 当前设备：本机 · 对话方：${brainDisplayName()}$projectSuffix"
+            "当前设备：本机 · 对话方：${brainDisplayName()}$projectSuffix"
         } else {
             val route = brainComponents?.let {
                 AgentChatRouter.resolve(
@@ -9272,24 +9349,9 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             val suffix = if (route is AgentChatRoute.NotRoutable) "（未接入）" else ""
-            "$modePrefix · 当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix$projectSuffix$directSuffix"
+            "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix$projectSuffix$directSuffix"
         }
         val spannable = SpannableStringBuilder(text)
-        // 模式段可点：点开三个模式的切换（大脑/单兵/团队）。
-        spannable.setSpan(
-            object : ClickableSpan() {
-                override fun onClick(widget: View) {
-                    showChatModePicker()
-                }
-
-                override fun updateDrawState(ds: TextPaint) {
-                    ds.isUnderlineText = true
-                }
-            },
-            0,
-            modePrefix.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
-        )
         val baseEnd = text.length - directSuffix.length
         if (projectSuffix.isNotEmpty()) {
             val start = baseEnd - projectSuffix.length
@@ -9331,44 +9393,21 @@ class MainActivity : AppCompatActivity() {
         chatRouteBanner.text = spannable
         chatRouteBanner.movementMethod = LinkMovementMethod.getInstance()
         chatRouteBanner.visibility = View.VISIBLE
-        // V5 聊天清理 20261111：输入框里的设备/Agent 胶囊与横幅同源刷新——
-        // 未选 Agent 显示“团队 ⌄”，选了显示当前对话方展示名 + ⌄；点按
-        // 开选 Agent 对话框（见 buttonAgentSelect 的点击监听）。
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
-                "团队 ⌄"
+                "选择模型 / Agent ⌄"
             } else {
                 "${agent.displayName} ⌄"
             }
         }
-        // maintainer 2026-11-11：大脑胶囊与横幅同源刷新——跟远程 Agent 对话
-        // 时不显示（推理不走全局大脑，显示它是误导）；大脑对话时照常显示。
+        updateContextPill()
         refreshBrainCapsule()
     }
 
-    /**
-     * 输入框大脑胶囊（maintainer 2026-11-11：能清理就清理掉）：
-     * 只在跟大脑对话（未选 Agent）时显示；跟远程 Agent 对话时隐藏——
-     * 推理不走全局大脑，显示 DeepSeek 是误导。Agent 下拉已显示对话方，
-     * 信息不丢。跟 updateChatRouteBanner 同源刷新：会话/对话方一切换
-     * （renderChat 经 publish 调 updateChatRouteBanner）胶囊状态就跟着变。
-     */
     private fun refreshBrainCapsule() {
         if (!::brainCapsule.isInitialized) return
-        val agent = if (::chatViewModel.isInitialized) chatViewModel.selectedAgent else null
-        screenChat.findViewById<TextView>(R.id.modelConnectionBanner)?.apply {
-            val components = brainComponents
-            val id = components?.configStore?.currentBrainId()
-            val configured = id != null && components?.isBrainConfigured(id) == true
-            visibility = if (components != null && agent == null && !configured) View.VISIBLE else View.GONE
-            setOnClickListener { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
-        }
-        if (agent == null) {
-            brainCapsule.text = brainShortLabel()
-            brainCapsule.visibility = View.VISIBLE
-        } else {
-            brainCapsule.visibility = View.GONE
-        }
+        brainCapsule.visibility = View.GONE
+        screenChat.findViewById<TextView>(R.id.modelConnectionBanner)?.visibility = View.GONE
     }
 
     private fun brainDisplayName(): String = BrainDisplayName.load(brainNamePrefs)

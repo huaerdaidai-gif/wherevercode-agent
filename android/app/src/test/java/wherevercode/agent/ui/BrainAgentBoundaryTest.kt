@@ -809,29 +809,10 @@ class BrainAgentBoundaryTest {
     )
 
     @Test
-    fun `three modes each have a clear identifier`() {
-        // 大脑对话：没选 Agent。
-        assertEquals(ChatMode.BRAIN, ChatMode.forConversation(null))
-        assertEquals("大脑对话", ChatMode.BRAIN.label)
-        // 单兵对话：选了一个 Agent——远程设备（VPS 的 Example Agent）。
-        assertEquals(ChatMode.SINGLE_AGENT, ChatMode.forConversation(grokAgent()))
-        assertEquals("单兵对话", ChatMode.SINGLE_AGENT.label)
-        // 单兵对话不分同设备/远程设备：本机 Codex 也是同一个模式。
-        assertEquals(ChatMode.SINGLE_AGENT, ChatMode.forConversation(localCodexAgent()))
-        // 团队对话/频道：跟所有设备、所有 Agent（频道屏的模式）。
-        assertEquals("团队对话", ChatMode.TEAM.label)
-        assertTrue(ChatMode.TEAM.description.contains("所有设备"))
-        assertTrue(ChatMode.TEAM.description.contains("所有 Agent"))
-        // 三个模式名互不相同，用户一眼分得清。
-        val labels = ChatMode.values().map { it.label }.toSet()
-        assertEquals(3, labels.size)
-    }
-
-    @Test
     fun `switching modes changes the speaker by the mode rule`() {
         // 大脑对话：只有大脑说话（像 Codex/Claude App，直接跟大脑聊）。
         assertTrue(viewModel.newConversation())
-        assertEquals(ChatMode.BRAIN, ChatMode.forConversation(viewModel.selectedAgent))
+        assertNull(viewModel.selectedAgent)
         assertTrue(viewModel.send("在吗").accepted)
         assertTrue(awaitIdle())
         val brainTurns = viewModel.stateNow().turns
@@ -841,7 +822,7 @@ class BrainAgentBoundaryTest {
 
         // 切到单兵对话（远程设备 Agent）：只有那个 Agent 说话，大脑不插话。
         assertTrue(viewModel.switchSession("session-grok", "Example Agent", grokAgent()))
-        assertEquals(ChatMode.SINGLE_AGENT, ChatMode.forConversation(viewModel.selectedAgent))
+        assertNotNull(viewModel.selectedAgent)
         assertTrue(viewModel.send("在吗").accepted)
         assertTrue(awaitIdle())
         val grokTurns = viewModel.stateNow().turns
@@ -850,7 +831,7 @@ class BrainAgentBoundaryTest {
 
         // 切回大脑对话：又只有大脑说话。
         assertTrue(viewModel.newConversation())
-        assertEquals(ChatMode.BRAIN, ChatMode.forConversation(viewModel.selectedAgent))
+        assertNull(viewModel.selectedAgent)
         assertTrue(viewModel.send("在吗").accepted)
         assertTrue(awaitIdle())
         val brainTurns2 = viewModel.stateNow().turns

@@ -40,6 +40,20 @@
                 android:textSize="10sp" />
         </LinearLayout>
 
+        <TextView
+            android:id="@+id/buttonNewProject"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_chip_accent"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="＋ 新建项目"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
         <ImageView
             android:id="@+id/buttonProjectRefresh"
             android:layout_width="40dp"

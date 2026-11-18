@@ -194,12 +194,28 @@
             android:background="@drawable/bg_input_home"
             android:padding="4dp">
 
+            <TextView
+                android:id="@+id/contextPill"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_chip_home"
+                android:gravity="center_vertical"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="本机 · App 沙盒 ⌄"
+                android:textColor="@color/home_text"
+                android:textSize="12sp"
+                android:contentDescription="当前项目上下文" />
+
             <EditText
                 android:id="@+id/inputPrompt"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@null"
-                android:hint="输入消息…"
+                android:hint="向 Agent 提问或分派任务"
                 android:imeOptions="actionSend"
                 android:inputType="textMultiLine|textCapSentences"
                 android:maxLines="5"
@@ -233,13 +249,6 @@
                     android:background="@drawable/bg_chip_home"
                     android:contentDescription="更多操作" />
 
-                <!-- V5 C2-3-R1: 原型图输入行里的 Agent 选择器（点开已有选 Agent
-                     对话框，见 showSelectAgentDialog；不新增功能）。 --><!-- V5 聊天清理 20261111：设备/Agent 胶囊（参考 Claude 输入框
-                     里“Sonnet 5.5 中等”胶囊的做法）——常驻显示当前对话方，
-                     点按打开选 Agent 对话框（见 showSelectAgentDialog）。
-                     多设备多 Agent 切换是 V5 真实需要的，不藏起来，只做干净。
-                     文案由 MainActivity.updateChatRouteBanner() 随路由刷新：
-                     未选 Agent 显示“团队 ⌄”，选了显示展示名 + ⌄。 -->
                 <TextView
                     android:id="@+id/buttonAgentSelect"
                     android:layout_width="wrap_content"
@@ -249,47 +258,27 @@
                     android:gravity="center"
                     android:paddingStart="10dp"
                     android:paddingEnd="10dp"
-                    android:text="团队 ⌄"
+                    android:text="选择模型 / Agent ⌄"
                     android:textColor="@color/home_text"
                     android:textSize="12sp"
-                    android:maxWidth="160dp"
+                    android:maxWidth="200dp"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:contentDescription="选择 Agent" />
+                    android:contentDescription="选择模型或 Agent" />
 
-                <!-- 设置清理 2（2026-11-11，Claude 标准）：当前大脑胶囊，
-                     点按打开设置页大脑列表切换。 -->
                 <TextView
                     android:id="@+id/brainCapsule"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_chip_home"
-                    android:gravity="center"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
                     android:text="未连接"
-                    android:textColor="@color/home_text"
-                    android:textSize="12sp"
-                    android:contentDescription="当前大脑，点按切换" />
+                    android:visibility="gone" />
 
-                <!-- 大脑/Agent 边界（maintainer 2026-11-12）：显式标任务开关——
-                     发消息时明确说“这句是任务”，不用靠 App 猜。点按切换，
-                     置起时下一条消息一定建派活任务行（走泵）；发完自动
-                     复位。只影响下一条消息，不持久化。 -->
                 <TextView
                     android:id="@+id/buttonTaskMark"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_chip_home"
-                    android:gravity="center"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
                     android:text="任务"
-                    android:textColor="@color/home_text_secondary"
-                    android:textSize="12sp"
-                    android:contentDescription="标为任务：下一条消息按任务处理" />
+                    android:visibility="gone" />
 
                 <View
                     android:layout_width="0dp"

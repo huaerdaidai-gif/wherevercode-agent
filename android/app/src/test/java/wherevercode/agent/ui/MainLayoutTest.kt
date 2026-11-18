@@ -114,10 +114,10 @@ class MainLayoutTest {
         )
         assertEquals(14f, input.textSize / density, 0.01f)
         // V5 聊天清理 20261111：输入框 hint 改干净；设备/Agent 胶囊常驻
-        // 输入框（默认“团队 ⌄”，文案随路由刷新），点按开选 Agent 对话框。
-        assertEquals("输入消息…", input.hint.toString())
+        // 输入框（默认“选择模型 / Agent ⌄”，文案随路由刷新），点按开选 Agent 对话框。
+        assertEquals("向 Agent 提问或分派任务", input.hint.toString())
         assertEquals(
-            "团队 ⌄",
+            "选择模型 / Agent ⌄",
             chat.findViewById<android.widget.TextView>(R.id.buttonAgentSelect).text.toString(),
         )
         assertNotNull(chat.findViewById<View>(R.id.buttonAgentSelect))

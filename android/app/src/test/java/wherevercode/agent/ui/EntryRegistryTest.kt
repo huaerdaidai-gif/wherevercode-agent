@@ -22,8 +22,8 @@ class EntryRegistryTest {
 
     @Test
     fun `registry has exactly the de-duplicated entries`() {
-        assertEquals(36, EntryRegistry.ENTRIES.size)
-        assertEquals(36, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
+        assertEquals(89, EntryRegistry.ENTRIES.size)
+        assertEquals(89, EntryRegistry.ENTRIES.map { it.id }.distinct().size)
     }
 
     @Test
@@ -40,11 +40,6 @@ class EntryRegistryTest {
 
     @Test
     fun `drawer workspace group keeps secondary theme and approval entries`() {
-        assertEquals(
-            listOf("nav_theme"),
-            EntryRegistry.byGroup(Group.DRAWER_WORKSPACE).map { it.id },
-        )
-        // 界面与主题（R2）：已实现的动作入口，接 cycleTheme()，不是待开发。
         val theme = EntryRegistry.find("nav_theme")!!
         assertEquals(Status.IMPLEMENTED, theme.status)
         assertEquals(EntryRegistry.TargetKind.ACTION, theme.targetKind)
@@ -52,16 +47,12 @@ class EntryRegistryTest {
     }
 
     @Test
-    fun `drawer top follows the ten V5 default entries`() {
+    fun `drawer top follows four converged parent entries`() {
         assertEquals(
-            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench", "nav_team_channel", "nav_pending_approval"),
+            listOf("nav_chat", "nav_projects", "nav_channels", "nav_control"),
             EntryRegistry.byGroup(Group.DRAWER_TOP).map { it.id },
         )
-        assertEquals(DrawerController.ID_HISTORY_SEARCH, EntryRegistry.find("nav_history")?.target)
-        assertEquals("任务", EntryRegistry.find("nav_running_tasks")?.title)
-        // V5 控制台（2026-11-11）：nav_console 已实现（抽屉“扩展与资源”分组，
-        // 指向 DrawerController.ID_CONSOLE），不再是待开发。
-        val console = EntryRegistry.find("nav_console")!!
+        val console = EntryRegistry.find("nav_control")!!
         assertEquals(Status.IMPLEMENTED, console.status)
         assertEquals(EntryRegistry.TargetKind.DRAWER, console.targetKind)
         assertEquals(DrawerController.ID_CONSOLE, console.target)

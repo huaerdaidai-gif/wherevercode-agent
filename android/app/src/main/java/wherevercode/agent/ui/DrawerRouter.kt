@@ -23,29 +23,29 @@ enum class EntryScreen {
     RESULTS,
     HELP,
     SETTINGS,
-    /** V5 控制台：按需展开的专业工作台（抽屉“扩展与资源”分组进入）。 */
+    /** V5 控制台 / 控制：按需展开的专业工作台。 */
     CONSOLE,
-    /** V5 MCP / 插件：扩展管理屏（抽屉“扩展与资源”分组进入）。 */
+    /** V5 MCP / 插件：扩展管理屏。 */
     MCP_PLUGINS,
-    /** V5 团队频道：有界团队聊天 + 只读扇出（抽屉“扩展与资源”分组进入）。 */
+    /** V5 团队频道：有界团队聊天 + 只读扇出。 */
     TEAM_CHANNEL,
 }
 
 object DrawerRouter {
     fun screenFor(entryId: String): EntryScreen = when (entryId) {
-        DrawerController.ID_NEW_CONVERSATION -> EntryScreen.HOME
-        DrawerController.ID_HISTORY_SEARCH -> EntryScreen.HISTORY
-        DrawerController.ID_PROJECTS -> EntryScreen.PROJECTS
-        DrawerController.ID_TASKS -> EntryScreen.TASKS
-        DrawerController.ID_AGENTS_TEAM -> EntryScreen.AGENTS
-        DrawerController.ID_DEVICES -> EntryScreen.DEVICES
-        DrawerController.ID_TOOLS_CONNECTIONS -> EntryScreen.TOOLS
-        DrawerController.ID_RESULTS -> EntryScreen.RESULTS
-        DrawerController.ID_HELP -> EntryScreen.HELP
-        DrawerController.ID_SETTINGS -> EntryScreen.SETTINGS
-        DrawerController.ID_CONSOLE -> EntryScreen.CONSOLE
-        DrawerController.ID_MCP_PLUGINS -> EntryScreen.MCP_PLUGINS
-        DrawerController.ID_TEAM_CHANNEL -> EntryScreen.TEAM_CHANNEL
+        DrawerController.ID_NEW_CONVERSATION, "nav_chat", "chat" -> EntryScreen.HOME
+        DrawerController.ID_HISTORY_SEARCH, "nav_history", "history" -> EntryScreen.HISTORY
+        DrawerController.ID_PROJECTS, "nav_projects", "projects" -> EntryScreen.PROJECTS
+        DrawerController.ID_TASKS, "nav_running_tasks", "tasks" -> EntryScreen.TASKS
+        DrawerController.ID_AGENTS_TEAM, "nav_team", "agents" -> EntryScreen.AGENTS
+        DrawerController.ID_DEVICES, "nav_devices", "devices" -> EntryScreen.DEVICES
+        DrawerController.ID_TOOLS_CONNECTIONS, "nav_tools", "connections", "feature_brain" -> EntryScreen.TOOLS
+        DrawerController.ID_RESULTS, "nav_results", "artifacts" -> EntryScreen.RESULTS
+        DrawerController.ID_HELP, "nav_help", "help", "onboarding" -> EntryScreen.HELP
+        DrawerController.ID_SETTINGS, "nav_workbench", "settings" -> EntryScreen.SETTINGS
+        DrawerController.ID_CONSOLE, "nav_control", "nav_console", "control", "console", "nav_pending_approval", "feature_run_logs" -> EntryScreen.CONSOLE
+        DrawerController.ID_MCP_PLUGINS, "nav_mcp_plugins", "mcp" -> EntryScreen.MCP_PLUGINS
+        DrawerController.ID_TEAM_CHANNEL, "nav_channels", "nav_team_channel", "channels", "channel" -> EntryScreen.TEAM_CHANNEL
         else -> EntryScreen.HOME
     }
 }

@@ -53,41 +53,32 @@
             android:contentDescription="打开抽屉"
             android:background="?attr/selectableItemBackgroundBorderless" />
 
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
         <TextView
             android:id="@+id/topBrandLogo"
-            android:layout_width="28dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:gravity="center"
             android:text="∞"
-            android:textColor="@color/home_gradient_start"
-            android:textSize="20sp"
-            android:textStyle="bold" />
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/topBrandName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="WhereverCode"
-            android:textColor="@color/home_text"
-            android:textSize="17sp"
-            android:textStyle="bold"
-            android:maxLines="1" />
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/topBrandVersion"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:paddingStart="6dp"
-            android:paddingTop="4dp"
             android:text=""
-            android:textColor="@color/text_tertiary"
-            android:textSize="11sp" />
+            android:visibility="gone" />
 
-        <!-- V5 C2-3-R1c：顶栏搜索（v4.3-01）：点按进会话（真实入口，
-             非装饰）。V5 C2-3-R4：铃铛只有图标、没有红点——App 内没有
-             通知功能，带红点的铃铛是伪造状态；点按只给“通知中心待开发”
-             提示（见 MainActivity.bindShell）。 -->
         <ImageView
             android:id="@+id/buttonSearch"
             android:layout_width="44dp"

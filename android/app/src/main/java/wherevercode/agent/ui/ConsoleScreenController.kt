@@ -49,6 +49,10 @@ class ConsoleScreenController(
     private val onOpenDevices: () -> Unit,
     private val onOpenAgents: () -> Unit,
     private val onRefresh: () -> Unit,
+    private val onOpenTasks: () -> Unit = {},
+    private val onOpenMcp: () -> Unit = {},
+    private val onOpenConnections: () -> Unit = {},
+    private val onToast: (String) -> Unit = {},
 ) {
     val root: ScrollView = ScrollView(context).apply {
         visibility = View.GONE
@@ -206,6 +210,11 @@ class ConsoleScreenController(
             if (loadError) modulesContainer.addView(note("读取持久任务库失败；详见运行事件/日志。"))
             return
         }
+
+        // V5 控制页对齐 iOS 控制页结构：服务连接与运行概览 + 控制模块入口列表
+        modulesContainer.addView(buildServiceOverviewCard(current))
+        modulesContainer.addView(buildControlModulesList(current))
+
         val visible = ConsoleSnapshot.visibleModules(freedomLevel, hiddenModules)
         visible.forEach { module ->
             val section = moduleSection(module, current)
@@ -234,6 +243,178 @@ class ConsoleScreenController(
             }
             modulesContainer.addView(row)
         }
+    }
+
+    private fun buildServiceOverviewCard(snapshot: Snapshot): View {
+        val card = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) }
+        }
+        val topRow = UiKit.horizontal(context)
+        val titleGroup = UiKit.vertical(context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleGroup.addView(UiKit.text(context, "服务连接与运行概览", 11f, R.color.text_secondary, bold = true))
+        titleGroup.addView(UiKit.text(context, "https://v5.cococolo.xyz", 14f, R.color.text_primary, bold = true).apply {
+            setPadding(0, dp(2), 0, 0)
+        })
+        topRow.addView(titleGroup)
+
+        val btnManage = UiKit.text(context, "管理连接", 11f, R.color.accent, bold = true).apply {
+            setBackgroundResource(R.drawable.bg_chip_accent)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            setOnClickListener { onOpenConnections() }
+        }
+        topRow.addView(btnManage)
+        card.addView(topRow)
+
+        val divider = View(context).apply {
+            setBackgroundColor(UiKit.color(context, R.color.divider))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                topMargin = dp(8)
+                bottomMargin = dp(8)
+            }
+        }
+        card.addView(divider)
+
+        val statsRow = UiKit.horizontal(context)
+        fun stat(label: String, value: String): View {
+            val col = UiKit.vertical(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            col.addView(UiKit.text(context, label, 10f, R.color.text_tertiary))
+            col.addView(UiKit.text(context, value, 13f, R.color.text_primary, bold = true).apply {
+                setPadding(0, dp(2), 0, 0)
+            })
+            return col
+        }
+        statsRow.addView(stat("已登记 Agent", "${snapshot.agents.size}"))
+        statsRow.addView(stat("执行中任务", "${snapshot.activeTasks.size}"))
+        statsRow.addView(stat("排队/待审", "${snapshot.queuedTasks.size}"))
+        statsRow.addView(stat("待决审批", "${if (snapshot.pendingApproval != null) 1 else 0}"))
+        card.addView(statsRow)
+
+        return card
+    }
+
+    private fun buildControlModulesList(snapshot: Snapshot): View {
+        val container = UiKit.vertical(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) }
+        }
+
+        fun controlCard(
+            title: String,
+            subtitle: String,
+            iconRes: Int,
+            badge: String,
+            isTodo: Boolean,
+            onClick: () -> Unit,
+        ): View {
+            val card = UiKit.horizontal(context).apply {
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(6) }
+                setOnClickListener { onClick() }
+            }
+            card.addView(UiKit.icon(context, iconRes, R.color.text_secondary).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) }
+            })
+            val textCol = UiKit.vertical(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            textCol.addView(UiKit.text(context, title, 14f, R.color.text_primary, bold = true))
+            textCol.addView(UiKit.text(context, subtitle, 11f, R.color.text_secondary).apply {
+                setPadding(0, dp(2), 0, 0)
+            })
+            card.addView(textCol)
+
+            val badgeView = UiKit.text(
+                context,
+                badge,
+                11f,
+                if (isTodo) R.color.home_warning else R.color.accent,
+                bold = true,
+            ).apply {
+                setBackgroundResource(if (isTodo) R.drawable.bg_chip_warning else R.drawable.bg_chip_accent)
+                setPadding(dp(8), dp(3), dp(8), dp(3))
+            }
+            card.addView(badgeView)
+            card.addView(UiKit.text(context, "›", 14f, R.color.text_tertiary).apply {
+                setPadding(dp(6), 0, 0, 0)
+            })
+            return card
+        }
+
+        container.addView(controlCard(
+            title = "设备管理与配对",
+            subtitle = "添加局域网电脑、远程设备、VPS 及授权工作目录",
+            iconRes = R.drawable.ic_device,
+            badge = "${snapshot.devices.size} 台设备",
+            isTodo = false,
+            onClick = { onOpenDevices() },
+        ))
+        container.addView(controlCard(
+            title = "Agent 管理与协作编排",
+            subtitle = "添加云端、设备或 CLI Agent，配置角色与分工",
+            iconRes = R.drawable.ic_team,
+            badge = "${snapshot.agents.size} 个 Agent",
+            isTodo = false,
+            onClick = { onOpenAgents() },
+        ))
+        container.addView(controlCard(
+            title = "MCP 工具与平台 Token",
+            subtitle = "保存或签发平台 Token、探测远端工具清单",
+            iconRes = R.drawable.ic_puzzle,
+            badge = "已配置",
+            isTodo = false,
+            onClick = { onOpenMcp() },
+        ))
+        container.addView(controlCard(
+            title = "Webhook 唤醒与自动化中心",
+            subtitle = "配置 Webhook、定时巡检、触发器与自主执行护栏",
+            iconRes = R.drawable.ic_clock,
+            badge = "待开发",
+            isTodo = true,
+            onClick = { onToast("【待开发】Webhook 唤醒与自动化中心尚未开发") },
+        ))
+        val pendingCount = if (snapshot.pendingApproval != null) 1 else 0
+        container.addView(controlCard(
+            title = "任务队列与审批中心",
+            subtitle = "查看排队任务、调整优先级与批准敏感写入操作",
+            iconRes = R.drawable.ic_approval,
+            badge = if (pendingCount > 0) "$pendingCount 待审批" else "队列 ${snapshot.queuedTasks.size}",
+            isTodo = false,
+            onClick = { onOpenTasks() },
+        ))
+        container.addView(controlCard(
+            title = "事件提醒与通知中心",
+            subtitle = "查看任务派发、审批请求与完成回执",
+            iconRes = R.drawable.ic_results,
+            badge = "动态",
+            isTodo = false,
+            onClick = { scrollToSection(ConsoleSection.LOGS) },
+        ))
+        container.addView(controlCard(
+            title = "用量统计与预算额度",
+            subtitle = "查看模型调用消耗与任务预算策略",
+            iconRes = R.drawable.ic_settings,
+            badge = "待开发",
+            isTodo = true,
+            onClick = { onToast("【待开发】用量与成本待开发（只是界面，不产生计费调用）") },
+        ))
+
+        return container
     }
 
     private fun moduleSection(module: ConsoleModule, snapshot: Snapshot): LinearLayout {

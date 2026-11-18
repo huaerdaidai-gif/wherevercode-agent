@@ -36,6 +36,8 @@ class DrawerRoutingTest {
         // V5 控制台（2026-11-11）：抽屉“扩展与资源”分组的 nav_console
         // 指向 DrawerController.ID_CONSOLE，不在 10 项默认一级入口里。
         assertEquals(EntryScreen.CONSOLE, DrawerRouter.screenFor(DrawerController.ID_CONSOLE))
+        assertEquals(EntryScreen.CONSOLE, DrawerRouter.screenFor("nav_control"))
+        assertEquals(EntryScreen.TEAM_CHANNEL, DrawerRouter.screenFor("nav_channels"))
         assertFalse(DrawerController.DEFAULT_ORDER.contains(DrawerController.ID_CONSOLE))
     }
 
