@@ -5,6 +5,7 @@ import wherevercode.agent.R
 import android.content.Context
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 import wherevercode.agent.core.agent.AgentLoginState
 import wherevercode.agent.core.agent.AgentRecord
