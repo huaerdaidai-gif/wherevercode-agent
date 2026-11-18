@@ -18,6 +18,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlertDialog
 import wherevercode.agent.AgentGraph
 import wherevercode.agent.AndroidApprovalGate
 import wherevercode.agent.MainActivity
@@ -50,7 +51,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        openDevicesViaControl(activity)
+        openDevicesViaFeatureCenter(activity)
 
         val shown = waitForText(activity, "dev-0", timeoutMs = 3000)
         assertTrue("点进设备页 3 秒内应已看到本地添加的设备 dev-0（不等 5 秒 mDNS）", shown)
@@ -68,7 +69,7 @@ class DeviceTapRefreshTest {
             .create().start().resume().visible()
         val activity = controller.get()
 
-        openDevicesViaControl(activity)
+        openDevicesViaFeatureCenter(activity)
         assertTrue(waitForText(activity, "dev-7", timeoutMs = 3000))
 
         val scrollView = activity.findViewById<FrameLayout>(R.id.screenContainer)
@@ -104,26 +105,26 @@ class DeviceTapRefreshTest {
     }
 
     /**
-     * 收敛后抽屉没有 nav_devices 行：设备入口在「控制」页的
-     * 「设备管理与配对」卡片里（onOpenDevices → ID_DEVICES，
-     * 仍是 screenAgents 的 devicesOnly 形态）。按真实用户路径进：
-     * 抽屉点「控制」→ 点该卡片。
+     * 收敛后抽屉没有 nav_devices 行，设备屏（screenAgents 的
+     * devicesOnly 形态）的真实用户路径有两条：控制页卡片（靠大脑
+     * 组件快照渲染，Robolectric 下组件引导不完成、卡片永不出现，
+     * 实测等 20 秒也不行）与「全部功能」全表（纯注册表渲染，
+     * 不依赖大脑组件）。本测试走后者：抽屉点「全部功能」→
+     * 全表里点「设备」行（nav_devices → ID_DEVICES）。
      */
-    private fun openDevicesViaControl(activity: MainActivity) {
-        clickDrawerRow(activity, "nav_control")
-        // 控制页快照靠大脑组件就绪后后台线程组装（refreshConsole），
-        // Robolectric 下组件引导要数秒，放宽到 20 秒等卡片渲染出来。
-        assertTrue(
-            "控制页应出现「设备管理与配对」入口",
-            waitForText(activity, "设备管理与配对", timeoutMs = 20000),
-        )
-        val title = findTextView(activity.window.decorView, "设备管理与配对")
-        assertNotNull("控制页应有「设备管理与配对」入口", title)
+    private fun openDevicesViaFeatureCenter(activity: MainActivity) {
+        clickDrawerRow(activity, "nav_feature_center")
+        idleMain()
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        assertNotNull("全部功能弹窗应已打开", dialog)
+        val dialogRoot = dialog!!.window!!.decorView
+        val title = findTextView(dialogRoot, "设备")
+        assertNotNull("全部功能里应有「设备」入口", title)
         var target: View? = title
         while (target != null && !target.isClickable) {
             target = target.parent as? View
         }
-        assertNotNull("「设备管理与配对」卡片应可点击", target)
+        assertNotNull("「设备」行应可点击", target)
         target!!.performClick()
         idleMain()
     }
