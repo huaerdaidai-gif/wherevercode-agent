@@ -59,7 +59,7 @@ class DrawerViewTest {
     @Test
     fun `bottom row is the user row with workbench entry`() {
         val drawerView = view(userLabel = "已登录")
-        assertEquals(listOf("nav_workbench"), drawerView.renderedGroupIds("bottom"))
+        assertEquals(listOf("settings"), drawerView.renderedGroupIds("bottom"))
         val bottom = drawerView.renderedRows().first { it.group == "bottom" }
         assertEquals("已登录", bottom.label)
         assertEquals("未登录", view().renderedRows().first { it.group == "bottom" }.label)

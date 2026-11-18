@@ -54,6 +54,8 @@ class ConsoleScreenController(
     private val onOpenMcp: () -> Unit = {},
     private val onOpenConnections: () -> Unit = {},
     private val onToast: (String) -> Unit = {},
+    private val onOpenModels: () -> Unit = {},
+    private val modelsCount: () -> Int = { 0 },
 ) {
     val root: ScrollView = ScrollView(context).apply {
         visibility = View.GONE
@@ -365,6 +367,7 @@ class ConsoleScreenController(
 
         val devicesBadge = if (snapshot != null) "${snapshot.devices.size} 台设备" else "设备"
         val agentsBadge = if (snapshot != null) "${snapshot.agents.size} 个 Agent" else "Agent"
+        val modelsBadge = modelsCount().let { if (it > 0) "$it 个模型" else "模型" }
         val pendingCount = if (snapshot?.pendingApproval != null) 1 else 0
         val tasksBadge = when {
             snapshot == null -> "任务"
@@ -387,6 +390,14 @@ class ConsoleScreenController(
             badge = agentsBadge,
             isTodo = false,
             onClick = { onOpenAgents() },
+        ))
+        container.addView(controlCard(
+            title = "模型",
+            subtitle = "添加模型服务商与免费 Token，配置智能路由",
+            iconRes = R.drawable.ic_cube,
+            badge = modelsBadge,
+            isTodo = false,
+            onClick = { onOpenModels() },
         ))
         container.addView(controlCard(
             title = "MCP",
@@ -499,6 +510,7 @@ class ConsoleScreenController(
             UiKit.text(
                 context,
                 "设备 ${snapshot.devices.size} 台 · Agent ${snapshot.agents.size} 个（含本机 App） · " +
+                    "模型 ${modelsCount()} 个 · " +
                     "待审批 ${if (snapshot.pendingApproval != null) 1 else 0} 个 · " +
                     "产物文件 ${snapshot.results.distinctArtifactCount} 个",
                 12f,

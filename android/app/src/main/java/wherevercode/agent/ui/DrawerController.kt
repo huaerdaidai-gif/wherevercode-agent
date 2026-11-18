@@ -78,6 +78,13 @@ class DrawerController {
          */
         const val ID_TEAM_CHANNEL = "team_channel"
 
+        /**
+         * 模型入口 id（V5 三件套，2026-11-19）。
+         * 控制菜单下与设备、Agent 并列的一页（添加模型 + 已添加模型）；
+         * 与控制台同级：不进 DEFAULT_ORDER、不占首页。
+         */
+        const val ID_MODELS = "models"
+
         /** V5-UI.md §三默认一级入口顺序。 */
         val DEFAULT_ORDER: List<String> = listOf(
             ID_NEW_CONVERSATION,

@@ -10,7 +10,8 @@ package wherevercode.agent.ui
  * 注意：设备入口与 Agent 入口共用 screenAgents 根视图，但路由表必须
  * 区分两者——设备入口路由后要附加“滚动到设备区段”（见 showEntry）。
  * 同理，工具与连接入口与设置入口共用 screenSettings 根视图，但前者
- * 路由后要附加“滚动到大脑分节顶部”。
+ * 路由后要附加“滚动到大脑分节顶部”。模型入口同样共用 screenSettings
+ * 根视图，路由后进入模型页模式（见 MainActivity.configureModelsMode）。
  */
 enum class EntryScreen {
     HOME,
@@ -19,6 +20,8 @@ enum class EntryScreen {
     TASKS,
     AGENTS,
     DEVICES,
+    /** V5 模型页：控制菜单下与设备、Agent 并列；与设置页共用 screenSettings 根视图。 */
+    MODELS,
     TOOLS,
     RESULTS,
     HELP,
@@ -39,6 +42,7 @@ object DrawerRouter {
         DrawerController.ID_TASKS, "nav_running_tasks", "tasks" -> EntryScreen.TASKS
         DrawerController.ID_AGENTS_TEAM, "nav_team", "agents" -> EntryScreen.AGENTS
         DrawerController.ID_DEVICES, "nav_devices", "devices" -> EntryScreen.DEVICES
+        DrawerController.ID_MODELS, "nav_models", "models" -> EntryScreen.MODELS
         DrawerController.ID_TOOLS_CONNECTIONS, "nav_tools", "connections", "feature_brain" -> EntryScreen.TOOLS
         DrawerController.ID_RESULTS, "nav_results", "artifacts" -> EntryScreen.RESULTS
         DrawerController.ID_HELP, "nav_help", "help", "onboarding" -> EntryScreen.HELP

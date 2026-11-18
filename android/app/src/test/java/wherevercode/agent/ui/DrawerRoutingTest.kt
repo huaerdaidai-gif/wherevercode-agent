@@ -42,6 +42,16 @@ class DrawerRoutingTest {
     }
 
     @Test
+    fun `models entry routes to the models page under control`() {
+        // V5 三件套（2026-11-19）：模型是控制菜单下与设备、Agent 并列的一页，
+        // 不在 10 项默认一级入口里。
+        assertEquals(EntryScreen.MODELS, DrawerRouter.screenFor(DrawerController.ID_MODELS))
+        assertEquals(EntryScreen.MODELS, DrawerRouter.screenFor("nav_models"))
+        assertEquals(EntryScreen.MODELS, DrawerRouter.screenFor("models"))
+        assertFalse(DrawerController.DEFAULT_ORDER.contains(DrawerController.ID_MODELS))
+    }
+
+    @Test
     fun `unknown entry id routes home`() {
         assertEquals(EntryScreen.HOME, DrawerRouter.screenFor("no_such_entry"))
         assertEquals(EntryScreen.HOME, DrawerRouter.screenFor(""))

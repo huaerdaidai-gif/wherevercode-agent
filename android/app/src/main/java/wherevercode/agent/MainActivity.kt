@@ -1555,6 +1555,8 @@ class MainActivity : AppCompatActivity() {
             onOpenChat = { showEntry(DrawerController.ID_NEW_CONVERSATION) },
             onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
             onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
+            onOpenModels = { showEntry(DrawerController.ID_MODELS) },
+            modelsCount = { brainComponents?.configStore?.listConfigs()?.size ?: 0 },
             onRefresh = { refreshConsole() },
             onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
             onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
@@ -1740,6 +1742,7 @@ class MainActivity : AppCompatActivity() {
             EntryScreen.TASKS -> DrawerController.ID_TASKS
             EntryScreen.AGENTS -> DrawerController.ID_AGENTS_TEAM
             EntryScreen.DEVICES -> DrawerController.ID_DEVICES
+            EntryScreen.MODELS -> DrawerController.ID_MODELS
             EntryScreen.TOOLS -> DrawerController.ID_TOOLS_CONNECTIONS
             EntryScreen.RESULTS -> DrawerController.ID_RESULTS
             EntryScreen.HELP -> DrawerController.ID_HELP
@@ -1759,7 +1762,7 @@ class MainActivity : AppCompatActivity() {
             configureAgentScreenForDevices(screen == EntryScreen.DEVICES)
         }
         screenSettings.visibility =
-            if (screen == EntryScreen.SETTINGS || screen == EntryScreen.TOOLS) View.VISIBLE else View.GONE
+            if (screen == EntryScreen.SETTINGS || screen == EntryScreen.TOOLS || screen == EntryScreen.MODELS) View.VISIBLE else View.GONE
         sessionListController.root.visibility =
             if (screen == EntryScreen.HISTORY) View.VISIBLE else View.GONE
         screenResults.visibility = if (screen == EntryScreen.RESULTS) View.VISIBLE else View.GONE
@@ -1767,6 +1770,8 @@ class MainActivity : AppCompatActivity() {
         screenConsole.visibility = if (screen == EntryScreen.CONSOLE) View.VISIBLE else View.GONE
         screenMcpPlugins.visibility = if (screen == EntryScreen.MCP_PLUGINS) View.VISIBLE else View.GONE
         screenTeamChannel.visibility = if (screen == EntryScreen.TEAM_CHANNEL) View.VISIBLE else View.GONE
+        // 模型页与设置页共用一屏：进模型页改呈现，离开即恢复（见 configureModelsMode）。
+        configureModelsMode(screen == EntryScreen.MODELS)
         // 离开控制台即停自动刷新（不空转耗电）；进入时由 CONSOLE 分支起 ticker。
         if (screen != EntryScreen.CONSOLE) stopConsoleTicker()
         // 离开频道即停 WS 订阅与兜底轮询（不空转耗电）；进入时由 TEAM_CHANNEL 分支重起。
@@ -1786,6 +1791,11 @@ class MainActivity : AppCompatActivity() {
             }
             EntryScreen.AGENTS -> refreshAgents()
             EntryScreen.DEVICES -> refreshAgents()
+            EntryScreen.MODELS -> {
+                refreshBrainStatus()
+                // 模型页从页顶开始：添加区在上、已添加列表在下。
+                screenSettings.post { (screenSettings as ScrollView).scrollTo(0, 0) }
+            }
             EntryScreen.TOOLS -> {
                 refreshBrainStatus()
                 // 设置页是单 ScrollView：回到页顶即大脑分节（分节在页首）。
@@ -1812,7 +1822,8 @@ class MainActivity : AppCompatActivity() {
 
     /** 设置页与“工具与连接”入口共用同一屏；返回键与 lastEntry 按设置处理。 */
     private fun isSettingsEntry(entry: String): Boolean =
-        entry == DrawerController.ID_SETTINGS || entry == DrawerController.ID_TOOLS_CONNECTIONS
+        entry == DrawerController.ID_SETTINGS || entry == DrawerController.ID_TOOLS_CONNECTIONS ||
+            entry == DrawerController.ID_MODELS
 
     private fun hideSettings() {
         // 离开设置页即放弃未保存的通用大脑编辑（恢复新增模式、表单
@@ -1838,6 +1849,66 @@ class MainActivity : AppCompatActivity() {
             if (devicesOnly) "设备" else "本机设备"
         if (devicesOnly) {
             screenAgents.post { (screenAgents as ScrollView).scrollTo(0, 0) }
+        }
+    }
+
+    /**
+     * 模型页模式（Funk 2026-11-19：模型是控制菜单下与设备、Agent 并列的一页）。
+     *
+     * 模型页与设置页共用同一屏（screenSettings）与同一套绑定——只在进入
+     * 模型页时改呈现：隐藏设置导航与大脑行为行（状态卡、换号行、大脑
+     * 名称、SIWC 模型行，以及高级配置之后的所有分节），把添加区（预设
+     * 块 + 高级配置折叠）挪到已添加列表之前，页头改称“模型”。离开即
+     * 按保存的顺序与可见性原样恢复；设置页本身一字不动。
+     */
+    private var modelsMode = false
+    private var modelsModeSavedOrder: List<View>? = null
+    private var modelsModeSavedVisibility: Map<View, Int>? = null
+
+    private fun configureModelsMode(enable: Boolean) {
+        if (enable == modelsMode) return
+        val scroll = screenSettings as? ScrollView ?: return
+        val content = scroll.getChildAt(0) as? LinearLayout ?: return
+        val headerTitle = screenSettings.findViewById<TextView>(R.id.settingsTitle) ?: return
+        val headerSubtitle = screenSettings.findViewById<TextView>(R.id.settingsSubtitle) ?: return
+        val jumpBar = screenSettings.findViewById<View>(R.id.settingsJumpBar) ?: return
+        val sectionTitle = screenSettings.findViewById<View>(R.id.brainSectionTitle) ?: return
+        val statusCard = screenSettings.findViewById<View>(R.id.brainStatusCard) ?: return
+        val siwcAccountRow = screenSettings.findViewById<View>(R.id.siwcAccountRow) ?: return
+        val listTitle = screenSettings.findViewById<TextView>(R.id.brainListTitle) ?: return
+        val siwcModelRow = screenSettings.findViewById<View>(R.id.siwcModelRow) ?: return
+        val brainNameRowView = screenSettings.findViewById<View>(R.id.brainNameRow) ?: return
+        val presetBlock = screenSettings.findViewById<View>(R.id.presetModelBlock) ?: return
+        val advancedButton = screenSettings.findViewById<View>(R.id.buttonBrainAdvanced) ?: return
+        val advancedContainer = screenSettings.findViewById<View>(R.id.brainAdvancedContainer) ?: return
+        modelsMode = enable
+        if (enable) {
+            modelsModeSavedOrder = (0 until content.childCount).map { content.getChildAt(it) }
+            val afterAdvanced = (0 until content.childCount).map { content.getChildAt(it) }
+                .filter { content.indexOfChild(it) > content.indexOfChild(advancedContainer) }
+            val hide = listOf(jumpBar, sectionTitle, statusCard, siwcAccountRow, brainNameRowView, siwcModelRow) + afterAdvanced
+            modelsModeSavedVisibility = hide.associateWith { it.visibility }
+            hide.forEach { it.visibility = View.GONE }
+            // 添加区挪到已添加列表之前（与设备/Agent 页“添加在上、已添加在下”对齐）。
+            listOf(presetBlock, advancedButton, advancedContainer).forEach { content.removeView(it) }
+            val anchor = content.indexOfChild(listTitle)
+            listOf(presetBlock, advancedButton, advancedContainer).forEachIndexed { i, view ->
+                content.addView(view, anchor + i)
+            }
+            headerTitle.text = "模型"
+            headerSubtitle.text = "添加模型，管理已添加的模型。"
+            listTitle.text = "已添加的模型（点按一行切换）"
+        } else {
+            modelsModeSavedVisibility?.forEach { (view, visibility) -> view.visibility = visibility }
+            modelsModeSavedOrder?.let { order ->
+                content.removeAllViews()
+                order.forEach { content.addView(it) }
+            }
+            modelsModeSavedOrder = null
+            modelsModeSavedVisibility = null
+            headerTitle.text = "设置"
+            headerSubtitle.text = "大脑、密钥与本机配置；密钥只存 Android Keystore。"
+            listTitle.text = "已添加的大脑（点按一行切换）"
         }
     }
 
@@ -10734,7 +10805,7 @@ class MainActivity : AppCompatActivity() {
         // 可见的添加入口（2026-11-11，maintainer：大脑增删改添要看得见）：
         // 列表末尾“＋ 添加大脑…”，点即进下方通用大脑添加表单（新增模式）。
         brainListContainer.addView(
-            UiKit.text(this, "＋ 添加大脑…", 13f, R.color.text_primary, bold = true).apply {
+            UiKit.text(this, if (modelsMode) "＋ 添加模型…" else "＋ 添加大脑…", 13f, R.color.text_primary, bold = true).apply {
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 setBackgroundResource(R.drawable.bg_card)
                 setOnClickListener { addGenericBrain() }
@@ -10879,7 +10950,7 @@ class MainActivity : AppCompatActivity() {
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(genericBrainLabel, InputMethodManager.SHOW_IMPLICIT)
         }
-        note("添加大脑：在下方通用表单里填名称、服务地址、模型、Key，点保存。")
+        note(if (modelsMode) "添加模型：在下方通用表单里填名称、服务地址、模型、Key，点保存。" else "添加大脑：在下方通用表单里填名称、服务地址、模型、Key，点保存。")
     }
 
     /**
