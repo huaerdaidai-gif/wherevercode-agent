@@ -27,6 +27,16 @@ class DeviceModelDiscoveryTest {
     }
 
     @Test
+    fun `tailnet hosts are probed over http, public hosts over https`() {
+        val tailnet = DeviceModelDiscovery.candidateBaseUrls("100.75.41.0")
+        assertTrue(tailnet.all { it.second.startsWith("http://100.75.41.0:") })
+        val pub = DeviceModelDiscovery.candidateBaseUrls("203.0.113.9")
+        assertTrue(pub.all { it.second.startsWith("https://203.0.113.9:") })
+        val pubName = DeviceModelDiscovery.candidateBaseUrls("models.example.com")
+        assertTrue(pubName.all { it.second.startsWith("https://models.example.com:") })
+    }
+
+    @Test
     fun `endpoint ports are the official defaults`() {
         val ports = DeviceModelDiscovery.ENDPOINTS.associate { it.serviceName to it.port }
         assertEquals(11434, ports["Ollama"])

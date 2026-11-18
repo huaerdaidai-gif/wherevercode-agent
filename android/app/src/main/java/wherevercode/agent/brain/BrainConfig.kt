@@ -188,8 +188,11 @@ object BrainConfigValidator {
         // LAN-model exception (2026-11-18, model auto-discovery): http
         // is also allowed when the host is a private-LAN IPv4 address
         // (RFC 1918) — a model server on the user's own Mac/PC/phone
-        // in the same LAN. Public http stays refused, and a hostname
-        // is never treated as LAN (it cannot be verified as local).
+        // in the same LAN — or a shared/mesh address (RFC 6598
+        // 100.64/10, e.g. a Tailscale peer): auto-discovery is not
+        // limited to the LAN (Funk 2026-11-18 23:56). Public http
+        // stays refused, and a hostname is never treated as LAN
+        // (it cannot be verified as local).
         if (lower.startsWith("http://")) {
             val host = lower.removePrefix("http://").takeWhile { it !in "/:?#" }
             if (isPrivateLanIpv4(host)) return true
@@ -197,7 +200,12 @@ object BrainConfigValidator {
         return false
     }
 
-    /** RFC 1918 private IPv4: 10/8, 172.16/12, 192.168/16. Dotted-quad only. */
+    /**
+     * Non-public IPv4 a model server may legitimately sit on:
+     * RFC 1918 private (10/8, 172.16/12, 192.168/16) plus RFC 6598
+     * shared address space (100.64/10 — Tailscale/mesh peers).
+     * Dotted-quad only.
+     */
     fun isPrivateLanIpv4(host: String): Boolean {
         val parts = host.split('.')
         if (parts.size != 4) return false
@@ -210,6 +218,7 @@ object BrainConfigValidator {
             nums[0] == 10 -> true
             nums[0] == 172 && nums[1] in 16..31 -> true
             nums[0] == 192 && nums[1] == 168 -> true
+            nums[0] == 100 && nums[1] in 64..127 -> true
             else -> false
         }
     }

@@ -2906,6 +2906,9 @@ class MainActivity : AppCompatActivity() {
                     agentStore.listAgents(),
                 )
                 created.forEach { agentStore.saveAgent(it) }
+                // 设备装好即发现（Funk 2026-11-18 23:56）：开关开着时
+                // 同步自动发现这台设备上的模型（Agent 在上、模型在此）。
+                autoDiscoverModelsOnDevice(device)
                 runOnUiThread {
                     toast(
                         "已配对 $displayName：${DeviceAgentDiscovery.summarize(discovery)}。",
@@ -2965,6 +2968,7 @@ class MainActivity : AppCompatActivity() {
                     agentStore.listAgents(),
                 )
                 created.forEach { agentStore.saveAgent(it) }
+                autoDiscoverModelsOnDevice(device)
                 runOnUiThread {
                     toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
                     refreshAgents()
@@ -11775,7 +11779,14 @@ class MainActivity : AppCompatActivity() {
     private fun discoverDeviceModels() {
         val targets = mutableListOf("本机" to "127.0.0.1")
         try {
-            remoteDeviceStore.listDevices().forEach { targets += it.displayName to it.host }
+            remoteDeviceStore.listDevices().forEach { device ->
+                targets += device.displayName to device.host
+                // 发现不限于局域网：设备登记的公网/远程地址同样探。
+                val pub = device.publicHost?.trim().orEmpty()
+                if (pub.isNotBlank() && pub != device.host) {
+                    targets += device.displayName to pub
+                }
+            }
         } catch (_: Exception) {
             // 设备清单读不到时只探本机，不把发现整体卡死。
         }
@@ -11802,6 +11813,47 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     showDiscoveredModelsPicker(found)
                 }
+            }
+        }.start()
+    }
+
+    /**
+     * 设备装好即自动发现模型（Funk 2026-11-18 23:56）：开关打开时，
+     * 设备配对成功（或重新发现）后顺手探它上面的本地模型端点并
+     * 自动添加——与 Agent 的配对后自动发现同一步、同一口径（设备
+     * 只是来源，添加的模型不与设备关联，删设备不删模型）。开关
+     * 关着不探，用户可用模型页按钮手动发现。探不到不报错。
+     */
+    private fun autoDiscoverModelsOnDevice(device: RemoteDevice) {
+        val enabled = try {
+            getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
+                .getBoolean("auto_discovery_models", false)
+        } catch (_: Exception) {
+            false
+        }
+        if (!enabled) return
+        val hosts = listOf(device.host, device.publicHost?.trim().orEmpty())
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        if (hosts.isEmpty()) return
+        Thread {
+            val found = mutableListOf<Triple<String, String, String>>()
+            runBlocking {
+                for (host in hosts) {
+                    for (endpoint in DeviceModelDiscovery.probeHost(host)) {
+                        for (model in endpoint.models) {
+                            found += Triple(
+                                "${device.displayName} · ${endpoint.serviceName}",
+                                endpoint.baseUrl,
+                                model,
+                            )
+                        }
+                    }
+                }
+            }
+            if (found.isNotEmpty()) {
+                saveDiscoveredModels(found)
             }
         }.start()
     }

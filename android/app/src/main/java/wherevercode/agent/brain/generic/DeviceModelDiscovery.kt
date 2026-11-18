@@ -1,5 +1,7 @@
 package wherevercode.agent.brain.generic
 
+import wherevercode.agent.brain.BrainConfigValidator
+
 /**
  * 设备本地模型自动发现（三件套之三，2026-11-18）：按常用兼容协议
  * 探一台设备（本机或已配对设备）上的本地模型服务端点——Ollama /
@@ -8,9 +10,10 @@ package wherevercode.agent.brain.generic
  * 添加的模型配置不与设备关联，删设备不删模型。
  *
  * 探测是只读 GET，不推理、不计费；端点没响应/没模型就跳过，不把
- * 「探不到」说成「设备坏了」。局域网 http 只对本机与私有局域网
- * 地址放行（见 [wherevercode.agent.brain.BrainConfigValidator] 的
- * LAN 规则），公网 http 永远拒绝。
+ * 「探不到」说成「设备坏了」。发现不限于局域网（Funk 2026-11-18
+ * 23:56）：已配对设备无论在局域网、Tailscale 还是公网都探——
+ * 本机/私有/网状网段地址走 http，公网地址走 https（公网明文
+ * http 永远拒绝，见 BrainConfigValidator 的地址规则）。
  */
 data class DiscoveredModelEndpoint(
     /** 服务名（Ollama / LM Studio / vLLM）。 */
@@ -34,8 +37,14 @@ object DeviceModelDiscovery {
     /** 一台主机要探的全部候选 baseUrl（服务名 → baseUrl）。 */
     fun candidateBaseUrls(host: String): List<Pair<String, String>> {
         val clean = host.trim().trimEnd('/')
-        return ENDPOINTS.map { spec -> spec.serviceName to "http://$clean:${spec.port}/v1" }
+        val scheme = if (isPlainHttpHost(clean)) "http" else "https"
+        return ENDPOINTS.map { spec -> spec.serviceName to "$scheme://$clean:${spec.port}/v1" }
     }
+
+    /** 明文 http 只探本机、私有局域网与网状网段（Tailscale）地址。 */
+    fun isPlainHttpHost(host: String): Boolean =
+        host == "localhost" || host == "127.0.0.1" ||
+            BrainConfigValidator.isPrivateLanIpv4(host)
 
     /**
      * 探一台主机：逐个端点拉 /models，只收「有模型」的端点。

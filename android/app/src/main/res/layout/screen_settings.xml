@@ -918,7 +918,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="打开后点下面按钮，按 Ollama / LM Studio / vLLM 的常用端口探已配对设备与本机，列出发现的模型勾选添加。局域网 http 仅限本机与私有局域网地址。"
+            android:text="打开后，设备配对成功会自动探它上面的模型并添加；也可以点下面按钮随时手动探、勾选添加。不限局域网：Tailscale 与远程设备同样探（私有网段走 http、公网走 https）。"
             android:textColor="@color/text_tertiary"
             android:textSize="10sp" />
 
