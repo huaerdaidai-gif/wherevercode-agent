@@ -1643,12 +1643,12 @@ class MainActivity : AppCompatActivity() {
 
         var dialog: AlertDialog? = null
 
-        val categories = EntryRegistry.Group.values()
-        categories.forEach { category ->
-            val entries = EntryRegistry.ENTRIES.filter { it.group == category }
+        val groups = EntryRegistry.Group.values()
+        groups.forEach { group ->
+            val entries = EntryRegistry.ENTRIES.filter { it.group == group }
             if (entries.isNotEmpty()) {
                 root.addView(
-                    UiKit.text(this, "${category.label} (${entries.size})", 14f, R.color.accent, bold = true).apply {
+                    UiKit.text(this, "${group.label} (${entries.size})", 14f, R.color.accent, bold = true).apply {
                         setPadding(0, dp(12), 0, dp(6))
                     }
                 )
@@ -1688,9 +1688,12 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                     textCol.addView(titleRow)
-                    textCol.addView(
-                        UiKit.text(this, entry.note.orEmpty(), 11f, R.color.text_secondary)
-                    )
+                    val subtitle = entry.note ?: entry.todoMessage ?: entry.target
+                    if (subtitle.isNotEmpty()) {
+                        textCol.addView(
+                            UiKit.text(this, subtitle, 11f, R.color.text_secondary)
+                        )
+                    }
                     row.addView(textCol)
                     row.addView(
                         UiKit.text(this, "›", 14f, R.color.text_tertiary).apply {

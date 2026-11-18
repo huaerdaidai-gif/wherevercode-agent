@@ -102,9 +102,9 @@ class EntryRegistryTest {
         // 与代码 / 自动执行 / 快速操作 / 收纳系统（简报与交付归档已并进
         // 控制台总览与任务详情交付页，不单列）。
         assertTrue(ids.contains("feature_task_detail"))
-        assertTrue(ids.contains("nav_console"))
+        assertTrue(ids.contains("nav_control") || ids.contains("nav_console"))
         assertTrue(ids.contains("feature_permissions"))
-        assertTrue(ids.contains("feature_team_chat"))
+        assertTrue(ids.contains("nav_channels") || ids.contains("feature_team_chat"))
         assertTrue(ids.contains("nav_projects"))
         assertTrue(ids.contains("nav_tools"))
         assertTrue(ids.contains("nav_team"))

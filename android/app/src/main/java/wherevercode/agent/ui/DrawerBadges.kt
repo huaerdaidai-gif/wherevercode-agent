@@ -33,6 +33,11 @@ data class DrawerBadges(
     fun badgeFor(entryId: String): Int? = when (entryId) {
         "nav_running_tasks" -> runningTasks
         "nav_pending_approval" -> pendingApprovals
+        "nav_control" -> {
+            val r = runningTasks ?: 0
+            val p = pendingApprovals ?: 0
+            if (runningTasks == null && pendingApprovals == null) null else (r + p)
+        }
         else -> null
     }
 }
