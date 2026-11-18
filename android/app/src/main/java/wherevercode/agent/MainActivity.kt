@@ -3050,7 +3050,9 @@ class MainActivity : AppCompatActivity() {
      * 一句。单台失败不挡其余；与添加设备、配对流程互不关联。
      */
     private fun batchDiscoverAgentsOnDevices(devices: List<RemoteDevice>) {
-        toast("正在批量发现 ${devices.size} 台设备上的 Agent…")
+        // 本函数从后台线程进入，开场提示必须回主线程发（194 真机
+        // 实证：后台线程直接 Toast 会让进程崩溃）。
+        runOnUiThread { toast("正在批量发现 ${devices.size} 台设备上的 Agent…") }
         Thread {
             var scanned = 0
             var createdTotal = 0
@@ -12271,6 +12273,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toast(message: String) {
+        // Toast 只能在主线程发：后台线程调用时转投主线程，避免
+        // Looper 缺失直接崩进程（194 批量发现实证）。
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread { toast(message) }
+            return
+        }
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
