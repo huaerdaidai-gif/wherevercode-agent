@@ -27,13 +27,15 @@ class EntryRegistryTest {
     }
 
     @Test
-    fun `home has four suggestion pills and three top entries`() {
+    fun `home has four suggestion pills and two top entries`() {
         assertEquals(
             listOf("home_dev_app", "home_import_project", "home_organize_team", "home_automation"),
             EntryRegistry.homeSuggestions().map { it.id },
         )
+        // 2026-11-17 定版：大脑砍出主线，HOME_TOP 不再含 home_brain
+        //（home_brain 条目本身保留在注册表，进全部功能/设置区）。
         assertEquals(
-            listOf("home_search", "home_brain", "home_new"),
+            listOf("home_search", "home_new"),
             EntryRegistry.byGroup(Group.HOME_TOP).map { it.id },
         )
     }

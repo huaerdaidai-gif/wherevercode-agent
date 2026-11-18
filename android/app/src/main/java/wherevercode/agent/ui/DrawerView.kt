@@ -69,6 +69,15 @@ class DrawerView(
     private var searchQuery: String = ""
     private val collapsedGroups: MutableSet<String> = mutableSetOf()
 
+    // 必须声明在 init 之前：init 会调用 refresh()，refresh() 读本表；
+    // 声明在 init 之后会导致初始化顺序未到、字段为 null 而 NPE。
+    private val PARENT_MENUS = listOf(
+        ParentMenuItem("nav_chat", "对话", DrawerController.ID_NEW_CONVERSATION, R.drawable.ic_chat),
+        ParentMenuItem("nav_projects", "项目", DrawerController.ID_PROJECTS, R.drawable.ic_folder),
+        ParentMenuItem("nav_channels", "频道", DrawerController.ID_TEAM_CHANNEL, R.drawable.ic_chat),
+        ParentMenuItem("nav_control", "控制", DrawerController.ID_CONSOLE, R.drawable.ic_console),
+    )
+
     init {
         root.addView(content)
         refresh()
@@ -226,13 +235,6 @@ class DrawerView(
         val label: String,
         val target: String,
         val iconRes: Int,
-    )
-
-    private val PARENT_MENUS = listOf(
-        ParentMenuItem("nav_chat", "对话", DrawerController.ID_NEW_CONVERSATION, R.drawable.ic_chat),
-        ParentMenuItem("nav_projects", "项目", DrawerController.ID_PROJECTS, R.drawable.ic_folder),
-        ParentMenuItem("nav_channels", "频道", DrawerController.ID_TEAM_CHANNEL, R.drawable.ic_chat),
-        ParentMenuItem("nav_control", "控制", DrawerController.ID_CONSOLE, R.drawable.ic_console),
     )
 
     private fun addParentMenus(rows: MutableList<RenderedRow>) {
