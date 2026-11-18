@@ -8,6 +8,8 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.RadioGroup
+import android.widget.RadioButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -40,6 +42,8 @@ data class TeamChannelSnapshot(
     val fanoutRuns: List<FanoutRun>,
     val fanoutRunning: Boolean,
     val notice: String?,
+    /** 2026-11-13 频道权限：可代人署名的发帖者（App 自己），见 teamMessageFromChannel。 */
+    val trustedAttributionPosterIds: Set<String> = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID),
 )
 
 /**
@@ -74,6 +78,8 @@ class TeamChannelController(
     private val onNewRound: () -> Unit,
     private val onStartFanout: (question: String) -> Unit,
     private val onRefresh: () -> Unit,
+    private val onCreateTask: ((String, () -> Unit) -> Unit)? = null,
+    private val onReconnect: () -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -98,6 +104,14 @@ class TeamChannelController(
     private val connectionLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val noticeLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
+    private val diagnosticToggle: TextView = UiKit.text(context, "查看连接诊断", 10f, R.color.accent).apply {
+        visibility = View.GONE
+        setPadding(dp(16), 0, dp(16), dp(3))
+    }
+    private val diagnosticLine: TextView = UiKit.text(context, "", 10f, R.color.text_tertiary).apply {
+        visibility = View.GONE
+        setPadding(dp(16), 0, dp(16), dp(4))
+    }
 
     private val messageInput: EditText = EditText(context).apply {
         hint = "给频道发一条短消息（≤500 字），@名字 叫一位 Agent…"
@@ -116,6 +130,7 @@ class TeamChannelController(
     }
 
     private var snapshot: TeamChannelSnapshot? = null
+    private var asTask = false
 
     init {
         root.addView(
@@ -126,16 +141,37 @@ class TeamChannelController(
         root.addView(
             UiKit.text(
                 context,
-                "全部 Agent 都在频道里：本机 App + 注册表里的每一位；" +
-                    "设备/云端 Agent 由调度器当中转——@名字 叫它，回复贴回频道。" +
-                    "短消息、3 轮一议、建议-only——群消息绝不直接触发派活；" +
-                    "只读扇出最多问 5 个分支，大家只看不写。",
+                "仅讨论会发送频道消息；作为任务发送会打开创建表单，确认后进入任务列表。",
                 11f,
                 R.color.text_tertiary,
             ).apply { setPadding(dp(16), 0, dp(16), dp(6)) },
         )
         connectionLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(connectionLine)
+        val connectionActions = UiKit.horizontal(context).apply {
+            setPadding(dp(16), 0, dp(16), dp(2))
+        }
+        connectionActions.addView(
+            UiKit.text(context, "重新连接", 11f, R.color.accent, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip_accent)
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                setOnClickListener { onReconnect() }
+            },
+        )
+        connectionActions.addView(
+            UiKit.text(context, "刷新消息", 11f, R.color.text_secondary).apply {
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                setOnClickListener { onRefresh() }
+            },
+        )
+        root.addView(connectionActions)
+        root.addView(diagnosticToggle)
+        root.addView(diagnosticLine)
+        diagnosticToggle.setOnClickListener {
+            val expanded = diagnosticLine.visibility != View.VISIBLE
+            diagnosticLine.visibility = if (expanded) View.VISIBLE else View.GONE
+            diagnosticToggle.text = if (expanded) "收起连接诊断" else "查看连接诊断"
+        }
         roundLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(roundLine)
         noticeLine.setPadding(dp(16), 0, dp(16), dp(6))
@@ -150,6 +186,21 @@ class TeamChannelController(
         val bar = UiKit.vertical(context).apply {
             setPadding(dp(16), dp(8), dp(16), dp(12))
         }
+        val sendLabel = UiKit.text(context, "发送", 12f, R.color.accent, bold = true)
+        if (onCreateTask != null) {
+            val modes = RadioGroup(context).apply { orientation = LinearLayout.HORIZONTAL }
+            val discussion = RadioButton(context).apply { id = View.generateViewId(); text = "仅讨论"; minHeight = dp(48) }
+            val task = RadioButton(context).apply { id = View.generateViewId(); text = "作为任务发送"; minHeight = dp(48) }
+            modes.addView(discussion)
+            modes.addView(task)
+            modes.check(discussion.id)
+            modes.setOnCheckedChangeListener { _, id ->
+                asTask = id == task.id
+                sendLabel.text = if (asTask) "创建任务" else "发送"
+                messageInput.hint = if (asTask) "任务目标与验收要求…" else "发送消息，或 @ 一位成员…"
+            }
+            bar.addView(modes)
+        }
         val sendRow = UiKit.horizontal(context)
         sendRow.addView(
             messageInput.apply {
@@ -157,13 +208,18 @@ class TeamChannelController(
             },
         )
         sendRow.addView(
-            UiKit.text(context, "发送", 12f, R.color.accent, bold = true).apply {
+            sendLabel.apply {
+                minHeight = dp(48)
+                gravity = android.view.Gravity.CENTER
                 setBackgroundResource(R.drawable.bg_chip_accent)
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 setOnClickListener { sendMessage() }
             },
         )
-        bar.addView(sendRow)
+        val sendColumn = UiKit.vertical(context)
+        sendColumn.addView(UiKit.text(context, "频道消息 · 所有成员可见，可用 @名字 邀请回复", 10f, R.color.text_tertiary))
+        sendColumn.addView(sendRow)
+        bar.addView(sendColumn)
         val fanoutRow = UiKit.horizontal(context).apply { setPadding(0, dp(8), 0, 0) }
         fanoutRow.addView(
             fanoutInput.apply {
@@ -177,13 +233,41 @@ class TeamChannelController(
                 setOnClickListener { startFanout() }
             },
         )
-        bar.addView(fanoutRow)
+        val fanoutColumn = UiKit.vertical(context)
+        fanoutColumn.addView(UiKit.text(context, "只读问大家 · 仅生成建议，不会派活或写文件", 10f, R.color.text_tertiary))
+        fanoutColumn.addView(fanoutRow)
+        fanoutColumn.visibility = View.GONE
+        val advanced = UiKit.text(context, "只读协作工具　展开 ›", 12f, R.color.text_secondary).apply {
+            minHeight = dp(48)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        advanced.setOnClickListener {
+            val expanded = fanoutColumn.visibility != View.VISIBLE
+            fanoutColumn.visibility = if (expanded) View.VISIBLE else View.GONE
+            advanced.text = if (expanded) "只读协作工具　收起 ⌃" else "只读协作工具　展开 ›"
+        }
+        bar.addView(advanced)
+        bar.addView(fanoutColumn)
         return bar
     }
 
     private fun sendMessage() {
-        val snap = snapshot ?: return
         val text = messageInput.text.toString().trim()
+        if (asTask) {
+            if (text.isBlank()) {
+                noticeLine.text = "请填写任务目标"
+                return
+            }
+            onCreateTask?.invoke(text) {
+                if (messageInput.text.toString().trim() == text) messageInput.setText("")
+            }
+            return
+        }
+        val snap = snapshot ?: return
+        if (!snap.configured) {
+            noticeLine.text = "频道尚未连接；消息未发送。"
+            return
+        }
         val error = TeamChatRules.validatePost(text, snap.roundsUsed)
         if (error != null) {
             noticeLine.text = error
@@ -207,14 +291,20 @@ class TeamChannelController(
 
     fun render(snapshot: TeamChannelSnapshot) {
         this.snapshot = snapshot
+        val diagnostic = snapshot.connectionError?.takeIf { it.isNotBlank() }
+        val certificateFailure = diagnostic?.let(::isCertificateFailure) == true
         connectionLine.text = when (snapshot.connectionState) {
             ChannelConnectionState.LIVE -> "● 直播推送（WS 已连）"
             ChannelConnectionState.CONNECTING -> "○ 正在连接频道…"
             ChannelConnectionState.POLLING ->
-                "○ 轮询兜底（推送已断）" +
-                    (snapshot.connectionError?.let { "：$it" } ?: "")
+                "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）" +
+                    if (certificateFailure) " · 证书验证失败，安全连接未建立" else ""
             ChannelConnectionState.STOPPED -> "○ 频道未连接"
         }
+        diagnosticToggle.visibility = if (diagnostic == null) View.GONE else View.VISIBLE
+        diagnosticLine.visibility = View.GONE
+        diagnosticLine.text = diagnostic.orEmpty()
+        diagnosticToggle.text = "查看连接诊断"
         roundLine.text = if (snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS) {
             "已到 ${TeamChatLimits.MAX_ROUNDS} 轮上限，点“开始新一轮”继续"
         } else {
@@ -237,7 +327,9 @@ class TeamChannelController(
             // 的讨论不混进另一个任务里；每条带发送者 + 任务归属。
             // 归属头从正文解析（App 贴回的中转回复带的头），无头
             // 的消息进“综合讨论”串。
-            val threads = groupTeamMessages(snapshot.messages.map { teamMessageFromChannel(it) })
+            val threads = groupTeamMessages(
+                snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) },
+            )
             threads.forEach { thread ->
                 bodyContainer.addView(threadHeaderRow(thread))
                 thread.messages.forEach { bodyContainer.addView(messageRow(it)) }
@@ -384,19 +476,45 @@ class TeamChannelController(
                 FanoutBranchStatus.DONE -> "已回"
                 FanoutBranchStatus.RUNNING -> "问着呢…"
                 FanoutBranchStatus.PENDING -> "等着问"
-                FanoutBranchStatus.FAILED -> "没回：${branch.error.orEmpty().take(100)}"
+                FanoutBranchStatus.FAILED -> "连接失败"
                 FanoutBranchStatus.TIMEOUT -> "超时没回"
             }
-            col.addView(
-                UiKit.text(context, "${branch.displayName}：$statusText", 12f, R.color.text_primary)
-                    .apply { setPadding(0, dp(2), 0, 0) },
-            )
-            branch.summary?.takeIf { it.isNotBlank() }?.let { summary ->
-                col.addView(
-                    UiKit.text(context, summary, 12f, R.color.text_tertiary)
-                        .apply { setPadding(dp(8), 0, 0, dp(4)) },
-                )
+            val branchCard = UiKit.vertical(context).apply {
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(5) }
             }
+            branchCard.addView(UiKit.text(context, "${branch.displayName} · $statusText", 12f, R.color.text_primary, bold = true))
+            branch.summary?.takeIf { it.isNotBlank() }?.let { summary ->
+                val summaryView = UiKit.text(context, summary, 12f, R.color.text_tertiary).apply {
+                    maxLines = 4
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(4), 0, 0)
+                }
+                summaryView.setOnClickListener {
+                    summaryView.maxLines = if (summaryView.maxLines == 4) 24 else 4
+                }
+                branchCard.addView(summaryView)
+            }
+            branch.error?.takeIf { it.isNotBlank() }?.let { error ->
+                val detail = UiKit.text(context, error, 10f, R.color.text_tertiary).apply {
+                    visibility = View.GONE
+                    setPadding(0, dp(4), 0, 0)
+                }
+                val toggle = UiKit.text(context, "查看失败诊断", 10f, R.color.accent).apply {
+                    setPadding(0, dp(4), 0, 0)
+                    setOnClickListener {
+                        detail.visibility = if (detail.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                        text = if (detail.visibility == View.VISIBLE) "收起失败诊断" else "查看失败诊断"
+                    }
+                }
+                branchCard.addView(toggle)
+                branchCard.addView(detail)
+            }
+            col.addView(branchCard)
         }
         return col
     }
@@ -414,6 +532,12 @@ class TeamChannelController(
         } catch (_: Exception) {
             ""
         }
+    }
+
+    private fun isCertificateFailure(error: String): Boolean {
+        val normalized = error.lowercase(Locale.ROOT)
+        return listOf("certificate", "certpath", "trust anchor", "sslhandshake", "证书", "证书链")
+            .any(normalized::contains)
     }
 
     private fun dp(value: Int): Int = UiKit.dp(context, value)

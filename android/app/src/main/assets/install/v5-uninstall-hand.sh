@@ -40,14 +40,16 @@ fi
 # 先停服务；停不下来就退出 1（不强删），保护运行中的任务。
 case "$(uname -s)" in
 Darwin)
-  if [ -f "$PLIST" ]; then
-    LABEL=$(plutil -extract Label raw -o - "$PLIST" 2>/dev/null || true)
-    [ -z "$LABEL" ] || launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-    if [ -n "$LABEL" ] && launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-      echo "Hand 服务仍在运行；为保护数据，已停止卸载。" >&2; exit 1
+  for plist_path in "$PLIST" "$HOME/Library/LaunchAgents/com.wherevercode.hand.plist"; do
+    if [ -f "$plist_path" ]; then
+      LABEL=$(plutil -extract Label raw -o - "$plist_path" 2>/dev/null || true)
+      [ -z "$LABEL" ] || launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+      if [ -n "$LABEL" ] && launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+        echo "Hand 服务仍在运行；为保护数据，已停止卸载。" >&2; exit 1
+      fi
+      rm -f "$plist_path"
     fi
-    rm -f "$PLIST"
-  fi;;
+  done;;
 Linux)
   UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/wherevercode-v5-hand.service"
   if [ -f "$UNIT_FILE" ] && command -v systemctl >/dev/null 2>&1; then
@@ -85,6 +87,8 @@ echo "已备份 Agent 与授权映射：${BACKUP}（重装后可对照恢复；�
 for link in "$HOME/.local/bin/wherevercode-hand"; do
   if [ -L "$link" ] && [ "$(readlink "$link")" = "$HOST_DIR/wherevercode-hand" ]; then rm -f "$link"; fi
 done
+[ -f "$HOME/.termux/boot/25-wherevercode-v5-hand" ] && rm -f "$HOME/.termux/boot/25-wherevercode-v5-hand"
+command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null || true
 # server_key.json（设备身份）与 audit.jsonl（日志）也删掉：卸载即干净断开，
 # 重装是新身份、须重新配对（与上方备份说明一致）。
 for path in "$HOST_DIR/wherevercode-hand" "$HOST_DIR/.wherevercode-v5-hand-state" \

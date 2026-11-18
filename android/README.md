@@ -1,4 +1,35 @@
-# 安卓版超级 Agent · 第 0 步：可行性验证
+# WhereverCode Agent Android
+
+当前 P0 设计、源码审计与缺口见 [Issue #6 审计](../docs/p0/README.md)。
+构建要求：JDK 17、Gradle 8.2.1、SDK platform 34（AGP 会使用 build-tools 33.0.1）、Chaquopy 15.0.1 / Python 3.11。
+
+```sh
+# 已安装 JDK/SDK/Gradle，并设置 JAVA_HOME 与 ANDROID_HOME 后：
+./scripts/build-android-p0.sh
+# 需要 x86_64 模拟器时，可显式构建双 ABI：
+./scripts/build-android-p0.sh -PandroidAbis=arm64-v8a,x86_64
+```
+
+默认 debug 包为 `wherevercode.agent.ci`，与正式包及其数据隔离。
+统一版本配置在 [`version.properties`](version.properties)，当前升级基线 183，
+高于已安装 Build 182 与 Build 5；versionName 还含 counter、commit 与构建时间。
+正式发布每次必须推进 counter，可用 `-PappVersionCode` 或
+`WHEREVERCODE_VERSION_CODE` 提供更高值，不能用不同 workflow 的 run_number 混算。
+
+`compat` / `release` 保留正式包名 `wherevercode.agent`；只有明确提供已有维护者签名
+环境变量才签名，缺少密钥时为 unsigned，绝不自动改用新 debug 密钥冒充覆盖升级。
+应用内安装前校验包名、严格更高版本与当前签名一致。密钥缺失或证书不一致由 Muse
+协调原签名处理，不以卸载旧版解决。配置与验证项见
+[三版本代码交接](../docs/compatibility/20261114-code-handoff.md)。
+
+无更新源配置时更新功能明确禁用；来源通过 `updateDriveFileId` /
+`WHEREVERCODE_UPDATE_DRIVE_FILE_ID` 注入，OAuth 和密钥继续使用已有本机存储。
+脚本的产物与测试记录是开发证据；最终构建、实机覆盖升级、验收和发布由 Muse 组织。
+Node CLI 运行时仍需按既有流程配置，不因代码编译成功就被视为真机可用。
+
+以下是历史可行性记录，含旧版本与曾拟议但本仓库 main 未包含的 CI 描述；当前事实以构建文件与 P0 报告为准。
+
+# 历史：第 0 步可行性验证
 
 > **2026-11-09 UI V2：** 当前界面已从“测试式聊天 + 控制台”升级为聊天 / 项目 /
 > 任务 / Agent 四入口工作台，见 [`docs/android-ui-v2-20261109.md`](../docs/android-ui-v2-20261109.md)。

@@ -1,0 +1,33 @@
+name: WhereverCodeAgent
+options:
+  bundleIdPrefix: wherevercode
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  WhereverCodeAgent:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WhereverCodeAgent
+        excludes:
+          - Info.plist
+          - WhereverCodeAgent.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: wherevercode.agent
+        INFOPLIST_FILE: WhereverCodeAgent/Info.plist
+        CODE_SIGN_ENTITLEMENTS: WhereverCodeAgent/WhereverCodeAgent.entitlements
+        MARKETING_VERSION: "1.5"
+        CURRENT_PROJECT_VERSION: "6"
+        SWIFT_VERSION: "5.0"
+    dependencies:
+      - sdk: libsqlite3.tbd
+  WhereverCodeAgentTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WhereverCodeAgentTests
+    dependencies:
+      - target: WhereverCodeAgent

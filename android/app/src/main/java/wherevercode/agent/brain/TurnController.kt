@@ -22,8 +22,16 @@ class TurnController {
     fun isRunning(): Boolean = state.get() == TurnControlState.RUNNING
 
     /** 新的一轮开始：清掉上一轮遗留的暂停/停止/改目标。 */
-    fun begin() {
+    fun begin(persistedControl: () -> TurnControlState = { TurnControlState.RUNNING }) {
         state.set(TurnControlState.RUNNING)
+        // A task may be paused after claim but before the executor begins.
+        // Read durable state after resetting, and never downgrade a concurrent stop.
+        when (persistedControl()) {
+            TurnControlState.PAUSED -> pause()
+            TurnControlState.STOPPED -> stop()
+            TurnControlState.GOAL_CHANGED -> changeGoal()
+            TurnControlState.RUNNING -> Unit
+        }
     }
 
     /** 请求暂停本轮。已停止/已改目标时不再降级。 */

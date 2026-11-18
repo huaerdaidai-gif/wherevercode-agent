@@ -1,4 +1,4 @@
-# WhereverCode V5 Hand 一键安装脚本（Windows）。
+﻿# WhereverCode V5 Hand 一键安装脚本（Windows）。
 #
 # V5 原生：只装 V5 Hand（hand_server.py，单文件 Python 服务），
 # 不装旧 Execution Host、不连旧服务器、不从网上下载文件——
@@ -33,11 +33,44 @@ if ($Version -notmatch '^[A-Za-z0-9._-]{1,80}$') {
 }
 if ($Port -lt 1 -or $Port -gt 65535) { Write-Error "-Port 必须在 1~65535 之间。"; exit 2 }
 
-# --- 安装包位置：hand_server.py 须与本脚本在同一目录（或 -BundleDir）。---
+# --- 安装包位置：优先本地目录，若无则自动从官方源下载 ---
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $BundleDir) { $BundleDir = $ScriptDir }
 $HandPy = Join-Path $BundleDir "hand_server.py"
-if (-not (Test-Path $HandPy)) { Write-Error "安装包里没有 hand_server.py（应在 $BundleDir 里）。"; exit 1 }
+
+if (-not (Test-Path $HandPy)) {
+    # 检查当前工作目录
+    $HandPyCur = Join-Path (Get-Location) "hand_server.py"
+    if (Test-Path $HandPyCur) {
+        $HandPy = $HandPyCur
+    } else {
+        # 自动从官方发布源下载
+        Write-Host "本地未找到 hand_server.py，正在从官方发布源下载……"
+        $TargetDir = if ($StateDir) { $StateDir } else { Join-Path $env:USERPROFILE ".wherevercode\v5-hand" }
+        $DlDir = Join-Path $TargetDir "downloads"
+        New-Item -ItemType Directory -Force -Path $DlDir | Out-Null
+        $DlHandPy = Join-Path $DlDir "hand_server.py"
+        $Urls = @(
+            "https://raw.githubusercontent.com/huaerdaidai-gif/wherevercode-agent/main/android/app/src/main/assets/install/hand_server.py",
+            "https://cdn.jsdelivr.net/gh/huaerdaidai-gif/wherevercode-agent@main/android/app/src/main/assets/install/hand_server.py",
+            "https://raw.githubusercontent.com/huaerdaidai-gif/wherevercode-agent/main/server/hand_server.py"
+        )
+        $Success = $false
+        foreach ($url in $Urls) {
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $DlHandPy -TimeoutSec 30
+                if ((Test-Path $DlHandPy) -and ((Get-Item $DlHandPy).Length -gt 50000)) {
+                    $HandPy = $DlHandPy
+                    $Success = $true
+                    break
+                }
+            } catch { }
+        }
+        if (-not $Success) {
+            Write-Error "未能找到或下载 hand_server.py；请检查网络或使用 -BundleDir 指定本地路径。"; exit 1
+        }
+    }
+}
 
 # --- 环境：Python 3.10+ + cryptography。---
 function Find-Python {
@@ -145,6 +178,6 @@ $Fingerprint = (& $Python $CurrentPy --state-dir $HostDir fingerprint 2>$null) -
 if (-not $Fingerprint -or $Fingerprint.Length -ne 64) {
     Write-Error "读不到 Hand 指纹；请看 $HostDir\v5-hand.log。"; exit 1
 }
-$PairCode = (& $Python $CurrentPy --state-dir $HostDir pair-code 2>$null) -join "" -replace '\s',''
+$PairCode = (& $Python $CurrentPy --state-dir $HostDir pair-code --raw 2>$null) -join "" -replace '\s',''
 Write-Host "V5_HAND_INSTALLED device_id=$DeviceId fingerprint=$Fingerprint pair_code=$PairCode port=$Port version=$Version state_dir=$HostDir python=$Python service=$Service"
-Write-Host "V5 Hand 已安装并启动（$Service）。App 里核对指纹一致、填入配对码 $PairCode 后确认配对。"
+Write-Host "V5 Hand 已安装并启动（$Service）。App 里核对指纹一致、填入配对码 $PairCode（5 分钟有效，一次性）后确认配对。"

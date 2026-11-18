@@ -17,11 +17,14 @@ import wherevercode.agent.core.project.Project
 import wherevercode.agent.core.project.ProjectLocation
 import wherevercode.agent.core.python.PythonProbe
 import wherevercode.agent.core.python.PythonRunRequest
+import wherevercode.agent.core.python.PythonRunControl
 import wherevercode.agent.core.python.PythonRuntime
 import wherevercode.agent.core.security.AuditEntry
 import wherevercode.agent.core.security.AuditLog
 import wherevercode.agent.core.security.CommandLimits
 import wherevercode.agent.core.security.LimitError
+import wherevercode.agent.core.security.SafePaths
+import wherevercode.agent.core.security.dangerousArgumentReason
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskStore
 import wherevercode.agent.core.workspace.ChangeSet
@@ -199,9 +202,25 @@ class ToolRegistry(
         fun isReadOnlyRun(argv: List<String>?): Boolean {
             if (argv.isNullOrEmpty()) return false
             val name = argv[0].substringAfterLast('/')
-            if (name in READ_ONLY_COMMANDS) return true
+            if (name in READ_ONLY_COMMANDS) {
+                // 2026-11-13 安全加固：只读白名单只看 argv[0] 时，
+                // `find -delete` / `find -exec` / `git push` / `git diff --output=…`
+                // 都会被当成只读、免审批直接跑；`cat /data/data/<包名>/shared_prefs/…`
+                // 能免审批读到工作区外（含本机凭证）的文件。现在：
+                // - 带危险参数的（见 dangerousArgumentReason）不算只读；
+                // - git 只认只读子命令；
+                // - 参数里有绝对路径 / `~` / `..`（可能出工作区）的不算只读——
+                //   回落到正常审批，由用户确认，而不是静默放行。
+                if (dangerousArgumentReason(argv) != null) return false
+                if (name == "git" && (argv.size < 2 || argv[1] !in GIT_READ_ONLY_SUBCOMMANDS)) return false
+                if (SafePaths.hasPathLikeEscapeArgs(argv)) return false
+                return true
+            }
             return isPythonVersionProbe(argv)
         }
+
+        /** 免审批的 git 子命令（与 CommandLimits.GIT_ALLOWED_SUBCOMMANDS 同口径）。 */
+        private val GIT_READ_ONLY_SUBCOMMANDS: Set<String> = setOf("status", "diff", "log", "show")
 
         private fun isPythonVersionProbe(argv: List<String>): Boolean {
             val name = argv[0].substringAfterLast('/')
@@ -492,6 +511,7 @@ class ToolRegistry(
          * 由引擎在每次执行前传入控制态快照。
          */
         stopped: () -> Boolean = { false },
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
         if (stopped()) {
             val outcome = ToolOutcome(
@@ -502,6 +522,7 @@ class ToolRegistry(
             audit(action, context, outcome, null)
             return outcome
         }
+        if (paused()) return denied(action, context, "turn_paused", "已暂停，未启动新执行步骤")
         // 1. Structure（扩展工具由来源自己校验参数形状）。
         val isExtension = extensionTools != null && action.tool !in ALL_TOOLS
         val structureError = if (isExtension) extensionTools!!.validate(action) else checkStructure(action)
@@ -591,12 +612,20 @@ class ToolRegistry(
                 )
             }
         }
+        // Approval may suspend while the user pauses/stops. Recheck every
+        // backend here, including plugins which do not implement a stop probe.
+        // 注（安全分支三方合并 2026-11-15）：sec 的 3d 停止门（stopped ->
+        // turn_stopped + audit 后拒绝）与此等价且被此覆盖——denied() 内部
+        // 同样写 audit，且这里还多了 paused -> turn_paused，故保留 PR #10 版，
+        // 不重复加 sec 的手写 outcome 块（否则 stopped 检查写两遍）。
+        if (stopped()) return denied(effectiveAction, context, "turn_stopped", "已停止，未执行")
+        if (paused()) return denied(effectiveAction, context, "turn_paused", "已暂停，未启动新执行步骤")
         // 4. Execute（扩展工具走来源执行，同样进审计）。
         val outcome = try {
             if (isExtension) {
                 extensionTools!!.execute(effectiveAction, context, stopped)
             } else {
-                runHandler(effectiveAction, context, stopped)
+                runHandler(effectiveAction, context, stopped, paused)
             }
         } catch (e: CancellationException) {
             throw e
@@ -759,8 +788,21 @@ class ToolRegistry(
         return null
     }
 
-    /** Resolve a workspace-relative path. Returns (relative, absolute) or null when outside the root. */
+    /**
+     * Resolve a workspace-relative path. Returns (relative, absolute) or null when outside the root.
+     *
+     * 2026-11-13 安全加固：词法/规范化解析之后，再用 [SafePaths] 按真实路径
+     * 复核一次——悬空符号链接叶子、不存在中间目录之上的根外链接，都不能
+     * 把读写带出工作区。
+     */
     private fun resolveInWorkspace(rawPath: String): Pair<String, File>? {
+        val root = workspaceRoot ?: return null
+        val resolved = resolveInWorkspaceUnchecked(rawPath) ?: return null
+        if (SafePaths.resolveInside(root, resolved.second) == null) return null
+        return resolved
+    }
+
+    private fun resolveInWorkspaceUnchecked(rawPath: String): Pair<String, File>? {
         val root = workspaceRoot ?: return null
         val cleaned = rawPath.trim().replace('\\', '/')
         if (cleaned.isEmpty() || cleaned == ".") return "" to root
@@ -826,11 +868,12 @@ class ToolRegistry(
         action: Action,
         context: ToolContext,
         stopped: () -> Boolean,
+        paused: () -> Boolean,
     ): ToolOutcome = when (action.tool) {
         "read_file" -> handleRead(action, context)
         "list_files" -> handleList(action, context)
-        "write_file" -> handleWrite(action, context, stopped)
-        "run_command" -> handleRun(action, context, stopped)
+        "write_file" -> handleWrite(action, context) { stopped() || paused() }
+        "run_command" -> handleRun(action, context, stopped, paused)
         "dispatch_task" -> handleDispatch(action)
         "ask_user" -> handleAskUser(action)
         // git 家（2026-11-11）：读/写/推分支/开 PR 全走该站 API。
@@ -1169,7 +1212,7 @@ class ToolRegistry(
         }
     }
 
-    private fun handleRun(action: Action, context: ToolContext, stopped: () -> Boolean): ToolOutcome {
+    private fun handleRun(action: Action, context: ToolContext, stopped: () -> Boolean, paused: () -> Boolean): ToolOutcome {
         val argv = parseArgv(action.args["argv"])!!
         val cwdArg = action.args["cwd"] as? String ?: ""
         val (_, cwd) = resolveInWorkspace(cwdArg)!!
@@ -1191,6 +1234,7 @@ class ToolRegistry(
         }
         try {
             if (stopped()) return stoppedOutcome()
+            if (paused()) return ToolOutcome(false, "已暂停，未启动命令", errorCode = "turn_paused")
             val python = pythonInvocation(argv)
             if (python is PythonInvocation.Probe) {
                 return handlePythonProbe()
@@ -1208,16 +1252,16 @@ class ToolRegistry(
                 // Python 脚本可能写文件：与其它写命令一样进写轮次保护。
                 return withWriteRound(context.taskId, "run_command:python") {
                     workspaceAdapter.guardCommand(argv.joinToString(" "))
-                    runPython(prepared.request!!, timeout, stopped)
+                    runPython(prepared.request!!, timeout, stopped, paused)
                 }
             }
             if (isReadOnlyRun(argv)) {
                 // 只读命令不建写轮次：不会改动工作区，也不该占用写锁。
-                return executeProcess(argv, cwd, timeout, stopped)
+                return executeProcess(argv, cwd, timeout, stopped, paused)
             }
             return withWriteRound(context.taskId, "run_command") {
                 workspaceAdapter.guardCommand(argv.joinToString(" "))
-                executeProcess(argv, cwd, timeout, stopped)
+                executeProcess(argv, cwd, timeout, stopped, paused)
             }
         } catch (e: WorkspaceException) {
             // 写轮次/工作区错误必须保留机器码，不能被下面的兜底吞成
@@ -1339,7 +1383,7 @@ class ToolRegistry(
         val root = workspaceRoot
         if (root != null && cwd != root && !File(rawPath).isAbsolute) {
             val cwdRelative = try {
-                cwd.relativeTo(root).path.replace('\\', '/')
+                cwd.canonicalFile.relativeTo(root.canonicalFile).path.replace('\\', '/')
             } catch (_: IllegalArgumentException) {
                 ""
             }
@@ -1355,6 +1399,7 @@ class ToolRegistry(
         request: PythonRunRequest,
         timeoutSeconds: Double,
         stopped: () -> Boolean,
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
         val runtime = pythonRuntime ?: return ToolOutcome(
             ok = false,
@@ -1363,13 +1408,18 @@ class ToolRegistry(
         )
         if (stopped()) return stoppedOutcome()
         val result = try {
-            runtime.run(request)
+            runtime.run(request.copy(control = PythonRunControl(stopped, paused)))
         } catch (e: Exception) {
             return ToolOutcome(
                 ok = false,
                 summary = "Python 执行失败：${e.message ?: "未知错误"}（未模拟执行）",
                 errorCode = "python_unavailable",
             )
+        }
+        if (result.interruption == "stopped" || result.interruption == "paused") {
+            return ToolOutcome(false, "Python 已响应运行中控制：${result.interruption}",
+                data = combineOutput(result.stdout, result.stderr),
+                errorCode = if (result.interruption == "paused") "turn_paused" else "turn_stopped")
         }
         if (!result.available) {
             return ToolOutcome(
@@ -1411,7 +1461,10 @@ class ToolRegistry(
         cwd: File,
         timeoutSeconds: Double,
         stopped: () -> Boolean,
+        paused: () -> Boolean = { false },
     ): ToolOutcome {
+        if (stopped()) return stoppedOutcome()
+        if (paused()) return ToolOutcome(false, "已暂停，未启动命令", errorCode = "turn_paused")
         val process = try {
             ProcessBuilder(argv)
                 .directory(cwd)

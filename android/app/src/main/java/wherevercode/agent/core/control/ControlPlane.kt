@@ -8,6 +8,7 @@ import wherevercode.agent.core.security.AuthorizationStore
 import wherevercode.agent.core.security.RevocationStore
 import wherevercode.agent.core.task.TaskControlCounterStore
 import wherevercode.agent.core.task.LocalTaskRunner
+import wherevercode.agent.core.task.TaskOrigins
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskStates
 import wherevercode.agent.core.task.TaskStore
@@ -104,6 +105,12 @@ class ControlPlane(
     private val authEpoch = AuthorizationEpoch(controlStore)
     private val token = CancellationToken(controlStore, taskStore, nowEpochSeconds)
 
+    @Volatile private var taskTargetResolver: ((TaskRecord) -> RemoteTarget?)? = null
+
+    fun configureTaskTargetResolver(resolver: (TaskRecord) -> RemoteTarget?) {
+        taskTargetResolver = resolver
+    }
+
     fun configureRemoteControl(
         targetResolver: ((String?) -> RemoteTarget?)?,
         controlSender: RemoteControlSender?,
@@ -184,17 +191,33 @@ class ControlPlane(
                     ok = false, confirmed = false, status = ControlStatus.STOPPING,
                     errorCode = "control_stopping", reason = "任务正在停止，无法恢复",
                 )
-                ControlStatus.PAUSING -> ControlResult(
-                    ok = false, confirmed = false, status = ControlStatus.PAUSING,
-                    errorCode = "control_pausing", reason = "暂停尚未确认，不能恢复",
-                )
-                else -> {
+                // PAUSING with a live attempt: the executor may still be
+                // running, so resuming would race it. Once the attempt's
+                // lease has expired the executor is gone (no renewals), the
+                // attempt can be released and resume is safe.
+                ControlStatus.PAUSING -> if (canRecoverExpiredAttempt(task)) {
+                    releasePausedAttempt(task)
                     token.confirm(taskId)
                     controlStore.setDispatchFrozen(taskId, false)
                     controlStore.setControlStatus(taskId, ControlStatus.RUNNING)
                     ControlResult(
                         ok = true, confirmed = true, status = ControlStatus.RUNNING,
-                        reason = "任务已恢复，可重新派单",
+                        reason = RESUME_REDISPATCH_REASON,
+                    )
+                } else {
+                    ControlResult(
+                        ok = false, confirmed = false, status = ControlStatus.PAUSING,
+                        errorCode = "control_pausing", reason = "暂停尚未确认，不能恢复",
+                    )
+                }
+                else -> {
+                    if (canRecoverExpiredAttempt(task)) releasePausedAttempt(task)
+                    token.confirm(taskId)
+                    controlStore.setDispatchFrozen(taskId, false)
+                    controlStore.setControlStatus(taskId, ControlStatus.RUNNING)
+                    ControlResult(
+                        ok = true, confirmed = true, status = ControlStatus.RUNNING,
+                        reason = RESUME_REDISPATCH_REASON,
                     )
                 }
             }
@@ -372,9 +395,11 @@ class ControlPlane(
             ControlAction.TAKEOVER -> true
         }
         if (!needsSend) return
-        if (!sentRemoteControls.add(operationId)) return
         val task = taskStore.getTask(taskId) ?: return
-        val target = resolver(task.assignedAgentId) ?: return
+        if (getControlStatus(taskId) != result.status) return
+        val taskResolver = taskTargetResolver
+        val target = (if (taskResolver != null) taskResolver(task) else resolver(task.assignedAgentId)) ?: return
+        if (!sentRemoteControls.add(operationId)) return
         // 快照读任务行（账本权威）：任务行与 ControlStore 计数器正常
         // 是一起涨的；任务行若领先，以任务行为准，绝不发一个比任务行
         // 旧的快照（远端会当成过期拒绝）。
@@ -384,10 +409,17 @@ class ControlPlane(
             newGoal = newGoal,
             goalVersion = task.goalVersion,
             epoch = task.authEpoch,
+            // Name the live attempt so the Hand never pauses/wakes a leftover
+            // process of a released attempt (e.g. resume after lease expiry).
+            attemptScoped = true,
+            attemptId = task.attemptId.orEmpty(),
         )
         try {
             sender.send(target, taskId, command) { remoteResult ->
-                if (!remoteResult.confirmed) return@send
+                if (!remoteResult.confirmed) {
+                    sentRemoteControls.remove(operationId)
+                    return@send
+                }
                 // 确认用派生的新 operationId：execute() 按 operationId
                 // 去重，复用原 operationId 会被当成重放而直接返回旧结果。
                 val confirmOpId = "$operationId:remote-confirm"
@@ -480,27 +512,19 @@ class ControlPlane(
     fun confirmPaused(taskId: String, operationId: String, reason: String): ControlResult =
         execute("CONFIRM_PAUSE", taskId, operationId, reason) { task ->
             when (getControlStatus(taskId)) {
-                ControlStatus.PAUSED -> ControlResult(
-                    ok = true, confirmed = true, status = ControlStatus.PAUSED,
-                    reason = "任务已处于暂停状态",
-                )
+                ControlStatus.PAUSED -> {
+                    // A remotely confirmed pause (process suspended) whose
+                    // executor later vanished: release the dead attempt so
+                    // the row no longer claims to be in flight.
+                    if (canRecoverExpiredAttempt(task)) releasePausedAttempt(task)
+                    ControlResult(
+                        ok = true, confirmed = true, status = ControlStatus.PAUSED,
+                        reason = "任务已处于暂停状态",
+                    )
+                }
                 ControlStatus.PAUSING -> {
                     if (TaskStates.isTerminal(task.state) || !isTaskInFlight(task.state) || leaseExpired(task)) {
-                        if (isTaskInFlight(task.state) && leaseExpired(task)) {
-                            taskStore.updateTask(
-                                taskId,
-                                mapOf(
-                                    "state" to "requeued",
-                                    "assigned_agent_id" to null,
-                                    "lease_owner" to null,
-                                    "lease_expires_at" to null,
-                                    "member_id" to null,
-                                    "attempt_id" to null,
-                                    "needs_attention" to true,
-                                ),
-                                task.version, task.goalVersion, task.authEpoch,
-                            )
-                        }
+                        if (isTaskInFlight(task.state) && leaseExpired(task)) releasePausedAttempt(task)
                         controlStore.setControlStatus(taskId, ControlStatus.PAUSED)
                         controlStore.setDispatchFrozen(taskId, false)
                         ControlResult(
@@ -556,7 +580,7 @@ class ControlPlane(
             if (!isTaskInFlight(task.state) || leaseExpired(task)) {
                 taskStore.updateTask(
                     taskId,
-                    mapOf("state" to "cancelled"),
+                    mapOf("state" to "cancelled", "lease_owner" to null, "lease_expires_at" to null),
                     task.version, task.goalVersion, task.authEpoch,
                 )
                 token.confirm(taskId)
@@ -575,14 +599,18 @@ class ControlPlane(
         }
 
     /**
-     * Finalize local pause/stop requests once a crashed executor's lease
-     * expires. Called after each lease sweep; the sweep preserves pending
+     * Finalize pause/stop requests of any dispatched task (local runner,
+     * remote member Agent, or MCP executor) once its executor's lease
+     * expires. An expired lease means nobody renews the attempt any more
+     * (crashed app, offline Hand, vanished MCP executor), so it is released:
+     * PAUSING/PAUSED -> requeued + PAUSED (resumable), STOPPING -> cancelled.
+     * Late writes from the dead attempt are fenced by attempt_id. Called after each lease sweep; the sweep preserves pending
      * control states so they cannot be silently requeued first.
      */
-    fun reconcileExpiredLocalControls() {
+    fun reconcileExpiredControls() {
         val expired = try {
             taskStore.listTasks().filter { task ->
-                isLocalDispatchedTask(task) && isTaskInFlight(task.state) && leaseExpired(task)
+                canRecoverExpiredAttempt(task)
             }
         } catch (_: Exception) {
             return
@@ -591,11 +619,15 @@ class ControlPlane(
             when (getControlStatus(task.taskId)) {
                 ControlStatus.PAUSING -> confirmPaused(
                     task.taskId, "lease-pause-${java.util.UUID.randomUUID()}",
-                    "本机执行器租约过期，已安全回队等待恢复",
+                    "执行器租约过期，已安全回队等待恢复",
+                )
+                ControlStatus.PAUSED -> confirmPaused(
+                    task.taskId, "lease-paused-${java.util.UUID.randomUUID()}",
+                    "执行器租约过期，已暂停的尝试已释放",
                 )
                 ControlStatus.STOPPING -> confirmStop(
                     task.taskId, "lease-stop-${java.util.UUID.randomUUID()}",
-                    "本机执行器租约过期，已确认停止",
+                    "执行器租约过期，已确认停止",
                 )
                 else -> Unit
             }
@@ -632,11 +664,53 @@ class ControlPlane(
         return target
     }
 
+    companion object {
+        /**
+         * Resume is a re-dispatch, not a continuation from a checkpoint: the
+         * executor starts the turn again, so steps that already completed
+         * (file edits, commands) may run a second time.
+         */
+        const val RESUME_REDISPATCH_REASON: String =
+            "任务已恢复，将重新派单：恢复会重新执行本轮（不是从断点续跑），此前已完成的步骤可能再次执行。"
+    }
+
     // -- Internals ----------------------------------------------------------
 
     private fun leaseExpired(task: TaskRecord): Boolean {
         val lease = task.leaseExpiresAt ?: return true
         return lease <= nowEpochSeconds()
+    }
+
+    /**
+     * A dispatched task (no chat session) whose in-flight attempt's lease has
+     * expired. Covers every executor kind: the local runner, remote member
+     * Agents (RemoteTaskPump / MemberDispatch) and MCP executors. Chat-turn
+     * mirrors always carry a sessionId and are never touched.
+     */
+    private fun canRecoverExpiredAttempt(task: TaskRecord): Boolean =
+        task.sessionId == null && isTaskInFlight(task.state) &&
+            task.leaseExpiresAt != null && leaseExpired(task) &&
+            // Defensive: never release the attempt the local runner is
+            // still executing in this process, even if a renewal was missed.
+            !(isLocalDispatchedTask(task) && localExecutionIsActive?.invoke(task.taskId) == true)
+
+    private fun releasePausedAttempt(task: TaskRecord) {
+        checkNotNull(taskStore.updateTask(
+            task.taskId,
+            mapOf(
+                "state" to "requeued",
+                // Keep the owner for MCP and remote member tasks so only that
+                // executor can pick the task up again; an unassigned row would
+                // become eligible for the local runner (wrong executor).
+                "assigned_agent_id" to task.assignedAgentId.takeUnless { isLocalDispatchedTask(task) },
+                "lease_owner" to null,
+                "lease_expires_at" to null,
+                "member_id" to null,
+                "attempt_id" to null,
+                "needs_attention" to true,
+            ),
+            task.version, task.goalVersion, task.authEpoch,
+        )) { "Expired task disappeared before its attempt could be released" }
     }
 
     private fun isLocalDispatchedTask(task: TaskRecord): Boolean =

@@ -91,8 +91,10 @@ class DrawerView(
 
     private var badges: DrawerBadges = DrawerBadges()
 
-    /** 折叠的分组（内存态，默认全展开；分组头点按切换）。 */
-    private val collapsedGroups: MutableSet<String> = mutableSetOf()
+    /** 折叠的分组（内存态；低频扩展默认收起，分组头点按切换）。 */
+    // Keep low-frequency plugins/resources below the fold without forcing the
+    // user to scroll past six secondary entries on every drawer open.
+    private val collapsedGroups: MutableSet<String> = mutableSetOf("extensions")
 
     /** 某分组是否折叠（测试口径）。 */
     fun isGroupCollapsed(group: String): Boolean = group in collapsedGroups
@@ -177,6 +179,7 @@ class DrawerView(
         "nav_models_skills" -> R.drawable.ic_cube
         "nav_custom_modules" -> R.drawable.ic_grid
         "nav_feature_center" -> R.drawable.ic_dashboard
+        "nav_flagship_70" -> R.drawable.ic_grid
         else -> null
     }
 
@@ -302,6 +305,7 @@ class DrawerView(
 
     private fun addGroupHeader(title: String, groupKey: String) {
         val row = UiKit.horizontal(context).apply {
+            minimumHeight = dp(48)
             setPadding(dp(8), dp(14), dp(8), dp(4))
             setOnClickListener {
                 setGroupCollapsed(groupKey, !isGroupCollapsed(groupKey))

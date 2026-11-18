@@ -20,6 +20,13 @@ class HandProtocolTest {
     )
 
     @Test
+    fun `nullable workspace notice is omitted from response arguments`() {
+        val json = org.json.JSONObject(HandProtocol.toJson(envelope().copy(type = "cross_device_result")))
+        json.put("args", org.json.JSONObject("""{"output":"ok","workspace_notice":null}"""))
+        assertEquals(mapOf("output" to "ok"), HandProtocol.parseJson(json.toString())?.args)
+    }
+
+    @Test
     fun `envelope toJson and parseJson round-trip`() {
         val parsed = HandProtocol.parseJson(HandProtocol.toJson(envelope()))
         assertEquals(envelope(), parsed)

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "WhereverCode-Agent-issue8-cacca58-arm64-debug.apk",
+    "size": 18657766,
+    "sha256": "19b2c465499b09f9ab1b0114e275734d21d7c0a54830023d9f0f31ac71e4de5d",
+    "abis": [
+      "arm64-v8a"
+    ],
+    "sourceCommit": "cacca583ed7f5bef9c3e8a0d9785893dfc1c3de0",
+    "applicationId": "wherevercode.agent.ci",
+    "versionName": "0.3.0-p0-r3",
+    "versionCode": 7
+  },
+  {
+    "name": "WhereverCode-Agent-issue8-cacca58-x86_64-debug.apk",
+    "size": 19430165,
+    "sha256": "4a6aa8efc678a45d3d4168ad22b83d001a902a50cfd7a2b12ddd4e17f5c5a6a6",
+    "abis": [
+      "x86_64"
+    ],
+    "sourceCommit": "cacca583ed7f5bef9c3e8a0d9785893dfc1c3de0",
+    "applicationId": "wherevercode.agent.ci",
+    "versionName": "0.3.0-p0-r3",
+    "versionCode": 7
+  }
+]

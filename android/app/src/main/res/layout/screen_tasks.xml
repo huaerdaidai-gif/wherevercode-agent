@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:clipToPadding="false"
-    android:scrollbars="none">
+    android:scrollbars="none"
+    android:background="@color/home_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -24,14 +26,22 @@
             android:fontFamily="sans-serif-medium" />
 
         <TextView
+            android:id="@+id/buttonCreateTask"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical|end"
+            android:text="＋ 创建任务"
+            android:textSize="14sp"
+            android:textColor="@color/accent" />
+
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="3dp"
-            android:text="暂停 / 停止 / 改目标作用于当前会话轮次，在引擎安全检查点生效。"
+            android:text="新建任务，或点开任务查看目标、步骤与回执。"
             android:textColor="@color/text_tertiary"
             android:textSize="11sp" />
 
-        <!-- 阶段 3（U4）：审批等待提示条（含剩余秒数倒计时），由 MainActivity 每秒刷新；无等待审批时隐藏。 -->
         <TextView
             android:id="@+id/taskApprovalBanner"
             android:layout_width="match_parent"
@@ -44,122 +54,183 @@
             android:textSize="12sp"
             android:visibility="gone" />
 
+        <TextView
+            android:id="@+id/buttonTaskSessionDetails"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:text="当前会话与运行事件　展开 ›"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary" />
+
         <LinearLayout
+            android:id="@+id/taskSessionDetails"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
             android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="14dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:id="@+id/currentStatusDot"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="●"
-                    android:textColor="@color/success"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/currentStatusText"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="7dp"
-                    android:text="空闲"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/currentStatusChip"
-                    android:layout_width="wrap_content"
-                    android:layout_height="26dp"
-                    android:background="@drawable/bg_chip"
-                    android:gravity="center"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
-                    android:text="无运行轮次"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="10sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/currentBrain"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="大脑：加载中…"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/currentStarted"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="开始时间：—"
-                android:textColor="@color/text_tertiary"
-                android:textSize="11sp" />
-
-            <TextView
-                android:id="@+id/currentNote"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_system_note"
-                android:padding="10dp"
-                android:text="没有正在执行的轮次。发送一条消息后，这里会显示真实状态。"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+            android:visibility="gone">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:orientation="horizontal">
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="14dp">
 
-                <Button
-                    android:id="@+id/buttonPause"
-                    android:layout_width="0dp"
-                    android:layout_height="42dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_chip"
-                    android:text="暂停"
-                    android:textAllCaps="false"
-                    android:textColor="@color/text_primary"
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/currentStatusDot"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="●"
+                        android:textColor="@color/success"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/currentStatusText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="7dp"
+                        android:text="空闲"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/currentStatusChip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="26dp"
+                        android:background="@drawable/bg_chip"
+                        android:gravity="center"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:text="无运行轮次"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/currentBrain"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="大脑：加载中…"
+                    android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
-                <Button
-                    android:id="@+id/buttonStop"
-                    android:layout_width="0dp"
-                    android:layout_height="42dp"
-                    android:layout_weight="1"
-                    android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_chip"
-                    android:text="停止"
-                    android:textAllCaps="false"
-                    android:textColor="@color/danger"
-                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/currentStarted"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="开始时间：—"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="11sp" />
 
-                <Button
-                    android:id="@+id/buttonChangeGoal"
-                    android:layout_width="0dp"
-                    android:layout_height="42dp"
-                    android:layout_weight="1"
-                    android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_chip"
-                    android:text="改目标"
-                    android:textAllCaps="false"
-                    android:textColor="@color/text_primary"
-                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/currentNote"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_system_note"
+                    android:padding="10dp"
+                    android:text="没有正在执行的轮次。发送一条消息后，这里会显示真实状态。"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/buttonPause"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_chip"
+                        android:text="暂停"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/buttonStop"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_chip"
+                        android:text="停止"
+                        android:textAllCaps="false"
+                        android:textColor="@color/danger"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/buttonChangeGoal"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_chip"
+                        android:text="改目标"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp" />
+                </LinearLayout>
             </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="运行事件"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/buttonEventRefresh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="刷新"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="来自本进程 EventLog 的真实记录；内容已脱敏。"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10sp" />
+
+            <LinearLayout
+                android:id="@+id/eventList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical" />
         </LinearLayout>
 
         <LinearLayout
@@ -173,51 +244,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="运行事件"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/buttonEventRefresh"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:background="@drawable/bg_chip"
-                android:gravity="center"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:text="刷新"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="来自本进程 EventLog 的真实记录；内容已脱敏。"
-            android:textColor="@color/text_tertiary"
-            android:textSize="10sp" />
-
-        <LinearLayout
-            android:id="@+id/eventList"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="vertical" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="持久任务库"
+                android:text="任务列表"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -239,7 +266,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="只显示 TaskStore 中真实存在的任务。聊天轮次会自动写入任务库，分派任务由调度器认领执行。"
+            android:text="任务从创建到执行、审查和完成，均以真实状态与回执为准。"
             android:textColor="@color/text_tertiary"
             android:textSize="10sp" />
 
@@ -256,7 +283,7 @@
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_system_note"
             android:padding="12dp"
-            android:text="未实现（明确标注）：逐行暂停仅支持当前轮次任务，分派任务暂停未实现（无恢复语义）；执行中任务改目标未实现；步骤已持久化，重启后仍显示。跨设备执行未实现：需另一设备的任务保持 queued 可见，不会假装执行。任务详情页已实现（点任务卡进入：状态+步骤+日志+产物文件链接+审批+逐任务控制）。"
+            android:text="任务详情支持暂停、继续、停止与回执查看。执行中的目标需先停止确认，再创建新任务。离线投递、自动化规则与扩展执行器尚未实现。"
             android:textColor="@color/text_tertiary"
             android:textSize="10sp" />
 
@@ -283,7 +310,5 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:orientation="vertical" />
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp" />
     </LinearLayout>
 </ScrollView>

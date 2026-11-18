@@ -11,12 +11,13 @@ import wherevercode.agent.BuildConfig
  * Google Drive update source is optional and configured per build. Public builds
  * leave the update file id empty, which disables update checks.
  *
- * 版本信号（所有构建都是 versionCode 2 / 0.2.0-ui2，版本号区分不了构建）：
+ * 第一阶段仅比较分发文件是否变化，不据此声明可覆盖升级：
  * Drive 文件的元数据自带 `sha256Checksum` / `md5Checksum` / `size` /
  * `modifiedTime`（Drive API v3 File 资源字段，见 DriveUpdateSource），
  * 本机已装 APK 的 SHA-256 / MD5 / 大小从
  * `PackageManager.applicationInfo.sourceDir` 的文件算出。两边比校验和，
- * 相同就是最新，不同就是有新版——不用版本号，不用新服务器。
+ * 相同说明文件一致，不同仅说明有候选包；下载后必须再验证包名、
+ * 更高的 versionCode 与历史签名一致，才允许交给安装器。
  *
  * When configured, the app uses Google Drive API v3 and the user's OAuth
  * session to read the selected file metadata and download the update package.

@@ -18,6 +18,33 @@ data class ProjectFolderAuthorizationReceipt(
     val responseSha256: String,
 )
 
+/**
+ * The App side of a Hand project-folder grant (MainActivity's authorization
+ * path): verify the Hand's receipt is bound to this exact request (agent
+ * identity and requested folder), then keep minimal local evidence keyed by
+ * the paired Hand's certificate fingerprint and the canonical folder.
+ * Nothing is recorded when verification fails.
+ */
+fun verifyAndRecordProjectFolderAuthorization(
+    rawAck: String,
+    peerFingerprintSha256: String,
+    agentId: String,
+    requestedFolder: String,
+    receipts: ProjectFolderAuthorizationReceiptStore,
+    receivedAtEpochSeconds: Long,
+): ProjectFolderAuthorizationAck {
+    val ack = parseProjectFolderAuthorizationAck(rawAck, requestedFolder, agentId)
+    receipts.record(
+        peerFingerprintSha256 = peerFingerprintSha256,
+        agentId = agentId,
+        requestedFolder = requestedFolder,
+        rawAck = rawAck,
+        ack = ack,
+        receivedAtEpochSeconds = receivedAtEpochSeconds,
+    )
+    return ack
+}
+
 interface ProjectFolderAuthorizationReceiptStore {
     fun record(peerFingerprintSha256: String, agentId: String, requestedFolder: String, rawAck: String,
                ack: ProjectFolderAuthorizationAck, receivedAtEpochSeconds: Long)
@@ -68,6 +95,11 @@ class KeystoreProjectFolderAuthorizationReceiptStore private constructor(
         "receipt_${sha256("$peer\u0000$agent\u0000$folder") }"
 
     companion object {
+        /** Same store over caller-supplied preferences (JVM tests; production uses [create]). */
+        @androidx.annotation.VisibleForTesting
+        internal fun forPreferences(prefs: android.content.SharedPreferences): KeystoreProjectFolderAuthorizationReceiptStore =
+            KeystoreProjectFolderAuthorizationReceiptStore(prefs)
+
         fun create(context: Context): KeystoreProjectFolderAuthorizationReceiptStore {
             val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
             val prefs = EncryptedSharedPreferences.create(

@@ -604,8 +604,8 @@ class ChatViewModel : ViewModel() {
      * 用户点“新对话”被“上一轮还在执行”拦住、且停止也不管用时用：
      * 取消所有在跑轮次 job、掐断远端连接、清全部轮次状态、记一条
      * 说明、开新对话。宁可丢掉一轮卡死的旧轮次，也不让用户永远
-     * 开不了新对话。旧轮次的 job 之后若跑到 finally，只会清一遍
-     * 已清的状态（幂等），不会污染新时间线。
+     * 开不了新对话。旧轮次的 job 之后若跑到 finally，只更新自己捕获的
+     * 时间线；仅归属仍匹配时才清当前运行态，不覆盖新轮次。
      */
     fun forceNewConversation(): Boolean {
         remoteRunTaskId?.let { remotePort?.abortRun(it) }
@@ -1483,6 +1483,7 @@ class ChatViewModel : ViewModel() {
         remoteTurnTarget = target
         val remoteTaskId = taskId
         remoteRunTaskId = remoteTaskId
+        val runTimeline = timeline
         remoteTurnJob = scope.launch {
             var cancelled = false
             var terminalStatus: TurnStatus? = null
@@ -1500,7 +1501,7 @@ class ChatViewModel : ViewModel() {
                 val startedAt = System.currentTimeMillis()
                 while (isActive) {
                     val waited = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
-                    timeline.appendStatusNote(turnId, "正在启动 ${agent.displayName}…已等待 ${waited} 秒")
+                    runTimeline.appendStatusNote(turnId, "正在启动 ${agent.displayName}…已等待 ${waited} 秒")
                     publish()
                     delay(1000)
                 }
@@ -1527,13 +1528,13 @@ class ChatViewModel : ViewModel() {
                             // 提示性 notes（空响应/取消/改目标）仍在
                             // finally 里追加，不受影响。
                             if (event.message.isNotBlank()) {
-                                timeline.appendAssistantText(turnId, event.message + "\n")
+                                runTimeline.appendAssistantText(turnId, event.message + "\n")
                                 publish()
                             }
                         }
                         is HandEvent.Result -> {
                             progressTicker?.cancel()
-                            timeline.setAssistantText(turnId, event.output)
+                            runTimeline.setAssistantText(turnId, event.output)
                             assistantText.clear()
                             assistantText.append(event.output)
                             publish()
@@ -1558,9 +1559,9 @@ class ChatViewModel : ViewModel() {
                 // 任务镜像、回调），active 也必须清掉，否则用户永远
                 // 被“上一轮还在执行”锁死。
                 try {
-                    timeline.cancelRunningTools(turnId)
+                    runTimeline.cancelRunningTools(turnId)
                     val resolvedStatus = when {
-                        remoteTurnGoalChanged -> TurnStatus.GOAL_CHANGED
+                        remoteRunTaskId == taskId && remoteTurnGoalChanged -> TurnStatus.GOAL_CHANGED
                         cancelled -> TurnStatus.CANCELLED
                         terminalStatus != null -> terminalStatus!!
                         assistantText.isBlank() -> TurnStatus.EMPTY
@@ -1577,7 +1578,7 @@ class ChatViewModel : ViewModel() {
                         resolvedStatus == TurnStatus.CANCELLED ||
                         resolvedStatus == TurnStatus.GOAL_CHANGED
                     ) {
-                        timeline.appendNote(turnId, resolutionMessage.orEmpty())
+                        runTimeline.appendNote(turnId, resolutionMessage.orEmpty())
                     }
                     // 2026-11-12 回复归属修复：有真实回复时，正文前
                     // 加任务归属头（任务编号 + 轮次标题），聊天、存库
@@ -1587,9 +1588,9 @@ class ChatViewModel : ViewModel() {
                         val attributed = replyAttributionHeader(taskId, prompt) + "\n" + assistantText.toString()
                         assistantText.clear()
                         assistantText.append(attributed)
-                        timeline.setAssistantText(turnId, attributed)
+                        runTimeline.setAssistantText(turnId, attributed)
                     }
-                    timeline.finishTurn(
+                    runTimeline.finishTurn(
                         turnId = turnId,
                         status = resolvedStatus,
                         error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
@@ -1602,7 +1603,7 @@ class ChatViewModel : ViewModel() {
                         hadToolCalls = false,
                     )
                     persistRemoteTurn(convId, prompt, assistantText.toString(), taskId)
-                    pausedTurn = resolvedStatus == TurnStatus.PAUSED
+                    if (remoteRunTaskId == taskId) pausedTurn = resolvedStatus == TurnStatus.PAUSED
                     // V5 修复（2026-11-11，能用的 Agent 显示“未验证”）：
                     // 终态 DONE 且真回了内容 = 一次真实往返成功，比 hello
                     // 探测更强的可用证据；通知回调方把该 Agent 标成已验证。
@@ -1611,14 +1612,16 @@ class ChatViewModel : ViewModel() {
                         onRemoteRoundSucceeded?.invoke(agent)
                     }
                 } finally {
-                    remoteTurnJob = null
-                    remoteTurnTaskId = null
-                    remoteRunTaskId = null
-                    remoteTurnTarget = null
-                    remoteTurnPaused = false
-                    active.set(false)
-                    publish(true)
-                    onTurnFinished?.invoke()
+                    if (remoteRunTaskId == taskId) {
+                        remoteTurnJob = null
+                        remoteTurnTaskId = null
+                        remoteRunTaskId = null
+                        remoteTurnTarget = null
+                        remoteTurnPaused = false
+                        active.set(false)
+                        publish(true)
+                        onTurnFinished?.invoke()
+                    }
                 }
             }
         }
@@ -1717,6 +1720,7 @@ class ChatViewModel : ViewModel() {
         // 无声回落。分流在后台协程里跑，任务观察不受影响。
         maybeRunTriage(comps, taskId, turnId, modelPrompt, boundDecisionId)
         val assistantText = StringBuilder()
+        val runTimeline = timeline
         taskTurnJob = scope.launch {
             var cancelled = false
             var terminalStatus: TurnStatus? = null
@@ -1743,7 +1747,7 @@ class ChatViewModel : ViewModel() {
                                 val summary = step.resultSummary?.takeIf { it.isNotBlank() }
                                     ?: step.argsSummary.takeIf { it.isNotBlank() }
                                     ?: continue
-                                timeline.appendNote(turnId, summary)
+                                runTimeline.appendNote(turnId, summary)
                                 publish()
                             }
                         }
@@ -1761,10 +1765,10 @@ class ChatViewModel : ViewModel() {
                         "completed" -> {
                             val result = task.result.orEmpty()
                             if (result.isNotBlank()) {
-                                timeline.appendAssistantText(turnId, result)
+                                runTimeline.appendAssistantText(turnId, result)
                                 assistantText.append(result)
                             } else {
-                                timeline.appendNote(turnId, "任务已完成（无文字结果，详见任务页）。")
+                                runTimeline.appendNote(turnId, "任务已完成（无文字结果，详见任务页）。")
                             }
                             terminalStatus = TurnStatus.DONE
                             break
@@ -1784,7 +1788,7 @@ class ChatViewModel : ViewModel() {
                 if (terminalStatus == null) {
                     // 观察超时：任务仍在后台跑（任务页可见），聊天先行结束，
                     // 不伪造完成、不杀任务。
-                    timeline.appendNote(turnId, "任务仍在后台执行（已超过观察时限），详见任务页。")
+                    runTimeline.appendNote(turnId, "任务仍在后台执行（已超过观察时限），详见任务页。")
                     terminalStatus = TurnStatus.DONE
                 }
             } catch (_: CancellationException) {
@@ -1793,9 +1797,9 @@ class ChatViewModel : ViewModel() {
                 terminalStatus = TurnStatus.ERROR
                 terminalError = "观察任务失败：${e.message ?: "未知错误"}"
             } finally {
-                timeline.cancelRunningTools(turnId)
+                runTimeline.cancelRunningTools(turnId)
                 val resolvedStatus = when {
-                    taskTurnGoalChanged -> TurnStatus.GOAL_CHANGED
+                    taskTurnTaskId == taskId && taskTurnGoalChanged -> TurnStatus.GOAL_CHANGED
                     cancelled -> TurnStatus.CANCELLED
                     terminalStatus != null -> terminalStatus!!
                     assistantText.isBlank() -> TurnStatus.EMPTY
@@ -1812,23 +1816,25 @@ class ChatViewModel : ViewModel() {
                     resolvedStatus == TurnStatus.CANCELLED ||
                     resolvedStatus == TurnStatus.GOAL_CHANGED
                 ) {
-                    timeline.appendNote(turnId, resolutionMessage.orEmpty())
+                    runTimeline.appendNote(turnId, resolutionMessage.orEmpty())
                 }
-                timeline.finishTurn(
+                runTimeline.finishTurn(
                     turnId = turnId,
                     status = resolvedStatus,
                     error = if (resolvedStatus == TurnStatus.ERROR) resolutionMessage else null,
                 )
                 persistRemoteTurn(convId, prompt, assistantText.toString(), taskId)
-                pausedTurn = resolvedStatus == TurnStatus.PAUSED
-                taskTurnJob = null
-                taskTurnTaskId = null
-                taskTurnAgent = null
-                taskTurnTarget = null
-                taskTurnPaused = false
-                active.set(false)
-                publish(true)
-                onTurnFinished?.invoke()
+                if (taskTurnTaskId == taskId) pausedTurn = resolvedStatus == TurnStatus.PAUSED
+                if (taskTurnTaskId == taskId) {
+                    taskTurnJob = null
+                    taskTurnTaskId = null
+                    taskTurnAgent = null
+                    taskTurnTarget = null
+                    taskTurnPaused = false
+                    active.set(false)
+                    publish(true)
+                    onTurnFinished?.invoke()
+                }
                 // V5 修复（2026-11-11，能用的 Agent 显示“未验证”）：
                 // 任务完成且真回了结果 = 一次真实往返成功，同 startRemoteTurn。
                 if (resolvedStatus == TurnStatus.DONE && assistantText.isNotBlank()) {
@@ -1844,7 +1850,9 @@ class ChatViewModel : ViewModel() {
     // 观察流本身只在停止/改目标时取消；暂停不断观察（任务行仍为
     // working，服务端 SIGSTOP）。--
 
-    private fun sendTaskTurnControl(action: ControlAction): String? {
+    @Volatile private var taskControlOperation: String? = null
+
+    private fun sendTaskTurnControl(action: ControlAction, onConfirmed: () -> Unit): String? {
         val target = taskTurnTarget ?: return "任务目标丢失，无法发送控制指令。"
         val taskId = taskTurnTaskId ?: return "任务丢失，无法发送控制指令。"
         val sender = remoteControlSender
@@ -1854,76 +1862,76 @@ class ChatViewModel : ViewModel() {
         } catch (_: Exception) {
             null
         }
-        sender.send(
-            target,
-            taskId,
-            RemoteControlCommand(
-                action = action,
-                operationId = UUID.randomUUID().toString(),
-                goalVersion = task?.goalVersion ?: 1L,
-                epoch = task?.authEpoch ?: 1L,
-            ),
-        ) { result ->
-            timeline.appendNote(
-                null,
-                if (result.confirmed) "远端已确认。" else "远端控制未确认：${result.message}",
-            )
-            publish(true)
+        val operationId = UUID.randomUUID().toString()
+        taskControlOperation = operationId
+        try {
+            sender.send(
+                target,
+                taskId,
+                RemoteControlCommand(
+                    action = action,
+                    operationId = operationId,
+                    goalVersion = task?.goalVersion ?: 1L,
+                    epoch = task?.authEpoch ?: 1L,
+                ),
+            ) { result ->
+                scope.launch {
+                    if (taskTurnTaskId != taskId || taskControlOperation != operationId) return@launch
+                    taskControlOperation = null
+                    if (result.confirmed) onConfirmed()
+                    timeline.appendNote(
+                        null,
+                        if (result.confirmed) "远端已确认。" else "远端控制未确认：${result.message}",
+                    )
+                    publish(true)
+                }
+            }
+        } catch (_: Exception) {
+            taskControlOperation = null
+            return "远端控制发送失败，尚未确认；请重试。"
         }
         return null
     }
 
     private fun pauseTaskTurn(): String {
-        val error = sendTaskTurnControl(ControlAction.PAUSE)
-        if (error != null) {
-            timeline.appendNote(null, error)
-            publish(true)
-            return error
+        val error = sendTaskTurnControl(ControlAction.PAUSE) {
+            taskTurnPaused = true
+            pausedTurn = true
         }
-        taskTurnPaused = true
-        pausedTurn = true
-        val message = "已向远端发送暂停指令：任务会在原地停下，详见任务页。"
+        val message = error ?: "已请求暂停，等待远端回执；确认前仍按执行中显示。"
         timeline.appendNote(null, message)
         publish(true)
         return message
     }
 
     private fun resumeTaskTurn(): String {
-        val error = sendTaskTurnControl(ControlAction.RESUME)
-        if (error != null) {
-            timeline.appendNote(null, error)
-            publish(true)
-            return error
+        val error = sendTaskTurnControl(ControlAction.RESUME) {
+            taskTurnPaused = false
+            pausedTurn = false
         }
-        taskTurnPaused = false
-        pausedTurn = false
-        val message = "已向远端发送继续指令：任务继续执行。"
+        val message = error ?: "已请求继续，等待远端回执。"
         timeline.appendNote(null, message)
         publish(true)
         return message
     }
 
     private fun stopTaskTurn(): String {
-        val error = sendTaskTurnControl(ControlAction.STOP)
-        if (error != null) {
-            timeline.appendNote(null, "$error 本地轮次先行结束，远端任务可能仍在运行。")
+        val error = sendTaskTurnControl(ControlAction.STOP) {
+            taskTurnGoalChanged = false
+            taskTurnJob?.cancel()
         }
-        taskTurnGoalChanged = false
-        taskTurnJob?.cancel()
-        val message = "已请求停止：已向远端发送停止指令，正在结束本轮。"
+        val message = error ?: "已请求停止，等待远端回执；确认前保留执行流。"
         timeline.appendNote(null, message)
         publish(true)
         return message
     }
 
     private fun changeGoalTaskTurn(): String {
-        val error = sendTaskTurnControl(ControlAction.STOP)
-        if (error != null) {
-            timeline.appendNote(null, "$error 本地轮次先行结束，远端任务可能仍在运行。")
+        val error = sendTaskTurnControl(ControlAction.STOP) {
+            taskTurnGoalChanged = true
+            taskTurnJob?.cancel()
         }
-        taskTurnGoalChanged = true
-        taskTurnJob?.cancel()
-        val message = "旧目标已作废：已向远端发送停止指令；请在输入框写下新目标并发送。"
+        val message = error ?: "已请求停止旧目标，等待远端确认后再输入新目标。"
         timeline.appendNote(null, message)
         publish(true)
         return message
@@ -2750,7 +2758,9 @@ class ChatViewModel : ViewModel() {
         return (task?.goalVersion ?: 1L) to (task?.authEpoch ?: 1L)
     }
 
-    private fun sendRemoteControl(action: ControlAction): String? {
+    @Volatile private var remoteControlOperation: String? = null
+
+    private fun sendRemoteControl(action: ControlAction, onConfirmed: () -> Unit): String? {
         val target = remoteTurnTarget ?: return "远端轮次目标丢失，无法发送控制指令。"
         // V5 修复（2026-11-11，CodeBuddy 卡死轮次）：控制指令用实际
         // 发给 Hand 的任务 id（[remoteRunTaskId]）。2026-11-12 回复
@@ -2759,87 +2769,78 @@ class ChatViewModel : ViewModel() {
         val sender = remoteControlSender
             ?: return "远端控制未接线：控制指令发不出去，本轮仍在远端运行，请检查后重试。"
         val (goalVersion, epoch) = currentRemoteCounters()
-        sender.send(
-            target,
-            taskId,
-            RemoteControlCommand(
-                action = action,
-                operationId = UUID.randomUUID().toString(),
-                goalVersion = goalVersion,
-                epoch = epoch,
-            ),
-        ) { result ->
-            timeline.appendNote(
-                null,
-                if (result.confirmed) "远端已确认。" else "远端控制未确认：${result.message}",
-            )
-            publish(true)
+        val operationId = UUID.randomUUID().toString()
+        remoteControlOperation = operationId
+        try {
+            sender.send(
+                target,
+                taskId,
+                RemoteControlCommand(
+                    action = action,
+                    operationId = operationId,
+                    goalVersion = goalVersion,
+                    epoch = epoch,
+                ),
+            ) { result ->
+                scope.launch {
+                    if (remoteRunTaskId != taskId || remoteControlOperation != operationId) return@launch
+                    remoteControlOperation = null
+                    if (result.confirmed) onConfirmed()
+                    timeline.appendNote(
+                        null,
+                        if (result.confirmed) "远端已确认。" else "远端控制未确认：${result.message}",
+                    )
+                    publish(true)
+                }
+            }
+        } catch (_: Exception) {
+            remoteControlOperation = null
+            return "远端控制发送失败，尚未确认；请重试。"
         }
         return null
     }
 
     private fun pauseRemoteTurn(): String {
-        val error = sendRemoteControl(ControlAction.PAUSE)
-        if (error != null) {
-            timeline.appendNote(null, error)
-            publish(true)
-            return error
+        val error = sendRemoteControl(ControlAction.PAUSE) {
+            remoteTurnPaused = true
+            pausedTurn = true
         }
-        remoteTurnPaused = true
-        pausedTurn = true
-        val message = "已向远端发送暂停指令：远端执行会在原地停下，流保持连接。"
+        val message = error ?: "已请求暂停，等待远端回执；确认前仍按执行中显示。"
         timeline.appendNote(null, message)
         publish(true)
         return message
     }
 
     private fun resumeRemoteTurn(): String {
-        val error = sendRemoteControl(ControlAction.RESUME)
-        if (error != null) {
-            timeline.appendNote(null, error)
-            publish(true)
-            return error
+        val error = sendRemoteControl(ControlAction.RESUME) {
+            remoteTurnPaused = false
+            pausedTurn = false
         }
-        remoteTurnPaused = false
-        pausedTurn = false
-        val message = "已向远端发送继续指令：远端执行继续。"
+        val message = error ?: "已请求继续，等待远端回执。"
         timeline.appendNote(null, message)
         publish(true)
         return message
     }
 
     private fun stopRemoteTurn(): String {
-        val error = sendRemoteControl(ControlAction.STOP)
-        if (error != null) {
-            // 控制发不出去也照常取消本地流（不让界面卡住），但如实说明
-            // 远端可能还在跑。
-            timeline.appendNote(null, "$error 本地轮次先行结束，远端执行可能仍在运行。")
+        val error = sendRemoteControl(ControlAction.STOP) {
+            remoteTurnGoalChanged = false
+            remoteRunTaskId?.let { remotePort?.abortRun(it) }
+            remoteTurnJob?.cancel()
         }
-        remoteTurnGoalChanged = false
-        // V5 修复（2026-11-11，CodeBuddy 卡死轮次）：光 cancel()
-        // 中断不了阻塞 socket 读，轮次要等 180 秒读超时才终态。
-        // 先掐连接（abortRun 关 socket，阻塞读立刻抛），再 cancel
-        // job，轮次的 finally 马上跑、active 马上清。
-        remoteRunTaskId?.let { remotePort?.abortRun(it) }
-        remoteTurnJob?.cancel()
-        val message = "已请求停止：已向远端发送停止指令，正在结束本轮。"
+        val message = error ?: "已请求停止，等待远端回执；确认前保留执行流。"
         timeline.appendNote(null, message)
         publish(true)
         return message
     }
 
     private fun changeGoalRemoteTurn(): String {
-        // 改目标时新目标用户还没输入：先发 STOP 停掉在途执行（线级
-        // STOP；服务端侧的 goal_version 涨幅走 ControlPlane 的
-        // CHANGE_GOAL，不走聊天轮次），新目标随下一条消息发。
-        val error = sendRemoteControl(ControlAction.STOP)
-        if (error != null) {
-            timeline.appendNote(null, "$error 本地轮次先行结束，远端执行可能仍在运行。")
+        val error = sendRemoteControl(ControlAction.STOP) {
+            remoteTurnGoalChanged = true
+            remoteRunTaskId?.let { remotePort?.abortRun(it) }
+            remoteTurnJob?.cancel()
         }
-        remoteTurnGoalChanged = true
-        remoteRunTaskId?.let { remotePort?.abortRun(it) }
-        remoteTurnJob?.cancel()
-        val message = "旧目标已作废：已向远端发送停止指令；请在输入框写下新目标并发送。"
+        val message = error ?: "已请求停止旧目标，等待远端确认后再输入新目标。"
         timeline.appendNote(null, message)
         publish(true)
         return message

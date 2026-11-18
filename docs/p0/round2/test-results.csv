@@ -1,0 +1,12 @@
+suite,tests,failures,errors,skipped,scope
+ApprovalSafetyTest,10,0,0,0,JVM/Robolectric/loopback；非真机
+ChatViewModelRemoteAgentTest,22,0,0,0,JVM/Robolectric/loopback；非真机
+DispatchClaimExecuteTest,5,0,0,0,JVM/Robolectric/loopback；非真机
+ExecutionFenceTest,12,0,0,0,JVM/Robolectric/loopback；非真机
+ExtensionManifestTest,2,0,0,0,JVM/Robolectric/loopback；非真机
+ExtensionToolBridgeTest,9,0,0,0,JVM/Robolectric/loopback；非真机
+LocalTaskRunnerAssignTest,4,0,0,0,JVM/Robolectric/loopback；非真机
+McpDispatchHttpE2ETest,5,0,0,0,JVM/Robolectric/loopback；非真机
+TaskClaimControlTransactionTest,1,0,0,0,JVM/Robolectric/loopback；非真机
+TaskControlActionsTest,3,0,0,0,JVM/Robolectric/loopback；非真机
+Python Hand,23,0,0,0,本地 socket + 隔离临时目录/假 CLI；含内置 Hand 授权与输出测试

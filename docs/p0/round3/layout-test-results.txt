@@ -1,0 +1,3 @@
+('wherevercode.agent.ui.MainLayoutTest', '5', '0', '0')
+('wherevercode.agent.MainActivitySmokeTest', '2', '0', '0')
+('wherevercode.agent.ui.TaskComposerTest', '4', '0', '0')

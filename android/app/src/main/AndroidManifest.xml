@@ -39,6 +39,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ui.flagship.FlagshipActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.WhereverCode" />
 
         <!-- No foregroundServiceType: only required when targetSdk >= 29.
              If the target is ever raised, a type (e.g. dataSync) becomes mandatory. -->

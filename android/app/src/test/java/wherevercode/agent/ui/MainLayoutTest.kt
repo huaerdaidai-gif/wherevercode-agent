@@ -47,7 +47,7 @@ class MainLayoutTest {
             root.findViewById<android.widget.TextView>(R.id.topBrandName).text.toString(),
         )
         assertEquals(
-            "V5",
+            "",
             root.findViewById<android.widget.TextView>(R.id.topBrandVersion).text.toString(),
         )
         assertNotNull(root.findViewById<View>(R.id.buttonSearch))

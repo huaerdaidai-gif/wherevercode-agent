@@ -57,13 +57,24 @@ class DrawerViewTest {
         activeTargetProvider = { activeTarget },
         userLabelProvider = { userLabel },
         themeLabelProvider = { themeLabel },
-    )
+    ).also { it.setGroupCollapsed("extensions", false) }
+
+    @Test
+    fun `advanced drawer starts collapsed while tasks channel and approvals stay visible`() {
+        val drawer = DrawerView(RuntimeEnvironment.getApplication(), DrawerController(), {}, {})
+        assertTrue(drawer.isGroupCollapsed("extensions"))
+        assertFalse(drawer.renderedIds().contains("nav_console"))
+        assertTrue(drawer.renderedGroupIds("top").contains("nav_team_channel"))
+        assertTrue(drawer.renderedGroupIds("top").contains("nav_pending_approval"))
+        drawer.setGroupCollapsed("extensions", false)
+        assertTrue(drawer.renderedIds().contains("nav_console"))
+    }
 
     @Test
     fun `top group exposes all ten V5 defaults in order`() {
         val drawerView = view()
         assertEquals(
-            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench"),
+            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench", "nav_team_channel", "nav_pending_approval"),
             drawerView.renderedGroupIds("top"),
         )
     }
@@ -79,7 +90,7 @@ class DrawerViewTest {
     fun `workspace group keeps theme and approval placeholder only`() {
         val drawerView = view()
         assertEquals(
-            listOf("nav_theme", "nav_pending_approval"),
+            listOf("nav_theme"),
             drawerView.renderedGroupIds("workspace"),
         )
         val topRow = drawerView.renderedRows().first { it.group == "top" && it.id == "nav_projects" }
@@ -89,8 +100,9 @@ class DrawerViewTest {
     @Test
     fun `extensions group keeps console mcp plugins and three resource placeholders in order`() {
         val drawerView = view()
+        drawerView.setGroupCollapsed("extensions", false)
         assertEquals(
-            listOf("nav_console", "nav_team_channel", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
+            listOf("nav_console", "nav_mcp_plugins", "nav_models_skills", "nav_custom_modules", "nav_feature_center"),
             drawerView.renderedGroupIds("extensions"),
         )
     }
@@ -108,13 +120,14 @@ class DrawerViewTest {
     @Test
     fun `default drawer renders ten primary rows and secondary groups`() {
         val drawerView = view()
-        // 一级 10 + 工作空间 2 + 扩展与资源 6（P3 加了团队频道）+ 底部用户行 1。
+        // 一级 12 + 工作空间 1 + 扩展与资源 6（双端组装第一轮加 70 屏导航）+ 底部用户行 1。
         assertEquals(19, drawerView.renderedIds().size)
     }
 
     @Test
     fun `all ten V5-UI section-three entries are reachable from the drawer or top bar`() {
         val drawerView = view()
+        drawerView.setGroupCollapsed("extensions", false)
         val targets = drawerView.renderedIds().mapNotNull { EntryRegistry.find(it) }
             .filter { it.targetKind == EntryRegistry.TargetKind.DRAWER }
             .map { it.target }
@@ -188,7 +201,7 @@ class DrawerViewTest {
         val content = drawerView.root.getChildAt(0) as LinearLayout
         val rows = (0 until content.childCount).map { content.getChildAt(it) }
             .filter { it.tag is String }
-        // 18 个入口行 + 底部用户行（tag 与工作台行相同，排最后，原样保留不查图标）。
+        // 19 个入口行 + 底部用户行（tag 与工作台行相同，排最后，原样保留不查图标）。
         assertEquals(19, rows.size)
         rows.dropLast(1).forEach { row ->
             val first = (row as LinearLayout).getChildAt(0)
@@ -238,7 +251,7 @@ class DrawerViewTest {
         val drawerView = view(themeLabel = "深色")
         assertEquals("深色", drawerView.renderedRowTrailing("nav_theme"))
         val workspace = drawerView.renderedGroupIds("workspace")
-        assertEquals(listOf("nav_theme", "nav_pending_approval"), workspace)
+        assertEquals(listOf("nav_theme"), workspace)
         assertEquals("浅色", view().renderedRowTrailing("nav_theme"))
     }
 
@@ -290,7 +303,7 @@ class DrawerViewTest {
         assertTrue(controller.nest(DrawerController.ID_DEVICES, DrawerController.ID_AGENTS_TEAM))
         val drawerView = view(controller)
         assertEquals(
-            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench"),
+            listOf("nav_chat", "nav_history", "nav_projects", "nav_running_tasks", "nav_team", "nav_devices", "nav_tools", "nav_results", "nav_help", "nav_workbench", "nav_team_channel", "nav_pending_approval"),
             drawerView.renderedGroupIds("top"),
         )
         assertEquals(19, drawerView.renderedIds().size)
@@ -321,8 +334,8 @@ class DrawerViewTest {
         drawerView.setGroupCollapsed("workspace", true)
         assertTrue(drawerView.isGroupCollapsed("workspace"))
         assertEquals(emptyList<String>(), drawerView.renderedGroupIds("workspace"))
-        assertEquals(17, drawerView.renderedIds().size)
+        assertEquals(18, drawerView.renderedIds().size)
         drawerView.setGroupCollapsed("workspace", false)
-        assertEquals(2, drawerView.renderedGroupIds("workspace").size)
+        assertEquals(1, drawerView.renderedGroupIds("workspace").size)
     }
 }

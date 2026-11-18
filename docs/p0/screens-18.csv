@@ -1,0 +1,19 @@
+screen_id,新设计页面,Android组件,真实API或事件,权限,已有测试检索名,源码状态,缺口
+S01,首页与抽屉,HomeScreenController / DrawerView,EntryRegistry / DrawerRouter,沙箱只读,HomeScreenControllerTest / DrawerViewTest,PARTIAL,4 个建议只填输入框；不代表自动化可执行
+S02,对话工作台,ChatViewModel / ChatTurnView,BrainEngine Flow / ChatTaskDispatcher.dispatch,工具写入须审批,TaskControlActionsTest / ChatTurnViewTest,PARTIAL,真实流与持久化任务存在；远端控制 UI 有乐观文案
+S03,会话历史,SessionListController,ConversationStore / SessionLedger,本地用户数据,SessionListItemsTest,SOURCE,搜索/恢复；没有云端同步承诺
+S04,项目列表与导入,ProjectScreenController,ProjectStore / GitHostApiClient,仓库令牌 / 用户选目录,ProjectStoreTest / GitHostApiClientTest,SOURCE,Git 托管与本地目录分开，空列表需引导
+S05,项目文件与变更,WorkspaceBrowser,WorkspaceGuard / WorkspaceAdapter,授权工作区 / 写轮次,WorkspaceEditTest / TaskStepArtifactsTest,PARTIAL,文件查看和编辑代码存在，逐项真机验证待做
+S06,任务看板,MainActivity / screen_tasks,TaskStore / TaskScheduler,任务拥有者,TaskStoreTest / KanbanStatusTest,SOURCE,queued→assigned→working→review→completed；失败/取消终态
+S07,任务详情与控制,TaskDetailController,ControlPlane / TaskStepStore / TaskEventLog,控制权 / epoch / goalVersion,TaskClaimControlTransactionTest / LocalTaskRunnerAssignTest,GAP-P0,MainActivity.stopTask 绕过控制平面直接 cancelled；删除吞停止错误
+S08,执行流与日志,ConsoleScreenController,ConsoleSnapshot / ConsoleWsFeed,配对 / 日志脱敏,ConsoleWsClientTest / ConsoleSnapshotTest,SOURCE,WS 断线不等于任务停止；保留旧快照与时间
+S09,结果与测试审查,ResultsScreenController,ResultsAggregation / PipelineOrchestrator,产物路径守卫 / 用户审查,PipelineMechanicalChecksTest / ResultsAggregationTest,PARTIAL,UI 机械检查固定 NOT_RUN，不得显示测试已过
+S10,审批中心,AndroidApprovalGate / ConsoleScreenController,ApprovalBroker / ExecutionFence,逐工具 / 授权 epoch,ExecutionFenceTest / ApprovalSafetyTest,SOURCE,拒绝和缓存均须区分；离线不能自动批准
+S11,Agent 与团队,AgentScreenController,AgentDiscovery / MemberManager / RemoteTaskPump,发现≠授权；任务租约,TaskSchedulerMemberParallelTest / DispatchClaimExecuteTest,PARTIAL,多个成员可并行；与模型供应商无绑定要求
+S12,设备与配对,AgentScreenController / MainActivity,PairingClient / RemoteDeviceStore / HandClient,确认配对 / X25519 / 文件夹范围,HandClientTest / RemoteCryptoInteropTest,PARTIAL,已配对≠在线；新 UX 分支有改进，尚未合 main
+S13,团队频道,TeamChannelController,TeamChannel / ChannelAgentRelay / WS,成员边界 / 只读建议,TeamChannelTest,PARTIAL,频道消息不是任务创建/指派 API
+S14,模型与登录,screen_settings / BrainLoginRows,BrainProviderRegistry / OAuthEngine / GenericOpenAiApiClient,用户配置 / Keystore,OAuthEngineTest / GenericOpenAiBrainAdapterTest,SOURCE,模型 HTTP/SSE，错误归属真实 provider，不内置账号
+S15,MCP 与扩展,McpPluginScreenController,ExtensionRegistry / McpServerManager / McpDispatchProtocol,Bearer scopes / MCP roots / 审批,McpDispatchHttpE2ETest / McpGenericTest,PARTIAL,现注册表七类；统一九类版本 manifest 缺失
+S16,自动化与唤醒,MISSING（新设计）,TaskScheduler / TaskRetry（仅任务能力）,默认关闭；去重/预算/审批,TaskSchedulerTest / TaskRetryTest,MISSING,无统一规则 UI、定时/事件入口和耐久唤醒账本
+S17,网络与离线,MISSING（统一页）；设备连接表单已有,DirectTransport / LanTransport / HandClient,用户选端点 / TLS / 配对,HandClientTest / DirectTransportTest,MISSING,本地/LAN 基础存在；VPN 依赖外部网络，HTTPS 中继/离线队列未完整实现
+S18,设置与帮助,screen_settings / OnboardingController,AutonomyStore / AppUpdateChecker / VersionInfo,更新安装系统确认,AppUpdateTest / VersionInfoTest,PARTIAL,版本与迁移保留；不改生产配置/签名/发布

@@ -25,7 +25,7 @@ import wherevercode.agent.core.transport.DiscoveredPeer
  * 走 App 自己的 HandClient + DirectTransport + 密封信封路径：
  *  1. 阴性对照：未授权时拿项目文件夹列目录 → Blocked wrong_folder；
  *  2. authorizeProjectFolder → Result authorized=true, already=false；
- *  3. 读 state dir 的 auth.json → authorized_project_folders 真进了项目文件夹；
+ *  3. 读 project_grants.json，确认授权限定到配对设备和 Agent；
  *  4. 再拿项目文件夹跑一次 run（/bin/echo）→ Result 输出含 prompt，
  *     证明 verify_credential 不再报 wrong_folder。
  *
@@ -72,6 +72,16 @@ class AuthorizeProjectFolderE2ETest {
         projectDir = File(root, "wherevercode-agent").apply { mkdirs() }
         stateDir = File(root, "state").apply { mkdirs() }
         val agentCanon = agentDir.canonicalPath
+        val runner = File(root, "runner.sh").apply {
+            writeText("""
+                #!/bin/sh
+                case "$1" in
+                    *：*) printf 'hand-delivery' > "${'$'}{1##*：}" ;;
+                esac
+                printf '%s\n' "$1"
+            """.trimIndent() + "\n")
+            setExecutable(true)
+        }
         val nowSeconds = System.currentTimeMillis() / 1000
         File(stateDir, "agents.json").writeText(
             JSONObject().apply {
@@ -80,7 +90,7 @@ class AuthorizeProjectFolderE2ETest {
                     put("kind", "agent")
                     put("folder", agentCanon)
                     put("command", org.json.JSONArray().apply {
-                        put("/bin/echo")
+                        put(runner.absolutePath)
                         put("{prompt}")
                     })
                 })
@@ -191,8 +201,8 @@ class AuthorizeProjectFolderE2ETest {
     )
 
     private fun authProjectFolders(): List<String> {
-        val auth = JSONObject(File(stateDir, "auth.json").readText())
-        val arr = auth.optJSONArray("e2e-agent") ?: return emptyList()
+        val grants = JSONObject(File(stateDir, "project_grants.json").readText())
+        val arr = grants.getJSONObject("k70").getJSONArray("e2e-agent")
         return (0 until arr.length()).map { arr.getString(it) }
     }
 
@@ -204,10 +214,6 @@ class AuthorizeProjectFolderE2ETest {
                 if (it in 32..126) it.toInt().toChar().toString() else "?"
             }
             println(line)
-            try {
-                File("/tmp/e2e-diag.txt").appendText(line + "\n")
-            } catch (_: Exception) {
-            }
         }
         val chatPort = chatPort()
         val agentTarget = RemoteTarget(peer = testPeer(), agentId = "e2e-agent", folder = agentDir.canonicalPath)
@@ -221,7 +227,7 @@ class AuthorizeProjectFolderE2ETest {
         }
         assertEquals(HandProtocol.Errors.WRONG_FOLDER, beforeBlocked.code)
 
-        // 2. 授权：信封 folder 必须是项目文件夹（修法点），凭证随之绑它。
+        // 2. 用已授权的 Agent 目录签发凭证，并请求项目目录授权。
         val authorized = chatPort.authorizeProjectFolder(agentTarget, projectDir.canonicalPath).toList()
         mark("authorize returned: $authorized")
         val result = checkNotNull(authorized.filterIsInstance<HandEvent.Result>().firstOrNull()) {
@@ -232,9 +238,9 @@ class AuthorizeProjectFolderE2ETest {
         assertTrue("首次授权 already 应为 false（否则是把已授权文件夹再授权一遍的假成功）：${result.output}", !output.optBoolean("already", true))
         assertEquals(projectDir.canonicalPath, output.optString("folder"))
 
-        // 3. 落盘核实：auth.json 的 authorized_project_folders 真进了项目文件夹。
+        // 3. 落盘核实：项目目录授权绑定配对设备和 Agent。
         assertTrue(
-            "auth.json 应含项目文件夹，实际：${authProjectFolders()}",
+            "project_grants.json 应含项目文件夹，实际：${authProjectFolders()}",
             authProjectFolders().contains(projectDir.canonicalPath),
         )
 
@@ -249,5 +255,14 @@ class AuthorizeProjectFolderE2ETest {
             "派活应回 Result，实际事件：$ran"
         }
         assertTrue("run 输出应含 prompt 原文，实际：${runResult.output}", runResult.output.contains("e2e-ping"))
+
+        val delivered = chatPort.runTask(projectTarget, "e2e-delivery", "e2e-ping", 60, 1, 1, "attempt-1")
+            .toList().filterIsInstance<HandEvent.Result>().single()
+        assertEquals(true, delivered.artifactPresent)
+        assertEquals("hand-delivery", String(Base64.getDecoder().decode(delivered.artifactBase64)))
+        val fetched = chatPort.getArtifact(projectTarget, "e2e-delivery", "attempt-1")
+            .toList().filterIsInstance<HandEvent.Result>().single()
+        assertEquals(delivered.artifactBase64, fetched.artifactBase64)
+        assertEquals(delivered.artifactSha256, fetched.artifactSha256)
     }
 }

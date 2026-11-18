@@ -35,6 +35,7 @@ class McpPluginScreenController(
     private val onDeleteServer: (String) -> Unit = {},
     private val onSaveServer: (McpServerFormData, String?) -> Unit = { _, _ -> },
     private val onImportServers: (String) -> Unit = {},
+    private val onManifests: () -> Unit = {},
 ) {
     /**
      * MCP 服务器表单（添加/编辑共用；existingId 为空 = 添加，
@@ -126,6 +127,11 @@ class McpPluginScreenController(
             },
         )
         content.addView(refreshRow)
+        content.addView(UiKit.text(context, "扩展清单 v1 · 查看 / 导入", 13f, R.color.accent, bold = true).apply {
+            minHeight = dp(48)
+            setPadding(0, dp(12), 0, dp(12))
+            setOnClickListener { onManifests() }
+        })
         content.addView(body)
     }
 

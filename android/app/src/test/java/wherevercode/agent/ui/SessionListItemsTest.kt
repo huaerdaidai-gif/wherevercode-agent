@@ -55,11 +55,11 @@ class SessionListItemsTest {
     }
 
     @Test
-    fun `subtitle carries member count and update time`() {
+    fun `subtitle carries member identities and update time`() {
         val items = buildSessionListItems(
             listOf(record("s-1", members = listOf("user", "a", "b"))),
         ) { "TIME" }
-        assertTrue(items[0].subtitle.contains("成员 3"))
+        assertTrue(items[0].subtitle.contains("3 位成员：user、a、b"))
         assertTrue(items[0].subtitle.contains("TIME"))
     }
 

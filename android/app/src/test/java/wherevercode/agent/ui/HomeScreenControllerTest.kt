@@ -260,6 +260,6 @@ class HomeScreenControllerTest {
     fun `greeting is always the fixed plain hello`() {
         // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
         // 不显示真人名字；没有带名分支可测。
-        assertEquals("你好", HomeScreenController.greeting())
+        assertEquals("今天想做什么？", HomeScreenController.greeting())
     }
 }

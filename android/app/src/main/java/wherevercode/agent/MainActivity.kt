@@ -126,6 +126,10 @@ import wherevercode.agent.core.agent.WebhookTestResult
 import wherevercode.agent.core.agent.SharedPreferencesAgentStore
 import wherevercode.agent.core.agent.SharedPreferencesManusTaskIdStore
 import wherevercode.agent.core.agent.SharedPreferencesPlatformReplyCursorStore
+import wherevercode.agent.core.control.ControlAction
+import wherevercode.agent.ui.CreateTaskDialog
+import wherevercode.agent.ui.TaskComposer
+import wherevercode.agent.ui.TaskControlActions
 import wherevercode.agent.core.control.HandRemoteControlSender
 import wherevercode.agent.core.install.AssetReader
 import wherevercode.agent.core.install.DeviceInstallController
@@ -165,7 +169,7 @@ import wherevercode.agent.core.project.remoteFolderPickerListing
 import wherevercode.agent.core.project.isValidLocalWorkspacePath
 import wherevercode.agent.core.project.openFolderEntryOptions
 import wherevercode.agent.core.project.parseFolderListJson
-import wherevercode.agent.core.project.parseProjectFolderAuthorizationAck
+import wherevercode.agent.core.project.verifyAndRecordProjectFolderAuthorization
 import wherevercode.agent.core.project.GitRepoKind
 import wherevercode.agent.core.project.parseGitHostRepoUrl
 import wherevercode.agent.core.project.parseGitRepoUrl
@@ -215,6 +219,7 @@ import wherevercode.agent.core.transport.RemoteHello
 import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
 import wherevercode.agent.core.security.SecretRedactor
+import wherevercode.agent.core.team.ChannelSenderPolicy
 import wherevercode.agent.core.session.SessionKind
 import wherevercode.agent.core.task.CapabilityCards
 import wherevercode.agent.core.task.CapabilityRouter
@@ -253,6 +258,7 @@ import wherevercode.agent.ui.SessionListController
 import wherevercode.agent.ui.PipelineAction
 import wherevercode.agent.ui.TaskDetailArtifacts
 import wherevercode.agent.ui.TaskDetailController
+import wherevercode.agent.ui.TurnTaskRecorder
 import wherevercode.agent.ui.taskStateLabel
 import wherevercode.agent.ui.approvalOutcomeLabel
 import wherevercode.agent.ui.buildSessionListItems
@@ -395,6 +401,15 @@ class MainActivity : AppCompatActivity() {
     private val teamChannelRelayedIds =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val teamChannelRelayOutputIds =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /**
+     * 2026-11-13 频道权限：本机用户经 App 发出的频道消息 id，与由这些消息
+     * （及中转回帖）学到的 App 自身 agent_id。只有它们和登记的平台 Agent
+     * 发的 @ 才会中转到设备 Agent（见 ChannelSenderPolicy）。
+     */
+    private val teamChannelOwnPostIds =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val teamChannelSelfAgentIds =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     /** 本会话已发轮次（发一条消息计一轮；上限见 TeamChatLimits.MAX_ROUNDS）。 */
     private var teamChannelRoundsUsed = 0
@@ -769,7 +784,7 @@ class MainActivity : AppCompatActivity() {
             apiKeyProvider = { agent -> agent.authRef?.let { brainKeyStore.getSecret(it) } },
             taskIdStore = SharedPreferencesManusTaskIdStore(applicationContext),
             // 回复落在非 assistant_message 字段时记一条诊断（不静默丢掉）。
-            onDiagnostic = { android.util.Log.d("ManusChatBridge", it) },
+            onDiagnostic = { android.util.Log.d("ManusChatBridge", SecretRedactor.redact(it)) },
         )
     }
 
@@ -1048,6 +1063,9 @@ class MainActivity : AppCompatActivity() {
         applyStoredTheme()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
+        // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
+        window.decorView.post { handleFlagshipEntryIntent(intent) }
         // V5 按主流改（maintainer 2026-11-11）：“+”菜单附件选择器与相机权限。
         // 必须在 onCreate 里注册（Activity 结果回调的注册点）。
         registerAttachmentLaunchers()
@@ -1160,13 +1178,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.buttonSearch).setOnClickListener {
             showEntry(DrawerController.ID_HISTORY_SEARCH)
         }
-        // V5 C2-3-R4 (v4.3-01)：铃铛只有图标、没有红点——App 内没有通知
-        // 功能，红点是伪造状态；点按只给“通知中心待开发”提示，绝不编
-        // 造通知数。大脑 pill 与“新建”已删：大脑状态在设置页大脑分节
-        // （refreshBrainStatus 写 brainStatus），新对话走抽屉“对话”
-        // 入口（onDrawerEntrySelected 的 nav_chat 分支调 newConversationAndShow）。
+        // Historical resource id retained; this is the real new-conversation action.
         findViewById<View>(R.id.buttonBell).setOnClickListener {
-            toast("通知中心待开发")
+            newConversationAndShow()
         }
     }
 
@@ -1525,6 +1539,7 @@ class MainActivity : AppCompatActivity() {
             onDeleteServer = { serverId -> deleteMcpServer(serverId) },
             onSaveServer = { form, existingId -> saveMcpServer(form, existingId) },
             onImportServers = { json -> importMcpServers(json) },
+            onManifests = { showExtensionManifests() },
         )
         screenMcpPlugins = mcpPluginController.root
         container.addView(screenMcpPlugins)
@@ -1535,6 +1550,7 @@ class MainActivity : AppCompatActivity() {
                 agentStore.getAgent(agentId)?.let { openAgentSession(it) }
             },
             onPost = { text -> postTeamChannelMessage(text) },
+            onCreateTask = { goal, created -> showCreateTaskDialog(initialGoal = goal, onCreated = created) },
             onMarkRead = { markTeamChannelRead() },
             onNewRound = {
                 teamChannelRoundsUsed = 0
@@ -1542,6 +1558,11 @@ class MainActivity : AppCompatActivity() {
             },
             onStartFanout = { question -> startTeamFanout(question) },
             onRefresh = { refreshTeamChannel() },
+            onReconnect = {
+                stopTeamChannelFeed()
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -1951,6 +1972,10 @@ class MainActivity : AppCompatActivity() {
                 sessions,
                 titleOverrides = titles,
                 summaryOverrides = summaries,
+                memberLabel = { id ->
+                    if (id == TurnTaskRecorder.LOCAL_AGENT_ID) "本机 App"
+                    else runCatching { agentStore.getAgent(id)?.displayName }.getOrNull() ?: id
+                },
                 timeLabel = { epochSeconds -> UiKit.shortTime(epochSeconds) },
             )
             val defaultSubtitle = "当前：${chatViewModel.currentSessionLabel()}"
@@ -3364,13 +3389,12 @@ class MainActivity : AppCompatActivity() {
         } ?: return Result.failure(IllegalStateException("30 秒内无回包，Hand 可能不在线"))
         return when (terminal) {
             is HandEvent.Result -> try {
-                val ack = parseProjectFolderAuthorizationAck(terminal.output, folder, target.agentId)
-                handAuthorizationReceipts.record(
+                verifyAndRecordProjectFolderAuthorization(
+                    rawAck = terminal.output,
                     peerFingerprintSha256 = target.peer.fingerprintSha256,
                     agentId = target.agentId,
                     requestedFolder = folder,
-                    rawAck = terminal.output,
-                    ack = ack,
+                    receipts = handAuthorizationReceipts,
                     receivedAtEpochSeconds = System.currentTimeMillis() / 1000,
                 )
                 Result.success(Unit)
@@ -4562,12 +4586,21 @@ class MainActivity : AppCompatActivity() {
         // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
         // 不显示真人名字（见 HomeScreenController.greeting）。
         val greetingView =
-            UiKit.text(this, HomeScreenController.greeting(), 22f, R.color.home_text, bold = true).apply {
+            UiKit.text(this, HomeScreenController.greeting(), 28f, R.color.home_text, bold = true).apply {
                 gravity = android.view.Gravity.CENTER
             }
+        card.addView(UiKit.text(this, "∞", 34f, R.color.home_gradient_start).apply {
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, dp(20), 0, dp(12))
+        })
         card.addView(greetingView)
+        card.addView(UiKit.text(this, "项目 · 选择或切换 ›", 12f, R.color.home_text_secondary).apply {
+            minHeight = dp(48)
+            gravity = android.view.Gravity.CENTER
+            setOnClickListener { showChatProjectPicker() }
+        })
         card.addView(
-            UiKit.text(this, "有什么想一起解决的？", 14f, R.color.home_text_secondary).apply {
+            UiKit.text(this, "", 14f, R.color.home_text_secondary).apply {
                 gravity = android.view.Gravity.CENTER
                 setPadding(0, dp(4), 0, dp(14))
             },
@@ -4577,7 +4610,7 @@ class MainActivity : AppCompatActivity() {
         // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
         // 连接设备/Agent 团队/任务中心）由抽屉承接（R2）。
         if (homeScreenController.suggestionsVisible()) {
-            EntryRegistry.homeSuggestions().take(2).chunked(2).forEach { rowSuggestions ->
+            EntryRegistry.homeSuggestions().take(3).chunked(2).forEach { rowSuggestions ->
                 val row = UiKit.horizontal(this).apply {
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
@@ -4587,7 +4620,7 @@ class MainActivity : AppCompatActivity() {
                 rowSuggestions.forEachIndexed { index, entry ->
                     row.addView(
                         homeSuggestionPill(entry.iconGlyph, entry.title) { applySuggestion(entry.target) },
-                        LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                        LinearLayout.LayoutParams(0, dp(48), 1f).apply {
                             marginEnd = if (index == 0) dp(8) else 0
                         },
                     )
@@ -4649,6 +4682,20 @@ class MainActivity : AppCompatActivity() {
      * SCREEN 类入口由父入口带参数打开（任务详情带任务 id），不走这里。
      * ACTION 类入口是应用内动作（如 nav_theme → cycleTheme()）。
      */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        window.decorView.post { handleFlagshipEntryIntent(intent) }
+    }
+
+    private fun handleFlagshipEntryIntent(intent: Intent?) {
+        val entryId = intent?.getStringExtra(
+            wherevercode.agent.ui.flagship.EXTRA_FLAGSHIP_ENTRY,
+        ) ?: return
+        intent.removeExtra(wherevercode.agent.ui.flagship.EXTRA_FLAGSHIP_ENTRY)
+        openRegistryEntry(entryId)
+    }
+
     private fun openRegistryEntry(id: String) {
         val entry = EntryRegistry.find(id) ?: return
         if (entry.status == EntryRegistry.Status.TODO) {
@@ -4681,6 +4728,7 @@ class MainActivity : AppCompatActivity() {
             context = this,
             rootLabel = screenProjects.findViewById(R.id.projectRoot),
             treePane = screenProjects.findViewById(R.id.projectTreePane),
+            breadcrumb = screenProjects.findViewById(R.id.projectBreadcrumb),
             treeList = screenProjects.findViewById(R.id.projectTreeList),
             treeScroll = screenProjects.findViewById(R.id.projectTreeScroll),
             emptyView = screenProjects.findViewById(R.id.projectEmpty),
@@ -4782,6 +4830,13 @@ class MainActivity : AppCompatActivity() {
         }
         screenTasks.findViewById<View>(R.id.buttonEventRefresh).setOnClickListener { refreshEvents() }
         screenTasks.findViewById<View>(R.id.buttonTaskRefresh).setOnClickListener { refreshTasks() }
+        screenTasks.findViewById<View>(R.id.buttonCreateTask).setOnClickListener { showCreateTaskDialog() }
+        screenTasks.findViewById<TextView>(R.id.buttonTaskSessionDetails).setOnClickListener { button ->
+            val details = screenTasks.findViewById<View>(R.id.taskSessionDetails)
+            val expanded = details.visibility != View.VISIBLE
+            details.visibility = if (expanded) View.VISIBLE else View.GONE
+            (button as TextView).text = if (expanded) "当前会话与运行事件　收起 ⌃" else "当前会话与运行事件　展开 ›"
+        }
     }
 
     private fun updateTaskStatus(state: ChatUiState) {
@@ -5137,6 +5192,52 @@ class MainActivity : AppCompatActivity() {
      * 后台线程读注册表快照（MCP 服务器 + 插件 + 七类计数）→ 回主线程渲染。
      * 大脑未建好时只显示加载态，不伪造空列表。
      */
+    /** An inert manifest catalogue: importing metadata cannot enable tools or grant permissions. */
+    private fun showExtensionManifests() {
+        val prefs = getSharedPreferences("extension-manifests-v1", MODE_PRIVATE)
+        val rows = prefs.all.values.mapNotNull { raw ->
+            try { wherevercode.agent.core.extension.ExtensionManifest.parse(raw as String) }
+            catch (_: Exception) { null }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("扩展清单 v1（${rows.size}）")
+            .setMessage(rows.joinToString("\n\n") {
+                "${it.name} · ${it.kind} · ${it.version}\n声明权限：${it.permissions.joinToString().ifBlank { "无" }}\n仅元数据，未安装、未授权、未执行"
+            }.ifBlank { "暂无清单。支持 Agent / Model / Harness / MCP / Skills / Automation / Network / Device / UI Extension。" })
+            .setPositiveButton("导入 JSON") { _, _ -> importExtensionManifest() }
+            .setNegativeButton("关闭", null).show()
+    }
+
+    private fun importExtensionManifest() {
+        val input = EditText(this).apply {
+            minLines = 6
+            hint = "{\"schemaVersion\":1,\"id\":\"example\",\"kind\":\"agent\",\"name\":\"示例\",\"version\":\"1.0.0\",\"permissions\":[]}"
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("导入扩展清单")
+            .setMessage("仅保存能力与权限声明；凭据与连接配置请使用现有设置。不会安装或启用扩展。")
+            .setView(input).setPositiveButton("预览", null).setNegativeButton("取消", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val manifest = wherevercode.agent.core.extension.ExtensionManifest.parse(input.text.toString())
+                    AlertDialog.Builder(this).setTitle("保存 ${manifest.name}？")
+                        .setMessage("类型：${manifest.kind}\n版本：${manifest.version}\n声明权限：${manifest.permissions.joinToString().ifBlank { "无" }}\n保存不授予这些权限。")
+                        .setPositiveButton("保存清单") { _, _ ->
+                            val prefs = getSharedPreferences("extension-manifests-v1", MODE_PRIVATE)
+                            val key = "${manifest.kind}:${manifest.id}"
+                            if (prefs.contains(key)) toast("同类型同 id 的清单已存在，未覆盖。")
+                            else {
+                                prefs.edit().putString(key, manifest.toJson().toString()).apply()
+                                toast("清单已保存，扩展尚未启用。")
+                                dialog.dismiss()
+                            }
+                        }.setNegativeButton("取消", null).show()
+                } catch (e: Exception) { input.error = e.message ?: "清单无效" }
+            }
+        }
+        dialog.show()
+    }
+
     private fun refreshMcpPlugins() {
         val components = brainComponents
         if (components == null) {
@@ -5545,6 +5646,8 @@ class MainActivity : AppCompatActivity() {
             fanoutRuns = fanoutRuns,
             fanoutRunning = teamChannelFanoutRunning,
             notice = teamChannelNotice,
+            trustedAttributionPosterIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
+                synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
         )
     }
 
@@ -5637,6 +5740,15 @@ class MainActivity : AppCompatActivity() {
                     ).clear()
                 }
             }
+            // 2026-11-13 频道权限：从本机发出的消息学 App 自身 agent_id
+            // （安全分支原在 ChannelFeed.onMessages 批量回调里；PR #10 已把
+            // feed 换成 McpChannelEventFeed 的单条回调，这里按单条移植，
+            // 语义不变：learnSelfAgentIds 只挑 id 命中本机发帖集的消息）。
+            teamChannelSelfAgentIds += ChannelSenderPolicy.learnSelfAgentIds(
+                listOf(message),
+                synchronized(teamChannelOwnPostIds) { teamChannelOwnPostIds.toSet() } +
+                    synchronized(teamChannelRelayOutputIds) { teamChannelRelayOutputIds.toSet() },
+            )
             // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
             // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
             maybeRelayChannelMessages(listOf(message))
@@ -5685,6 +5797,14 @@ class MainActivity : AppCompatActivity() {
             isManusConfigured = ::isManusConfigured,
             relayedIds = teamChannelRelayedIds,
             relayOutputIds = teamChannelRelayOutputIds,
+            isTrustedSender = { message ->
+                ChannelSenderPolicy.isTrustedRelaySender(
+                    message,
+                    agents,
+                    ownPostIds = synchronized(teamChannelOwnPostIds) { teamChannelOwnPostIds.toSet() },
+                    selfAgentIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
+                )
+            },
         )
         val todo = messages.filter { message ->
             message.id !in teamChannelRelayedIds &&
@@ -5724,7 +5844,8 @@ class MainActivity : AppCompatActivity() {
                     tokenProvider = { platformCredentialStore.loadPlatformToken() },
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
-                runBlocking { transport.postMessage(channelId, text) }
+                val postedId = runBlocking { transport.postMessage(channelId, text) }
+                if (postedId.isNotBlank()) teamChannelOwnPostIds += postedId
                 teamChannelRoundsUsed++
                 teamChannelNotice = null
             } catch (e: Exception) {
@@ -5920,7 +6041,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 refreshConsole()
             },
-            onLog = { Log.d("ConsoleWs", it) },
+            onLog = { Log.d("ConsoleWs", SecretRedactor.redact(it)) },
         )
         consoleWsFeed = feed
         feed.start(devices)
@@ -6308,6 +6429,16 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 emptyList()
             }
+            val controlStatus = if (task?.sessionId == null) try {
+                when (components.controlPlane?.getControlStatus(taskId)) {
+                    wherevercode.agent.core.control.ControlStatus.PAUSING -> "暂停请求待执行器确认"
+                    wherevercode.agent.core.control.ControlStatus.PAUSED -> "已确认暂停"
+                    wherevercode.agent.core.control.ControlStatus.STOPPING ->
+                        if (task != null && TaskStates.isTerminal(task.state)) "任务已结束" else "停止请求待执行器确认"
+                    wherevercode.agent.core.control.ControlStatus.RUNNING -> "允许调度（执行进度以任务状态为准）"
+                    null -> "控制平面未就绪"
+                }
+            } catch (_: Exception) { "控制状态读取失败，请刷新" } else null
             val artifactPaths = TaskDetailArtifacts.extractPaths(steps)
             val approvals = history.filter { record ->
                 val target = record.target ?: return@filter false
@@ -6342,6 +6473,7 @@ class MainActivity : AppCompatActivity() {
                     pipeline = pipelineView,
                     onPipelineAction = { action -> handlePipelineAction(taskId, action, artifactPaths) },
                     autoDecisions = autoDecisions,
+                    controlStatus = controlStatus,
                 )
             }
         }.start()
@@ -6363,9 +6495,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 阶段 1（U3）：逐任务控制。停止 / 重试真实接线；改目标仅 queued
-     * 任务可改（弹框改描述）；暂停仅当前轮次任务可用（委托
-     * ChatViewModel.pause()，安全检查点语义）；其余情况页脚明标未实现。
+     * 分派任务通过 ControlPlane 控制；聊天镜像沿用原会话安全检查点。
+     * 改目标仅限未认领任务；执行中的任务必须先停止确认。
      */
     private fun taskControls(task: TaskRecord): View {
         val row = UiKit.horizontal(this).apply {
@@ -6373,7 +6504,10 @@ class MainActivity : AppCompatActivity() {
         }
         val terminal = TaskStates.isTerminal(task.state)
         if (!terminal) {
-            if (task.taskId == chatViewModel.currentTurnTaskId() && chatViewModel.isRunning()) {
+            if (task.sessionId == null) {
+                row.addView(taskButton("暂停") { requestTaskControl(task.taskId, ControlAction.PAUSE) })
+                row.addView(taskButton("继续") { requestTaskControl(task.taskId, ControlAction.RESUME) })
+            } else if (task.taskId == chatViewModel.currentTurnTaskId() && chatViewModel.isRunning()) {
                 row.addView(taskButton("暂停") { toast(chatViewModel.pause()); refreshTasks() })
             }
             row.addView(taskButton("停止") {
@@ -6390,7 +6524,7 @@ class MainActivity : AppCompatActivity() {
             // 未启用流水线的任务走 P0 requestRework 原样。
             row.addView(taskButton("打回返工") { showReworkDialog(task) })
         }
-        if (task.state == "queued") {
+        if (task.sessionId == null && TaskStates.isClaimable(task.state)) {
             row.addView(taskButton("改目标") { editTaskGoal(task) })
         }
         // “···”管理单：删除任务（可见入口，不藏长按里；项目/大脑
@@ -6428,36 +6562,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopTask(task: TaskRecord) {
         // 当前轮次任务：走聊天控制（安全检查点停轮）。
-        if (task.taskId == chatViewModel.currentTurnTaskId()) {
+        if (task.sessionId != null && task.taskId == chatViewModel.currentTurnTaskId()) {
             toast(chatViewModel.stop())
             refreshTasks()
             return
         }
+        requestTaskControl(task.taskId, ControlAction.STOP)
+    }
+
+    /** All dispatched-task controls use the same persisted control plane as MCP. */
+    private fun requestTaskControl(taskId: String, action: ControlAction, goal: String? = null) {
         val components = brainComponents ?: return
-        // 正在执行的分派任务：取消执行 job，runner 记为 cancelled。
-        if (components.taskRunner.cancel(task.taskId)) {
-            toast("已请求停止分派任务。")
-            refreshTasks()
+        val plane = components.controlPlane ?: run {
+            toast("控制平面尚未就绪，请稍后重试。")
             return
         }
-        // 未执行的 queued/assigned 任务：直接记 cancelled（合法迁移）。
         Thread {
-            try {
-                val current = components.taskStore.getTask(task.taskId)
-                if (current != null && !TaskStates.isTerminal(current.state)) {
-                    components.taskStore.updateTask(
-                        task.taskId,
-                        mapOf("state" to "cancelled", "result" to "任务被用户停止。"),
-                        current.version,
-                        current.goalVersion,
-                        current.authEpoch,
-                    )
-                }
+            val message = try {
+                val result = TaskControlActions(components.taskStore, plane).request(taskId, action, goal)
+                TaskControlActions.message(result)
             } catch (e: Exception) {
-                runOnUiThread { toast("停止失败：${e.message}") }
-                return@Thread
+                "操作失败：${e.message}"
             }
-            runOnUiThread { refreshTasks() }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                toast(message)
+                refreshTasks()
+                if (taskDetailVisible && taskDetailTaskId == taskId) openTaskDetail(taskId)
+            }
         }.start()
     }
 
@@ -6508,7 +6640,7 @@ class MainActivity : AppCompatActivity() {
         val message = buildString {
             append("删除任务“${task.title.ifBlank { task.taskId }}”？")
             append("只删除任务库里的这条记录，仓库、分支与聊天消息不受影响，无法恢复。")
-            if (running) append("任务正在执行，会先停止再删除。")
+            if (running) append("将先请求停止；只有执行器确认后才能删除。")
         }
         AlertDialog.Builder(this)
             .setTitle("删除任务")
@@ -6522,36 +6654,20 @@ class MainActivity : AppCompatActivity() {
      * 删除任务记录：正在跑的先停再删；删完回任务列表、不留空页，
      * 任务库与成果汇总立刻刷新，不留幽灵行。
      *
-     * 先停：当前轮次任务走聊天控制停轮；分派任务取消 runner job；
-     * 其余非终态任务记 cancelled——与 stopTask 同款语义。任何一
-     * 步失败都不拦删除：行删掉后，后续写回按任务不存在拒绝，不会
-     * 复活；远端成员的迟到回传按 attemptId 围栏拒绝（P0）。
+     * 通过控制平面请求停止。未确认时保留任务和审计；聊天镜像需从
+     * 原会话先停止，终态后才能删除。
      */
     private fun deleteTaskRecord(task: TaskRecord) {
         val components = brainComponents ?: return
-        val isCurrentTurn = task.taskId == chatViewModel.currentTurnTaskId()
-        if (isCurrentTurn && chatViewModel.isRunning()) {
-            chatViewModel.stop()
-        }
         Thread {
             try {
-                val current = components.taskStore.getTask(task.taskId)
-                if (current != null && !TaskStates.isTerminal(current.state) && !isCurrentTurn) {
-                    try {
-                        if (!components.taskRunner.cancel(task.taskId)) {
-                            components.taskStore.updateTask(
-                                task.taskId,
-                                mapOf("state" to "cancelled", "result" to "任务被用户删除。"),
-                                current.version,
-                                current.goalVersion,
-                                current.authEpoch,
-                            )
-                        }
-                    } catch (_: Exception) {
-                        // 停止失败不拦删除：行删掉即终态，后续写回会被拒绝。
-                    }
+                val plane = components.controlPlane ?: throw IllegalStateException("控制平面尚未就绪")
+                val removed = TaskControlActions(components.taskStore, plane)
+                    .deleteAfterConfirmedStop(task.taskId)
+                if (!removed) {
+                    runOnUiThread { toast("停止尚未确认，任务记录已保留。请等待执行器回执后重试删除。") }
+                    return@Thread
                 }
-                val removed = components.taskStore.deleteTask(task.taskId)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (taskDetailVisible && taskDetailTaskId == task.taskId) hideTaskDetail()
@@ -6566,7 +6682,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun editTaskGoal(task: TaskRecord) {
-        val components = brainComponents ?: return
         val input = EditText(this).apply {
             setText(task.description ?: task.title)
             setSingleLine(false)
@@ -6574,7 +6689,7 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("改目标")
-            .setMessage("仅修改 queued 任务的目标描述；执行中的任务改目标未实现。")
+            .setMessage("仅修改尚未认领的目标并更新目标版本；执行中的任务请先停止确认。")
             .setView(input)
             .setPositiveButton("保存") { _, _ ->
                 val goal = input.text.toString().trim()
@@ -6582,28 +6697,7 @@ class MainActivity : AppCompatActivity() {
                     toast("目标不能为空。")
                     return@setPositiveButton
                 }
-                Thread {
-                    try {
-                        val current = components.taskStore.getTask(task.taskId)
-                        if (current == null || current.state != "queued") {
-                            runOnUiThread { toast("任务已不在 queued，改目标未生效。") }
-                            return@Thread
-                        }
-                        components.taskStore.updateTask(
-                            task.taskId,
-                            mapOf(
-                                "description" to SecretRedactor.redact(goal, 4000),
-                                "title" to SecretRedactor.redact(goal.take(40), 100),
-                            ),
-                            current.version,
-                            current.goalVersion,
-                            current.authEpoch,
-                        )
-                        runOnUiThread { refreshTasks() }
-                    } catch (e: Exception) {
-                        runOnUiThread { toast("改目标失败：${e.message}") }
-                    }
-                }.start()
+                requestTaskControl(task.taskId, ControlAction.CHANGE_GOAL, SecretRedactor.redact(goal, 4000))
             }
             .setNegativeButton("取消", null)
             .show()
@@ -7456,22 +7550,34 @@ class MainActivity : AppCompatActivity() {
         cloudSection.addView(canDispatchBox)
         cloudSection.addView(setupSheetButton)
         form.addView(cloudSection)
-        form.addView(label("服务地址"))
+        val baseUrlLabel = label("服务地址")
+        val modelLabel = label("模型")
+        val adapterLabel = label("适配器 id")
+        val binaryLabel = label("CLI 二进制名")
+        val authRefLabel = label("密钥引用名")
+        val secretLabel = label("密钥值")
+        val capabilitiesLabel = label("能力")
+        val limitsLabel = label("已知限制")
+        val dispatchableLabel = label("任务权限")
+        form.addView(label("当前类型配置"))
+        form.addView(baseUrlLabel)
         form.addView(baseUrlField)
-        form.addView(label("模型"))
+        form.addView(modelLabel)
         form.addView(modelField)
-        form.addView(label("适配器 id"))
+        form.addView(adapterLabel)
         form.addView(adapterField)
-        form.addView(label("CLI 二进制名"))
+        form.addView(binaryLabel)
         form.addView(binaryField)
-        form.addView(label("密钥引用名"))
+        form.addView(authRefLabel)
         form.addView(authRefField)
-        form.addView(label("密钥值"))
+        form.addView(secretLabel)
         form.addView(secretField)
-        form.addView(label("能力"))
+        form.addView(label("通用能力与限制"))
+        form.addView(capabilitiesLabel)
         form.addView(capsField)
+        form.addView(dispatchableLabel)
         form.addView(dispatchableBox)
-        form.addView(label("已知限制"))
+        form.addView(limitsLabel)
         form.addView(limitsField)
 
         fun currentKind(): BrainKind = when {
@@ -7490,21 +7596,36 @@ class MainActivity : AppCompatActivity() {
             val kind = currentKind()
             val isManus = kind == BrainKind.MODEL_API && manusBox.isChecked
             manusBox.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            baseUrlLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             baseUrlField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            modelLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             modelField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             modelField.hint = if (isManus) {
                 "档位：standard / lite / max（默认 standard；“Manus 2.0 Lite”填 lite）"
             } else {
                 "模型，如 deepseek-flash"
             }
+            binaryLabel.visibility = if (kind == BrainKind.AGENT_RUNTIME) View.VISIBLE else View.GONE
             binaryField.visibility = if (kind == BrainKind.AGENT_RUNTIME) View.VISIBLE else View.GONE
             binaryField.hint = if (isDeviceAgent()) "设备上的 CLI 二进制名，如 codex" else "CLI 二进制名，如 codebuddy"
+            val adapterVisible = kind in setOf(BrainKind.MODEL_API, BrainKind.SUBSCRIPTION, BrainKind.AGENT_RUNTIME)
+            adapterLabel.visibility = if (adapterVisible) View.VISIBLE else View.GONE
+            adapterField.visibility = adapterLabel.visibility
             deviceSection.visibility = if (isDeviceAgent()) View.VISIBLE else View.GONE
             platformSection.visibility = if (isPlatformAgent()) View.VISIBLE else View.GONE
             cloudSection.visibility = if (isCloudAgent()) View.VISIBLE else View.GONE
             cloudHomeSpinner.visibility = if (isCloudAgent() && cloudHomeDevice.isChecked) View.VISIBLE else View.GONE
+            authRefLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             authRefField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            secretLabel.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
             secretField.visibility = if (kind == BrainKind.MODEL_API) View.VISIBLE else View.GONE
+            val commonVisibility = if (kind == BrainKind.CLOUD_AGENT) View.GONE else View.VISIBLE
+            capabilitiesLabel.visibility = commonVisibility
+            capsField.visibility = commonVisibility
+            limitsLabel.visibility = commonVisibility
+            limitsField.visibility = commonVisibility
+            dispatchableLabel.visibility = commonVisibility
+            dispatchableBox.visibility = commonVisibility
         }
         typeGroup.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
         cloudHomeGroup.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
@@ -8045,65 +8166,60 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 指派任务给某 Agent：建 queued 任务行并写 assigned_agent_id；本地不代执行。 */
-    private fun assignTaskToAgent(agent: AgentRecord) {
-        if (!agent.dispatchable) {
-            toast("该 Agent 不可派单（dispatchable=false），只对话、不接任务。")
-            return
-        }
+    /** C13: all explicit task entry points share the existing TaskStore/runner pipeline. */
+    private var taskComposerLoading = false
+
+    private fun showCreateTaskDialog(
+        initialGoal: String = "",
+        initialAgentId: String? = null,
+        onCreated: () -> Unit = {},
+    ) {
         val components = brainComponents ?: run {
-            toast("大脑还在加载，请稍候再指派。")
+            toast("任务组件正在加载，请稍后重试。")
             return
         }
-        val input = EditText(this).apply {
-            hint = "任务目标，如：写一个 calculator.py 并跑测试"
-            setSingleLine(false)
-            minLines = 3
-        }
-        AlertDialog.Builder(this)
-            .setTitle("指派任务给 ${agent.displayName}")
-            .setMessage(
-                if (agent.deviceId != null) {
-                    "任务进入 queued，远端泵会发到设备上执行；本地执行器不代执行。"
-                } else {
-                    "任务进入 queued 等 ${agent.displayName} 认领；本地执行器不代执行（跨设备执行待 P2）。"
-                },
-            )
-            .setView(input)
-            .setPositiveButton("指派") { _, _ ->
-                val goal = input.text.toString().trim()
-                if (goal.isBlank()) {
-                    toast("任务目标不能为空。")
-                    return@setPositiveButton
+        if (taskComposerLoading) return
+        taskComposerLoading = true
+        val initialProjectId = currentChatProjectId()
+        Thread {
+            try {
+                val projects = projectStore.listProjects()
+                val agents = agentStore.listAgents()
+                runOnUiThread {
+                    taskComposerLoading = false
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    CreateTaskDialog(this, projects, agents, initialGoal, initialProjectId, initialAgentId) {
+                        goal, agentId, projectId, complete ->
+                        Thread {
+                            try {
+                                val task = TaskComposer.submit(components.taskStore, agentStore, projectStore,
+                                    goal, agentId, projectId, components.configStore.currentBrainId())
+                                runOnUiThread {
+                                    if (isFinishing || isDestroyed) return@runOnUiThread
+                                    complete(null)
+                                    onCreated()
+                                    toast("任务 ${task.taskId.take(8)} 已创建，等待执行器认领。")
+                                    showEntry(DrawerController.ID_TASKS)
+                                    refreshTasks()
+                                    openTaskDetail(task.taskId)
+                                }
+                            } catch (e: Exception) {
+                                runOnUiThread { complete(e.message ?: "创建失败，请重试") }
+                            }
+                        }.start()
+                    }.show()
                 }
-                Thread {
-                    try {
-                        val now = System.currentTimeMillis() / 1000
-                        val record = TaskRecord(
-                            taskId = UUID.randomUUID().toString(),
-                            title = goal.take(40),
-                            description = goal,
-                            state = "queued",
-                            // V5 跨设备开发（2026-11-12，A1）：手动指派
-                            // 同样带当前聊天绑定作 projectId。
-                            projectId = currentChatProjectId(),
-                            assignedAgentId = agent.agentId,
-                            createdAt = now,
-                            updatedAt = now,
-                            version = 1,
-                        )
-                        components.taskStore.createTask(record)
-                        runOnUiThread {
-                            toast("已指派给 ${agent.displayName}，进入 queued 等认领。")
-                            refreshTasks()
-                        }
-                    } catch (e: Exception) {
-                        runOnUiThread { toast("指派失败：${e.message}") }
-                    }
-                }.start()
+            } catch (e: Exception) {
+                runOnUiThread {
+                    taskComposerLoading = false
+                    toast("读取项目或成员失败，请重试。")
+                }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }.start()
+    }
+
+    private fun assignTaskToAgent(agent: AgentRecord) {
+        showCreateTaskDialog(initialAgentId = agent.agentId)
     }
 
     /** 测试某 Agent 的连接（结果写回记录：登录态 + 摘要 + 时间）。 */
@@ -8420,6 +8536,30 @@ class MainActivity : AppCompatActivity() {
         bindAutonomySettings()
         // Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接设备的 Hand）。
         bindHandSyncSettings()
+        bindSettingsNavigation()
+    }
+
+    private fun bindSettingsNavigation() {
+        val scroll = screenSettings as? ScrollView ?: return
+        val destinations = mapOf(
+            R.id.settingsJumpModels to { screenSettings.findViewById<View>(R.id.brainListContainer) },
+            R.id.settingsJumpRepos to { screenSettings.findViewById<View>(R.id.githubAuthStatus) },
+            R.id.settingsJumpDevices to { screenSettings.findViewById<View>(R.id.handAutoSyncRow) },
+            R.id.settingsJumpMcp to {
+                screenSettings.findViewWithTag<View>("settings_mcp_dispatch")
+                    ?: screenSettings.findViewById(R.id.buttonBrainAdvanced)
+            },
+            R.id.settingsJumpAbout to { screenSettings.findViewById<View>(R.id.appUpdateStatus) },
+        )
+        destinations.forEach { (buttonId, resolveTarget) ->
+            screenSettings.findViewById<View>(buttonId).setOnClickListener {
+                val target = resolveTarget() ?: return@setOnClickListener
+                val rect = android.graphics.Rect()
+                target.getDrawingRect(rect)
+                scroll.offsetDescendantRectToMyCoords(target, rect)
+                scroll.smoothScrollTo(0, rect.top.coerceAtLeast(0))
+            }
+        }
     }
 
     /**
@@ -8436,6 +8576,7 @@ class MainActivity : AppCompatActivity() {
         val section = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(20), 0, dp(8))
+            tag = "settings_mcp_dispatch"
         }
         val title = TextView(this).apply {
             text = "本机 MCP 派工"
@@ -8479,10 +8620,10 @@ class MainActivity : AppCompatActivity() {
         toggle.setOnCheckedChangeListener { _, enabled ->
             toggleMcpDispatchService(enabled, toggle, tokenButton, status, endpoint)
         }
-        tokenButton.setOnClickListener {
+        fun issueToken(create: () -> wherevercode.agent.core.dispatch.IssuedDispatchToken) {
             tokenButton.isEnabled = false
             Thread {
-                val issued = runCatching { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                val issued = runCatching(create)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     tokenButton.isEnabled = toggle.isChecked
@@ -8509,6 +8650,38 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.start()
+        }
+        tokenButton.setOnClickListener {
+            val capabilities = wherevercode.agent.core.dispatch.DispatchCapability.values()
+            val roles = arrayOf("派工", "执行", "本机所有者")
+            android.app.AlertDialog.Builder(this)
+                .setTitle("令牌权限")
+                .setItems(roles) { _, index ->
+                    if (index == capabilities.size) {
+                        issueToken { McpDispatchRuntime.issueOwnerToken(applicationContext) }
+                    } else {
+                        val principal = EditText(this).apply { hint = "Agent ID" }
+                        val project = EditText(this).apply { hint = "项目 ID（可留空）" }
+                        val fields = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(principal)
+                            addView(project)
+                        }
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle(roles[index])
+                            .setView(fields)
+                            .setPositiveButton("生成令牌") { _, _ ->
+                                val id = principal.text.toString().trim()
+                                val projectId = project.text.toString().trim().ifEmpty { null }
+                                issueToken {
+                                    McpDispatchRuntime.issueAgentToken(applicationContext, id, capabilities[index], projectId)
+                                }
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+                .show()
         }
         section.addView(title)
         section.addView(note)
@@ -8806,7 +8979,10 @@ class MainActivity : AppCompatActivity() {
                     targetResolver = ::resolveRemoteTargetForMember,
                     controlSender = remoteControlSender,
                 )
-                components.controlPlane?.let { McpDispatchRuntime.bindControlPlane(it) }
+                components.controlPlane?.let { plane ->
+                    plane.configureTaskTargetResolver { task -> resolveRemoteTargetForMember(task.assignedAgentId, task) }
+                    McpDispatchRuntime.bindControlPlane(plane)
+                }
                 runOnUiThread {
                     brainComponents = components
                     chatViewModel.attach(components, toolApprovalGate)
@@ -8888,6 +9064,7 @@ class MainActivity : AppCompatActivity() {
                             scheduler = components.taskScheduler,
                             stepStore = components.taskStepStore,
                             port = remoteChatPort,
+                            artifactDirectory = java.io.File(filesDir, "task-artifacts"),
                             // P2：远端编码发 plan 批准后的包、完成停 review。
                             pipelineHook = components.pipelineOrchestrator?.let { PipelineRunnerHookImpl(it) },
                         ),
@@ -8934,6 +9111,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                     )
+                    // Remote/MCP tasks whose executor vanished mid-pause/stop
+                    // are reconciled here too, not only between local tasks.
+                    components.controlPlane?.let { plane ->
+                        pump.onControlSweep = { plane.reconcileExpiredControls() }
+                    }
                     remoteTaskPump = pump
                     pump.start()
                     // P2 自动执行（2026-11-11）：规划者自动起草 + 审查者自动
@@ -8992,7 +9174,14 @@ class MainActivity : AppCompatActivity() {
         // V5 C1：保留现有版本行不动，在其后追加短 SHA 与构建时间（VersionInfo）。
         aboutVersion.text = try {
             val info = packageManager.getPackageInfo(packageName, 0)
-            VersionInfo.aboutText("WhereverCode 超级 Agent · ${info.versionName}（${info.versionCode}）")
+            VersionInfo.aboutText("WhereverCode 超级 Agent · ${info.versionName}（${info.versionCode}）") +
+                "\n包名：$packageName · " + if (packageName.endsWith(".ci")) {
+                    "独立 CI 测试包，不覆盖正式数据"
+                } else if (BuildConfig.MAINTAINER_SIGNED) {
+                    "维护者签名构建；覆盖升级仍需与已安装证书一致"
+                } else {
+                    "未配置维护者签名，不声明可覆盖升级"
+                }
         } catch (_: Exception) {
             VersionInfo.aboutText("WhereverCode 超级 Agent")
         }
@@ -9167,6 +9356,13 @@ class MainActivity : AppCompatActivity() {
     private fun refreshBrainCapsule() {
         if (!::brainCapsule.isInitialized) return
         val agent = if (::chatViewModel.isInitialized) chatViewModel.selectedAgent else null
+        screenChat.findViewById<TextView>(R.id.modelConnectionBanner)?.apply {
+            val components = brainComponents
+            val id = components?.configStore?.currentBrainId()
+            val configured = id != null && components?.isBrainConfigured(id) == true
+            visibility = if (components != null && agent == null && !configured) View.VISIBLE else View.GONE
+            setOnClickListener { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
+        }
         if (agent == null) {
             brainCapsule.text = brainShortLabel()
             brainCapsule.visibility = View.VISIBLE

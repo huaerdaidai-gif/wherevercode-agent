@@ -100,14 +100,14 @@ object EntryRegistry {
 
     val ENTRIES: List<Entry> = listOf(
         // ── 首页问候区建议 pill（v4.3-01；点按填输入框，等用户补齐再发）──
-        Entry("home_dev_app", "开发一个 App", Group.HOME_SUGGESTION,
-            Status.IMPLEMENTED, TargetKind.SUGGESTION, "开发一个 App：",
+        Entry("home_dev_app", "检查项目并修复问题", Group.HOME_SUGGESTION,
+            Status.IMPLEMENTED, TargetKind.SUGGESTION, "检查项目并修复问题：",
             "</>", null, null, null, null),
-        Entry("home_import_project", "导入项目并交付", Group.HOME_SUGGESTION,
-            Status.IMPLEMENTED, TargetKind.SUGGESTION, "导入项目并交付：",
+        Entry("home_import_project", "解释这段代码", Group.HOME_SUGGESTION,
+            Status.IMPLEMENTED, TargetKind.SUGGESTION, "解释这段代码：",
             "↓", null, null, null, null),
-        Entry("home_organize_team", "组织多 Agent 团队", Group.HOME_SUGGESTION,
-            Status.IMPLEMENTED, TargetKind.SUGGESTION, "组织多 Agent 团队：",
+        Entry("home_organize_team", "拆成任务", Group.HOME_SUGGESTION,
+            Status.IMPLEMENTED, TargetKind.SUGGESTION, "拆成任务：",
             "团", null, null, null, null),
         Entry("home_automation", "自动化任务", Group.HOME_SUGGESTION,
             Status.IMPLEMENTED, TargetKind.SUGGESTION, "自动化任务：",
@@ -160,7 +160,7 @@ object EntryRegistry {
             "控", null, null, null,
             "V5 控制台（2026-11-11）：按需展开的专业工作台，按 PROJECT.md §7 / V5-UI.md §三；" +
             "六大页面一份；智能工作简报并进总览，不单做；用量与成本仍待开发（无真实用量数据）。"),
-        Entry("nav_team_channel", "团队频道", Group.DRAWER_EXTENSIONS,
+        Entry("nav_team_channel", "团队频道", Group.DRAWER_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TEAM_CHANNEL,
             "频", null, null, null,
             "V5 团队频道（P3，2026-11-11）：有界团队聊天 + 只读扇出；" +
@@ -171,7 +171,7 @@ object EntryRegistry {
             Status.IMPLEMENTED, TargetKind.ACTION, "cycle_theme",
             "◐", null, null, null,
             "抽屉内切换主题（跟随系统 → 浅色 → 深色循环，见 MainActivity.cycleTheme；第二步的主题选择器/字体/布局不在此入口）。"),
-        Entry("nav_pending_approval", "待审批", Group.DRAWER_WORKSPACE,
+        Entry("nav_pending_approval", "待审批", Group.DRAWER_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_CONSOLE,
             "审", null, null, null, "打开控制台的待审批模块（当前待决 + 审批历史）。"),
         // ── 抽屉扩展与资源分组 ──

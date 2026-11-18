@@ -8,6 +8,7 @@ import androidx.appcompat.app.AlertDialog
 import java.lang.ref.WeakReference
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
+import wherevercode.agent.ui.UiKit
 import wherevercode.agent.brain.Action
 import wherevercode.agent.brain.ApprovalBroker
 import wherevercode.agent.brain.ApprovalGate
@@ -120,10 +121,12 @@ class AndroidApprovalGate private constructor() : ApprovalGate {
                 }
 
                 var settled = false
+                var countdown: Runnable? = null
                 lateinit var dialog: AlertDialog
                 val settle: (Boolean) -> Unit = { allowed ->
                     if (!settled) {
                         settled = true
+                        countdown?.let { handler.removeCallbacks(it) }
                         pendingDialog = null
                         pendingSettle = null
                         try {
@@ -138,10 +141,29 @@ class AndroidApprovalGate private constructor() : ApprovalGate {
                     }
                 }
 
+                val details = UiKit.vertical(activity).apply {
+                    setPadding(UiKit.dp(activity, 24), UiKit.dp(activity, 8), UiKit.dp(activity, 24), UiKit.dp(activity, 8))
+                }
+                details.addView(UiKit.text(activity, ApprovalPromptFormatter.message(action), 14f, R.color.text_primary))
+                val remaining = UiKit.text(activity, "", 13f, R.color.warning).apply {
+                    setPadding(0, UiKit.dp(activity, 16), 0, UiKit.dp(activity, 8))
+                    accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }
+                details.addView(remaining)
+                val deadline = broker.pendingApproval()?.deadlineEpochMillis ?: System.currentTimeMillis()
+                countdown = object : Runnable {
+                    override fun run() {
+                        if (settled) return
+                        val seconds = ((deadline - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000
+                        remaining.text = if (seconds > 0) "$seconds 秒后自动拒绝" else "审批已到期，正在拒绝"
+                        // ApprovalBroker owns timeout and outcome classification; the timer only renders it.
+                        if (seconds > 0) handler.postDelayed(this, 1000)
+                    }
+                }
                 dialog = AlertDialog.Builder(activity)
-                    .setTitle(ApprovalPromptFormatter.title(action))
-                    .setMessage(ApprovalPromptFormatter.message(action))
-                    .setPositiveButton("允许") { _, _ -> settle(true) }
+                    .setTitle("审批 · 工具操作")
+                    .setView(details)
+                    .setPositiveButton("允许一次") { _, _ -> settle(true) }
                     .setNegativeButton("拒绝") { _, _ -> settle(false) }
                     .setOnCancelListener { settle(false) }
                     .create()
@@ -156,6 +178,7 @@ class AndroidApprovalGate private constructor() : ApprovalGate {
                 }
                 try {
                     dialog.show()
+                    countdown?.run()
                 } catch (_: Exception) {
                     settle(false)
                 }

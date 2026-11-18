@@ -1,0 +1,37 @@
+existing_id,title,source_status,target_kind,源码
+home_dev_app,开发一个 App,IMPLEMENTED,SUGGESTION,ui/EntryRegistry.kt
+home_import_project,导入项目并交付,IMPLEMENTED,SUGGESTION,ui/EntryRegistry.kt
+home_organize_team,组织多 Agent 团队,IMPLEMENTED,SUGGESTION,ui/EntryRegistry.kt
+home_automation,自动化任务,IMPLEMENTED,SUGGESTION,ui/EntryRegistry.kt
+home_search,会话,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+home_brain,大脑,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+home_new,新建,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_chat,新对话,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_history,会话,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_projects,项目,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_running_tasks,任务,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_team,团队（Agent / 成员）,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_devices,设备,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_tools,工具与连接,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_results,成果,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_help,帮助,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_workbench,设置,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_console,控制台,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_team_channel,团队频道,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_theme,界面与主题,IMPLEMENTED,ACTION,ui/EntryRegistry.kt
+nav_pending_approval,待审批,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_mcp_plugins,MCP / 插件,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+nav_models_skills,模型与技能,TODO,TODO,ui/EntryRegistry.kt
+nav_custom_modules,自定义模块,TODO,TODO,ui/EntryRegistry.kt
+nav_feature_center,功能中心,TODO,TODO,ui/EntryRegistry.kt
+feature_task_detail,任务详情,IMPLEMENTED,SCREEN,ui/EntryRegistry.kt
+feature_team_chat,团队群聊,TODO,TODO,ui/EntryRegistry.kt
+feature_permissions,执行权限 L0–L4,TODO,TODO,ui/EntryRegistry.kt
+feature_project_files,项目文件与代码,IMPLEMENTED,SCREEN,ui/EntryRegistry.kt
+feature_topology,团队拓扑,TODO,TODO,ui/EntryRegistry.kt
+feature_usage_cost,用量与成本,TODO,TODO,ui/EntryRegistry.kt
+feature_run_logs,运行日志,IMPLEMENTED,DRAWER,ui/EntryRegistry.kt
+feature_unified_access,统一接入与通信中心,TODO,TODO,ui/EntryRegistry.kt
+feature_auto_exec,对话中自动执行,TODO,TODO,ui/EntryRegistry.kt
+feature_quick_actions,快速操作与自定义快捷入口,TODO,TODO,ui/EntryRegistry.kt
+feature_nesting,收纳系统与自定义引擎,TODO,TODO,ui/EntryRegistry.kt

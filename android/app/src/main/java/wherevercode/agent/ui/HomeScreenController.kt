@@ -13,7 +13,7 @@ package wherevercode.agent.ui
  * C2-批 2 的事，且必须等 C1 首批落定后（C1 正在改 MainActivity，
  * 见实施计划 §C2 与 C1 的边界）。
  *
- * 本文件只写模型，不复用任何第三方代码。问候文案固定“你好”
+ * 本文件只写模型，不复用任何第三方代码。问候文案不包含用户身份
  * （见 [greeting]，R4c 隐私修正：不读已存身份、不显示真人名字）。
  */
 class HomeScreenController {
@@ -74,11 +74,11 @@ class HomeScreenController {
 
     companion object {
         /**
-         * V5 C2-3-R4c（隐私修正，maintainer 05:16/05:22 拍板）：问候文案固定
-         * “你好”，不读已存身份、不显示真人名字；真人实名不出现在
+         * Claude C01 通用问候沿用隐私边界：不读已存身份、不显示真人名字；
+         * 真人实名不出现在
          * 界面文案、代码注释与测试数据里（项目走向开源）。
          */
-        fun greeting(): String = "你好"
+        fun greeting(): String = "今天想做什么？"
 
         /** + 号菜单的操作（显示顺序 = 加东西组在上、切换上下文组在下）。 */
         val PLUS_MENU_ITEMS: List<PlusMenuItem> = listOf(
