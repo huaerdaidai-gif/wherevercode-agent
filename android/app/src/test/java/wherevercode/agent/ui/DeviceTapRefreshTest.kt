@@ -18,7 +18,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowAlertDialog
+import org.robolectric.shadows.ShadowDialog
 import wherevercode.agent.AgentGraph
 import wherevercode.agent.AndroidApprovalGate
 import wherevercode.agent.MainActivity
@@ -115,7 +115,9 @@ class DeviceTapRefreshTest {
     private fun openDevicesViaFeatureCenter(activity: MainActivity) {
         clickDrawerRow(activity, "nav_feature_center")
         idleMain()
-        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        // MainActivity 用的是 androidx.appcompat.app.AlertDialog，
+        // Robolectric 里要经 ShadowDialog 取最近弹窗（ShadowAlertDialog 只跟 android.app.AlertDialog）。
+        val dialog = ShadowDialog.getLatestDialog()
         assertNotNull("全部功能弹窗应已打开", dialog)
         val dialogRoot = dialog!!.window!!.decorView
         val title = findTextView(dialogRoot, "设备")
