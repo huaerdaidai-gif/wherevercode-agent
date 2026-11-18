@@ -58,18 +58,18 @@ object InstallFlow {
                 os = os,
                 method = method,
                 command = InstallCommand.unixLocalCommand(bundle.version, "~/wherevercode-v5-hand-install"),
-                note = "先把安装包传到目标机（App 里点“分享安装包”可导出 4 个文件），再在目标机上跑这条命令。装好后点“我已装好，继续配对”。",
+                note = "先把安装包传到目标机（App 里点“分享安装包”可导出 4 个文件），再在目标机任意终端里跑这条命令（系统终端、iTerm、VS Code 终端、SSH 会话都可以）。装好后 Hand 会自动在局域网广播，回到 App 点“我已装好，继续配对”；配对后可授权这台设备上的新老项目。设备上装了 Paseo 等其他工具也不影响，可并行运行。",
             )
             InstallMethod.POWERSHELL -> InstallStep.ShowCommand(
                 os = os,
                 method = method,
                 command = InstallCommand.windowsLocalCommand(bundle.version, "\$env:LOCALAPPDATA\\WhereverCode\\V5Hand"),
-                note = "先把安装包传到目标机（App 里点“分享安装包”可导出 4 个文件），再在目标机上跑这条命令。远程一键安装的前提（WinRM/SSH）未评估，本轮只给本机命令。装好后点“我已装好，继续配对”。",
+                note = "先把安装包传到目标机（App 里点“分享安装包”可导出 4 个文件），再在目标机的 PowerShell 里跑这条命令。装好后 Hand 会自动在局域网广播，回到 App 点“我已装好，继续配对”；配对后可授权这台设备上的新老项目。设备上装了 Paseo 等其他工具也不影响，可并行运行。",
             )
             InstallMethod.EXISTING_HAND -> InstallStep.Guidance(
                 os = os,
                 method = method,
-                text = "目标机上已经装好 Hand，直接配对即可。",
+                text = "目标机上已经装好 Hand 就不用再装：确认 Hand 正在运行，直接配对即可。不管 Hand 是随哪个项目装的、设备上有没有 Paseo 等其他工具，都不影响配对；配对后可授权设备上的新老项目。",
             )
             InstallMethod.QR_PAIR -> InstallStep.Guidance(
                 os = os,
@@ -84,7 +84,7 @@ object InstallFlow {
             InstallMethod.ADAPTER -> InstallStep.Guidance(
                 os = os,
                 method = method,
-                text = "云端 Agent 不装 Hand，走 API / Bot / MCP 适配。在 Agent 页添加对应 Agent 即可。",
+                text = "云端 Agent 不装 Hand，走 API / Bot / MCP 等适配器或连接器接入。在 Agent 页添加对应 Agent 即可。",
             )
         }
     }
