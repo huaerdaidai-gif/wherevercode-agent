@@ -70,6 +70,8 @@ public final class AppState: ObservableObject {
     public let brainKeyStore: BrainKeyStore
     @Published public private(set) var brainRegistry: BrainAdapterRegistry
     public let brainSettingsModel: BrainSettingsModel
+    public let modelConfigStore: ModelConfigStore
+    public let modelSettingsModel: ModelSettingsModel
 
     public init(
         settings: AppSettings = SettingsStore.load(),
@@ -91,6 +93,11 @@ public final class AppState: ObservableObject {
             self?.brainRegistry ?? BrainAdapterRegistry()
         }
         model.onChange = { [weak self] in self?.rebuildBrainStack() }
+
+        let modelStore = KeyValueModelConfigStore(kv: data.kv)
+        self.modelConfigStore = modelStore
+        self.modelSettingsModel = ModelSettingsModel(configStore: modelStore, keyStore: keyStore)
+
         repairCurrentBrainReference()
     }
 

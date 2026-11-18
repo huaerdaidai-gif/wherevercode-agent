@@ -103,7 +103,7 @@ public struct FlagshipRouteDestinationView: View {
         case "devices", "devicedetail":
             DevicesView(appState: appState, onNavigateRoute: onNavigateRoute)
         case "models", "connectmodel", "modelroute":
-            BrainSettingsView(model: appState.brainSettingsModel)
+            ModelSettingsView(model: appState.modelSettingsModel)
         case "mcp":
             McpToolsInspectorScreen(appState: appState, onNavigateRoute: onNavigateRoute)
         case "skills":
@@ -5108,7 +5108,7 @@ public struct AccountSettingsView: View {
             // 分组二：应用
             Section("应用") {
                 NavigationLink {
-                    BrainSettingsView(model: appState.brainSettingsModel)
+                    ModelSettingsView(model: appState.modelSettingsModel)
                 } label: {
                     Label("模型配置", systemImage: "cpu")
                 }
