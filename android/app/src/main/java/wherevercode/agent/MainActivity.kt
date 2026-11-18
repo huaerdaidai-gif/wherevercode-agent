@@ -2982,26 +2982,75 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
         if (enabled) {
-            batchDiscoverAgentsOnInstalledDevices()
+            // 先勾选、再打开开关（Funk 2026-11-19）：只扫 Agent 页
+            // 设备清单里勾中的已安装设备，没勾的不扫。
+            Thread {
+                val paired = pairedDevicesNow()
+                val checkedIds = batchCheckedDeviceIds(paired.map { it.deviceId }.toSet())
+                val selected = paired.filter { it.deviceId in checkedIds }
+                if (selected.isEmpty()) {
+                    runOnUiThread {
+                        toast("没有勾选要扫描的设备：请先在 Agent 页勾选设备，再打开开关。")
+                    }
+                } else {
+                    batchDiscoverAgentsOnDevices(selected)
+                }
+            }.start()
         } else {
             toast("Agent 自动发现已关闭。")
         }
     }
 
+    /** 当前已安装且已配对的设备（批量扫描的候选全集）。 */
+    private fun pairedDevicesNow(): List<RemoteDevice> {
+        val devices = try {
+            remoteDeviceStore.listDevices()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val pairings = try {
+            pairingStore.all()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
+            .map { it.deviceId }.toSet()
+        return devices.filter { it.deviceId in confirmedIds }
+    }
+
     /**
-     * 批量自动发现 Agent（Funk 2026-11-19）：只在开关被打开时跑
-     * 一遍——遍历已安装且已配对的设备，逐台拉 hello、按既有去重
-     * 口径补建缺失的 Agent 记录，最后汇总一句。单台失败不挡其余；
-     * 与添加设备、配对流程互不关联，不由它们触发。
+     * 批量扫描的勾选集（存本机）：从未存过 = 全部已配对设备默认
+     * 勾选；存过就以存的为准（与当前设备清单取交集，删掉的设备
+     * 不再出现）。勾选只是选择，不是关联：不勾的设备照常在册。
      */
-    private fun batchDiscoverAgentsOnInstalledDevices() {
-        toast("正在批量发现已安装设备上的 Agent…")
+    private fun batchCheckedDeviceIds(pairedIds: Set<String>): Set<String> {
+        val stored = try {
+            getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
+                .getStringSet("batch_scan_device_ids", null)
+        } catch (_: Exception) {
+            null
+        }
+        return if (stored == null) pairedIds else stored.intersect(pairedIds)
+    }
+
+    private fun setBatchDeviceChecked(device: RemoteDevice, checked: Boolean, pairedIds: Set<String>) {
+        val next = batchCheckedDeviceIds(pairedIds).toMutableSet()
+        if (checked) next += device.deviceId else next -= device.deviceId
+        try {
+            getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
+                .edit().putStringSet("batch_scan_device_ids", next).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 批量自动发现 Agent（Funk 2026-11-19）：只扫用户勾选的设备——
+     * 逐台拉 hello、按既有去重口径补建缺失的 Agent 记录，最后汇总
+     * 一句。单台失败不挡其余；与添加设备、配对流程互不关联。
+     */
+    private fun batchDiscoverAgentsOnDevices(devices: List<RemoteDevice>) {
+        toast("正在批量发现 ${devices.size} 台设备上的 Agent…")
         Thread {
-            val devices = try {
-                remoteDeviceStore.listDevices()
-            } catch (_: Exception) {
-                emptyList()
-            }
             var scanned = 0
             var createdTotal = 0
             for (device in devices) {
@@ -7437,6 +7486,16 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 emptyList()
             } else emptyList()
+            val batchDevices = if (devicesOnly) {
+                emptyList()
+            } else {
+                try {
+                    pairedDevicesNow()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+            val batchChecked = batchCheckedDeviceIds(batchDevices.map { it.deviceId }.toSet())
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (devicesOnly) {
@@ -7452,6 +7511,15 @@ class MainActivity : AppCompatActivity() {
                         onAddFromDevice = { addAgentsFromDevice() },
                         autoDiscoveryEnabled = agentAutoDiscoveryEnabled(),
                         onToggleAutoDiscovery = { enabled -> setAgentAutoDiscoveryEnabled(enabled) },
+                        batchDevices = batchDevices,
+                        batchCheckedIds = batchChecked,
+                        onBatchDeviceChecked = { device, checked ->
+                            setBatchDeviceChecked(
+                                device,
+                                checked,
+                                batchDevices.map { it.deviceId }.toSet(),
+                            )
+                        },
                     )
                 }
             }
@@ -8813,7 +8881,7 @@ class MainActivity : AppCompatActivity() {
                 // 打开的那一刻把已安装的设备全扫一遍；发现与配对
                 // 不关联，新装设备配对成功不触发扫描；关着时只有
                 // 手动点按钮才探。
-                note("自动发现已打开：正在扫描已安装的设备…")
+                note("自动发现已打开：请勾选要扫描的设备。")
                 discoverDeviceModels()
             } else {
                 note("自动发现已关闭。")
@@ -11862,19 +11930,48 @@ class MainActivity : AppCompatActivity() {
      * 占位值 local 进 Keystore（服务端忽略），不假装有真 Key。
      */
     private fun discoverDeviceModels() {
-        val targets = mutableListOf("本机" to "127.0.0.1")
+        // 来源 = 本机 + 每台已登记远程设备（含其公网/远程地址）。
+        val sources = mutableListOf("本机" to "127.0.0.1")
         try {
             remoteDeviceStore.listDevices().forEach { device ->
-                targets += device.displayName to device.host
+                sources += device.displayName to device.host
                 // 发现不限于局域网：设备登记的公网/远程地址同样探。
                 val pub = device.publicHost?.trim().orEmpty()
                 if (pub.isNotBlank() && pub != device.host) {
-                    targets += device.displayName to pub
+                    sources += device.displayName to pub
                 }
             }
         } catch (_: Exception) {
             // 设备清单读不到时只探本机，不把发现整体卡死。
         }
+        if (sources.size <= 1) {
+            probeModelSources(sources)
+            return
+        }
+        // 先勾选、再扫描（Funk 2026-11-19，与 Agent 批量发现同口径）：
+        // 只探勾中的来源，不勾的不探。
+        val checked = BooleanArray(sources.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle("勾选要扫描的设备")
+            .setMultiChoiceItems(
+                sources.map { it.first }.toTypedArray(),
+                checked,
+            ) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("开始扫描") { _, _ ->
+                val selected = sources.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    note("没有勾选任何设备，未扫描。")
+                } else {
+                    probeModelSources(selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun probeModelSources(targets: List<Pair<String, String>>) {
         note("正在探测 ${targets.size} 个来源的模型端点…")
         Thread {
             // Triple = 来源标签（含服务名）、baseUrl、模型 ID。
@@ -11894,7 +11991,7 @@ class MainActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (found.isEmpty()) {
-                    note("没有发现模型端点：已配对设备与本机上都没有 Ollama / LM Studio / vLLM 在常用端口返回模型。")
+                    note("没有发现模型端点：勾选的来源上都没有 Ollama / LM Studio / vLLM 在常用端口返回模型。")
                 } else {
                     showDiscoveredModelsPicker(found)
                 }
