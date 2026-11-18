@@ -251,7 +251,7 @@ public final class ModelSettingsModel: ObservableObject {
 
     public func setKey(_ key: String, for config: ModelConfig) {
         guard let authRef = config.authRef else { return }
-        keyStore.setSecret(authRef: authRef, secret: key)
+        try? keyStore.putSecret(authRef: authRef, value: key)
     }
 
     public func addModelConfig(
@@ -264,7 +264,7 @@ public final class ModelSettingsModel: ObservableObject {
         let modelId = UUID().uuidString
         let authRef = "model:\(modelId):key"
         if !apiKey.isEmpty {
-            keyStore.setSecret(authRef: authRef, secret: apiKey)
+            try? keyStore.putSecret(authRef: authRef, value: apiKey)
         }
         let config = ModelConfig(
             modelId: modelId,
