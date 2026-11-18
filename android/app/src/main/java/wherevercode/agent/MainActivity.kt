@@ -10939,20 +10939,25 @@ class MainActivity : AppCompatActivity() {
      * - “退出登录”（SIWC）：退出 ChatGPT 登录（见 signOut）。
      *
      * 2026-11-19 起模型页已添加列表也共用这张管理单（动作集不变）；
-     * 只有“编辑…”的去向随调用页不同——设置页填设置页的大脑表单、
-     * 定位设置页配置节；模型页填模型页自己的表单，一线配置节则先
-     * 切到设置页再定位（配置节只在设置页有）。
+     * 去向随调用页不同——设置页填设置页的大脑表单、定位设置页配置
+     * 节；模型页填模型页自己的表单，一线配置节则先切到设置页再定位
+     * （配置节只在设置页有）。删除确认与详情文案也随页分家：设置页
+     * 走大脑口径（默认参数，一字不动），模型页传自己的
+     * [confirmDeleteModel] 与 [ModelListRows.manageDetail]——在模型页
+     * 点删除，确认框必须说「删除模型」，不能借大脑的确认框。
      */
     private fun showBrainManage(
         config: BrainConfig,
         onEditGeneric: (BrainConfig) -> Unit = { startEditGenericBrain(it) },
         onEditSection: (BrainConfig) -> Unit = { scrollToBrainSection(it) },
+        onDelete: (BrainConfig) -> Unit = { confirmDeleteBrain(it) },
+        detailText: String = BrainLoginRows.brainManageDetail(config),
     ) {
         val actions = BrainLoginRows.manageActions(config)
         if (actions.isEmpty()) {
             AlertDialog.Builder(this)
                 .setTitle(config.label)
-                .setMessage(BrainLoginRows.brainManageDetail(config))
+                .setMessage(detailText)
                 .setNegativeButton("关闭", null)
                 .show()
             return
@@ -10962,7 +10967,7 @@ class MainActivity : AppCompatActivity() {
         ListDialog.show(
             this,
             config.label,
-            BrainLoginRows.brainManageDetail(config),
+            detailText,
             actions,
             negativeLabel = "关闭",
         ) { which ->
@@ -10976,7 +10981,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 "登录…" -> startDeviceCodeLogin(config.brainId)
                 "编辑模型…" -> editDeviceCodeModel(config)
-                "删除…" -> confirmDeleteBrain(config)
+                "删除…" -> onDelete(config)
                 "退出登录" -> {
                     if (config.brainId == BrainBootstrap.SIWC_BRAIN_ID) signOut()
                     else signOutDeviceCode(config)
@@ -11216,6 +11221,8 @@ class MainActivity : AppCompatActivity() {
                         showEntry(DrawerController.ID_SETTINGS)
                         scrollToBrainSection(target)
                     },
+                    onDelete = { confirmDeleteModel(it) },
+                    detailText = ModelListRows.manageDetail(config),
                 )
             }
         }
@@ -11229,7 +11236,10 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         textCol.addView(UiKit.text(this, row.title, 12f, R.color.text_primary, bold = true))
-        val detail = listOfNotNull(row.detailText, row.statusText).joinToString(" · ")
+        // 自定义服务商落成的条目在副行尾标注「自定义」，与内置名单分开呈现。
+        val detailParts = listOfNotNull(row.detailText, row.statusText) +
+            if (row.isCustomProvider) listOf(ModelListRows.CUSTOM_TAG) else emptyList()
+        val detail = detailParts.joinToString(" · ")
         textCol.addView(UiKit.text(this, detail, 11f, R.color.text_secondary))
         container.addView(textCol)
         if (row.isCurrent) {
@@ -11254,8 +11264,9 @@ class MainActivity : AppCompatActivity() {
      * 模型页保存：与设置页 saveGenericBrain 同一条路径（校验走
      * BrainLoginRows.validateGenericForm、Key 只进 Keystore、保存后
      * 立即注册进引擎注册表），只是读写本页自己的表单；保存后不自动
-     * 设为当前大脑（同设置页口径）。校验文案沿用 BrainLoginRows 的
-     * 既有字符串（红线：不改 BrainLoginRows 行为）。
+     * 设为当前大脑（同设置页口径）。校验文案经 [ModelListRows.formErrors]
+     * 在本页侧换口径：名称为空报「请填写模型名称」，不借大脑文案
+     * （红线：不改 BrainLoginRows 的原字符串与行为）。
      */
     private fun saveModel() {
         val components = brainComponents ?: run {
@@ -11275,7 +11286,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val hasStoredKey = keyStore.getSecret(authRef) != null
-        val errors = BrainLoginRows.validateGenericForm(label, baseUrl, model, apiKey, hasStoredKey)
+        val errors = ModelListRows.formErrors(
+            BrainLoginRows.validateGenericForm(label, baseUrl, model, apiKey, hasStoredKey),
+        )
         if (errors.isNotEmpty()) {
             note("未保存：" + errors.joinToString("；"))
             return
@@ -11339,6 +11352,29 @@ class MainActivity : AppCompatActivity() {
         modelFormBaseUrl.text.clear()
         modelFormModel.text.clear()
         modelFormApiKey.text.clear()
+    }
+
+    /**
+     * 模型页删除：模型页自己的二次确认（标题/正文由
+     * [ModelListRows.deleteTitle] / [ModelListRows.deleteWarning]
+     * 生成，全程「删除模型」口径，不借大脑的确认框）。确认后执行
+     * 仍走 [deleteBrain] 同一条路径（删配置 + Key + 注销注册表，
+     * 删的本来就是同一条模型连接记录），分家的只是确认文案与入口；
+     * 设置页/大脑路径继续用 [confirmDeleteBrain]，一字不动。
+     */
+    private fun confirmDeleteModel(config: BrainConfig) {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再删除。")
+            return
+        }
+        val isCurrent = components.configStore.currentBrainId() == config.brainId
+        val agentNames = agentsUsingBrain(config)
+        AlertDialog.Builder(this)
+            .setTitle(ModelListRows.deleteTitle(config))
+            .setMessage(ModelListRows.deleteWarning(config, isCurrent, agentNames))
+            .setPositiveButton("删除") { _, _ -> deleteBrain(config) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /** 删除大脑：二次确认。文案由 BrainLoginRows.deleteWarning 生成。 */
