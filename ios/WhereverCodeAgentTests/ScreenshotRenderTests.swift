@@ -125,6 +125,14 @@ final class ScreenshotRenderTests: XCTestCase {
         attach(image, name: "page-07-channel-picker")
     }
 
+    func testScreenshotSelectorAgentOnly() async {
+        let state = AppState()
+        let image = await snapshot(
+            ModelAndAgentSheet(model: state.chat, onManage: {})
+        )
+        attach(image, name: "page-08-selector-agent-only")
+    }
+
     func testScreenshotHomeNotConnected() async {
         // The restructured home in its platform-not-connected
         // state: still the app's home page — a 平台连接 card, the
