@@ -29,6 +29,7 @@ class ModelListRowsTest {
         model: String = "",
         authRef: String? = null,
         cliBinary: String? = null,
+        extra: Map<String, String> = emptyMap(),
     ) = BrainConfig(
         brainId = brainId,
         kind = kind,
@@ -38,6 +39,7 @@ class ModelListRowsTest {
         model = model,
         authRef = authRef,
         cliBinary = cliBinary,
+        extra = extra,
     )
 
     private fun rows(
@@ -136,6 +138,121 @@ class ModelListRowsTest {
         assertEquals(BrainLoginRows.GEMINI_LOGIN_ONLY_NOTE, byId.getValue("gemini").statusText)
         // Gemini 仅登录、不能设为当前大脑：永不标当前。
         assertFalse(byId.getValue("gemini").isCurrent)
+    }
+
+    @Test
+    fun `custom provider rows are flagged and builtin presets are not`() {
+        val custom = config(
+            "my-cloud",
+            BrainKind.MODEL_API,
+            adapterId = "model-api-generic",
+            label = "某某云 · m1",
+            model = "m1",
+            authRef = "generic:my-cloud",
+            extra = mapOf("provider_preset" to "custom-provider"),
+        )
+        val builtin = config(
+            "groq-llama",
+            BrainKind.MODEL_API,
+            adapterId = "model-api-generic",
+            label = "Groq · llama",
+            model = "llama",
+            authRef = "generic:groq-llama",
+            extra = mapOf("provider_preset" to "groq"),
+        )
+        val noPreset = config(
+            "plain",
+            BrainKind.MODEL_API,
+            adapterId = "model-api-generic",
+            label = "手工模型",
+            model = "m",
+            authRef = "generic:plain",
+        )
+        assertTrue(ModelListRows.isCustomProvider(custom))
+        assertFalse(ModelListRows.isCustomProvider(builtin))
+        assertFalse(ModelListRows.isCustomProvider(noPreset))
+        val byId = rows(listOf(custom, builtin, noPreset)).associateBy { it.brainId }
+        assertTrue(byId.getValue("my-cloud").isCustomProvider)
+        assertFalse(byId.getValue("groq-llama").isCustomProvider)
+        assertFalse(byId.getValue("plain").isCustomProvider)
+    }
+
+    @Test
+    fun `manage detail marks custom provider only`() {
+        val custom = config(
+            "my-cloud",
+            BrainKind.MODEL_API,
+            adapterId = "model-api-generic",
+            label = "某某云 · m1",
+            model = "m1",
+            baseUrl = "https://api.example.com/v1",
+            extra = mapOf("provider_preset" to "custom-provider"),
+        )
+        val builtin = config(
+            "groq-llama",
+            BrainKind.MODEL_API,
+            adapterId = "model-api-generic",
+            label = "Groq · llama",
+            model = "llama",
+            baseUrl = "https://api.groq.com/openai/v1",
+            extra = mapOf("provider_preset" to "groq"),
+        )
+        assertTrue(ModelListRows.manageDetail(custom).contains("来源：${ModelListRows.CUSTOM_TAG}服务商"))
+        assertFalse(ModelListRows.manageDetail(builtin).contains(ModelListRows.CUSTOM_TAG))
+        // 底文案与大脑侧详情一致（模型 + 服务地址，只读复用未改）。
+        assertEquals(
+            BrainLoginRows.brainManageDetail(builtin),
+            ModelListRows.manageDetail(builtin),
+        )
+    }
+
+    @Test
+    fun `model delete confirmation never says brain`() {
+        val config = config(
+            "my-model",
+            BrainKind.MODEL_API,
+            adapterId = "model-api-generic",
+            label = "我的模型",
+            model = "m1",
+            authRef = "generic:my-model",
+        )
+        val title = ModelListRows.deleteTitle(config)
+        assertTrue(title.startsWith("删除模型"))
+        assertFalse(title.contains("大脑"))
+        val warning = ModelListRows.deleteWarning(
+            config,
+            isCurrent = true,
+            agentNames = listOf("写手甲"),
+        )
+        assertTrue(warning.startsWith("删除模型“我的模型”？"))
+        assertFalse(warning.contains("大脑"))
+        // 后果说清：只删这条模型配置，不动 Agent 与设备。
+        assertTrue(warning.contains("不会删除 Agent"))
+        assertTrue(warning.contains("不会删除设备"))
+        assertTrue(warning.contains("写手甲"))
+        // 无 Key 引用、无 Agent 使用时也不出现大脑字样。
+        val bare = ModelListRows.deleteWarning(
+            config.copy(authRef = null),
+            isCurrent = false,
+            agentNames = emptyList(),
+        )
+        assertFalse(bare.contains("大脑"))
+        assertTrue(bare.contains("不会删除设备"))
+    }
+
+    @Test
+    fun `model form errors rename the brain name error only`() {
+        val mapped = ModelListRows.formErrors(
+            listOf("请填写大脑名称", "请填写 API Key（只存本机 Keystore）"),
+        )
+        assertEquals("请填写模型名称", mapped[0])
+        assertEquals("请填写 API Key（只存本机 Keystore）", mapped[1])
+        assertFalse(mapped.any { it.contains("大脑") })
+        // 大脑侧原字符串本体未动（设置页仍报大脑名称）。
+        assertTrue(
+            BrainLoginRows.validateGenericForm("", "https://api.example.com/v1", "m", "k", false)
+                .contains("请填写大脑名称"),
+        )
     }
 
     @Test
