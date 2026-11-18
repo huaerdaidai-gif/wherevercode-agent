@@ -11524,16 +11524,16 @@ class MainActivity : AppCompatActivity() {
             .setMessage(message)
             .setView(input)
             .setPositiveButton("下一步") { _, _ ->
-                val apiKey = <redacted>
-                if (apiKey.isBlank()) {
+                val key = input.text.toString().trim()
+                if (key.isBlank()) {
                     note("未填 API Key，无法继续。")
                 } else {
                     val baseUrl = preset.resolveBaseUrl(accountId)
                     when (preset.listMode) {
                         FreeModelListMode.FIXED ->
-                            showFreeModelPicker(preset, baseUrl, apiKey, preset.fixedModels)
+                            showFreeModelPicker(preset, baseUrl, key, preset.fixedModels)
                         FreeModelListMode.LIVE ->
-                            fetchFreeProviderModels(preset, baseUrl, apiKey)
+                            fetchFreeProviderModels(preset, baseUrl, key)
                     }
                 }
             }
@@ -11542,16 +11542,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** LIVE 组：用刚填的 Key 拉 /models（只读探针，不推理不计费）。 */
-    private fun fetchFreeProviderModels(preset: FreeProviderPreset, baseUrl: String, apiKey: <redacted>
+    private fun fetchFreeProviderModels(preset: FreeProviderPreset, baseUrl: String, key: String
         note("正在从 ${preset.displayName} 读取模型列表…")
         Thread {
-            val result = runBlocking { GenericOpenAiApiClient().listModels(apiKey, baseUrl) }
+            val result = runBlocking { GenericOpenAiApiClient().listModels(key, baseUrl) }
             runOnUiThread {
                 result.onSuccess { models ->
                     if (models.isEmpty()) {
                         note("${preset.displayName} 没有返回任何模型；请确认 Key 可用，或改用手工表单填写模型 ID。")
                     } else {
-                        showFreeModelPicker(preset, baseUrl, apiKey, models.map { it.id })
+                        showFreeModelPicker(preset, baseUrl, key, models.map { it.id })
                     }
                 }.onFailure { e ->
                     note("读取模型列表失败：${e.message}")
@@ -11564,7 +11564,7 @@ class MainActivity : AppCompatActivity() {
     private fun showFreeModelPicker(
         preset: FreeProviderPreset,
         baseUrl: String,
-        apiKey: <redacted>
+        key: String
         models: List<String>,
     ) {
         val checked = BooleanArray(models.size)
@@ -11578,7 +11578,7 @@ class MainActivity : AppCompatActivity() {
                 if (selected.isEmpty()) {
                     note("没有勾选任何模型，未添加。")
                 } else {
-                    saveFreeModels(preset, baseUrl, apiKey, selected)
+                    saveFreeModels(preset, baseUrl, key, selected)
                 }
             }
             .setNegativeButton("取消", null)
@@ -11593,7 +11593,7 @@ class MainActivity : AppCompatActivity() {
     private fun saveFreeModels(
         preset: FreeProviderPreset,
         baseUrl: String,
-        apiKey: <redacted>
+        key: String
         models: List<String>,
     ) {
         val components = brainComponents ?: run {
@@ -11631,7 +11631,7 @@ class MainActivity : AppCompatActivity() {
                     fallbackBrainIds = emptyList(),
                 )
                 if (BrainConfigValidator.validate(config).isNotEmpty()) continue
-                keyStore.putSecret(authRef, apiKey)
+                keyStore.putSecret(authRef, key)
                 components.configStore.saveConfig(config)
                 savedConfigs += config
                 added++
