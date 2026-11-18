@@ -3,6 +3,8 @@ package wherevercode.agent.ui
 import wherevercode.agent.brain.BrainConfig
 import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
+import wherevercode.agent.brain.generic.CustomFreeProviders
+import wherevercode.agent.brain.generic.FreeProviderPresets
 
 /**
  * 模型页“已添加模型”的行数据（纯逻辑，无 Android 依赖，可单测）。
@@ -34,7 +36,80 @@ object ModelListRows {
         val statusText: String,
         /** 这条连接是否正被当前大脑使用（只标注，不提供切换动作）。 */
         val isCurrent: Boolean,
+        /** 自定义服务商（用户本机自加、不在内置名单内）落成的条目：列表与详情都要标注。 */
+        val isCustomProvider: Boolean = false,
     )
+
+    /** 列表行里自定义条目的标注文案（本页自己的常量，不借大脑侧字符串）。 */
+    const val CUSTOM_TAG: String = "自定义"
+
+    /** 模型页保存表单名称为空时本页自己的报错（不借大脑侧「请填写大脑名称」）。 */
+    const val NAME_REQUIRED_ERROR: String = "请填写模型名称"
+
+    /** 共用校验器里的大脑口径名称错误原文（只用于在本页侧替换，不改其本体）。 */
+    private const val BRAIN_NAME_REQUIRED_ERROR: String = "请填写大脑名称"
+
+    /**
+     * 这条连接是不是自定义服务商落成的：自定义预设落配置时
+     * extra["provider_preset"] 写的是 "custom-…" 开头的预设 id
+     * （见 [CustomFreeProviders.ID_PREFIX] 与落配置路径）；内置预设
+     * 写的是自家 id，不带此前缀。
+     */
+    fun isCustomProvider(config: BrainConfig): Boolean =
+        config.extra[FreeProviderPresets.EXTRA_PRESET]
+            ?.startsWith(CustomFreeProviders.ID_PREFIX) == true
+
+    /**
+     * 模型页管理单的详情：与大脑侧详情同底（模型 + 服务地址，只读
+     * 复用 [BrainLoginRows.brainManageDetail]），自定义条目多一行
+     * 来源标注——内置名单是逐家核验过的，自定义是用户自加的，
+     * 呈现上必须分开（同预设名单的标注纪律）。
+     */
+    fun manageDetail(config: BrainConfig): String = buildString {
+        append(BrainLoginRows.brainManageDetail(config))
+        if (isCustomProvider(config)) {
+            append("\n来源：${CUSTOM_TAG}服务商（本机自加，不在内置名单内）")
+        }
+    }
+
+    /** 模型页删除确认标题（本页自己的口径，全程说「模型」）。 */
+    fun deleteTitle(config: BrainConfig): String = "删除模型“${config.label}”？"
+
+    /**
+     * 模型页删除二次确认的文案（纯函数，单测覆盖；与大脑侧
+     * [BrainLoginRows.deleteWarning] 分家——那张确认框说的是删大脑，
+     * 本页删的是模型连接，必须全程「模型」口径）。后果写清三件：
+     * 配置与 Key 一起删、删后无法恢复；删的若是当前在用的模型，
+     * 当前模型清空、不会自动切到别的模型；正用它的 Agent 之后发
+     * 消息会提示未接入。并且明确：只删这一条模型配置，不删
+     * Agent、不删设备。
+     */
+    fun deleteWarning(
+        config: BrainConfig,
+        isCurrent: Boolean,
+        agentNames: List<String>,
+    ): String = buildString {
+        if (config.authRef.isNullOrBlank()) {
+            append("删除模型“${config.label}”？这条模型配置会彻底删除，删后无法恢复。\n")
+        } else {
+            append("删除模型“${config.label}”？这条模型配置与它存在本机 Keystore 里的 Key 会一起删除，删后无法恢复。\n")
+        }
+        if (isCurrent) {
+            append("它是当前在用的模型：删除后当前模型清空，不会自动切到别的模型，请在列表里另选一个。\n")
+        }
+        if (agentNames.isNotEmpty()) {
+            append("以下 Agent 正用这个模型：${agentNames.joinToString("、")}。删除后它们发消息时会提示未接入（Agent 记录本身不动，重新添加这个模型或改选 Agent 即可恢复）。\n")
+        }
+        append("删除只影响这一条模型配置，不会删除 Agent，也不会删除设备。")
+    }
+
+    /**
+     * 模型页保存表单的校验文案：共用校验器返回的错误里，大脑口径的
+     * 名称错误换成本页自己的 [NAME_REQUIRED_ERROR]，其余原样。
+     * 只在本页侧替换呈现，不改 BrainLoginRows 的原字符串。
+     */
+    fun formErrors(errors: List<String>): List<String> =
+        errors.map { if (it == BRAIN_NAME_REQUIRED_ERROR) NAME_REQUIRED_ERROR else it }
 
     /**
      * 连接 → 分组标题；平台 / 云端 Agent 不是模型，返回 null 不入列。
@@ -143,7 +218,7 @@ object ModelListRows {
                     isCurrent = config.brainId == currentBrainId,
                 )
             }
-            row
+            row.copy(isCustomProvider = isCustomProvider(config))
         }.filterNotNull()
     }
 }

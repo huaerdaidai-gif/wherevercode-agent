@@ -15,6 +15,7 @@ import wherevercode.agent.core.transport.DeviceListFormat
 import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.transport.RemoteDevice
 import wherevercode.agent.core.transport.RemoteDeviceRow
+import wherevercode.agent.core.transport.standalonePairings
 
 /**
  * Agent 页渲染（阶段 3，A1）。
@@ -105,6 +106,12 @@ class AgentScreenController(
         onRevoke: (PairingRecord) -> Unit,
         remoteDevices: List<RemoteDeviceRow> = emptyList(),
         /**
+         * 每台设备承载的 Agent 数（按 AgentRecord.deviceId 计数，
+         * 与 Agent 页/控制台同一口径）。配对单卡用它显示承载数；
+         * 远程设备卡的计数在 [RemoteDeviceRow.agentCount] 里。
+         */
+        agentCounts: Map<String, Int> = emptyMap(),
+        /**
          * 未配对远程设备卡片上的“输入配对码完成配对”（V5，2026-11-11）：
          * 断点续配——不用重新发现，直接对该设备 hello → 指纹 + 配对码。
          * 注意：本参数放在 onRediscover 之前——onAddRemote 必须是最后一个
@@ -157,7 +164,12 @@ class AgentScreenController(
             discovered.forEach { peer -> list.addView(deviceCard(peer, onPair)) }
         }
         list.addView(sectionTitle("已添加设备"))
-        if (pairings.isEmpty() && remoteDevices.isEmpty()) {
+        // 同一台设备只出一张卡（2026-11-19 双记录修复）：配对记录与
+        // 远程设备记录的身份键都是服务端 deviceId——有远程记录的以
+        // 远程卡为准（配对状态/承载数都在卡上，撤销配对也在卡上），
+        // 配对记录不再单独出卡；只有配对记录的才出配对卡。
+        val standalone = standalonePairings(pairings, remoteDevices.map { it.device })
+        if (standalone.isEmpty() && remoteDevices.isEmpty()) {
             list.addView(
                 UiKit.text(context, "还没有添加设备。", 12f, R.color.text_secondary).apply {
                     setBackgroundResource(R.drawable.bg_card)
@@ -165,10 +177,13 @@ class AgentScreenController(
                 },
             )
         }
-        pairings.forEach { record ->
-            list.addView(pairingCard(record, onConfirm, onReject, onRevoke))
+        standalone.forEach { record ->
+            list.addView(pairingCard(record, onConfirm, onReject, onRevoke, agentCounts[record.deviceId] ?: 0))
         }
-        remoteDevices.forEach { row -> list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote)) }
+        remoteDevices.forEach { row ->
+            val record = pairings.firstOrNull { it.deviceId == row.device.deviceId }
+            list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote, record, onRevoke))
+        }
     }
 
     /**
@@ -185,6 +200,13 @@ class AgentScreenController(
         onEditRemote: ((RemoteDevice) -> Unit)? = null,
         onUpdateHand: ((RemoteDevice) -> Unit)? = null,
         onDeleteRemote: ((RemoteDevice) -> Unit)? = null,
+        /**
+         * 与本卡同 deviceId 的配对记录（合并卡用，2026-11-19）：配对
+         * 记录不再单独出卡，它的状态与“撤销配对”动作都并到本卡上，
+         * 不因合并丢功能。
+         */
+        pairingRecord: PairingRecord? = null,
+        onRevokePairing: ((PairingRecord) -> Unit)? = null,
     ): LinearLayout {
         val card = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
@@ -228,6 +250,16 @@ class AgentScreenController(
             UiKit.text(
                 context,
                 "当前在线：未检测 · 最近连接成功：${DeviceListFormat.formatLastSeen(row.lastSeenEpochSeconds, System.currentTimeMillis() / 1000)}",
+                11f,
+                R.color.text_secondary,
+            ).apply { setPadding(0, dp(4), 0, 0) },
+        )
+        // 承载 Agent 数（清单 2.4）：按 AgentRecord.deviceId 归属计数，
+        // 与控制台同一口径；0 也照实显示“0 个 Agent”，不藏。
+        card.addView(
+            UiKit.text(
+                context,
+                "承载：${row.agentCount} 个 Agent",
                 11f,
                 R.color.text_secondary,
             ).apply { setPadding(0, dp(4), 0, 0) },
@@ -298,7 +330,12 @@ class AgentScreenController(
             // 补建服务端新增的 Agent 记录；已有的按去重口径保留不动。
             // Hand 自更新（2026-11-12）：“更新 Hand”只在已配对时出，
             // 落后或未知（旧版）时才出，最新时不出。
-            if (onEditRemote != null || onRediscover != null || onDeleteRemote != null || (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank()))) {
+            // 合并卡保留配对卡原有的撤销入口（合并前在配对卡上）：
+            // 已确认的配对记录 + 撤销回调都在，才构造得出撤销动作。
+            val revokeAction: (() -> Unit)? = pairingRecord
+                ?.takeIf { it.state == PairingState.CONFIRMED }
+                ?.let { rec -> onRevokePairing?.let { cb -> { cb(rec) } } }
+            if (onEditRemote != null || onRediscover != null || onDeleteRemote != null || revokeAction != null || (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank()))) {
                 val actions = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
                 if (onEditRemote != null) {
                     actions.addView(actionButton("编辑地址") { onEditRemote(row.device) })
@@ -308,6 +345,9 @@ class AgentScreenController(
                 }
                 if (onUpdateHand != null && (row.handUpdateAvailable || row.handVersion.isBlank())) {
                     actions.addView(actionButton("更新 Hand") { onUpdateHand(row.device) })
+                }
+                if (revokeAction != null) {
+                    actions.addView(actionButton("撤销配对") { revokeAction() })
                 }
                 if (onDeleteRemote != null) {
                     actions.addView(actionButton("删除设备") { onDeleteRemote(row.device) })
@@ -379,6 +419,8 @@ class AgentScreenController(
         onConfirm: (PairingRecord) -> Unit,
         onReject: (PairingRecord) -> Unit,
         onRevoke: (PairingRecord) -> Unit,
+        /** 这台设备承载的 Agent 数（清单 2.4；只有配对记录的设备也照实显示）。 */
+        agentCount: Int = 0,
     ): LinearLayout {
         val card = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
@@ -412,6 +454,16 @@ class AgentScreenController(
                 11f,
                 R.color.text_secondary,
                 mono = true,
+            ).apply {
+                setPadding(0, dp(4), 0, 0)
+            },
+        )
+        card.addView(
+            UiKit.text(
+                context,
+                "承载：$agentCount 个 Agent",
+                11f,
+                R.color.text_secondary,
             ).apply {
                 setPadding(0, dp(4), 0, 0)
             },

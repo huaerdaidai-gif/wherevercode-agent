@@ -161,6 +161,52 @@ class ConsoleSnapshotTest {
 
     // ── 快照组装（全局可见性） ────────────────────────────────────
 
+    /**
+     * 登记数口径锁死（2026-11-19 真机走查缺陷）：控制台角标「N 个
+     * Agent」与总览「已登记 Agent」必须与 Agent 页「已添加的 Agent」
+     * 同口径——只数 AgentStore 的真实记录。快照的 agents 展示行含
+     * App 自身行（首位），曾直接拿 agents.size 当登记数，恒比
+     * Agent 页多 1（真机：页里 2 个、角标 3 个，增删后仍恒 +1）。
+     */
+    @Test
+    fun `member agent count excludes the app itself row`() {
+        val snapshot = ConsoleSnapshot.build(
+            tasks = emptyList(),
+            stepsByTask = emptyMap(),
+            events = emptyList(),
+            pendingApproval = null,
+            approvalHistory = emptyList(),
+            devices = emptyList(),
+            pairedDeviceIds = emptySet(),
+            agents = listOf(agent("agy", "AGY"), agent("codex", "Codex")),
+            generatedAtEpochSeconds = 500,
+        )
+        // 展示行：App 自身 + 2 个成员 = 3 行（设备与 Agent 模块要列全）。
+        assertEquals(3, snapshot.agents.size)
+        assertTrue(snapshot.agents.first().isSelf)
+        // 登记数：只数成员，与 Agent 页一致。
+        assertEquals(2, snapshot.memberAgentCount)
+        assertEquals(listOf("agy", "codex"), snapshot.memberAgents.map { it.id })
+    }
+
+    @Test
+    fun `member agent count is zero when nothing is registered`() {
+        val snapshot = ConsoleSnapshot.build(
+            tasks = emptyList(),
+            stepsByTask = emptyMap(),
+            events = emptyList(),
+            pendingApproval = null,
+            approvalHistory = emptyList(),
+            devices = emptyList(),
+            pairedDeviceIds = emptySet(),
+            agents = emptyList(),
+            generatedAtEpochSeconds = 500,
+        )
+        assertEquals(1, snapshot.agents.size)
+        assertEquals(0, snapshot.memberAgentCount)
+        assertTrue(snapshot.memberAgents.isEmpty())
+    }
+
     @Test
     fun `build puts the app itself first with real task counts`() {
         val tasks = listOf(
@@ -199,6 +245,49 @@ class ConsoleSnapshotTest {
         assertEquals(1, snapshot.devices.size)
         assertTrue(snapshot.devices.first().paired)
         assertEquals(1, snapshot.devices.first().agentCount)
+    }
+
+    @Test
+    fun `build counts a device once when it has both a remote entry and a pairing`() {
+        // 2026-11-19 双记录修复：同一台小米 12 在 RemoteDeviceStore 与
+        // 配对存储里各有一条（deviceId 相同）——控制台角标必须与设备
+        // 页合并卡同数，只算一台；只有配对记录的设备也算一台。
+        val snapshot = ConsoleSnapshot.build(
+            tasks = emptyList(),
+            stepsByTask = emptyMap(),
+            events = emptyList(),
+            pendingApproval = null,
+            approvalHistory = emptyList(),
+            devices = listOf(RemoteDevice("Android-x", "小米 12", "192.168.1.7", 18743)),
+            pairedDeviceIds = setOf("Android-x", "mac-host"),
+            agents = listOf(
+                agent("agy-on-mi12", "AGY", deviceId = "Android-x"),
+                agent("codex-on-mac", "Codex", deviceId = "mac-host"),
+            ),
+            generatedAtEpochSeconds = 400,
+            pairings = listOf(
+                wherevercode.agent.core.security.PairingRecord(
+                    "Android-x", "小米 12", "aa".repeat(32),
+                    state = wherevercode.agent.core.security.PairingState.CONFIRMED,
+                    updatedAtEpochSeconds = 1L,
+                ),
+                wherevercode.agent.core.security.PairingRecord(
+                    "mac-host", "Mac", "bb".repeat(32),
+                    state = wherevercode.agent.core.security.PairingState.CONFIRMED,
+                    updatedAtEpochSeconds = 1L,
+                ),
+            ),
+        )
+        assertEquals(2, snapshot.devices.size)
+        val mi12 = snapshot.devices.first { it.deviceId == "Android-x" }
+        assertTrue(mi12.paired)
+        assertEquals(1, mi12.agentCount)
+        assertEquals("192.168.1.7", mi12.host)
+        // 只有配对记录的 Mac：出一行，地址留空（不编造），计数照实。
+        val mac = snapshot.devices.first { it.deviceId == "mac-host" }
+        assertTrue(mac.paired)
+        assertEquals("", mac.host)
+        assertEquals(1, mac.agentCount)
     }
 
     @Test

@@ -227,7 +227,11 @@ import wherevercode.agent.core.transport.RemoteDeviceStore
 import wherevercode.agent.core.transport.RemoteDeviceValidation
 import wherevercode.agent.core.transport.RemoteHello
 import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
+import wherevercode.agent.core.transport.DEVICE_PICKER_ADD_ID
+import wherevercode.agent.core.transport.agentCountsByDevice
+import wherevercode.agent.core.transport.buildDevicePickerRows
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
+import wherevercode.agent.core.transport.deleteDeviceRecords
 import wherevercode.agent.core.security.SecretRedactor
 import wherevercode.agent.core.team.ChannelSenderPolicy
 import wherevercode.agent.core.session.SessionKind
@@ -2497,53 +2501,24 @@ class MainActivity : AppCompatActivity() {
         discovered: List<DiscoveredPeer>,
         pairings: List<PairingRecord>,
     ) {
-        val pairedIds = pairings.map { it.deviceId }.toSet()
-        val rows = mutableListOf<Pair<String, Boolean>>()
-        // rowRemoteDeviceIds 与 rows 一一对应：null = 局域网/已配对设备，
-        // "ADD" = 添加远程设备入口，其余 = 远程设备 id。
-        val rowRemoteDeviceIds = mutableListOf<String?>()
-        pairings.forEach { record ->
-            val stateLabel = when (record.state) {
-                PairingState.CONFIRMED -> "已配对"
-                PairingState.PENDING -> "待确认（不可用）"
-                else -> "已拒绝（不可用）"
-            }
-            rows += "${record.displayName} · $stateLabel" to (record.state == PairingState.CONFIRMED)
-            rowRemoteDeviceIds += null
-        }
-        discovered.filter { it.deviceId !in pairedIds }.forEach { peer ->
-            rows += "${peer.displayName} · 未配对（不可用）" to false
-            rowRemoteDeviceIds += null
-        }
-        // 阶段 B：已添加的远程设备（手动添加的 VPS 等）也列出来；
-        // 状态以配对记录为准，未配对一律标“不可用”，不伪造在线态。
-        try {
-            remoteDeviceStore.listDevices().forEach { device ->
-                val record = pairings.firstOrNull { it.deviceId == device.deviceId }
-                val stateLabel = when (record?.state) {
-                    PairingState.CONFIRMED -> "已配对"
-                    PairingState.PENDING -> "待确认（不可用）"
-                    else -> "未配对（不可用）"
-                }
-                // V5 公网直连（2026-11-11）：列表只标走线（公网/内网），
-                // 不贴完整 IP；两个地址在设备页“编辑地址”里看改。
-                val route = if (device.hasPublicAddress()) "公网" else "内网"
-                rows += "${device.displayName} · $stateLabel（远程·$route）" to (record?.state == PairingState.CONFIRMED)
-                rowRemoteDeviceIds += device.deviceId
-            }
+        // 名单组装走 buildDevicePickerRows（与设备页同一合并口径：
+        // 配对记录与远程设备记录按 deviceId 合并，同机只出一行）。
+        // 取远程设备名单失败时按空名单组装，不让整张对话框打不开。
+        val devices = try {
+            remoteDeviceStore.listDevices()
         } catch (_: Exception) {
+            emptyList()
         }
-        rows += "＋ 添加远程设备…" to true
-        rowRemoteDeviceIds += "ADD"
+        val rows = buildDevicePickerRows(pairings, discovered, devices)
         AlertDialog.Builder(this)
             .setTitle("选设备")
-            .setItems(rows.map { it.first }.toTypedArray()) { _, which ->
-                val remoteId = rowRemoteDeviceIds[which]
-                if (remoteId == "ADD") {
+            .setItems(rows.map { it.label }.toTypedArray()) { _, which ->
+                val remoteId = rows[which].remoteDeviceId
+                if (remoteId == DEVICE_PICKER_ADD_ID) {
                     showAddRemoteDeviceDialog()
                     return@setItems
                 }
-                if (rows[which].second) {
+                if (rows[which].enabled) {
                     showEntry(DrawerController.ID_DEVICES)
                     toast(
                         if (remoteId != null) "远程设备已接入，可在 Agent 页选它的 Agent 对话"
@@ -3086,11 +3061,17 @@ class MainActivity : AppCompatActivity() {
     private fun deleteRemoteDevice(device: RemoteDevice) {
         AlertDialog.Builder(this)
             .setTitle("删除设备")
-            .setMessage("确定删除设备 ${device.displayName} 吗？只删这条设备记录：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
+            // 删除语义（2026-11-19 合并卡后写清）：删的是这台设备自己
+            // 的登记——设备条目 + 同 deviceId 的配对信任记录（只删条目
+            // 会让配对卡刷新后单独冒回来）；这台设备上的 Agent 记录、
+            // 项目和会话都不删（删设备只删设备、删 Agent 只删 Agent），
+            // 之后可以重新添加这台设备，原有 Agent 仍按 deviceId 归它。
+            .setMessage("确定删除设备 ${device.displayName} 吗？只删这台设备的记录（设备条目和配对记录）：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
             .setPositiveButton("删除") { _, _ ->
                 Thread {
                     try {
-                        remoteDeviceStore.deleteDevice(device.deviceId)
+                        deleteDeviceRecords(device.deviceId, remoteDeviceStore, pairingStore)
+                        refreshPairingSnapshot()
                         runOnUiThread {
                             toast("已删除设备 ${device.displayName}。")
                             refreshAgents()
@@ -5350,11 +5331,12 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 emptyList()
             }
-            val pairedIds = try {
-                pairingStore.all().map { it.deviceId }.toSet()
+            val pairingRecords = try {
+                pairingStore.all()
             } catch (e: Exception) {
-                emptySet()
+                emptyList()
             }
+            val pairedIds = pairingRecords.map { it.deviceId }.toSet()
             val agents = try {
                 agentStore.listAgents()
             } catch (e: Exception) {
@@ -5372,6 +5354,9 @@ class MainActivity : AppCompatActivity() {
                     agents = agents,
                     generatedAtEpochSeconds = System.currentTimeMillis() / 1000,
                     taskEvents = taskEvents,
+                    // 控制台设备数与设备页同一份合并清单（同 deviceId
+                    // 只算一次，只有配对记录的也算一台）。
+                    pairings = pairingRecords,
                 )
             }
             runOnUiThread {
@@ -7290,11 +7275,14 @@ class MainActivity : AppCompatActivity() {
         // 线程访问，本地读仍在后台线程做，不上 UI 线程。
         if (!devicesOnly) agentController.showLoading()
         Thread {
-            val added = if (devicesOnly) emptyList() else try {
+            // 设备页也要读 Agent 库：设备卡上的承载数按 AgentRecord
+            // .deviceId 现数（2026-11-19 清单 2.4），不是只给 Agent 页用。
+            val added = try {
                 agentStore.listAgents()
             } catch (e: Exception) {
                 emptyList<AgentRecord>()
             }
+            val agentCounts = agentCountsByDevice(added.map { it.deviceId })
             // 设备页第一段：本地数据先画（不等 mDNS）。
             if (devicesOnly) {
                 val pairingsNow = try {
@@ -7307,14 +7295,14 @@ class MainActivity : AppCompatActivity() {
                 // 里就是“添加设备不能用”。现把远程设备连同配对状态一起传
                 // 过去，设备页单列“远程设备”区段并给添加入口。
                 val remoteRowsNow = try {
-                    buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairingsNow, bundledHandVersion())
+                    buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairingsNow, bundledHandVersion(), agentCounts)
                 } catch (e: Exception) {
                     emptyList()
                 }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (currentEntry != DrawerController.ID_DEVICES) return@runOnUiThread
-                    renderDeviceListNow(emptyList(), pairingsNow, remoteRowsNow)
+                    renderDeviceListNow(emptyList(), pairingsNow, remoteRowsNow, agentCounts)
                 }
             }
             // 阶段 3（U5/批 3c）：真实 LAN 发现（5 秒 mDNS）+ 配对记录。
@@ -7329,7 +7317,7 @@ class MainActivity : AppCompatActivity() {
                 emptyList()
             } else emptyList()
             val remoteRows = if (devicesOnly) try {
-                buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairings, bundledHandVersion())
+                buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairings, bundledHandVersion(), agentCounts)
             } catch (e: Exception) {
                 emptyList()
             } else emptyList()
@@ -7339,7 +7327,7 @@ class MainActivity : AppCompatActivity() {
                     // 用户 5 秒内已切走别的页：本轮不画，目标页进页时自己会
                     // 刷（showEntry 调 refreshAgents），不把设备区段画到别页。
                     if (currentEntry != DrawerController.ID_DEVICES) return@runOnUiThread
-                    renderDeviceListNow(discovered, pairings, remoteRows)
+                    renderDeviceListNow(discovered, pairings, remoteRows, agentCounts)
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
@@ -7360,6 +7348,7 @@ class MainActivity : AppCompatActivity() {
         discovered: List<DiscoveredPeer>,
         pairings: List<PairingRecord>,
         remoteRows: List<RemoteDeviceRow>,
+        agentCounts: Map<String, Int> = emptyMap(),
     ) {
         val scrollView = screenAgents as ScrollView
         val savedY = scrollView.scrollY
@@ -7373,6 +7362,7 @@ class MainActivity : AppCompatActivity() {
             onReject = { record -> rejectPairing(record) },
             onRevoke = { record -> revokePairing(record) },
             remoteDevices = remoteRows,
+            agentCounts = agentCounts,
             // 未配对远程设备断点续配：有地址，直接 hello → 指纹 + 配对码。
             onResumePairing = { device ->
                 probeAndAddRemoteDevice(device.displayName, device.host, device.port)
@@ -10939,20 +10929,25 @@ class MainActivity : AppCompatActivity() {
      * - “退出登录”（SIWC）：退出 ChatGPT 登录（见 signOut）。
      *
      * 2026-11-19 起模型页已添加列表也共用这张管理单（动作集不变）；
-     * 只有“编辑…”的去向随调用页不同——设置页填设置页的大脑表单、
-     * 定位设置页配置节；模型页填模型页自己的表单，一线配置节则先
-     * 切到设置页再定位（配置节只在设置页有）。
+     * 去向随调用页不同——设置页填设置页的大脑表单、定位设置页配置
+     * 节；模型页填模型页自己的表单，一线配置节则先切到设置页再定位
+     * （配置节只在设置页有）。删除确认与详情文案也随页分家：设置页
+     * 走大脑口径（默认参数，一字不动），模型页传自己的
+     * [confirmDeleteModel] 与 [ModelListRows.manageDetail]——在模型页
+     * 点删除，确认框必须说「删除模型」，不能借大脑的确认框。
      */
     private fun showBrainManage(
         config: BrainConfig,
         onEditGeneric: (BrainConfig) -> Unit = { startEditGenericBrain(it) },
         onEditSection: (BrainConfig) -> Unit = { scrollToBrainSection(it) },
+        onDelete: (BrainConfig) -> Unit = { confirmDeleteBrain(it) },
+        detailText: String = BrainLoginRows.brainManageDetail(config),
     ) {
         val actions = BrainLoginRows.manageActions(config)
         if (actions.isEmpty()) {
             AlertDialog.Builder(this)
                 .setTitle(config.label)
-                .setMessage(BrainLoginRows.brainManageDetail(config))
+                .setMessage(detailText)
                 .setNegativeButton("关闭", null)
                 .show()
             return
@@ -10962,7 +10957,7 @@ class MainActivity : AppCompatActivity() {
         ListDialog.show(
             this,
             config.label,
-            BrainLoginRows.brainManageDetail(config),
+            detailText,
             actions,
             negativeLabel = "关闭",
         ) { which ->
@@ -10976,7 +10971,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 "登录…" -> startDeviceCodeLogin(config.brainId)
                 "编辑模型…" -> editDeviceCodeModel(config)
-                "删除…" -> confirmDeleteBrain(config)
+                "删除…" -> onDelete(config)
                 "退出登录" -> {
                     if (config.brainId == BrainBootstrap.SIWC_BRAIN_ID) signOut()
                     else signOutDeviceCode(config)
@@ -11216,6 +11211,8 @@ class MainActivity : AppCompatActivity() {
                         showEntry(DrawerController.ID_SETTINGS)
                         scrollToBrainSection(target)
                     },
+                    onDelete = { confirmDeleteModel(it) },
+                    detailText = ModelListRows.manageDetail(config),
                 )
             }
         }
@@ -11229,7 +11226,10 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         textCol.addView(UiKit.text(this, row.title, 12f, R.color.text_primary, bold = true))
-        val detail = listOfNotNull(row.detailText, row.statusText).joinToString(" · ")
+        // 自定义服务商落成的条目在副行尾标注「自定义」，与内置名单分开呈现。
+        val detailParts = listOfNotNull(row.detailText, row.statusText) +
+            if (row.isCustomProvider) listOf(ModelListRows.CUSTOM_TAG) else emptyList()
+        val detail = detailParts.joinToString(" · ")
         textCol.addView(UiKit.text(this, detail, 11f, R.color.text_secondary))
         container.addView(textCol)
         if (row.isCurrent) {
@@ -11254,8 +11254,9 @@ class MainActivity : AppCompatActivity() {
      * 模型页保存：与设置页 saveGenericBrain 同一条路径（校验走
      * BrainLoginRows.validateGenericForm、Key 只进 Keystore、保存后
      * 立即注册进引擎注册表），只是读写本页自己的表单；保存后不自动
-     * 设为当前大脑（同设置页口径）。校验文案沿用 BrainLoginRows 的
-     * 既有字符串（红线：不改 BrainLoginRows 行为）。
+     * 设为当前大脑（同设置页口径）。校验文案经 [ModelListRows.formErrors]
+     * 在本页侧换口径：名称为空报「请填写模型名称」，不借大脑文案
+     * （红线：不改 BrainLoginRows 的原字符串与行为）。
      */
     private fun saveModel() {
         val components = brainComponents ?: run {
@@ -11275,7 +11276,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val hasStoredKey = keyStore.getSecret(authRef) != null
-        val errors = BrainLoginRows.validateGenericForm(label, baseUrl, model, apiKey, hasStoredKey)
+        val errors = ModelListRows.formErrors(
+            BrainLoginRows.validateGenericForm(label, baseUrl, model, apiKey, hasStoredKey),
+        )
         if (errors.isNotEmpty()) {
             note("未保存：" + errors.joinToString("；"))
             return
@@ -11339,6 +11342,29 @@ class MainActivity : AppCompatActivity() {
         modelFormBaseUrl.text.clear()
         modelFormModel.text.clear()
         modelFormApiKey.text.clear()
+    }
+
+    /**
+     * 模型页删除：模型页自己的二次确认（标题/正文由
+     * [ModelListRows.deleteTitle] / [ModelListRows.deleteWarning]
+     * 生成，全程「删除模型」口径，不借大脑的确认框）。确认后执行
+     * 仍走 [deleteBrain] 同一条路径（删配置 + Key + 注销注册表，
+     * 删的本来就是同一条模型连接记录），分家的只是确认文案与入口；
+     * 设置页/大脑路径继续用 [confirmDeleteBrain]，一字不动。
+     */
+    private fun confirmDeleteModel(config: BrainConfig) {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再删除。")
+            return
+        }
+        val isCurrent = components.configStore.currentBrainId() == config.brainId
+        val agentNames = agentsUsingBrain(config)
+        AlertDialog.Builder(this)
+            .setTitle(ModelListRows.deleteTitle(config))
+            .setMessage(ModelListRows.deleteWarning(config, isCurrent, agentNames))
+            .setPositiveButton("删除") { _, _ -> deleteBrain(config) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /** 删除大脑：二次确认。文案由 BrainLoginRows.deleteWarning 生成。 */
