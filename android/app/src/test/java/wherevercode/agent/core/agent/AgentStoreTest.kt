@@ -61,11 +61,13 @@ class AgentStoreTest {
     }
 
     @Test
-    fun `MODEL_API rejects plain http except local model urls`() {
-        val errors = apiRecord(baseUrl = "http://192.168.1.7:8080").validate()
+    fun `MODEL_API rejects public http but allows local and LAN model urls`() {
+        val errors = apiRecord(baseUrl = "http://203.0.113.7:8080").validate()
         assertTrue(errors.any { it.contains("只允许 https") })
         assertTrue(apiRecord(baseUrl = "http://127.0.0.1:8080").validate().isEmpty())
         assertTrue(apiRecord(baseUrl = "http://localhost:8080").validate().isEmpty())
+        // 三件套之三（2026-11-18）：局域网设备上的本地模型走 LAN http。
+        assertTrue(apiRecord(baseUrl = "http://192.168.1.7:8080").validate().isEmpty())
         assertTrue(apiRecord(baseUrl = "https://api.deepseek.com").validate().isEmpty())
     }
 

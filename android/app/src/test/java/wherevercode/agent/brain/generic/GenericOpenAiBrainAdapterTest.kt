@@ -279,9 +279,9 @@ class GenericOpenAiBrainAdapterTest {
     }
 
     @Test
-    fun `chat stream refuses a LAN http baseUrl without an HTTP call`() = runTest {
+    fun `chat stream refuses a public http baseUrl without an HTTP call`() = runTest {
         val (adapter, _, transport) = setup(
-            config = genericConfig(baseUrl = "http://192.168.1.5:11434/v1"),
+            config = genericConfig(baseUrl = "http://203.0.113.5:11434/v1"),
             transport = FakeTransport(postBody = textStream()),
         )
         val events = adapter.chatStream(request()).toList()
@@ -350,14 +350,16 @@ class GenericOpenAiBrainAdapterTest {
     }
 
     @Test
-    fun `baseUrl validation allows https and local http but rejects LAN http`() {
+    fun `baseUrl validation allows https, local http and LAN http but rejects public http`() {
         fun errorsFor(baseUrl: String) = BrainConfigValidator.validate(genericConfig(baseUrl = baseUrl))
         assertTrue(errorsFor("https://openrouter.ai/api/v1").isEmpty())
         assertTrue(errorsFor("http://127.0.0.1:11434/v1").isEmpty())
         assertTrue(errorsFor("http://localhost:1234/v1").isEmpty())
-        val lan = errorsFor("http://192.168.1.5:11434/v1")
-        assertTrue(lan.isNotEmpty())
-        assertTrue(lan.any { it.contains("服务地址") })
+        // 三件套之三（2026-11-18）：设备在局域网，本地模型走 LAN http 是自动发现的正路。
+        assertTrue(errorsFor("http://192.168.1.5:11434/v1").isEmpty())
+        val pub = errorsFor("http://203.0.113.5:11434/v1")
+        assertTrue(pub.isNotEmpty())
+        assertTrue(pub.any { it.contains("服务地址") })
     }
 
     @Test
