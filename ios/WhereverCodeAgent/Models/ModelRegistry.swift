@@ -12,6 +12,7 @@ import SwiftUI
 // MARK: - 1. 模型独立配置实体
 
 public struct ModelConfig: Equatable, Codable, Identifiable, Sendable {
+    public typealias ID = String
     public var id: String { modelId }
     public var modelId: String
     public var kind: BrainKind

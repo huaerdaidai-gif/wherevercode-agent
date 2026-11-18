@@ -9,7 +9,7 @@ import Foundation
 import SwiftUI
 
 public struct ModelSettingsView: View {
-    @ObservedObject public var model: ModelSettingsModel
+    @ObservedObject var model: ModelSettingsModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var editing: ModelConfig?
@@ -180,25 +180,25 @@ public struct ModelSettingsView: View {
             }
 
             if !model.modelApis.isEmpty {
-                ForEach(model.modelApis) { config in
+                ForEach(model.modelApis, id: \.modelId) { config in
                     modelRow(config: config, groupTitle: "模型 API")
                 }
             }
 
             if !model.localModels.isEmpty {
-                ForEach(model.localModels) { config in
+                ForEach(model.localModels, id: \.modelId) { config in
                     modelRow(config: config, groupTitle: "本地模型")
                 }
             }
 
             if !model.cliBrains.isEmpty {
-                ForEach(model.cliBrains) { config in
+                ForEach(model.cliBrains, id: \.modelId) { config in
                     modelRow(config: config, groupTitle: "CLI 会员")
                 }
             }
 
             if !model.subscriptions.isEmpty {
-                ForEach(model.subscriptions) { config in
+                ForEach(model.subscriptions, id: \.modelId) { config in
                     modelRow(config: config, groupTitle: "订阅授权")
                 }
             }
@@ -435,7 +435,7 @@ private struct ModelFreeProviderPickerSheet: View {
         let all = CustomFreeProviders.merged(builtins: FreeProviderPresets.presets, customs: customs)
         return List {
             Section {
-                ForEach(all) { preset in
+                ForEach(all, id: \.id) { preset in
                     Button {
                         selectedPreset = preset
                         if preset.needsAccountId { step = .inputAccountId } else { step = .inputApiKey }
@@ -695,7 +695,7 @@ private struct ModelRoutingPoolPickerSheet: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(model.configs) { config in
+                    ForEach(model.configs, id: \.modelId) { config in
                         Button {
                             togglePool(config.modelId)
                         } label: {
