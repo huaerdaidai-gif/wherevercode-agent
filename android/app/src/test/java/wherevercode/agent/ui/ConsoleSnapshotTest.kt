@@ -161,6 +161,52 @@ class ConsoleSnapshotTest {
 
     // ── 快照组装（全局可见性） ────────────────────────────────────
 
+    /**
+     * 登记数口径锁死（2026-11-19 真机走查缺陷）：控制台角标「N 个
+     * Agent」与总览「已登记 Agent」必须与 Agent 页「已添加的 Agent」
+     * 同口径——只数 AgentStore 的真实记录。快照的 agents 展示行含
+     * App 自身行（首位），曾直接拿 agents.size 当登记数，恒比
+     * Agent 页多 1（真机：页里 2 个、角标 3 个，增删后仍恒 +1）。
+     */
+    @Test
+    fun `member agent count excludes the app itself row`() {
+        val snapshot = ConsoleSnapshot.build(
+            tasks = emptyList(),
+            stepsByTask = emptyMap(),
+            events = emptyList(),
+            pendingApproval = null,
+            approvalHistory = emptyList(),
+            devices = emptyList(),
+            pairedDeviceIds = emptySet(),
+            agents = listOf(agent("agy", "AGY"), agent("codex", "Codex")),
+            generatedAtEpochSeconds = 500,
+        )
+        // 展示行：App 自身 + 2 个成员 = 3 行（设备与 Agent 模块要列全）。
+        assertEquals(3, snapshot.agents.size)
+        assertTrue(snapshot.agents.first().isSelf)
+        // 登记数：只数成员，与 Agent 页一致。
+        assertEquals(2, snapshot.memberAgentCount)
+        assertEquals(listOf("agy", "codex"), snapshot.memberAgents.map { it.id })
+    }
+
+    @Test
+    fun `member agent count is zero when nothing is registered`() {
+        val snapshot = ConsoleSnapshot.build(
+            tasks = emptyList(),
+            stepsByTask = emptyMap(),
+            events = emptyList(),
+            pendingApproval = null,
+            approvalHistory = emptyList(),
+            devices = emptyList(),
+            pairedDeviceIds = emptySet(),
+            agents = emptyList(),
+            generatedAtEpochSeconds = 500,
+        )
+        assertEquals(1, snapshot.agents.size)
+        assertEquals(0, snapshot.memberAgentCount)
+        assertTrue(snapshot.memberAgents.isEmpty())
+    }
+
     @Test
     fun `build puts the app itself first with real task counts`() {
         val tasks = listOf(

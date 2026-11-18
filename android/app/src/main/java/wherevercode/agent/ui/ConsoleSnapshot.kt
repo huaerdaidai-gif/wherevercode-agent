@@ -223,6 +223,20 @@ object ConsoleSnapshot {
         val failedCount: Int get() = tasks.count { it.state == "failed" }
         val cancelledCount: Int get() = tasks.count { it.state == "cancelled" }
 
+        /** 成员 Agent 行（不含 App 自身行）：与 Agent 页列表同源（AgentStore 记录）。 */
+        val memberAgents: List<ConsoleAgentRow>
+            get() = agents.filter { !it.isSelf }
+
+        /**
+         * 成员 Agent 数：与 Agent 页「已添加的 Agent（N）」同口径——只数
+         * AgentStore 里的真实记录。App 自身行在 [agents] 里只是展示行
+         * （控制台设备与 Agent 模块要列它），不是登记的 Agent，绝不
+         * 计入登记数（2026-11-19 真机走查实证：角标与总览曾直接用
+         * agents.size，把自身行多算成 +1，增删后恒为列表数 + 1）。
+         */
+        val memberAgentCount: Int
+            get() = memberAgents.size
+
         /** 待审核（review）：看板 In Review 列。 */
         val inReviewCount: Int get() = tasks.count { it.state == "review" }
 
