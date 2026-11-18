@@ -8,6 +8,7 @@
 import XCTest
 @testable import WhereverCodeAgent
 
+@MainActor
 final class ModelDecoupleTests: XCTestCase {
 
     // MARK: - 1. 独立存储键隔离测试（model.configs_json vs brain.configs_json）

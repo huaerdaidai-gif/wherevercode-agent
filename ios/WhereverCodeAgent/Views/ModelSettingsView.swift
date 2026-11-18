@@ -142,10 +142,10 @@ public struct ModelSettingsView: View {
                 .foregroundStyle(.secondary)
 
             Toggle("允许付费模型作为备选", isOn: Binding(
-                get: { model.routingSettings.allowPaidInPool },
+                get: { model.routingSettings.allowPaid },
                 set: { val in
                     var s = model.routingSettings
-                    s.allowPaidInPool = val
+                    s.allowPaid = val
                     model.saveRoutingSettings(s)
                 }
             ))
@@ -156,7 +156,7 @@ public struct ModelSettingsView: View {
                 HStack {
                     Text("路由降级链配置")
                     Spacer()
-                    Text("\(model.routingSettings.candidateBrainIds.count) 个模型在池")
+                    Text("\(model.routingSettings.orderedBrainIds.count) 个模型在池")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
@@ -348,6 +348,7 @@ private struct ModelEditorView: View {
         dismiss()
     }
 
+    @MainActor
     private func testConnection() async {
         isTesting = true
         testResult = nil
@@ -621,10 +622,16 @@ private struct ModelFreeProviderPickerSheet: View {
 // MARK: - 局域网与设备模型探测 Sheet
 
 private struct ModelDeviceDiscoverySheet: View {
+    struct Candidate: Identifiable {
+        var id: String { baseUrl + modelName }
+        let modelName: String
+        let baseUrl: String
+    }
+
     @ObservedObject var model: ModelSettingsModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var candidates: [ModelDiscoveryCandidate] = []
+    @State private var candidates: [Candidate] = []
     @State private var isScanning = false
     @State private var selectedIndices: Set<Int> = []
 
@@ -687,7 +694,7 @@ private struct ModelDeviceDiscoverySheet: View {
             await MainActor.run {
                 self.isScanning = false
                 self.candidates = [
-                    ModelDiscoveryCandidate(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
+                    Candidate(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
                 ]
             }
         }
@@ -707,12 +714,6 @@ private struct ModelDeviceDiscoverySheet: View {
     }
 }
 
-private struct ModelDiscoveryCandidate: Identifiable {
-    var id: String { baseUrl + modelName }
-    let modelName: String
-    let baseUrl: String
-}
-
 // MARK: - 智能路由降级池选择 Sheet
 
 private struct ModelRoutingPoolPickerSheet: View {
@@ -729,16 +730,16 @@ private struct ModelRoutingPoolPickerSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(model.configs) { config in
-                        let inPool = model.routingSettings.candidateBrainIds.contains(config.modelId)
+                        let inPool = model.routingSettings.orderedBrainIds.contains(config.modelId)
                         Button {
-                            var ids = model.routingSettings.candidateBrainIds
+                            var ids = model.routingSettings.orderedBrainIds
                             if inPool {
                                 ids.removeAll { $0 == config.modelId }
                             } else {
                                 ids.append(config.modelId)
                             }
                             var s = model.routingSettings
-                            s.candidateBrainIds = ids
+                            s.orderedBrainIds = ids
                             model.saveRoutingSettings(s)
                         } label: {
                             HStack {
