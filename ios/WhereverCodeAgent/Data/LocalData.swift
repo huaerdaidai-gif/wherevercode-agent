@@ -1076,7 +1076,7 @@ public struct AgentTaskInlineCard: View {
     }
 }
 
-/// Claude 极简风格对话首页（严格遵循设计冻结要求：顶部圆按钮、中部 ✳ 星号与问候、底部悬浮胶囊输入栏，无底部 Tab Bar、无功能宫格、无首页统计卡片）
+/// Claude 极简风格对话首页（严格遵循设计冻结要求：顶部圆按钮、中部 ∞ 品牌字标与问候、底部悬浮胶囊输入栏，无底部 Tab Bar、无功能宫格、无首页统计卡片）
 public struct LocalChatHomeView: View {
     @ObservedObject public var appState: AppState
     @ObservedObject public var model: LocalChatModel
@@ -1195,9 +1195,9 @@ public struct LocalChatHomeView: View {
                         if model.visibleMessages.isEmpty && !model.isSending && !greetingDismissed {
                             Spacer(minLength: 88)
                             VStack(spacing: 14) {
-                                Text("✳")
-                                    .font(.system(size: 52))
-                                    .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                                Text("∞")
+                                    .font(.system(size: 52, weight: .medium))
+                                    .foregroundStyle(Color(red: 123 / 255.0, green: 92 / 255.0, blue: 1.0))
 
                                 Text("今天想做什么？")
                                     .font(.system(size: 27, weight: .regular, design: .serif))

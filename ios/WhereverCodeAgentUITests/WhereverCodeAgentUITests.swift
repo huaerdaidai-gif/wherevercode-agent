@@ -91,7 +91,7 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        XCTAssertTrue(app.navigationBars["频道与协作"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["频道与协作"].firstMatch.waitForExistence(timeout: 10))
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
