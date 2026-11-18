@@ -864,13 +864,6 @@
             android:textSize="14sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="常用服务商：选一家把服务地址填进下面的表单，再填你的 Key。免费 token 服务商：填你自己注册好的免费 Key，拉回模型阵列勾选添加；项目主打开源免费，注册领 Key 即可开始干活。"
-            android:textColor="@color/text_tertiary"
-            android:textSize="10sp" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -902,33 +895,13 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- 三件套之三（2026-11-18）：模型自动发现——打开开关后按
-             常用兼容协议探已配对设备与本机的本地模型端点，勾选
-             添加；设备只是来源，添加后互不关联，删设备不删模型。 -->
-        <CheckBox
-            android:id="@+id/checkModelAutoDiscovery"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="自动发现设备上的模型"
-            android:textColor="@color/text_primary"
-            android:textSize="12sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="打开后选择设备，扫描上面的本地模型服务。"
-            android:textColor="@color/text_tertiary"
-            android:textSize="10sp" />
-
         <Button
             android:id="@+id/buttonDiscoverDeviceModels"
             android:layout_width="match_parent"
             android:layout_height="42dp"
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_chip"
-            android:text="发现设备上的模型"
+            android:text="自动发现设备上的模型"
             android:textAllCaps="false"
             android:textColor="@color/text_primary"
             android:textSize="11sp" />

@@ -1826,7 +1826,6 @@ class MainActivity : AppCompatActivity() {
         val agentOnlyIds = listOf(
             R.id.agentHeader,
             R.id.buttonAddAgent,
-            R.id.agentAddIntro,
         )
         agentOnlyIds.forEach { id ->
             screenAgents.findViewById<View>(id).visibility =
@@ -2913,149 +2912,71 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /**
-     * 重新发现某台已配对设备上的 Agent（V5，2026-11-11）：设备页每台已
-     * 配对远程设备卡片上的“重新发现 Agent”。场景：设备是在自动发现上
-     * 线前加的，或服务端后来又装了新 Agent——重拉一次 hello，按同一
-     * 去重口径补建缺失的记录，已有的不动。只读 hello，不改配对、不删记录。
+     * 自动发现（集成在「添加 Agent」里，全 App 唯一的 Agent 发现
+     * 入口）：勾选要扫描的已配对设备（勾几个扫几个）→ 批量拉
+     * hello → 发现的 Agent 汇成一张勾选单 → 添加。设备页不再另设
+     * 发现入口，避免同一功能多个门。发现只是添加的快捷方式：建
+     * 出的记录与手工添加没有区别，删设备不删 Agent、删 Agent 不
+     * 删设备。去重与 [DeviceAgentDiscovery.discover] 一致。
      */
-    private fun rediscoverDeviceAgents(device: RemoteDevice) {
-        toast("正在重新发现 ${device.displayName} 上的 Agent…")
+    private fun discoverAgentsFromDevices() {
         Thread {
-            try {
-                val pairing = loadPairingRecord(
-                    device.deviceId,
-                    brainComponents?.pairingTrustStore,
-                    pairingStore,
-                )
-                if (pairing == null || pairing.state != PairingState.CONFIRMED) {
-                    runOnUiThread { toast("${device.displayName} 未配对：请先完成配对，再重新发现 Agent。") }
-                    return@Thread
+            val devices = try {
+                remoteDeviceStore.listDevices()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val pairings = try {
+                pairingStore.all()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
+                .map { it.deviceId }.toSet()
+            val paired = devices.filter { it.deviceId in confirmedIds }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when {
+                    devices.isEmpty() -> toast("还没加设备：先去设备页添加设备并完成配对。")
+                    paired.isEmpty() -> toast("设备还没配对完成：先在设备页完成配对。")
+                    else -> showScanDevicePicker(paired)
                 }
-                val identity = deviceIdentityStore.getOrCreate()
-                val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
-                val hello = runBlocking {
-                    directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
-                }
-                // hello 成功：记最后在线与服务端批准状态（列表如实显示）。
-                // Hand 自更新（2026-11-12）：顺手记远端 Hand 版本。
-                try {
-                    remoteDeviceStore.saveDevice(
-                        device.copy(
-                            lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
-                            lastServerStatus = hello.clientStatus,
-                            handVersion = hello.handVersion,
-                        ),
-                    )
-                } catch (_: Exception) {
-                }
-                // P1 能力卡：hello 成功，存仓库快照。
-                noteHelloForCapabilityCards(hello)
-                val (created, discovery) = DeviceAgentDiscovery.discover(
-                    device.deviceId,
-                    hello.agents,
-                    agentStore.listAgents(),
-                )
-                created.forEach { agentStore.saveAgent(it) }
-                runOnUiThread {
-                    toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
-                    refreshAgents()
-                }
-            } catch (e: Exception) {
-                runOnUiThread { toast("重新发现失败：${e.message}") }
             }
         }.start()
     }
 
-    /** Agent 批量自动发现开关（默认关；与模型自动发现同口径、各自独立）。 */
-    private fun agentAutoDiscoveryEnabled(): Boolean = try {
-        getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
-            .getBoolean("auto_discovery_agents", false)
-    } catch (_: Exception) {
-        false
-    }
-
-    private fun setAgentAutoDiscoveryEnabled(enabled: Boolean) {
-        try {
-            getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
-                .edit().putBoolean("auto_discovery_agents", enabled).apply()
-        } catch (_: Exception) {
-        }
-        if (enabled) {
-            // 先勾选、再打开开关（Funk 2026-11-19）：只扫 Agent 页
-            // 设备清单里勾中的已安装设备，没勾的不扫。
-            Thread {
-                val paired = pairedDevicesNow()
-                val checkedIds = batchCheckedDeviceIds(paired.map { it.deviceId }.toSet())
-                val selected = paired.filter { it.deviceId in checkedIds }
+    /** 自动发现第一步：勾选要扫描的设备（默认不勾，勾几个扫几个）。 */
+    private fun showScanDevicePicker(devices: List<RemoteDevice>) {
+        val labels = devices.map { it.displayName }.toTypedArray()
+        val checked = BooleanArray(devices.size) { false }
+        AlertDialog.Builder(this)
+            .setTitle("选择要扫描的设备")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("扫描") { _, _ ->
+                val selected = devices.filterIndexed { index, _ -> checked[index] }
                 if (selected.isEmpty()) {
-                    runOnUiThread {
-                        toast("先勾选要扫描的设备，再打开开关。")
-                    }
+                    toast("先勾选要扫描的设备。")
                 } else {
-                    batchDiscoverAgentsOnDevices(selected)
+                    scanDevicesForAgents(selected)
                 }
-            }.start()
-        } else {
-            toast("Agent 自动发现已关闭。")
-        }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
-    /** 当前已安装且已配对的设备（批量扫描的候选全集）。 */
-    private fun pairedDevicesNow(): List<RemoteDevice> {
-        val devices = try {
-            remoteDeviceStore.listDevices()
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val pairings = try {
-            pairingStore.all()
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
-            .map { it.deviceId }.toSet()
-        return devices.filter { it.deviceId in confirmedIds }
-    }
-
-    /**
-     * 批量扫描的勾选集（存本机）：默认一个都不勾——批量是可选项，
-     * 先由用户明确勾选要扫的设备才扫（Funk 2026-11-19）；勾过的
-     * 记住（与当前设备清单取交集，删掉的设备不再出现）。勾选
-     * 只是选择，不是关联：不勾的设备照常在册。
-     */
-    private fun batchCheckedDeviceIds(pairedIds: Set<String>): Set<String> {
-        val stored = try {
-            getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
-                .getStringSet("batch_scan_device_ids", null)
-        } catch (_: Exception) {
-            null
-        }
-        return stored?.intersect(pairedIds) ?: emptySet()
-    }
-
-    private fun setBatchDeviceChecked(device: RemoteDevice, checked: Boolean, pairedIds: Set<String>) {
-        val next = batchCheckedDeviceIds(pairedIds).toMutableSet()
-        if (checked) next += device.deviceId else next -= device.deviceId
-        try {
-            getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
-                .edit().putStringSet("batch_scan_device_ids", next).apply()
-        } catch (_: Exception) {
-        }
-    }
-
-    /**
-     * 批量自动发现 Agent（Funk 2026-11-19）：只扫用户勾选的设备——
-     * 逐台拉 hello、按既有去重口径补建缺失的 Agent 记录，最后汇总
-     * 一句。单台失败不挡其余；与添加设备、配对流程互不关联。
-     */
-    private fun batchDiscoverAgentsOnDevices(devices: List<RemoteDevice>) {
-        // 本函数从后台线程进入，开场提示必须回主线程发（194 真机
-        // 实证：后台线程直接 Toast 会让进程崩溃）。
-        runOnUiThread { toast("正在批量发现 ${devices.size} 台设备上的 Agent…") }
+    /** 自动发现第二步：批量扫描勾中的设备，汇总还没添加的 Agent。 */
+    private fun scanDevicesForAgents(devices: List<RemoteDevice>) {
+        toast("正在扫描 ${devices.size} 台设备…")
         Thread {
+            val existingIds = try {
+                agentStore.listAgents().map { it.agentId }.toSet()
+            } catch (_: Exception) {
+                emptySet()
+            }
+            val found = mutableListOf<Pair<RemoteDevice, RemoteAgentInfo>>()
             var scanned = 0
-            var createdTotal = 0
             for (device in devices) {
                 try {
                     val pairing = loadPairingRecord(
@@ -3080,157 +3001,62 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: Exception) {
                     }
                     noteHelloForCapabilityCards(hello)
-                    val (created, _) = DeviceAgentDiscovery.discover(
-                        device.deviceId,
-                        hello.agents,
-                        agentStore.listAgents(),
-                    )
-                    created.forEach { agentStore.saveAgent(it) }
-                    createdTotal += created.size
+                    hello.agents
+                        .filter { it.available && it.folder.isNotBlank() && it.agentId !in existingIds }
+                        .forEach { found += device to it }
                     scanned++
                 } catch (_: Exception) {
-                    // 单台设备拉不到 hello 就跳过，不把整批卡死。
+                    // 单台连不上就跳过，不把整批卡死。
                 }
             }
-            runOnUiThread {
-                toast(
-                    if (scanned == 0) {
-                        "没有已配对的设备可扫描：请先去设备页添加并完成配对。"
-                    } else {
-                        "批量发现完成：扫了 $scanned 台设备，新添加 $createdTotal 个 Agent。"
-                    },
-                )
-                refreshAgents()
-            }
-        }.start()
-    }
-
-    /**
-     * 从设备添加 Agent（三件套之二，2026-11-18）：Agent 页的自动发现
-     * 快捷入口——选一台已配对设备 → 拉 hello → 列出它上面的 Agent →
-     * 勾选直接添加。只是省手工填表单的步骤，不建立设备对 Agent 的
-     * 归属：建出的记录与手工添加的没有区别，删设备不删 Agent、删
-     * Agent 不删设备。去重口径与配对后自动发现、“重新发现 Agent”
-     * 完全一致（[DeviceAgentDiscovery.discover]）。
-     */
-    private fun addAgentsFromDevice() {
-        Thread {
-            val devices = try {
-                remoteDeviceStore.listDevices()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            val pairings = try {
-                pairingStore.all()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
-                .map { it.deviceId }.toSet()
-            val paired = devices.filter { it.deviceId in confirmedIds }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when {
-                    devices.isEmpty() -> toast("还没加设备：请先去设备页添加远程设备并完成配对，再回来从设备添加 Agent。")
-                    paired.isEmpty() -> toast("设备还没配对完成：请先在设备页完成配对，再回来从设备添加 Agent。")
-                    paired.size == 1 -> fetchDeviceAgentsForAdd(paired.first())
-                    else -> {
-                        AlertDialog.Builder(this)
-                            .setTitle("从哪台设备添加 Agent")
-                            .setItems(paired.map { it.displayName }.toTypedArray()) { _, which ->
-                                fetchDeviceAgentsForAdd(paired[which])
-                            }
-                            .setNegativeButton("取消", null)
-                            .show()
-                    }
+                    scanned == 0 -> toast("没有连上任何一台设备。")
+                    found.isEmpty() -> toast("扫描完成：没有可添加的 Agent。")
+                    else -> showDiscoveredAgentsPicker(found)
                 }
             }
         }.start()
     }
 
-    /** 拉一台已配对设备的 hello，把可选 Agent 交给勾选对话框。 */
-    private fun fetchDeviceAgentsForAdd(device: RemoteDevice) {
-        toast("正在连接 ${device.displayName}…")
-        Thread {
-            try {
-                val pairing = loadPairingRecord(
-                    device.deviceId,
-                    brainComponents?.pairingTrustStore,
-                    pairingStore,
-                )
-                if (pairing == null || pairing.state != PairingState.CONFIRMED) {
-                    runOnUiThread { toast("${device.displayName} 未配对：请先完成配对，再从设备添加 Agent。") }
-                    return@Thread
-                }
-                val identity = deviceIdentityStore.getOrCreate()
-                val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
-                val hello = runBlocking {
-                    directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
-                }
-                try {
-                    remoteDeviceStore.saveDevice(
-                        device.copy(
-                            lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
-                            lastServerStatus = hello.clientStatus,
-                            handVersion = hello.handVersion,
-                        ),
-                    )
-                } catch (_: Exception) {
-                }
-                noteHelloForCapabilityCards(hello)
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    showAddAgentsFromDeviceDialog(device, hello.agents)
-                }
-            } catch (e: Exception) {
-                runOnUiThread { toast("连接 ${device.displayName} 失败：${e.message}") }
-            }
-        }.start()
-    }
-
-    /** 勾选要添加的 Agent（不可用的不列出，只在说明里计数）。 */
-    private fun showAddAgentsFromDeviceDialog(device: RemoteDevice, infos: List<RemoteAgentInfo>) {
-        val addable = infos.filter { it.available && it.folder.isNotBlank() }
-        val skipped = infos.size - addable.size
-        if (addable.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("${device.displayName} 上的 Agent")
-                .setMessage("没有可添加的 Agent：这台设备上报的 Agent 都不可用或没有工作文件夹（共 ${infos.size} 个）。")
-                .setPositiveButton("知道了", null)
-                .show()
-            return
-        }
-        val labels = addable.map { "${it.displayName}（${it.folder}）" }.toTypedArray()
-        val checked = BooleanArray(addable.size) { true }
-        val builder = AlertDialog.Builder(this)
-            .setTitle("从 ${device.displayName} 添加 Agent")
+    /** 自动发现第三步：一张勾选单选要添加的 Agent（跨设备汇总）。 */
+    private fun showDiscoveredAgentsPicker(found: List<Pair<RemoteDevice, RemoteAgentInfo>>) {
+        val labels = found.map { (device, info) ->
+            "${info.displayName}（${info.folder}）· ${device.displayName}"
+        }.toTypedArray()
+        val checked = BooleanArray(found.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle("发现的 Agent（${found.size}）")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
             .setPositiveButton("添加所选") { _, _ ->
-                val selected = addable.filterIndexed { index, _ -> checked[index] }
+                val selected = found.filterIndexed { index, _ -> checked[index] }
                 if (selected.isEmpty()) {
                     toast("没有勾选任何 Agent。")
                     return@setPositiveButton
                 }
                 Thread {
-                    val (created, discovery) = DeviceAgentDiscovery.discover(
-                        device.deviceId,
-                        selected,
-                        agentStore.listAgents(),
-                    )
-                    created.forEach { agentStore.saveAgent(it) }
+                    var createdTotal = 0
+                    selected.groupBy({ it.first }, { it.second })
+                        .forEach { (device, infos) ->
+                            val (created, _) = DeviceAgentDiscovery.discover(
+                                device.deviceId,
+                                infos,
+                                agentStore.listAgents(),
+                            )
+                            created.forEach { agentStore.saveAgent(it) }
+                            createdTotal += created.size
+                        }
                     runOnUiThread {
-                        toast("${device.displayName}：${DeviceAgentDiscovery.summarize(discovery)}。")
+                        toast("已添加 $createdTotal 个 Agent。")
                         refreshAgents()
                     }
                 }.start()
             }
             .setNegativeButton("取消", null)
-        if (skipped > 0) {
-            builder.setMessage("另有 $skipped 个 Agent 不可用（未就绪或没有工作文件夹），未列出。")
-        }
-        builder.show()
+            .show()
     }
 
     /**
@@ -7369,7 +7195,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Hand 自更新（2026-11-12）：设备卡“更新 Hand”与设置页入口。
         // 管理调用走密封通道（HandClient.requestHandAdmin），hello 探针
-        // 走 DirectTransport.fetchHello（与 rediscoverDeviceAgents 同款）。
+        // 走 DirectTransport.fetchHello（与自动发现同款）。
         handUpdateController = HandUpdateController(
             activity = this,
             scope = lifecycleScope,
@@ -7489,16 +7315,6 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 emptyList()
             } else emptyList()
-            val batchDevices = if (devicesOnly) {
-                emptyList()
-            } else {
-                try {
-                    pairedDevicesNow()
-                } catch (e: Exception) {
-                    emptyList()
-                }
-            }
-            val batchChecked = batchCheckedDeviceIds(batchDevices.map { it.deviceId }.toSet())
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (devicesOnly) {
@@ -7509,21 +7325,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
-                    agentController.renderAddedAgents(
-                        added,
-                        onAddFromDevice = { addAgentsFromDevice() },
-                        autoDiscoveryEnabled = agentAutoDiscoveryEnabled(),
-                        onToggleAutoDiscovery = { enabled -> setAgentAutoDiscoveryEnabled(enabled) },
-                        batchDevices = batchDevices,
-                        batchCheckedIds = batchChecked,
-                        onBatchDeviceChecked = { device, checked ->
-                            setBatchDeviceChecked(
-                                device,
-                                checked,
-                                batchDevices.map { it.deviceId }.toSet(),
-                            )
-                        },
-                    )
+                    agentController.renderAddedAgents(added)
                 }
             }
         }.start()
@@ -7558,7 +7360,6 @@ class MainActivity : AppCompatActivity() {
                 probeAndAddRemoteDevice(device.displayName, device.host, device.port)
             },
             onAddRemote = { showAddRemoteDeviceDialog() },
-            onRediscover = { device -> rediscoverDeviceAgents(device) },
             onEditRemote = { device -> showEditRemoteDeviceDialog(device) },
             onUpdateHand = { device -> handUpdateController?.updateDevice(device) },
             onDeleteRemote = { device -> deleteRemoteDevice(device) },
@@ -8021,12 +7822,15 @@ class MainActivity : AppCompatActivity() {
         refreshVisibility()
 
         val scroll = ScrollView(this).apply { addView(form) }
-        val dialog = AlertDialog.Builder(this)
+        val formBuilder = AlertDialog.Builder(this)
             .setTitle(if (existing == null) "添加 Agent" else "编辑 Agent")
             .setView(scroll)
             .setPositiveButton("保存", null)
             .setNegativeButton("取消", null)
-            .create()
+        if (existing == null) {
+            formBuilder.setNeutralButton("自动发现") { _, _ -> discoverAgentsFromDevices() }
+        }
+        val dialog = formBuilder.create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val kind = currentKind()
@@ -8872,24 +8676,6 @@ class MainActivity : AppCompatActivity() {
         screenSettings.findViewById<View>(R.id.buttonFreeProviders).setOnClickListener {
             showFreeProviderPicker()
         }
-        val checkModelAutoDiscovery = screenSettings.findViewById<CheckBox>(R.id.checkModelAutoDiscovery)
-        checkModelAutoDiscovery.isChecked =
-            getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
-                .getBoolean("auto_discovery_models", false)
-        checkModelAutoDiscovery.setOnCheckedChangeListener { _, isChecked ->
-            getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
-                .edit().putBoolean("auto_discovery_models", isChecked).apply()
-            if (isChecked) {
-                // Funk 口径（2026-11-19 00:00）：打开开关才扫描——
-                // 打开的那一刻把已安装的设备全扫一遍；发现与配对
-                // 不关联，新装设备配对成功不触发扫描；关着时只有
-                // 手动点按钮才探。
-                note("自动发现已打开：请勾选要扫描的设备。")
-                discoverDeviceModels()
-            } else {
-                note("自动发现已关闭。")
-            }
-        }
         val routingStore = SharedPreferencesModelRoutingStore(applicationContext)
         val routingSettingsNow = routingStore.load()
         val checkModelRouting = screenSettings.findViewById<CheckBox>(R.id.checkModelRouting)
@@ -8914,11 +8700,7 @@ class MainActivity : AppCompatActivity() {
             showRoutingPoolPicker()
         }
         screenSettings.findViewById<View>(R.id.buttonDiscoverDeviceModels).setOnClickListener {
-            if (checkModelAutoDiscovery.isChecked) {
-                discoverDeviceModels()
-            } else {
-                note("先打开上面的自动发现开关，再来发现设备上的模型。")
-            }
+            discoverDeviceModels()
         }
         buttonVerifyCli.setOnClickListener { verifyCliBrain() }
         // 设置清理 2（2026-11-11，Claude 极简标准）：Cloudflare /

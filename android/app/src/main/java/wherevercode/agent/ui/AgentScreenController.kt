@@ -4,9 +4,7 @@ import wherevercode.agent.R
 
 import android.content.Context
 import android.view.View
-import android.widget.CheckBox
 import android.widget.LinearLayout
-import android.widget.Switch
 import android.widget.TextView
 import wherevercode.agent.core.agent.AgentLoginState
 import wherevercode.agent.core.agent.AgentRecord
@@ -74,68 +72,11 @@ class AgentScreenController(
         list.removeAllViews()
     }
 
-    fun renderAddedAgents(
-        agents: List<AgentRecord>,
-        onAddFromDevice: (() -> Unit)? = null,
-        autoDiscoveryEnabled: Boolean? = null,
-        onToggleAutoDiscovery: ((Boolean) -> Unit)? = null,
-        batchDevices: List<RemoteDevice> = emptyList(),
-        batchCheckedIds: Set<String> = emptySet(),
-        onBatchDeviceChecked: ((RemoteDevice, Boolean) -> Unit)? = null,
-    ) {
-        // 批量自动发现开关（Funk 2026-11-19）：默认关；打开的那一刻
-        // 批量扫已安装设备。添加设备、配对与发现互相独立、不关联：
-        // 加设备只加设备，发现只由这个开关与手动入口触发。
-        if (onBatchDeviceChecked != null) {
-            // 先勾设备、再开开关（Funk 2026-11-19）：要批量扫描的
-            // 已安装设备先在这里勾好，开关只扫勾中的。
-            list.addView(sectionTitle("选择设备"))
-            if (batchDevices.isEmpty()) {
-                list.addView(
-                    UiKit.text(context, "还没有已配对的设备：先去设备页添加并完成配对，设备会出现在这里供勾选。", 10f, R.color.text_tertiary).apply {
-                        setPadding(0, 0, 0, dp(8))
-                    },
-                )
-            } else {
-                batchDevices.forEach { device ->
-                    val box = CheckBox(context).apply {
-                        text = device.displayName
-                        isChecked = device.deviceId in batchCheckedIds
-                        setOnCheckedChangeListener { _, checked -> onBatchDeviceChecked(device, checked) }
-                    }
-                    list.addView(box)
-                }
-            }
-        }
-        if (autoDiscoveryEnabled != null && onToggleAutoDiscovery != null) {
-            val toggleRow = UiKit.horizontal(context).apply { setPadding(0, dp(6), 0, dp(2)) }
-            val toggle = Switch(context).apply {
-                text = "自动发现设备上的 Agent"
-                isChecked = autoDiscoveryEnabled
-                setOnCheckedChangeListener { _, checked -> onToggleAutoDiscovery(checked) }
-            }
-            toggleRow.addView(toggle)
-            list.addView(toggleRow)
-            list.addView(
-                UiKit.text(
-                    context,
-                    "打开后扫描上面勾选的设备，添加上面的 Agent。",
-                    10f,
-                    R.color.text_tertiary,
-                ).apply { setPadding(0, 0, 0, dp(10)) },
-            )
-        }
-        // 三件套之二（2026-11-18）：「从设备添加」= 自动发现快捷入口，
-        // 与手工表单并列；发现与去重口径和设备页“重新发现 Agent”一致。
-        if (onAddFromDevice != null) {
-            val addRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(10)) }
-            addRow.addView(actionButton("＋ 从设备添加（自动发现）") { onAddFromDevice() })
-            list.addView(addRow)
-        }
+    fun renderAddedAgents(agents: List<AgentRecord>) {
         list.addView(sectionTitle("已添加的 Agent（${agents.size}）"))
         if (agents.isEmpty()) {
             list.addView(
-                UiKit.text(context, "还没有添加 Agent。点上方“添加 Agent”，可加云端模型 API、订阅授权 Agent、本机 CLI Agent 或设备上的 Agent。", 11f, R.color.text_tertiary).apply {
+                UiKit.text(context, "还没有添加 Agent。", 11f, R.color.text_tertiary).apply {
                     setBackgroundResource(R.drawable.bg_system_note)
                     setPadding(dp(12), dp(10), dp(12), dp(10))
                 },
