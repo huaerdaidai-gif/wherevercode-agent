@@ -34,11 +34,10 @@ package wherevercode.agent.brain.generic
  *   send a non-empty placeholder. Caveat, written on the presets: on
  *   the phone, `localhost` is the phone itself — a model server running
  *   on the user's Mac/PC is NOT reachable at `localhost` from the App.
- *   The user must type that computer's LAN address instead, and the
- *   current [wherevercode.agent.brain.BrainConfigValidator] only allows
- *   https or loopback http, so a LAN http address is rejected until
- *   the validator gains an explicit LAN rule (follow-up, not smuggled
- *   in here).
+ *   The user must type that computer's LAN address instead; the
+ *   validator allows http for loopback and private-LAN IPv4 hosts
+ *   (LAN rule landed 2026-11-18 with the model auto-discovery work),
+ *   while public http stays refused.
  *
  * Deliberately absent: Anthropic. Anthropic has NO OpenAI-compatible
  * endpoint — its API is the Messages API (`/v1/messages`), a different

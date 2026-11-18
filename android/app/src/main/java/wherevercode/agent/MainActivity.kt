@@ -32,6 +32,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -77,6 +78,7 @@ import wherevercode.agent.brain.cloudflare.CloudflareBrainAdapter
 import wherevercode.agent.brain.deepseek.DeepSeekApiClient
 import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
+import wherevercode.agent.brain.generic.DeviceModelDiscovery
 import wherevercode.agent.brain.generic.FreeModelListMode
 import wherevercode.agent.brain.generic.FreeProviderPreset
 import wherevercode.agent.brain.generic.FreeProviderPresets
@@ -8713,6 +8715,25 @@ class MainActivity : AppCompatActivity() {
         screenSettings.findViewById<View>(R.id.buttonFreeProviders).setOnClickListener {
             showFreeProviderPicker()
         }
+        val checkModelAutoDiscovery = screenSettings.findViewById<CheckBox>(R.id.checkModelAutoDiscovery)
+        checkModelAutoDiscovery.isChecked =
+            getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
+                .getBoolean("auto_discovery_models", false)
+        checkModelAutoDiscovery.setOnCheckedChangeListener { _, isChecked ->
+            getSharedPreferences("wherevercode_model_prefs", MODE_PRIVATE)
+                .edit().putBoolean("auto_discovery_models", isChecked).apply()
+            note(
+                if (isChecked) "自动发现已打开：点“发现设备上的模型”开始探测。"
+                else "自动发现已关闭。",
+            )
+        }
+        screenSettings.findViewById<View>(R.id.buttonDiscoverDeviceModels).setOnClickListener {
+            if (checkModelAutoDiscovery.isChecked) {
+                discoverDeviceModels()
+            } else {
+                note("先打开上面的自动发现开关，再来发现设备上的模型。")
+            }
+        }
         buttonVerifyCli.setOnClickListener { verifyCliBrain() }
         // 设置清理 2（2026-11-11，Claude 极简标准）：Cloudflare /
         // DeepSeek / Grok / Muse Spark / Claude / 通用表单 / CLI 七节收到“高级配置”折叠里，默认不
@@ -11290,7 +11311,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!BrainConfigValidator.isAllowedBaseUrl(baseUrl)) {
-            note("Base URL 只允许 https（本地模型可用 http://127.0.0.1 或 http://localhost）。")
+            note("Base URL 只允许 https（本机/局域网模型可用 http）。")
             return
         }
         genericModels.text = "正在读取可用模型…"
@@ -11598,6 +11619,121 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     note("没有添加成功：配置校验未通过，请改用手工表单添加。")
                 }
+            }
+        }.start()
+    }
+
+    /**
+     * 三件套之三·自动发现（2026-11-18）：探本机（127.0.0.1）与每台
+     * 已登记远程设备的常用本地模型端点（Ollama 11434 / LM Studio
+     * 1234 / vLLM 8000 的 /v1/models），列出发现的模型勾选添加。
+     * 设备只是来源：添加的配置不与设备建归属，删设备不删模型
+     * （与 Agent 从设备添加同口径）。局域网端点多无鉴权：Key 存
+     * 占位值 local 进 Keystore（服务端忽略），不假装有真 Key。
+     */
+    private fun discoverDeviceModels() {
+        val targets = mutableListOf("本机" to "127.0.0.1")
+        try {
+            remoteDeviceStore.listDevices().forEach { targets += it.displayName to it.host }
+        } catch (_: Exception) {
+            // 设备清单读不到时只探本机，不把发现整体卡死。
+        }
+        note("正在探测 ${targets.size} 个来源的模型端点…")
+        Thread {
+            // Triple = 来源标签（含服务名）、baseUrl、模型 ID。
+            val found = mutableListOf<Triple<String, String, String>>()
+            runBlocking {
+                for ((sourceLabel, host) in targets) {
+                    for (endpoint in DeviceModelDiscovery.probeHost(host)) {
+                        for (model in endpoint.models) {
+                            found += Triple(
+                                "$sourceLabel · ${endpoint.serviceName}",
+                                endpoint.baseUrl,
+                                model,
+                            )
+                        }
+                    }
+                }
+            }
+            runOnUiThread {
+                if (found.isEmpty()) {
+                    note("没有发现模型端点：已配对设备与本机上都没有 Ollama / LM Studio / vLLM 在常用端口返回模型。")
+                } else {
+                    showDiscoveredModelsPicker(found)
+                }
+            }
+        }.start()
+    }
+
+    private fun showDiscoveredModelsPicker(found: List<Triple<String, String, String>>) {
+        val labels = found.map { "${it.first}：${it.third}" }.toTypedArray()
+        val checked = BooleanArray(found.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle("发现的模型（${found.size}）")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("添加所选") { _, _ ->
+                val selected = found.filterIndexed { index, _ -> checked[index] }
+                if (selected.isEmpty()) {
+                    note("没有勾选任何模型，未添加。")
+                } else {
+                    saveDiscoveredModels(selected)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun saveDiscoveredModels(selected: List<Triple<String, String, String>>) {
+        val components = brainComponents ?: run {
+            note("大脑还在加载，请稍候再添加。")
+            return
+        }
+        val keyStore = try {
+            BrainKeyStore(applicationContext)
+        } catch (e: Exception) {
+            note("无法打开本机 Keystore，未添加：${e.message}")
+            return
+        }
+        Thread {
+            var added = 0
+            val savedConfigs = mutableListOf<BrainConfig>()
+            for ((sourceLabel, baseUrl, model) in selected) {
+                val label = "$sourceLabel · $model"
+                val hash = (model.hashCode() and 0xFFFF).toString(16).padStart(4, '0')
+                val brainId = BrainLoginRows.genericBrainId(label) + "-" + hash
+                val authRef = BrainLoginRows.genericAuthRef(brainId)
+                val config = BrainConfig(
+                    brainId = brainId,
+                    kind = BrainKind.MODEL_API,
+                    adapterId = BrainLoginRows.GENERIC_ADAPTER_ID,
+                    label = label,
+                    baseUrl = baseUrl,
+                    model = model,
+                    authRef = authRef,
+                    extra = mapOf(
+                        FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
+                        "discovery" to "device",
+                    ),
+                    fallbackBrainIds = emptyList(),
+                )
+                if (BrainConfigValidator.validate(config).isNotEmpty()) continue
+                keyStore.putSecret(authRef, "local")
+                components.configStore.saveConfig(config)
+                savedConfigs += config
+                added++
+            }
+            runOnUiThread {
+                savedConfigs.forEach { BrainAdapterRegistry.registerConfig(it) }
+                refreshBrainStatus()
+                note(
+                    if (added > 0) {
+                        "已添加 $added 个发现的模型。${BrainLoginRows.GENERIC_SAVED_NOTE}"
+                    } else {
+                        "没有添加成功：配置校验未通过。"
+                    },
+                )
             }
         }.start()
     }

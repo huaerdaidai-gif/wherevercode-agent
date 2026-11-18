@@ -125,7 +125,7 @@ object BrainConfigValidator {
                     errors += "服务地址只能来自用户配置，不能来自任务内容或聊天消息"
                 }
                 if (!isAllowedBaseUrl(url)) {
-                    errors += "服务地址只允许 https（本地模型允许 http://127.0.0.1 或 http://localhost）：$url"
+                    errors += "服务地址只允许 https（本机/局域网模型允许 http）：$url"
                 }
             }
         }
@@ -185,7 +185,33 @@ object BrainConfigValidator {
                 return true
             }
         }
+        // LAN-model exception (2026-11-18, model auto-discovery): http
+        // is also allowed when the host is a private-LAN IPv4 address
+        // (RFC 1918) — a model server on the user's own Mac/PC/phone
+        // in the same LAN. Public http stays refused, and a hostname
+        // is never treated as LAN (it cannot be verified as local).
+        if (lower.startsWith("http://")) {
+            val host = lower.removePrefix("http://").takeWhile { it !in "/:?#" }
+            if (isPrivateLanIpv4(host)) return true
+        }
         return false
+    }
+
+    /** RFC 1918 private IPv4: 10/8, 172.16/12, 192.168/16. Dotted-quad only. */
+    fun isPrivateLanIpv4(host: String): Boolean {
+        val parts = host.split('.')
+        if (parts.size != 4) return false
+        val nums = parts.map { part ->
+            if (part.isEmpty() || part.length > 3) return false
+            part.toIntOrNull() ?: return false
+        }
+        if (nums.any { it !in 0..255 }) return false
+        return when {
+            nums[0] == 10 -> true
+            nums[0] == 172 && nums[1] in 16..31 -> true
+            nums[0] == 192 && nums[1] == 168 -> true
+            else -> false
+        }
     }
 
     /** Export a config for backup/sharing: reference names only, never secret values. */

@@ -902,6 +902,37 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <!-- 三件套之三（2026-11-18）：模型自动发现——打开开关后按
+             常用兼容协议探已配对设备与本机的本地模型端点，勾选
+             添加；设备只是来源，添加后互不关联，删设备不删模型。 -->
+        <CheckBox
+            android:id="@+id/checkModelAutoDiscovery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="自动发现设备上的模型（开关）"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="打开后点下面按钮，按 Ollama / LM Studio / vLLM 的常用端口探已配对设备与本机，列出发现的模型勾选添加。局域网 http 仅限本机与私有局域网地址。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/buttonDiscoverDeviceModels"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="发现设备上的模型"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
         <!-- V5 C3-C：通用 MODEL_API 添加表单（OpenAI 兼容）。Cloudflare /
              DeepSeek 两节保持不动；通用表单是第四路及以后的唯一入口。
              Key 只存本机 Keystore，配置只存 authRef 引用名；推理已接线
