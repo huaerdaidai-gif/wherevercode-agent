@@ -70,6 +70,20 @@ class DrawerView(
     private var searchInputField: EditText? = null
     private var searchBoxView: LinearLayout? = null
     private var sessionListContainer: LinearLayout? = null
+    private var recentHeaderView: TextView? = null
+
+    // refresh() 重建期间的插入游标：>=0 时新分节插到持久区（最近会话区）之前，
+    // -1 表示追加到 content 末尾。
+    private var contentInsertIndex: Int = -1
+
+    private fun addContent(view: View) {
+        if (contentInsertIndex >= 0) {
+            content.addView(view, contentInsertIndex)
+            contentInsertIndex++
+        } else {
+            content.addView(view)
+        }
+    }
     private val collapsedGroups: MutableSet<String> = mutableSetOf()
 
     // 必须声明在 init 之前：init 会调用 refresh()，refresh() 读本表；
@@ -171,7 +185,23 @@ class DrawerView(
 
     fun refresh() {
         val rows = mutableListOf<RenderedRow>()
-        content.removeAllViews()
+
+        // 最近会话区（标题 + 搜索框 + 会话列表容器）是持久区：建成一次、永不摘下。
+        // 旧实现每次 refresh() 都以 content.removeAllViews() 开头，把搜索框连同
+        // 输入框一起从窗口摘下、随后又 addView 重挂。而 refresh() 的调用点恰恰是
+        // 抽屉打开（与 220ms 滑入动画同帧）、会话列表/角标的异步回主线程刷新
+        // （可能落在动画中、甚至用户已经开始打字时）：输入框在动画容器的分数位移
+        // 下被反复脱挂重绘，新旧位移的绘制叠在一起就是占位文字与正文的双影
+        // （重影）；脱挂还会拆掉输入连接与焦点（开抽屉立刻打字被吞）。
+        // 这里只摘非持久子视图、只重建其余分节，搜索框全程纹丝不动。
+        ensureRecentSectionViews()
+        val persistent = listOfNotNull(recentHeaderView, searchBoxView, sessionListContainer)
+        for (i in content.childCount - 1 downTo 0) {
+            val child = content.getChildAt(i)
+            if (child !in persistent) content.removeViewAt(i)
+        }
+        contentInsertIndex = content.indexOfChild(recentHeaderView)
+            .takeIf { it >= 0 } ?: content.childCount
 
         // 1. 品牌头：WhereverCode + 关闭按钮
         addBrandHeader()
@@ -181,8 +211,10 @@ class DrawerView(
 
         addDivider()
 
-        // 3. 中部最近会话与会话搜索
+        // 3. 中部最近会话与会话搜索（持久区已在位，只重画会话行）
         addRecentConversationsSection(rows)
+
+        contentInsertIndex = -1
 
         addDivider()
 
@@ -230,7 +262,7 @@ class DrawerView(
             setOnClickListener { onEntrySelected("drawer_close") }
         }
         row.addView(closeBtn)
-        content.addView(row)
+        addContent(row)
     }
 
     data class ParentMenuItem(
@@ -295,26 +327,37 @@ class DrawerView(
             })
             if (badge != null) row.addView(badgeView(badge))
             if (trailing != null) row.addView(trailingView(trailing))
-            content.addView(row)
+            addContent(row)
+        }
+    }
+
+    /** 持久区三件套（标题、搜索框、会话列表容器）只建一次，之后只复用同一批实例。 */
+    private fun ensureRecentSectionViews() {
+        if (recentHeaderView == null) {
+            recentHeaderView = UiKit.text(context, "最近会话", 12f, R.color.text_secondary, bold = true).apply {
+                setPadding(dp(4), dp(6), dp(4), dp(4))
+            }
+        }
+        if (searchBoxView == null) {
+            searchBoxView = buildSearchBox()
+        }
+        if (sessionListContainer == null) {
+            // 会话列表单独一个容器：打字时只重建这个容器里的行，
+            // 搜索框与输入框纹丝不动。
+            sessionListContainer = UiKit.vertical(context)
         }
     }
 
     private fun addRecentConversationsSection(rows: MutableList<RenderedRow>) {
-        val header = UiKit.text(context, "最近会话", 12f, R.color.text_secondary, bold = true).apply {
-            setPadding(dp(4), dp(6), dp(4), dp(4))
-        }
-        content.addView(header)
-
-        // 搜索框只建一次、整只复用：输入框永远不脱离搜索框，
-        // refresh() 重建抽屉时不再销毁/重挂输入框（旧做法导致占位文字重影、打字吞字）。
-        val searchBox = searchBoxView ?: buildSearchBox().also { searchBoxView = it }
-        (searchBox.parent as? android.view.ViewGroup)?.removeView(searchBox)
-        content.addView(searchBox)
-
-        // 会话列表单独一个容器：打字时只重建这个容器，搜索框与输入框纹丝不动。
-        val container = UiKit.vertical(context)
-        sessionListContainer = container
-        content.addView(container)
+        ensureRecentSectionViews()
+        val header = recentHeaderView!!
+        val searchBox = searchBoxView!!
+        val container = sessionListContainer!!
+        // 只在首次时把持久区三件套放进 content；之后 refresh() 只摘非持久
+        // 子视图，三件套的挂载状态与位置保持不变，输入框永不脱挂、永不重挂。
+        if (header.parent == null) addContent(header)
+        if (searchBox.parent == null) addContent(searchBox)
+        if (container.parent == null) addContent(container)
         renderSessionRows(rows)
     }
 
@@ -557,7 +600,7 @@ class DrawerView(
     }
 
     private fun addDivider() {
-        content.addView(
+        addContent(
             View(context).apply {
                 setBackgroundColor(UiKit.color(context, R.color.divider))
                 layoutParams = LinearLayout.LayoutParams(
