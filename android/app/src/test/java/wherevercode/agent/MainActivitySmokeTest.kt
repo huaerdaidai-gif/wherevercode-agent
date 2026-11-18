@@ -54,25 +54,28 @@ class MainActivitySmokeTest {
         assertNotNull(capsule)
         assertTrue(capsule.isClickable)
         val container = activity.findViewById<android.widget.FrameLayout>(R.id.screenContainer)
-        // 5 个屏（聊天/项目/任务/Agent/设置）+ 1 个任务详情浮层（阶段 3 批 3a，
+        // 6 个屏（聊天/项目/任务/Agent/设置/模型——模型页 2026-11-19 起
+        // 是独立一页，不再与设置页共用一屏）+ 1 个任务详情浮层（阶段 3 批 3a，
         // 复用设置浮层的宿主模式）+ 1 个会话列表（阶段 3 批 3c，聊天 Tab 首屏）
         // + 2 个 V5 C2 批 2 占位屏（成果、帮助）+ 1 个 V5 控制台（2026-11-11，
         // 按需展开的专业工作台，抽屉“控制台”进入）+ 1 个 MCP/插件屏
         // （2026-11-11，抽屉“扩展与资源”→“MCP / 插件”进入）+ 1 个团队频道屏
         // （P3 频道，抽屉“扩展与资源”→“团队频道”进入）；
         // 初始入口是新对话（首页），聊天屏 VISIBLE，其余全部 GONE。
-        assertEquals(12, container.childCount)
+        assertEquals(13, container.childCount)
         assertEquals(View.VISIBLE, container.getChildAt(0).visibility)
         assertEquals(View.GONE, container.getChildAt(1).visibility)
         assertEquals(View.GONE, container.getChildAt(2).visibility)
         assertEquals(View.GONE, container.getChildAt(3).visibility)
         assertEquals(View.GONE, container.getChildAt(4).visibility)
+        // 第 6 个子视图即模型屏（排在设置屏之后），初始同样 GONE。
         assertEquals(View.GONE, container.getChildAt(5).visibility)
         assertEquals(View.GONE, container.getChildAt(6).visibility)
         assertEquals(View.GONE, container.getChildAt(7).visibility)
         assertEquals(View.GONE, container.getChildAt(8).visibility)
         assertEquals(View.GONE, container.getChildAt(9).visibility)
         assertEquals(View.GONE, container.getChildAt(10).visibility)
+        assertEquals(View.GONE, container.getChildAt(11).visibility)
 
         // V5-UI：首屏保持轻量问候 + 两个建议 pill（点按填输入框）。用户名不写死：无登录用户名时
         // 只显示“你好”。
