@@ -76,7 +76,30 @@ class AgentScreenController(
     fun renderAddedAgents(
         agents: List<AgentRecord>,
         onAddFromDevice: (() -> Unit)? = null,
+        autoDiscoveryEnabled: Boolean? = null,
+        onToggleAutoDiscovery: ((Boolean) -> Unit)? = null,
     ) {
+        // 批量自动发现开关（Funk 2026-11-19）：默认关；打开的那一刻
+        // 批量扫已安装设备。添加设备、配对与发现互相独立、不关联：
+        // 加设备只加设备，发现只由这个开关与手动入口触发。
+        if (autoDiscoveryEnabled != null && onToggleAutoDiscovery != null) {
+            val toggleRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(2)) }
+            val toggle = Switch(context).apply {
+                text = "自动发现设备上的 Agent"
+                isChecked = autoDiscoveryEnabled
+                setOnCheckedChangeListener { _, checked -> onToggleAutoDiscovery(checked) }
+            }
+            toggleRow.addView(toggle)
+            list.addView(toggleRow)
+            list.addView(
+                UiKit.text(
+                    context,
+                    "默认关。打开时批量扫描已安装的设备，把上面的 Agent 添加进来；关着时只有下面“从设备添加”和设备页“重新发现”才发现。",
+                    10f,
+                    R.color.text_tertiary,
+                ).apply { setPadding(0, 0, 0, dp(10)) },
+            )
+        }
         // 三件套之二（2026-11-18）：「从设备添加」= 自动发现快捷入口，
         // 与手工表单并列；发现与去重口径和设备页“重新发现 Agent”一致。
         if (onAddFromDevice != null) {

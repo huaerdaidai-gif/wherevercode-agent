@@ -2894,22 +2894,14 @@ class MainActivity : AppCompatActivity() {
                 refreshPairingSnapshot()
                 // P1 能力卡：hello 成功，存仓库快照。
                 noteHelloForCapabilityCards(hello)
-                // V5 自动发现（2026-11-11）：配对 + hello 成功后按 hello
-                // 列表自动建 Agent 记录。去重按 deviceId + agentId：手工
-                // 已加的保留不动（不覆盖测试结果与登录态），同 agentId 属
-                // 别台设备的跳过（AgentStore 全局按 agentId 存，覆盖会毁
-                // 掉另一台设备的 Agent）。只存可用的；不可用的跳过并如实说明。
+                // 添加设备独立（Funk 2026-11-19）：配对只完成配对，
+                // 不再顺带建 Agent 记录——发现 Agent 由 Agent 页的
+                // 批量自动发现开关与手动入口独立触发，互不关联。
+                // hello 报的 Agent 文件夹仍作下面添加项目的候选
+                // （那是项目添加流程自己的事，不建 Agent 记录）。
                 val available = hello.agents.filter { it.available && it.folder.isNotBlank() }
-                val (created, discovery) = DeviceAgentDiscovery.discover(
-                    hello.deviceId,
-                    hello.agents,
-                    agentStore.listAgents(),
-                )
-                created.forEach { agentStore.saveAgent(it) }
                 runOnUiThread {
-                    toast(
-                        "已配对 $displayName：${DeviceAgentDiscovery.summarize(discovery)}。",
-                    )
+                    toast("已配对 $displayName。")
                     refreshAgents()
                     // V5 项目添加：配对成功后问一句要不要顺手加项目
                     //（列出刚发现的 Agent 文件夹作候选；不强制，可暂不添加）。
@@ -2971,6 +2963,92 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread { toast("重新发现失败：${e.message}") }
+            }
+        }.start()
+    }
+
+    /** Agent 批量自动发现开关（默认关；与模型自动发现同口径、各自独立）。 */
+    private fun agentAutoDiscoveryEnabled(): Boolean = try {
+        getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
+            .getBoolean("auto_discovery_agents", false)
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun setAgentAutoDiscoveryEnabled(enabled: Boolean) {
+        try {
+            getSharedPreferences("wherevercode_agent_prefs", MODE_PRIVATE)
+                .edit().putBoolean("auto_discovery_agents", enabled).apply()
+        } catch (_: Exception) {
+        }
+        if (enabled) {
+            batchDiscoverAgentsOnInstalledDevices()
+        } else {
+            toast("Agent 自动发现已关闭。")
+        }
+    }
+
+    /**
+     * 批量自动发现 Agent（Funk 2026-11-19）：只在开关被打开时跑
+     * 一遍——遍历已安装且已配对的设备，逐台拉 hello、按既有去重
+     * 口径补建缺失的 Agent 记录，最后汇总一句。单台失败不挡其余；
+     * 与添加设备、配对流程互不关联，不由它们触发。
+     */
+    private fun batchDiscoverAgentsOnInstalledDevices() {
+        toast("正在批量发现已安装设备上的 Agent…")
+        Thread {
+            val devices = try {
+                remoteDeviceStore.listDevices()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            var scanned = 0
+            var createdTotal = 0
+            for (device in devices) {
+                try {
+                    val pairing = loadPairingRecord(
+                        device.deviceId,
+                        brainComponents?.pairingTrustStore,
+                        pairingStore,
+                    )
+                    if (pairing == null || pairing.state != PairingState.CONFIRMED) continue
+                    val identity = deviceIdentityStore.getOrCreate()
+                    val peer = device.toDiscoveredPeer(pairing.fingerprintSha256)
+                    val hello = runBlocking {
+                        directTransport.fetchHello(peer, identity.deviceId, identity.publicKey)
+                    }
+                    try {
+                        remoteDeviceStore.saveDevice(
+                            device.copy(
+                                lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
+                                lastServerStatus = hello.clientStatus,
+                                handVersion = hello.handVersion,
+                            ),
+                        )
+                    } catch (_: Exception) {
+                    }
+                    noteHelloForCapabilityCards(hello)
+                    val (created, _) = DeviceAgentDiscovery.discover(
+                        device.deviceId,
+                        hello.agents,
+                        agentStore.listAgents(),
+                    )
+                    created.forEach { agentStore.saveAgent(it) }
+                    createdTotal += created.size
+                    scanned++
+                } catch (_: Exception) {
+                    // 单台设备拉不到 hello 就跳过，不把整批卡死。
+                }
+            }
+            runOnUiThread {
+                toast(
+                    if (scanned == 0) {
+                        "没有已配对的设备可扫描：请先去设备页添加并完成配对。"
+                    } else {
+                        "批量发现完成：扫了 $scanned 台设备，新添加 $createdTotal 个 Agent。"
+                    },
+                )
+                refreshAgents()
             }
         }.start()
     }
@@ -7369,7 +7447,12 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
-                    agentController.renderAddedAgents(added, onAddFromDevice = { addAgentsFromDevice() })
+                    agentController.renderAddedAgents(
+                        added,
+                        onAddFromDevice = { addAgentsFromDevice() },
+                        autoDiscoveryEnabled = agentAutoDiscoveryEnabled(),
+                        onToggleAutoDiscovery = { enabled -> setAgentAutoDiscoveryEnabled(enabled) },
+                    )
                 }
             }
         }.start()
