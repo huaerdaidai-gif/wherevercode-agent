@@ -4649,7 +4649,7 @@ class MainActivity : AppCompatActivity() {
         // V5 C2-3-R4c（隐私修正）：问候固定“你好”，不读已存身份、
         // 不显示真人名字（见 HomeScreenController.greeting）。
         val greetingView =
-            UiKit.text(this, HomeScreenController.greeting(), 28f, R.color.home_text, bold = true).apply {
+            UiKit.text(this, "你好", 28f, R.color.home_text, bold = true).apply {
                 gravity = android.view.Gravity.CENTER
             }
         card.addView(UiKit.text(this, "∞", 34f, R.color.home_gradient_start).apply {
@@ -4657,6 +4657,12 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, dp(20), 0, dp(12))
         })
         card.addView(greetingView)
+        card.addView(
+            UiKit.text(this, HomeScreenController.greeting(), 14f, R.color.home_text_secondary).apply {
+                gravity = android.view.Gravity.CENTER
+                setPadding(0, dp(4), 0, dp(10))
+            },
+        )
         card.addView(UiKit.text(this, "项目 · 选择或切换 ›", 12f, R.color.home_text_secondary).apply {
             minHeight = dp(48)
             gravity = android.view.Gravity.CENTER

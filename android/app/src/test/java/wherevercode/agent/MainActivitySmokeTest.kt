@@ -80,9 +80,10 @@ class MainActivitySmokeTest {
         assertTrue(texts.contains("WhereverCode"))
         assertTrue(texts.contains("今天想做什么？"))
         assertTrue(texts.contains("项目 · 选择或切换 ›"))
-        assertTrue(texts.contains("检查项目并修复问题"))
-        assertTrue(texts.contains("解释这段代码"))
-        assertTrue(texts.contains("拆成任务"))
+        assertTrue(texts.contains("开发一个 App"))
+        assertTrue(texts.contains("导入项目并交付"))
+        assertTrue(texts.contains("组织多 Agent 团队"))
+        assertTrue(texts.contains("自动化任务"))
 
         controller.pause().stop().destroy()
     }

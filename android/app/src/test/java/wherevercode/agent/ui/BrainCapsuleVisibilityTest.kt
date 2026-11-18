@@ -56,7 +56,7 @@ class BrainCapsuleVisibilityTest {
 
         val capsule = activity.findViewById<TextView>(R.id.brainCapsule)
         assertNotNull(capsule)
-        assertEquals(View.VISIBLE, capsule.visibility)
+        assertEquals(View.GONE, capsule.visibility)
 
         controller.pause().stop().destroy()
     }
@@ -70,31 +70,21 @@ class BrainCapsuleVisibilityTest {
 
         val capsule = activity.findViewById<TextView>(R.id.brainCapsule)
         assertNotNull(capsule)
-        assertTrue(
-            "默认大脑会话应显示胶囊",
-            waitForCapsuleVisibility(activity, View.VISIBLE),
-        )
+        assertEquals(View.GONE, capsule.visibility)
 
         // 切到 Agent 会话：走真实 switchSession + publish → renderChat →
         // updateChatRouteBanner → refreshBrainCapsule。
         val viewModel = chatViewModelOf(activity)
         assertTrue(viewModel.switchSession("session-agy", "Antigravity (agy)", fakeAgent()))
-        assertTrue(
-            "Agent 会话不应显示大脑胶囊",
-            waitForCapsuleVisibility(activity, View.GONE),
-        )
+        assertEquals(View.GONE, capsule.visibility)
         assertEquals(
-            "Agent 会话里 Agent 下拉仍应显示对话方",
             "Antigravity (agy) ⌄",
             activity.findViewById<TextView>(R.id.buttonAgentSelect).text.toString(),
         )
 
-        // 切回新对话（大脑）：胶囊重新可见。
+        // 切回新对话（大脑）：收敛界面下胶囊同样保持 GONE。
         assertTrue(viewModel.newConversation())
-        assertTrue(
-            "切回大脑会话应重新显示胶囊",
-            waitForCapsuleVisibility(activity, View.VISIBLE),
-        )
+        assertEquals(View.GONE, capsule.visibility)
 
         controller.pause().stop().destroy()
     }
