@@ -282,6 +282,16 @@ public enum BrainBootstrap {
             tools: tools,
             eventLog: eventLog,
             approvalGate: approvalGate,
-            currentBrainId: { configStore.currentBrainId() })
+            currentBrainId: { configStore.currentBrainId() },
+            failoverPolicyProvider: { brainId in
+                let routingSettings = UserDefaultsModelRoutingStore().load()
+                guard routingSettings.enabled else { return nil }
+                guard let config = configStore.getConfig(brainId: brainId),
+                      config.kind == .modelApi else { return nil }
+                return ModelRouting.policyFor(
+                    settings: routingSettings,
+                    configs: configStore.listConfigs(),
+                    currentBrainId: brainId)
+            })
     }
 }

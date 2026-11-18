@@ -338,11 +338,15 @@ public struct BrainSettingsView: View {
                 }
             ))
 
+            Text("模型额度不足、被限流或出错时，按路由池顺序自动切到下一个。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Button {
                 showRoutingPoolPicker = true
             } label: {
                 HStack {
-                    Text("路由池配置（按顺序切换）")
+                    Text("选择路由池模型")
                     Spacer()
                     let count = model.routingSettings.orderedBrainIds.count
                     Text(count > 0 ? "\(count) 个模型参与" : "未配置")

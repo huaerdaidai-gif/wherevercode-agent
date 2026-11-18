@@ -89,6 +89,7 @@ final class BrainLayerTests: XCTestCase {
         tools: ToolRegistry,
         currentBrainId: @escaping () -> String?,
         failoverPolicy: FailoverPolicy = FailoverPolicy(),
+        failoverPolicyProvider: ((String) -> FailoverPolicy?)? = nil,
         sessionLedger: SessionLedger = NoOpSessionLedger()
     ) -> BrainEngine {
         BrainEngine(
@@ -101,6 +102,7 @@ final class BrainLayerTests: XCTestCase {
             approvalGate: DenyApprovalGate(),
             currentBrainId: currentBrainId,
             failoverPolicy: failoverPolicy,
+            failoverPolicyProvider: failoverPolicyProvider,
             sessionLedger: sessionLedger)
     }
 
@@ -651,6 +653,35 @@ final class BrainLayerTests: XCTestCase {
             failoverPolicy: FailoverPolicy(fallbackBrainIds: ["b2"]))
         let events = try await collect(engine.chat(conversationId: "c1", userText: "在吗"))
         // Same-brain retry once, then the switch.
+        XCTAssertEqual(failing.requests.count, 2)
+        XCTAssertEqual(backup.requests.count, 1)
+        XCTAssertEqual(doneReasons(events), ["switched_brain"])
+    }
+
+    func testEngineFailoverPolicyProviderOverridesStaticPolicy() async throws {
+        let registry = BrainAdapterRegistry()
+        let failing = FakeBrainAdapter(adapterId: "fake1") { _, _ in
+            [
+                .error(BrainErrorInfo(code: "server_error", message: "服务错误", retryable: true)),
+                .done(finishReason: "error"),
+            ]
+        }
+        let backup = FakeBrainAdapter(adapterId: "fake2") { _, _ in
+            [.textDelta("路由池接手了"), .done(finishReason: "stop")]
+        }
+        registerBrain(registry, failing, brainId: "b1")
+        registerBrain(registry, backup, brainId: "b2")
+        let tools = FakeToolRegistry(defs: []) { _ in
+            ToolOutcome(ok: true, summary: "ok")
+        }
+        let engine = makeEngine(
+            registry: registry, store: InMemoryConversationStore(),
+            tools: tools, currentBrainId: { "b1" },
+            failoverPolicy: FailoverPolicy(),
+            failoverPolicyProvider: { brainId in
+                brainId == "b1" ? FailoverPolicy(fallbackBrainIds: ["b2"]) : nil
+            })
+        let events = try await collect(engine.chat(conversationId: "c1", userText: "在吗"))
         XCTAssertEqual(failing.requests.count, 2)
         XCTAssertEqual(backup.requests.count, 1)
         XCTAssertEqual(doneReasons(events), ["switched_brain"])

@@ -102,7 +102,7 @@ public struct FlagshipRouteDestinationView: View {
         // MARK: - 二、工作台 · 连接 (11 路由)
         case "devices", "devicedetail":
             DevicesView(appState: appState, onNavigateRoute: onNavigateRoute)
-        case "models", "connectmodel":
+        case "models", "connectmodel", "modelroute":
             BrainSettingsView(model: appState.brainSettingsModel)
         case "mcp":
             McpToolsInspectorScreen(appState: appState, onNavigateRoute: onNavigateRoute)
@@ -110,7 +110,7 @@ public struct FlagshipRouteDestinationView: View {
             SkillsManagementScreen(routeId: "skills", appState: appState, onNavigateRoute: onNavigateRoute)
         case "connections":
             SettingsView(appState: appState, onNavigateRoute: onNavigateRoute)
-        case "modelroute", "agentimport", "network", "routes":
+        case "agentimport", "network", "routes":
             ConnectionExtendedScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
         // MARK: - 三、控制 · 系统与自动化 (17 路由)
@@ -1402,6 +1402,8 @@ private struct CollaborationAndAgentsScreen: View {
     @State private var bannerMsg: String? = nil
     @State private var testingAgentId: String? = nil
     @State private var testResultMsg: String? = nil
+    @State private var agentPendingDelete: AgentRecord? = nil
+    @State private var showDeleteAgentConfirm = false
 
     var body: some View {
         List {
@@ -1478,8 +1480,8 @@ private struct CollaborationAndAgentsScreen: View {
                                 Button("工具权限") { onNavigateRoute("mcp") }.buttonStyle(.bordered).controlSize(.mini)
                                 Spacer()
                                 Button("删除", role: .destructive) {
-                                    try? LocalData.shared.agents.deleteAgent(agentId: ag.agentId)
-                                    reload()
+                                    agentPendingDelete = ag
+                                    showDeleteAgentConfirm = true
                                 }.font(.caption2)
                             }
                         }
@@ -1493,6 +1495,20 @@ private struct CollaborationAndAgentsScreen: View {
         }
         .navigationTitle(route.id == "team" ? "团队空间" : "Agent")
         .onAppear(perform: reload)
+        .alert("移除 Agent", isPresented: $showDeleteAgentConfirm) {
+            Button("取消", role: .cancel) { agentPendingDelete = nil }
+            Button("移除", role: .destructive) {
+                if let ag = agentPendingDelete {
+                    try? LocalData.shared.agents.deleteAgent(agentId: ag.agentId)
+                    agentPendingDelete = nil
+                    reload()
+                }
+            }
+        } message: {
+            if let ag = agentPendingDelete {
+                Text("确定移除 \(ag.displayName) 吗？它的独立会话与已指派任务不受影响。")
+            }
+        }
         .sheet(isPresented: $showAddAgentSheet) {
             AddAgentSheet(
                 onSaved: { addedName in
@@ -2270,19 +2286,6 @@ private struct ConnectionExtendedScreen: View {
         List {
             Section("\(route.title)") {
                 switch route.id {
-                case "modelroute":
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .foregroundStyle(.orange)
-                            Text("【待开发】智能模型路由待开发（尚未开发）。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text("当前可通过模型设置手动选择或切换默认模型。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 case "agentimport":
                     Text("导入现有 Agent：支持将 Codex、Claude Code、OpenCode 等外部 Agent 登记至本机 Agent 目录。")
                 case "network", "routes":
