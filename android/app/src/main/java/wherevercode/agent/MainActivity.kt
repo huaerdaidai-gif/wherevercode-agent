@@ -2912,6 +2912,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /**
      * 自动发现（集成在「添加 Agent」里，全 App 唯一的 Agent 发现
      * 入口）：勾选要扫描的已配对设备（勾几个扫几个）→ 批量拉
      * hello → 发现的 Agent 汇成一张勾选单 → 添加。设备页不再另设
