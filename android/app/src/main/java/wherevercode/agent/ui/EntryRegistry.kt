@@ -195,7 +195,7 @@ object EntryRegistry {
         Entry("nav_channels", "频道", Group.DRAWER_TOP,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TEAM_CHANNEL,
             "频", "ic_chat", null, null, null),
-        Entry("nav_team_channel", "团队频道", Group.DRAWER_EXTENSIONS,
+        Entry("nav_team_channel", "频道", Group.DRAWER_EXTENSIONS,
             Status.IMPLEMENTED, TargetKind.DRAWER, DrawerController.ID_TEAM_CHANNEL,
             "频", "ic_chat", null, null, "有界团队聊天 + 只读扇出。"),
         Entry("feature_channel_manage", "频道管理", Group.FEATURE,

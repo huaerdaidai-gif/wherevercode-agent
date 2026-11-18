@@ -134,7 +134,7 @@ class TeamChannelController(
 
     init {
         root.addView(
-            UiKit.text(context, "团队频道", 20f, R.color.text_primary, bold = true).apply {
+            UiKit.text(context, "频道", 20f, R.color.text_primary, bold = true).apply {
                 setPadding(dp(16), dp(12), dp(16), dp(2))
             },
         )

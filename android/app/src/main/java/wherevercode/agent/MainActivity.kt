@@ -5662,7 +5662,7 @@ class MainActivity : AppCompatActivity() {
         if (endpoint == null) {
             return TeamChannelSnapshot(
                 configured = false,
-                setupHint = "团队频道还没法连：先去 Agent 页加一个平台 Agent，" +
+                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
                     "并在表单的平台凭证栏填入 App 的平台凭证" +
                     "（由你的平台管理员签发）。",
                 channelId = PlatformAgent.V5_CHANNEL_ID,
@@ -5758,7 +5758,7 @@ class MainActivity : AppCompatActivity() {
         teamChannelController.render(
             TeamChannelSnapshot(
                 configured = endpoint != null,
-                setupHint = "团队频道还没法连：先去 Agent 页加一个平台 Agent。",
+                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent。",
                 channelId = endpoint?.second.orEmpty(),
                 connectionState = teamChannelFeed?.connectionState
                     ?: ChannelConnectionState.STOPPED,
