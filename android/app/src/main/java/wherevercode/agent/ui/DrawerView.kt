@@ -68,6 +68,8 @@ class DrawerView(
     private var badges: DrawerBadges = DrawerBadges()
     private var searchQuery: String = ""
     private var searchInputField: EditText? = null
+    private var searchBoxView: LinearLayout? = null
+    private var sessionListContainer: LinearLayout? = null
     private val collapsedGroups: MutableSet<String> = mutableSetOf()
 
     // 必须声明在 init 之前：init 会调用 refresh()，refresh() 读本表；
@@ -303,7 +305,20 @@ class DrawerView(
         }
         content.addView(header)
 
-        // 搜索框
+        // 搜索框只建一次、整只复用：输入框永远不脱离搜索框，
+        // refresh() 重建抽屉时不再销毁/重挂输入框（旧做法导致占位文字重影、打字吞字）。
+        val searchBox = searchBoxView ?: buildSearchBox().also { searchBoxView = it }
+        (searchBox.parent as? android.view.ViewGroup)?.removeView(searchBox)
+        content.addView(searchBox)
+
+        // 会话列表单独一个容器：打字时只重建这个容器，搜索框与输入框纹丝不动。
+        val container = UiKit.vertical(context)
+        sessionListContainer = container
+        content.addView(container)
+        renderSessionRows(rows)
+    }
+
+    private fun buildSearchBox(): LinearLayout {
         val searchBox = UiKit.horizontal(context).apply {
             background = UiKit.rounded(context, R.color.bg_card, 10, R.color.divider, 1)
             setPadding(dp(10), dp(4), dp(10), dp(4))
@@ -318,31 +333,56 @@ class DrawerView(
         searchBox.addView(UiKit.icon(context, R.drawable.ic_search, R.color.text_secondary).apply {
             layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(8) }
         })
-        // 搜索输入框常驻复用同一个实例：refresh() 重建抽屉时不再销毁重建
-        // （旧做法每次刷新新建 EditText，占位文字重影、焦点与光标全丢）。
-        val searchInput = searchInputField ?: EditText(context).apply {
+        val searchInput = EditText(context).apply {
             hint = "搜索会话与消息…"
             textSize = 13f
             setTextColor(UiKit.color(context, R.color.text_primary))
             setHintTextColor(UiKit.color(context, R.color.text_tertiary))
             background = null
             isSingleLine = true
+            // 软件绘制：避开抽屉滑动时硬件层缓存造成的文字双重绘制（重影）。
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     searchQuery = s?.toString().orEmpty()
                 }
                 override fun afterTextChanged(s: Editable?) {
-                    // 局部更新或刷新列表
-                    refresh()
+                    // 只更新会话列表容器，绝不整抽屉 refresh()：
+                    // 整刷会把正在输入的 EditText 脱挂重挂，吞字且重影。
+                    updateSessionRowsOnly()
                 }
             })
-        }.also { searchInputField = it }
-        (searchInput.parent as? android.view.ViewGroup)?.removeView(searchInput)
-        searchInput.layoutParams =
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        searchInputField = searchInput
         searchBox.addView(searchInput)
-        content.addView(searchBox)
+        return searchBox
+    }
+
+    /** 只重建会话列表容器（搜索过滤结果），不动搜索框与输入框。 */
+    private fun updateSessionRowsOnly() {
+        if (sessionListContainer == null) return
+        val collector = mutableListOf<RenderedRow>()
+        renderSessionRows(collector)
+        val oldList = renderedRowList
+        val start = oldList.indexOfFirst { it.group == "recent" }
+        renderedRowList = if (start >= 0) {
+            val end = oldList.indexOfLast { it.group == "recent" } + 1
+            oldList.subList(0, start) + collector + oldList.subList(end, oldList.size)
+        } else {
+            val bottomIdx = oldList.indexOfFirst { it.group == "bottom" }
+            if (bottomIdx >= 0) {
+                oldList.subList(0, bottomIdx) + collector + oldList.subList(bottomIdx, oldList.size)
+            } else {
+                oldList + collector
+            }
+        }
+    }
+
+    private fun renderSessionRows(rows: MutableList<RenderedRow>) {
+        val container = sessionListContainer ?: return
+        container.removeAllViews()
 
         // 会话列表
         val allSessions = recentSessionsProvider()
@@ -372,7 +412,7 @@ class DrawerView(
                     R.color.text_tertiary,
                 ).apply { setPadding(0, dp(4), 0, 0) },
             )
-            content.addView(emptyNotice)
+            container.addView(emptyNotice)
         } else {
             filtered.forEach { session ->
                 val rowId = "session_${session.id}"
@@ -408,7 +448,7 @@ class DrawerView(
                     setOnClickListener { onDeleteSession(session.id) }
                 }
                 row.addView(delBtn)
-                content.addView(row)
+                container.addView(row)
             }
         }
     }
