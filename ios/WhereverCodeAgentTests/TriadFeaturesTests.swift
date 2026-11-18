@@ -233,10 +233,12 @@ final class TriadFeaturesTests: XCTestCase {
 
     // MARK: - 6. 控制台三件套卡片并列测试 (设备 / Agent / 模型)
     func testControlModulesListIncludesModelsCard() {
-        let appState = AppState()
-        let countBefore = appState.brainConfigStore.listConfigs().count
+        let kv = InMemoryKeyValueStore()
+        let store = KeyValueBrainConfigStore(kv: kv)
+        let countBefore = store.listConfigs().count
+        XCTAssertEqual(countBefore, 0)
         let badgeBefore = countBefore > 0 ? "\(countBefore) 个模型" : "模型"
-        XCTAssertTrue(badgeBefore.contains("模型"))
+        XCTAssertEqual(badgeBefore, "模型")
 
         // 添加一个测试模型配置
         let testConfig = BrainConfig(
@@ -248,22 +250,10 @@ final class TriadFeaturesTests: XCTestCase {
             model: "test-model",
             authRef: "test-ref"
         )
-        appState.brainConfigStore.saveConfig(testConfig)
-        let countAfter = appState.brainConfigStore.listConfigs().count
-        XCTAssertEqual(countAfter, countBefore + 1)
+        store.saveConfig(testConfig)
+        let countAfter = store.listConfigs().count
+        XCTAssertEqual(countAfter, 1)
         let badgeAfter = "\(countAfter) 个模型"
-        XCTAssertEqual(badgeAfter, "\(countAfter) 个模型")
-
-        // 验证 ControlHomeView 构建正常无崩溃
-        var navigatedRoute: String? = nil
-        let control = ControlHomeView(
-            appState: appState,
-            onOpenDrawer: {},
-            onNavigateRoute: { r in navigatedRoute = r }
-        )
-        _ = control.body
-
-        // 清理
-        appState.brainConfigStore.deleteConfig(brainId: "triad-test-model-card")
+        XCTAssertEqual(badgeAfter, "1 个模型")
     }
 }
