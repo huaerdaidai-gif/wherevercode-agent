@@ -918,7 +918,9 @@ class ConsoleScreenController(
                 )
                 val networkDetails = UiKit.text(
                     context,
-                    "高级诊断 · ${device.host}:${device.port}",
+                    // 只有配对记录的设备没有登记过地址：照实说，不拼假地址。
+                    if (device.host.isBlank()) "高级诊断 · 无地址记录（仅有配对记录）"
+                    else "高级诊断 · ${device.host}:${device.port}",
                     10f,
                     R.color.text_tertiary,
                 ).apply { visibility = View.GONE; setPadding(0, dp(4), 0, 0) }

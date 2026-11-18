@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import wherevercode.agent.core.security.PairingRecord
 import wherevercode.agent.core.security.PairingState
+import wherevercode.agent.core.security.PairingTrustStore
 
 /**
  * 阶段 B（V5 紧急开发）：手动添加的远程设备。
@@ -256,6 +257,12 @@ data class RemoteDeviceRow(
     val handVersion: String = "",
     /** Hand 自更新：远端 Hand 版本落后于 App 内置安装包，需要更新。 */
     val handUpdateAvailable: Boolean = false,
+    /**
+     * 这台设备承载的 Agent 数（按 AgentRecord.deviceId 归属计数，
+     * 与控制台 ConsoleDeviceRow.agentCount 同一口径；清单 2.4）。
+     * 0 是真实值（设备上没登记 Agent），照实显示“0 个 Agent”。
+     */
+    val agentCount: Int = 0,
 )
 
 fun buildRemoteDeviceRows(
@@ -266,6 +273,11 @@ fun buildRemoteDeviceRows(
      * 前 12 位）。"" = 调用方不知道/不关心，不算 handUpdateAvailable。
      */
     bundledHandVersion: String = "",
+    /**
+     * 每台设备承载的 Agent 数（见 [agentCountsByDevice]）。缺省空表 =
+     * 调用方不关心，行里记 0；设备页调用方必须传真实计数，不许缺省。
+     */
+    agentCounts: Map<String, Int> = emptyMap(),
 ): List<RemoteDeviceRow> {
     return devices.map { device ->
         val record = pairings.firstOrNull { it.deviceId == device.deviceId }
@@ -289,6 +301,59 @@ fun buildRemoteDeviceRows(
             handUpdateAvailable = bundledHandVersion.isNotBlank() &&
                 device.handVersion.isNotBlank() &&
                 device.handVersion != bundledHandVersion,
+            agentCount = agentCounts[device.deviceId] ?: 0,
         )
     }
+}
+
+/**
+ * 设备身份合并（2026-11-19，197/199 真机双记录修复）：同一台设备在
+ * 两个存储里各有一条记录——配对成功时 confirmRemoteDevice 同时写
+ * RemoteDevice（[RemoteDeviceStore]，deviceId = hello 报的服务端 id）
+ * 与 PairingRecord（[PairingTrustStore]，deviceId 同为 hello id；
+ * mDNS TXT 的 id 也是同一个服务端 id）。两条记录的身份键都是
+ * deviceId，所以按 deviceId 精确相等即可判定同一台。
+ *
+ * “已添加设备”列表的口径：一台设备只出一张卡——有 RemoteDevice
+ * 的以远程设备卡为准（它已经按 deviceId 关联了配对状态），配对记录
+ * 不再单独出卡；只有配对记录、没有 RemoteDevice 的（旧版本流程留
+ * 下的记录，或远程记录已被删）才单独出配对卡。本函数返回后者。
+ * 纯展示/聚合层合并，不改任何存储结构、不迁移数据。
+ */
+fun standalonePairings(
+    pairings: List<PairingRecord>,
+    devices: List<RemoteDevice>,
+): List<PairingRecord> {
+    val deviceIds = devices.map { it.deviceId }.toSet()
+    return pairings.filter { it.deviceId !in deviceIds }
+}
+
+/**
+ * 按设备归属数 Agent：入参是全部 Agent 记录的 deviceId（云端/平台
+ * Agent 为 null，不归任何设备）。口径与 Agent 页按设备过滤、控制台
+ * ConsoleDeviceRow.agentCount 一致：AgentRecord.deviceId 与设备
+ * deviceId 精确相等才算这台设备承载。
+ */
+fun agentCountsByDevice(agentDeviceIds: List<String?>): Map<String, Int> =
+    agentDeviceIds.filterNotNull().groupingBy { it }.eachCount()
+
+/**
+ * 删除设备的全部语义（2026-11-19，合并卡之后写清）：删的是“这台
+ * 设备自己的记录”——[RemoteDeviceStore] 里的设备条目 + [PairingTrustStore]
+ * 里同 deviceId 的配对信任记录（两者合起来才是这台设备在 App 里的
+ * 完整登记；只删设备条目会让配对卡在下次刷新时单独冒出来，等于
+ * 没删干净）。绝不级联：该设备上的 Agent 记录（AgentStore）、项目、
+ * 会话一概不动（Funk 概念分离硬规则：删设备只删设备、删 Agent 只
+ * 删 Agent；设备重加后，原有 Agent 记录按 deviceId 仍归这台设备）。
+ * 返回 true = 原本确有一条设备条目被删。
+ */
+fun deleteDeviceRecords(
+    deviceId: String,
+    devices: RemoteDeviceStore,
+    pairings: PairingTrustStore,
+): Boolean {
+    val hadDevice = devices.getDevice(deviceId) != null
+    devices.deleteDevice(deviceId)
+    pairings.remove(deviceId)
+    return hadDevice
 }

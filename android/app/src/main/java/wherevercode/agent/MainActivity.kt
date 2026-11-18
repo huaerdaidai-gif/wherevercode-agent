@@ -227,7 +227,9 @@ import wherevercode.agent.core.transport.RemoteDeviceStore
 import wherevercode.agent.core.transport.RemoteDeviceValidation
 import wherevercode.agent.core.transport.RemoteHello
 import wherevercode.agent.core.transport.SharedPreferencesRemoteDeviceStore
+import wherevercode.agent.core.transport.agentCountsByDevice
 import wherevercode.agent.core.transport.buildRemoteDeviceRows
+import wherevercode.agent.core.transport.deleteDeviceRecords
 import wherevercode.agent.core.security.SecretRedactor
 import wherevercode.agent.core.team.ChannelSenderPolicy
 import wherevercode.agent.core.session.SessionKind
@@ -3086,11 +3088,17 @@ class MainActivity : AppCompatActivity() {
     private fun deleteRemoteDevice(device: RemoteDevice) {
         AlertDialog.Builder(this)
             .setTitle("删除设备")
-            .setMessage("确定删除设备 ${device.displayName} 吗？只删这条设备记录：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
+            // 删除语义（2026-11-19 合并卡后写清）：删的是这台设备自己
+            // 的登记——设备条目 + 同 deviceId 的配对信任记录（只删条目
+            // 会让配对卡刷新后单独冒回来）；这台设备上的 Agent 记录、
+            // 项目和会话都不删（删设备只删设备、删 Agent 只删 Agent），
+            // 之后可以重新添加这台设备，原有 Agent 仍按 deviceId 归它。
+            .setMessage("确定删除设备 ${device.displayName} 吗？只删这台设备的记录（设备条目和配对记录）：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
             .setPositiveButton("删除") { _, _ ->
                 Thread {
                     try {
-                        remoteDeviceStore.deleteDevice(device.deviceId)
+                        deleteDeviceRecords(device.deviceId, remoteDeviceStore, pairingStore)
+                        refreshPairingSnapshot()
                         runOnUiThread {
                             toast("已删除设备 ${device.displayName}。")
                             refreshAgents()
@@ -5350,11 +5358,12 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 emptyList()
             }
-            val pairedIds = try {
-                pairingStore.all().map { it.deviceId }.toSet()
+            val pairingRecords = try {
+                pairingStore.all()
             } catch (e: Exception) {
-                emptySet()
+                emptyList()
             }
+            val pairedIds = pairingRecords.map { it.deviceId }.toSet()
             val agents = try {
                 agentStore.listAgents()
             } catch (e: Exception) {
@@ -5372,6 +5381,9 @@ class MainActivity : AppCompatActivity() {
                     agents = agents,
                     generatedAtEpochSeconds = System.currentTimeMillis() / 1000,
                     taskEvents = taskEvents,
+                    // 控制台设备数与设备页同一份合并清单（同 deviceId
+                    // 只算一次，只有配对记录的也算一台）。
+                    pairings = pairingRecords,
                 )
             }
             runOnUiThread {
@@ -7290,11 +7302,14 @@ class MainActivity : AppCompatActivity() {
         // 线程访问，本地读仍在后台线程做，不上 UI 线程。
         if (!devicesOnly) agentController.showLoading()
         Thread {
-            val added = if (devicesOnly) emptyList() else try {
+            // 设备页也要读 Agent 库：设备卡上的承载数按 AgentRecord
+            // .deviceId 现数（2026-11-19 清单 2.4），不是只给 Agent 页用。
+            val added = try {
                 agentStore.listAgents()
             } catch (e: Exception) {
                 emptyList<AgentRecord>()
             }
+            val agentCounts = agentCountsByDevice(added.map { it.deviceId })
             // 设备页第一段：本地数据先画（不等 mDNS）。
             if (devicesOnly) {
                 val pairingsNow = try {
@@ -7307,14 +7322,14 @@ class MainActivity : AppCompatActivity() {
                 // 里就是“添加设备不能用”。现把远程设备连同配对状态一起传
                 // 过去，设备页单列“远程设备”区段并给添加入口。
                 val remoteRowsNow = try {
-                    buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairingsNow, bundledHandVersion())
+                    buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairingsNow, bundledHandVersion(), agentCounts)
                 } catch (e: Exception) {
                     emptyList()
                 }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (currentEntry != DrawerController.ID_DEVICES) return@runOnUiThread
-                    renderDeviceListNow(emptyList(), pairingsNow, remoteRowsNow)
+                    renderDeviceListNow(emptyList(), pairingsNow, remoteRowsNow, agentCounts)
                 }
             }
             // 阶段 3（U5/批 3c）：真实 LAN 发现（5 秒 mDNS）+ 配对记录。
@@ -7329,7 +7344,7 @@ class MainActivity : AppCompatActivity() {
                 emptyList()
             } else emptyList()
             val remoteRows = if (devicesOnly) try {
-                buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairings, bundledHandVersion())
+                buildRemoteDeviceRows(remoteDeviceStore.listDevices(), pairings, bundledHandVersion(), agentCounts)
             } catch (e: Exception) {
                 emptyList()
             } else emptyList()
@@ -7339,7 +7354,7 @@ class MainActivity : AppCompatActivity() {
                     // 用户 5 秒内已切走别的页：本轮不画，目标页进页时自己会
                     // 刷（showEntry 调 refreshAgents），不把设备区段画到别页。
                     if (currentEntry != DrawerController.ID_DEVICES) return@runOnUiThread
-                    renderDeviceListNow(discovered, pairings, remoteRows)
+                    renderDeviceListNow(discovered, pairings, remoteRows, agentCounts)
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
@@ -7360,6 +7375,7 @@ class MainActivity : AppCompatActivity() {
         discovered: List<DiscoveredPeer>,
         pairings: List<PairingRecord>,
         remoteRows: List<RemoteDeviceRow>,
+        agentCounts: Map<String, Int> = emptyMap(),
     ) {
         val scrollView = screenAgents as ScrollView
         val savedY = scrollView.scrollY
@@ -7373,6 +7389,7 @@ class MainActivity : AppCompatActivity() {
             onReject = { record -> rejectPairing(record) },
             onRevoke = { record -> revokePairing(record) },
             remoteDevices = remoteRows,
+            agentCounts = agentCounts,
             // 未配对远程设备断点续配：有地址，直接 hello → 指纹 + 配对码。
             onResumePairing = { device ->
                 probeAndAddRemoteDevice(device.displayName, device.host, device.port)
