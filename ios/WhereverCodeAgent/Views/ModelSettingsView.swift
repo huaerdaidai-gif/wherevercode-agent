@@ -431,9 +431,9 @@ private struct ModelFreeProviderPickerSheet: View {
     }
 
     private var providerSelectionView: some View {
-        List {
-            let customs = model.customProviderStore.list()
-            let all = CustomFreeProviders.merged(builtins: FreeProviderPresets.presets, customs: customs)
+        let customs = model.customProviderStore.list()
+        let all = CustomFreeProviders.merged(builtins: FreeProviderPresets.presets, customs: customs)
+        return List {
             Section {
                 ForEach(all) { preset in
                     Button {
@@ -696,22 +696,13 @@ private struct ModelRoutingPoolPickerSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(model.configs) { config in
-                        let inPool = model.routingSettings.orderedBrainIds.contains(config.modelId)
                         Button {
-                            var ids = model.routingSettings.orderedBrainIds
-                            if inPool {
-                                ids.removeAll { $0 == config.modelId }
-                            } else {
-                                ids.append(config.modelId)
-                            }
-                            var s = model.routingSettings
-                            s.orderedBrainIds = ids
-                            model.saveRoutingSettings(s)
+                            togglePool(config.modelId)
                         } label: {
                             HStack {
                                 Text(config.label).foregroundStyle(.primary)
                                 Spacer()
-                                if inPool {
+                                if isConfigInPool(config.modelId) {
                                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
                                 } else {
                                     Image(systemName: "circle").foregroundStyle(.secondary)
@@ -729,5 +720,21 @@ private struct ModelRoutingPoolPickerSheet: View {
                 }
             }
         }
+    }
+
+    private func isConfigInPool(_ id: String) -> Bool {
+        model.routingSettings.orderedBrainIds.contains(id)
+    }
+
+    private func togglePool(_ id: String) {
+        var ids = model.routingSettings.orderedBrainIds
+        if ids.contains(id) {
+            ids.removeAll { $0 == id }
+        } else {
+            ids.append(id)
+        }
+        var s = model.routingSettings
+        s.orderedBrainIds = ids
+        model.saveRoutingSettings(s)
     }
 }

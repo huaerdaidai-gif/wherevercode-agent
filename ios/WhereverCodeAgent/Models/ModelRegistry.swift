@@ -60,7 +60,7 @@ public struct ModelConfig: Equatable, Codable, Identifiable, Sendable {
 
 // MARK: - 2. 模型配置 Store 协议
 
-public protocol ModelConfigStore: AnyObject, Sendable {
+public protocol ModelConfigStore: AnyObject {
     func listConfigs() -> [ModelConfig]
     func getConfig(modelId: String) -> ModelConfig?
     func saveConfig(_ config: ModelConfig)
@@ -71,7 +71,7 @@ public protocol ModelConfigStore: AnyObject, Sendable {
 
 // MARK: - 3. 基于 KeyValueStore 的模型存储实现 (Key: model.configs_json)
 
-public final class KeyValueModelConfigStore: ModelConfigStore {
+public final class KeyValueModelConfigStore: ModelConfigStore, @unchecked Sendable {
     public static let keyConfigs = "model.configs_json"
     public static let keyCurrent = "model.current_model_id"
 
