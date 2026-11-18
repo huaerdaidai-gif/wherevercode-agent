@@ -255,5 +255,18 @@ final class TriadFeaturesTests: XCTestCase {
         XCTAssertEqual(countAfter, 1)
         let badgeAfter = "\(countAfter) 个模型"
         XCTAssertEqual(badgeAfter, "1 个模型")
+
+        // 验证多模型计数累加
+        let testConfig2 = BrainConfig(
+            brainId: "triad-test-model-card-2",
+            kind: .modelApi,
+            adapterId: "generic",
+            label: "Triad Test Model Card 2",
+            baseUrl: "https://api.test2.com/v1",
+            model: "test-model-2",
+            authRef: "test-ref-2"
+        )
+        store.saveConfig(testConfig2)
+        XCTAssertEqual(store.listConfigs().count, 2)
     }
 }
