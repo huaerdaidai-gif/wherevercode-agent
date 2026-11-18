@@ -172,4 +172,42 @@
 5. `ios/WhereverCodeAgent/FlagshipUI/FlagshipRouteDestinations.swift`：接管 `"models"`, `"connectmodel"`, `"modelroute"` 路由至真模型页。
 6. `ios/WhereverCodeAgent.xcodeproj/project.pbxproj`：注册新模型源码与测试文件。
 7. `ios/WhereverCodeAgentTests/ModelDecoupleTests.swift`：脱钩防劣化单元测试（存储物理隔离、CRUD 闭环、分类分组）。
-8. `docs/reviews/agy-ios-model-decouple.md`：本审查报告。
+8. `ios/WhereverCodeAgentTests/TriadFeaturesTests.swift`：将控制台模型卡角标测试断言更新为 `KeyValueModelConfigStore`。
+9. `docs/reviews/agy-ios-model-decouple.md`：本审查报告。
+
+---
+
+## 八、最后一修：控制台模型卡角标改源与 main 同步（fix-9）
+
+### 1. 背景与原因
+脱钩分支最初分叉于 `acaa60d3`，落后于 `main` 分支 16 个提交。控制台模型卡系 `main` 后续于 `53260e37` 引入；在 `main` 的 `FlagshipRouteDestinations.swift` 中，`ControlHomeView` 的 `modelsCount` 原本统计的是 `appState.brainConfigStore.listConfigs().count`。为彻底实现模型与大脑脱钩，必须将控制台模型卡角标的数据源切换为独立模型存储。
+
+### 2. 同步 main 与冲突解决
+1. **同步 `main`（`bafe277c`）**：执行 `git merge origin/main`，自动平滑合并安卓最新变更及 iOS 模型卡视图；
+2. **路由与卡片并存**：确认 `ControlHomeView` 的模型卡片（点击跳转 `models` 路由）与分发器中接管至 `ModelSettingsView` 的新路由完全对齐，大脑接线零改动。
+
+### 3. 具体改动位置（精确到行）
+- **FlagshipRouteDestinations.swift 第 4720 行**：
+  ```diff
+  --- a/ios/WhereverCodeAgent/FlagshipUI/FlagshipRouteDestinations.swift
+  +++ b/ios/WhereverCodeAgent/FlagshipUI/FlagshipRouteDestinations.swift
+  @@ -4717,7 +4717,7 @@ public struct ControlHomeView: View {
+           let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
+           let agentsCount = allAgents.count
+           let devicesCount = allAgents.filter { $0.kind == .device }.count
+  -        let modelsCount = appState.brainConfigStore.listConfigs().count
+  +        let modelsCount = appState.modelConfigStore.listConfigs().count
+           let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
+  ```
+- **TriadFeaturesTests.swift 第 237-271 行（`testControlModulesListIncludesModelsCard`）**：
+  将测试内的持久化存储由 `KeyValueBrainConfigStore` (`BrainConfig`) 切换为独立模型存储 `KeyValueModelConfigStore` (`ModelConfig`)，验证角标在 0 个模型时显示 `"模型"`，添加 1 个及多个模型后如实展示 `"X 个模型"`。
+
+### 4. 双 CI 绿标验证结果
+- **代码提交**：`b995817` (`Merge origin/main into feat/ios-model-decouple-20261119 and update model card badge to ModelConfigStore`)
+- **iOS CI #176**（Run ID: [44423291619](https://github.com/huaerdaidai-gif/wherevercode-agent/actions/runs/44423291619)）：
+  - 状态：**completed success**（17 个步骤 100% 全绿）
+  - 覆盖步骤：70 屏契约校验、编译构建、unsigned IPA 打包、D5 版本校验、模拟器启动与截屏、模拟器导航测试、XCTest 单元测试套件全部通过。
+- **Android CI #418**（Run ID: [44423291638](https://github.com/huaerdaidai-gif/wherevercode-agent/actions/runs/44423291638)）：
+  - 状态：**completed success**（全绿）
+  - 覆盖步骤：Hand server tests、JVM tests、Debug & Compatibility APKs 构建全部通过。
+
