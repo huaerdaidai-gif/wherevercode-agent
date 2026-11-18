@@ -10,8 +10,8 @@ package wherevercode.agent.ui
  * 注意：设备入口与 Agent 入口共用 screenAgents 根视图，但路由表必须
  * 区分两者——设备入口路由后要附加“滚动到设备区段”（见 showEntry）。
  * 同理，工具与连接入口与设置入口共用 screenSettings 根视图，但前者
- * 路由后要附加“滚动到大脑分节顶部”。模型入口同样共用 screenSettings
- * 根视图，路由后进入模型页模式（见 MainActivity.configureModelsMode）。
+ * 路由后要附加“滚动到大脑分节顶部”。模型入口有自己的根视图
+ * screenModels（2026-11-19 解耦：不再与设置页共用一屏）。
  */
 enum class EntryScreen {
     HOME,

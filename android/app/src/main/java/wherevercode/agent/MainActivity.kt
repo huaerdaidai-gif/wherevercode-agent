@@ -282,6 +282,7 @@ import wherevercode.agent.ui.AppUpdateSettings
 import wherevercode.agent.ui.BrainDisplayName
 import wherevercode.agent.ui.BrainListRowView
 import wherevercode.agent.ui.BrainLoginRows
+import wherevercode.agent.ui.ModelListRows
 import wherevercode.agent.ui.ChatHistoryStore
 import wherevercode.agent.ui.ChatSessionRestore
 import wherevercode.agent.ui.ChatTurnView
@@ -360,6 +361,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var screenTasks: View
     private lateinit var screenAgents: View
     private lateinit var screenSettings: View
+    private lateinit var screenModels: View
 
     /** V5 应用更新（2026-11-11）：设置页“关于”分节的更新控制器。 */
     private lateinit var appUpdateSettings: AppUpdateSettings
@@ -1088,6 +1090,7 @@ class MainActivity : AppCompatActivity() {
         bindTasks()
         bindAgents()
         bindSettings()
+        bindModels()
         bindDrawer()
         loadDrawerPrefs()
         // GitHub 闭环（2026-11-11）：恢复上次的聊天项目（重启后仍记得）。
@@ -1512,11 +1515,13 @@ class MainActivity : AppCompatActivity() {
         screenTasks = inflater.inflate(R.layout.screen_tasks, container, false)
         screenAgents = inflater.inflate(R.layout.screen_agents, container, false)
         screenSettings = inflater.inflate(R.layout.screen_settings, container, false)
+        screenModels = inflater.inflate(R.layout.screen_models, container, false)
         container.addView(screenChat)
         container.addView(screenProjects)
         container.addView(screenTasks)
         container.addView(screenAgents)
         container.addView(screenSettings)
+        container.addView(screenModels)
         taskDetailController = TaskDetailController(
             this,
             onBack = { hideTaskDetail() },
@@ -1609,6 +1614,7 @@ class MainActivity : AppCompatActivity() {
         screenTasks.visibility = View.GONE
         screenAgents.visibility = View.GONE
         screenSettings.visibility = View.GONE
+        screenModels.visibility = View.GONE
     }
 
     /**
@@ -1762,7 +1768,8 @@ class MainActivity : AppCompatActivity() {
             configureAgentScreenForDevices(screen == EntryScreen.DEVICES)
         }
         screenSettings.visibility =
-            if (screen == EntryScreen.SETTINGS || screen == EntryScreen.TOOLS || screen == EntryScreen.MODELS) View.VISIBLE else View.GONE
+            if (screen == EntryScreen.SETTINGS || screen == EntryScreen.TOOLS) View.VISIBLE else View.GONE
+        screenModels.visibility = if (screen == EntryScreen.MODELS) View.VISIBLE else View.GONE
         sessionListController.root.visibility =
             if (screen == EntryScreen.HISTORY) View.VISIBLE else View.GONE
         screenResults.visibility = if (screen == EntryScreen.RESULTS) View.VISIBLE else View.GONE
@@ -1770,8 +1777,6 @@ class MainActivity : AppCompatActivity() {
         screenConsole.visibility = if (screen == EntryScreen.CONSOLE) View.VISIBLE else View.GONE
         screenMcpPlugins.visibility = if (screen == EntryScreen.MCP_PLUGINS) View.VISIBLE else View.GONE
         screenTeamChannel.visibility = if (screen == EntryScreen.TEAM_CHANNEL) View.VISIBLE else View.GONE
-        // 模型页与设置页共用一屏：进模型页改呈现，离开即恢复（见 configureModelsMode）。
-        configureModelsMode(screen == EntryScreen.MODELS)
         // 离开控制台即停自动刷新（不空转耗电）；进入时由 CONSOLE 分支起 ticker。
         if (screen != EntryScreen.CONSOLE) stopConsoleTicker()
         // 离开频道即停 WS 订阅与兜底轮询（不空转耗电）；进入时由 TEAM_CHANNEL 分支重起。
@@ -1792,9 +1797,10 @@ class MainActivity : AppCompatActivity() {
             EntryScreen.AGENTS -> refreshAgents()
             EntryScreen.DEVICES -> refreshAgents()
             EntryScreen.MODELS -> {
-                refreshBrainStatus()
-                // 模型页从页顶开始：添加区在上、已添加列表在下。
-                screenSettings.post { (screenSettings as ScrollView).scrollTo(0, 0) }
+                // 模型页是独立一页（screenModels）：添加块在上、已添加
+                // 模型在下，进页刷新列表与路由开关状态，从页顶开始。
+                refreshModelPage()
+                screenModels.post { (screenModels as ScrollView).scrollTo(0, 0) }
             }
             EntryScreen.TOOLS -> {
                 refreshBrainStatus()
@@ -1820,10 +1826,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 设置页与“工具与连接”入口共用同一屏；返回键与 lastEntry 按设置处理。 */
+    /** 设置页与“工具与连接”入口共用同一屏；返回键与 lastEntry 按设置处理。
+     * 模型页是独立一页（与设备、Agent 并列），不按设置处理。 */
     private fun isSettingsEntry(entry: String): Boolean =
-        entry == DrawerController.ID_SETTINGS || entry == DrawerController.ID_TOOLS_CONNECTIONS ||
-            entry == DrawerController.ID_MODELS
+        entry == DrawerController.ID_SETTINGS || entry == DrawerController.ID_TOOLS_CONNECTIONS
 
     private fun hideSettings() {
         // 离开设置页即放弃未保存的通用大脑编辑（恢复新增模式、表单
@@ -1849,66 +1855,6 @@ class MainActivity : AppCompatActivity() {
             if (devicesOnly) "设备" else "本机设备"
         if (devicesOnly) {
             screenAgents.post { (screenAgents as ScrollView).scrollTo(0, 0) }
-        }
-    }
-
-    /**
-     * 模型页模式（Funk 2026-11-19：模型是控制菜单下与设备、Agent 并列的一页）。
-     *
-     * 模型页与设置页共用同一屏（screenSettings）与同一套绑定——只在进入
-     * 模型页时改呈现：隐藏设置导航与大脑行为行（状态卡、换号行、大脑
-     * 名称、SIWC 模型行，以及高级配置之后的所有分节），把添加区（预设
-     * 块 + 高级配置折叠）挪到已添加列表之前，页头改称“模型”。离开即
-     * 按保存的顺序与可见性原样恢复；设置页本身一字不动。
-     */
-    private var modelsMode = false
-    private var modelsModeSavedOrder: List<View>? = null
-    private var modelsModeSavedVisibility: Map<View, Int>? = null
-
-    private fun configureModelsMode(enable: Boolean) {
-        if (enable == modelsMode) return
-        val scroll = screenSettings as? ScrollView ?: return
-        val content = scroll.getChildAt(0) as? LinearLayout ?: return
-        val headerTitle = screenSettings.findViewById<TextView>(R.id.settingsTitle) ?: return
-        val headerSubtitle = screenSettings.findViewById<TextView>(R.id.settingsSubtitle) ?: return
-        val jumpBar = screenSettings.findViewById<View>(R.id.settingsJumpBar) ?: return
-        val sectionTitle = screenSettings.findViewById<View>(R.id.brainSectionTitle) ?: return
-        val statusCard = screenSettings.findViewById<View>(R.id.brainStatusCard) ?: return
-        val siwcAccountRow = screenSettings.findViewById<View>(R.id.siwcAccountRow) ?: return
-        val listTitle = screenSettings.findViewById<TextView>(R.id.brainListTitle) ?: return
-        val siwcModelRow = screenSettings.findViewById<View>(R.id.siwcModelRow) ?: return
-        val brainNameRowView = screenSettings.findViewById<View>(R.id.brainNameRow) ?: return
-        val presetBlock = screenSettings.findViewById<View>(R.id.presetModelBlock) ?: return
-        val advancedButton = screenSettings.findViewById<View>(R.id.buttonBrainAdvanced) ?: return
-        val advancedContainer = screenSettings.findViewById<View>(R.id.brainAdvancedContainer) ?: return
-        modelsMode = enable
-        if (enable) {
-            modelsModeSavedOrder = (0 until content.childCount).map { content.getChildAt(it) }
-            val afterAdvanced = (0 until content.childCount).map { content.getChildAt(it) }
-                .filter { content.indexOfChild(it) > content.indexOfChild(advancedContainer) }
-            val hide = listOf(jumpBar, sectionTitle, statusCard, siwcAccountRow, brainNameRowView, siwcModelRow) + afterAdvanced
-            modelsModeSavedVisibility = hide.associateWith { it.visibility }
-            hide.forEach { it.visibility = View.GONE }
-            // 添加区挪到已添加列表之前（与设备/Agent 页“添加在上、已添加在下”对齐）。
-            listOf(presetBlock, advancedButton, advancedContainer).forEach { content.removeView(it) }
-            val anchor = content.indexOfChild(listTitle)
-            listOf(presetBlock, advancedButton, advancedContainer).forEachIndexed { i, view ->
-                content.addView(view, anchor + i)
-            }
-            headerTitle.text = "模型"
-            headerSubtitle.text = "添加模型，管理已添加的模型。"
-            listTitle.text = "已添加的模型（点按一行切换）"
-        } else {
-            modelsModeSavedVisibility?.forEach { (view, visibility) -> view.visibility = visibility }
-            modelsModeSavedOrder?.let { order ->
-                content.removeAllViews()
-                order.forEach { content.addView(it) }
-            }
-            modelsModeSavedOrder = null
-            modelsModeSavedVisibility = null
-            headerTitle.text = "设置"
-            headerSubtitle.text = "大脑、密钥与本机配置；密钥只存 Android Keystore。"
-            listTitle.text = "已添加的大脑（点按一行切换）"
         }
     }
 
@@ -8737,37 +8683,22 @@ class MainActivity : AppCompatActivity() {
         buttonRefreshSiwcModels.setOnClickListener { refreshSiwcModels() }
         buttonPickSiwcModel.setOnClickListener { pickSiwcModel() }
         screenSettings.findViewById<View>(R.id.buttonTestGenericModels).setOnClickListener {
-            testGenericModels()
+            testGenericModels(settingsFormFields())
         }
         screenSettings.findViewById<View>(R.id.buttonSaveGenericBrain).setOnClickListener {
             saveGenericBrain()
         }
         screenSettings.findViewById<View>(R.id.buttonCommonProviders).setOnClickListener {
-            showCommonProviderPicker()
+            showCommonProviderPicker(settingsFormFields())
         }
         screenSettings.findViewById<View>(R.id.buttonFreeProviders).setOnClickListener {
             showFreeProviderPicker()
         }
-        val routingStore = SharedPreferencesModelRoutingStore(applicationContext)
-        val routingSettingsNow = routingStore.load()
-        val checkModelRouting = screenSettings.findViewById<CheckBox>(R.id.checkModelRouting)
-        checkModelRouting.isChecked = routingSettingsNow.enabled
-        checkModelRouting.setOnCheckedChangeListener { _, isChecked ->
-            routingStore.save(routingStore.load().copy(enabled = isChecked))
-            note(
-                if (isChecked) "智能路由已打开：模型失败时按路由池顺序自动切换（下一轮生效）。"
-                else "智能路由已关闭。",
-            )
-        }
-        val checkRoutingAllowPaid = screenSettings.findViewById<CheckBox>(R.id.checkRoutingAllowPaid)
-        checkRoutingAllowPaid.isChecked = routingSettingsNow.allowPaid
-        checkRoutingAllowPaid.setOnCheckedChangeListener { _, isChecked ->
-            routingStore.save(routingStore.load().copy(allowPaid = isChecked))
-            note(
-                if (isChecked) "已允许路由切到付费模型。"
-                else "路由只在免费模型之间切换。",
-            )
-        }
+        // 智能路由开关：设置页与模型页是同一份状态（同一 Store），
+        // 两处勾选框经 bindRoutingCheckPair 绑定、改一处另一处同步。
+        settingsRoutingCheck = screenSettings.findViewById(R.id.checkModelRouting)
+        settingsRoutingPaidCheck = screenSettings.findViewById(R.id.checkRoutingAllowPaid)
+        bindRoutingCheckPair(settingsRoutingCheck!!, settingsRoutingPaidCheck!!)
         screenSettings.findViewById<View>(R.id.buttonRoutingPool).setOnClickListener {
             showRoutingPoolPicker()
         }
@@ -9709,6 +9640,9 @@ class MainActivity : AppCompatActivity() {
         val currentBrainId = components.configStore.currentBrainId()
         // V5 C3-C：状态行刷新时同步刷新大脑列表、SIWC 模型行与 CLI 行。
         refreshBrainList()
+        // 模型页的已添加列表与大脑列表是同一批连接数据的两处呈现：
+        // 任一处增删改后两处一起刷新，模型页永不拿大脑列表改标题充数。
+        refreshModelList()
         refreshSiwcModelRow()
         refreshCliRow()
         updateSiwcSignInButtons()
@@ -10805,7 +10739,7 @@ class MainActivity : AppCompatActivity() {
         // 可见的添加入口（2026-11-11，maintainer：大脑增删改添要看得见）：
         // 列表末尾“＋ 添加大脑…”，点即进下方通用大脑添加表单（新增模式）。
         brainListContainer.addView(
-            UiKit.text(this, if (modelsMode) "＋ 添加模型…" else "＋ 添加大脑…", 13f, R.color.text_primary, bold = true).apply {
+            UiKit.text(this, "＋ 添加大脑…", 13f, R.color.text_primary, bold = true).apply {
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 setBackgroundResource(R.drawable.bg_card)
                 setOnClickListener { addGenericBrain() }
@@ -10950,7 +10884,7 @@ class MainActivity : AppCompatActivity() {
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(genericBrainLabel, InputMethodManager.SHOW_IMPLICIT)
         }
-        note(if (modelsMode) "添加模型：在下方通用表单里填名称、服务地址、模型、Key，点保存。" else "添加大脑：在下方通用表单里填名称、服务地址、模型、Key，点保存。")
+        note("添加大脑：在下方通用表单里填名称、服务地址、模型、Key，点保存。")
     }
 
     /**
@@ -11003,8 +10937,17 @@ class MainActivity : AppCompatActivity() {
      * - “删除…”：二次确认后彻底删除（配置 + Keystore 凭证 + 注册表注销，
      *   一线大脑另记墓碑防复活）；
      * - “退出登录”（SIWC）：退出 ChatGPT 登录（见 signOut）。
+     *
+     * 2026-11-19 起模型页已添加列表也共用这张管理单（动作集不变）；
+     * 只有“编辑…”的去向随调用页不同——设置页填设置页的大脑表单、
+     * 定位设置页配置节；模型页填模型页自己的表单，一线配置节则先
+     * 切到设置页再定位（配置节只在设置页有）。
      */
-    private fun showBrainManage(config: BrainConfig) {
+    private fun showBrainManage(
+        config: BrainConfig,
+        onEditGeneric: (BrainConfig) -> Unit = { startEditGenericBrain(it) },
+        onEditSection: (BrainConfig) -> Unit = { scrollToBrainSection(it) },
+    ) {
         val actions = BrainLoginRows.manageActions(config)
         if (actions.isEmpty()) {
             AlertDialog.Builder(this)
@@ -11026,9 +10969,9 @@ class MainActivity : AppCompatActivity() {
             when (actions[which]) {
                 "编辑…" -> {
                     if (BrainLoginRows.isGenericBrain(config)) {
-                        startEditGenericBrain(config)
+                        onEditGeneric(config)
                     } else {
-                        scrollToBrainSection(config)
+                        onEditSection(config)
                     }
                 }
                 "登录…" -> startDeviceCodeLogin(config.brainId)
@@ -11109,6 +11052,293 @@ class MainActivity : AppCompatActivity() {
         genericBaseUrl.text.clear()
         genericModel.text.clear()
         genericApiKey.text.clear()
+    }
+
+    // ------------------------------------------------------------------
+    // 模型页（2026-11-19 解耦）：控制菜单下与设备、Agent 并列的独立
+    // 一页（screen_models）。上面“添加模型”一块（常用/免费两预设
+    // 分开、自动发现、智能路由、本页自己的手工表单），下面“已添加
+    // 模型”一块（ModelListRows 渲染模型自己的列表）。与设置页大脑
+    // 分节彻底分家：不借大脑列表、不改大脑标题、不动 brain/ 行为。
+    // ------------------------------------------------------------------
+
+    private lateinit var modelListContainer: LinearLayout
+    private lateinit var modelFormLabel: EditText
+    private lateinit var modelFormBaseUrl: EditText
+    private lateinit var modelFormModel: EditText
+    private lateinit var modelFormApiKey: EditText
+    private lateinit var modelFormModels: TextView
+    /** 模型页正在编辑的连接 id（null = 新增模式；同设置页编辑口径）。 */
+    private var editingModelId: String? = null
+    private var settingsRoutingCheck: CheckBox? = null
+    private var settingsRoutingPaidCheck: CheckBox? = null
+    private var modelRoutingCheck: CheckBox? = null
+    private var modelRoutingPaidCheck: CheckBox? = null
+    /** 同步两页路由勾选框时为 true：程序化改勾选不触发保存与提示。 */
+    private var routingCheckSyncing = false
+
+    private fun settingsFormFields() = GenericFormFields(
+        genericBrainLabel, genericBaseUrl, genericModel, genericApiKey, genericModels,
+    )
+
+    private fun modelFormFields() = GenericFormFields(
+        modelFormLabel, modelFormBaseUrl, modelFormModel, modelFormApiKey, modelFormModels,
+    )
+
+    private fun bindModels() {
+        modelListContainer = screenModels.findViewById(R.id.modelListContainer)
+        modelFormLabel = screenModels.findViewById(R.id.modelFormLabel)
+        modelFormBaseUrl = screenModels.findViewById(R.id.modelFormBaseUrl)
+        modelFormModel = screenModels.findViewById(R.id.modelFormModel)
+        modelFormApiKey = screenModels.findViewById(R.id.modelFormApiKey)
+        modelFormModels = screenModels.findViewById(R.id.modelFormModels)
+        screenModels.findViewById<View>(R.id.buttonModelCommonProviders).setOnClickListener {
+            showCommonProviderPicker(modelFormFields())
+        }
+        screenModels.findViewById<View>(R.id.buttonModelFreeProviders).setOnClickListener {
+            showFreeProviderPicker()
+        }
+        screenModels.findViewById<View>(R.id.buttonModelDiscover).setOnClickListener {
+            discoverDeviceModels()
+        }
+        modelRoutingCheck = screenModels.findViewById(R.id.checkModelRoutingPage)
+        modelRoutingPaidCheck = screenModels.findViewById(R.id.checkModelRoutingAllowPaid)
+        bindRoutingCheckPair(modelRoutingCheck!!, modelRoutingPaidCheck!!)
+        screenModels.findViewById<View>(R.id.buttonModelRoutingPool).setOnClickListener {
+            showRoutingPoolPicker()
+        }
+        screenModels.findViewById<View>(R.id.buttonTestModelModels).setOnClickListener {
+            testGenericModels(modelFormFields())
+        }
+        screenModels.findViewById<View>(R.id.buttonSaveModel).setOnClickListener {
+            saveModel()
+        }
+    }
+
+    /**
+     * 智能路由两只勾选框的绑定：设置页与模型页共用同一份状态
+     * （SharedPreferencesModelRoutingStore），初始值取 Store 当前值，
+     * 用户改一处、另一处经 [syncRoutingChecks] 同步。
+     */
+    private fun bindRoutingCheckPair(enabledBox: CheckBox, paidBox: CheckBox) {
+        val store = SharedPreferencesModelRoutingStore(applicationContext)
+        val now = store.load()
+        routingCheckSyncing = true
+        enabledBox.isChecked = now.enabled
+        paidBox.isChecked = now.allowPaid
+        routingCheckSyncing = false
+        enabledBox.setOnCheckedChangeListener { _, isChecked ->
+            if (routingCheckSyncing) return@setOnCheckedChangeListener
+            store.save(store.load().copy(enabled = isChecked))
+            note(
+                if (isChecked) "智能路由已打开：模型失败时按路由池顺序自动切换（下一轮生效）。"
+                else "智能路由已关闭。",
+            )
+            syncRoutingChecks()
+        }
+        paidBox.setOnCheckedChangeListener { _, isChecked ->
+            if (routingCheckSyncing) return@setOnCheckedChangeListener
+            store.save(store.load().copy(allowPaid = isChecked))
+            note(
+                if (isChecked) "已允许路由切到付费模型。"
+                else "路由只在免费模型之间切换。",
+            )
+            syncRoutingChecks()
+        }
+    }
+
+    private fun syncRoutingChecks() {
+        val now = SharedPreferencesModelRoutingStore(applicationContext).load()
+        routingCheckSyncing = true
+        listOfNotNull(settingsRoutingCheck, modelRoutingCheck).forEach { it.isChecked = now.enabled }
+        listOfNotNull(settingsRoutingPaidCheck, modelRoutingPaidCheck).forEach { it.isChecked = now.allowPaid }
+        routingCheckSyncing = false
+    }
+
+    /** 进模型页时刷新：路由勾选与 Store 对齐 + 已添加列表重渲染。 */
+    private fun refreshModelPage() {
+        syncRoutingChecks()
+        refreshModelList()
+    }
+
+    /**
+     * 已添加模型列表：数据是已配置的模型连接（configStore），行由
+     * [ModelListRows] 按类型分组生成，本页渲染；列表末尾不放添加
+     * 按钮（添加只在上方添加块里）。由 refreshBrainStatus 与进页时
+     * 调用，与大脑列表同刷但各渲染各的。
+     */
+    private fun refreshModelList() {
+        if (!::modelListContainer.isInitialized) return
+        val components = brainComponents ?: return
+        val rows = ModelListRows.buildRows(
+            configs = components.configStore.listConfigs(),
+            currentBrainId = components.configStore.currentBrainId(),
+            isConfigured = { brainId -> components.isBrainConfigured(brainId) },
+            siwcSignedIn = components.authManager.isSignedIn(),
+        )
+        modelListContainer.removeAllViews()
+        if (rows.isEmpty()) {
+            modelListContainer.addView(
+                UiKit.text(this, "还没有添加模型。用上面的服务商预设或手工表单添加。", 12f, R.color.text_secondary).apply {
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    setBackgroundResource(R.drawable.bg_card)
+                },
+            )
+            return
+        }
+        var lastGroup: String? = null
+        for (row in rows) {
+            if (row.groupTitle != lastGroup) {
+                lastGroup = row.groupTitle
+                modelListContainer.addView(
+                    UiKit.text(this, row.groupTitle, 12f, R.color.text_secondary, bold = true).apply {
+                        setPadding(dp(4), dp(14), dp(4), dp(6))
+                    },
+                )
+            }
+            val config = components.configStore.getConfig(row.brainId)
+            modelListContainer.addView(buildModelListRow(row, config))
+        }
+    }
+
+    /**
+     * 已添加模型一行：名称 + 模型 · 状态，当前大脑在用的连接标 ✓。
+     * 与大脑列表不同：点行不切换大脑，只打开同一张管理单（编辑在本
+     * 页表单里完成，一线配置节先切到设置页再定位）。
+     */
+    private fun buildModelListRow(row: ModelListRows.ModelListRow, config: BrainConfig?): View {
+        val openManage = {
+            if (config != null) {
+                showBrainManage(
+                    config,
+                    onEditGeneric = { startEditModel(it) },
+                    onEditSection = { target ->
+                        showEntry(DrawerController.ID_SETTINGS)
+                        scrollToBrainSection(target)
+                    },
+                )
+            }
+        }
+        val container = UiKit.horizontal(this).apply {
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setBackgroundResource(R.drawable.bg_card)
+            isClickable = true
+            isFocusable = true
+        }
+        val textCol = UiKit.vertical(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        textCol.addView(UiKit.text(this, row.title, 12f, R.color.text_primary, bold = true))
+        val detail = listOfNotNull(row.detailText, row.statusText).joinToString(" · ")
+        textCol.addView(UiKit.text(this, detail, 11f, R.color.text_secondary))
+        container.addView(textCol)
+        if (row.isCurrent) {
+            container.addView(UiKit.text(this, "✓", 16f, R.color.accent, bold = true))
+        }
+        if (config != null) {
+            container.addView(
+                UiKit.text(this, "···", 18f, R.color.text_secondary, bold = true).apply {
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                    setOnClickListener { openManage() }
+                },
+            )
+        }
+        container.setOnClickListener { openManage() }
+        if (config != null) {
+            container.setOnLongClickListener { openManage(); true }
+        }
+        return container
+    }
+
+    /**
+     * 模型页保存：与设置页 saveGenericBrain 同一条路径（校验走
+     * BrainLoginRows.validateGenericForm、Key 只进 Keystore、保存后
+     * 立即注册进引擎注册表），只是读写本页自己的表单；保存后不自动
+     * 设为当前大脑（同设置页口径）。校验文案沿用 BrainLoginRows 的
+     * 既有字符串（红线：不改 BrainLoginRows 行为）。
+     */
+    private fun saveModel() {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再保存。")
+            return
+        }
+        val label = modelFormLabel.text.toString().trim()
+        val baseUrl = modelFormBaseUrl.text.toString().trim().trimEnd('/')
+        val model = modelFormModel.text.toString().trim()
+        val apiKey = modelFormApiKey.text.toString().trim()
+        val brainId = editingModelId ?: BrainLoginRows.genericBrainId(label)
+        val authRef = BrainLoginRows.genericAuthRef(brainId)
+        val keyStore = try {
+            BrainKeyStore(applicationContext)
+        } catch (e: Exception) {
+            note("无法打开本机 Keystore，未保存：${e.message}")
+            return
+        }
+        val hasStoredKey = keyStore.getSecret(authRef) != null
+        val errors = BrainLoginRows.validateGenericForm(label, baseUrl, model, apiKey, hasStoredKey)
+        if (errors.isNotEmpty()) {
+            note("未保存：" + errors.joinToString("；"))
+            return
+        }
+        Thread {
+            if (apiKey.isNotEmpty()) keyStore.putSecret(authRef, apiKey)
+            val current = components.configStore.getConfig(brainId)
+                ?: BrainConfig(
+                    brainId = brainId,
+                    kind = BrainKind.MODEL_API,
+                    adapterId = BrainLoginRows.GENERIC_ADAPTER_ID,
+                    label = label,
+                    baseUrl = baseUrl,
+                    model = model,
+                    authRef = authRef,
+                    fallbackBrainIds = emptyList(),
+                )
+            val saved = current.copy(
+                kind = BrainKind.MODEL_API,
+                adapterId = BrainLoginRows.GENERIC_ADAPTER_ID,
+                label = label,
+                baseUrl = baseUrl,
+                model = model,
+                authRef = authRef,
+            )
+            components.configStore.saveConfig(saved)
+            runOnUiThread {
+                BrainAdapterRegistry.registerConfig(saved)
+                if (editingModelId != null) {
+                    exitModelEditMode()
+                } else {
+                    modelFormApiKey.text.clear()
+                }
+                refreshBrainStatus()
+                val keySaved = apiKey.isNotEmpty() || hasStoredKey
+                val keyNote = if (keySaved) "（Key 已存本机 Keystore）" else "（本机模型，无需 Key）"
+                note("已保存 $label$keyNote。")
+            }
+        }.start()
+    }
+
+    /** 编辑通用模型连接：预填本页表单（Key 留空 = 不换），名称不可改。 */
+    private fun startEditModel(config: BrainConfig) {
+        if (!::modelFormLabel.isInitialized) return
+        editingModelId = config.brainId
+        modelFormLabel.setText(config.label)
+        modelFormLabel.isEnabled = false
+        modelFormBaseUrl.setText(config.baseUrl ?: "")
+        modelFormModel.setText(config.model)
+        modelFormApiKey.text.clear()
+        modelFormBaseUrl.requestFocus()
+        note("正在编辑 ${config.label}：可改模型、地址；Key 留空表示不换，填了才换。名称不可改，改完点“保存模型”。")
+    }
+
+    /** 退出模型编辑模式：恢复新增模式（名称栏可用、表单清空）。 */
+    private fun exitModelEditMode() {
+        editingModelId = null
+        if (!::modelFormLabel.isInitialized) return
+        modelFormLabel.isEnabled = true
+        modelFormLabel.text.clear()
+        modelFormBaseUrl.text.clear()
+        modelFormModel.text.clear()
+        modelFormApiKey.text.clear()
     }
 
     /** 删除大脑：二次确认。文案由 BrainLoginRows.deleteWarning 生成。 */
@@ -11202,6 +11432,7 @@ class MainActivity : AppCompatActivity() {
             BrainAdapterRegistry.unregisterConfig(config.brainId)
             runOnUiThread {
                 if (editingGenericBrainId == config.brainId) exitGenericEditMode()
+                if (editingModelId == config.brainId) exitModelEditMode()
                 refreshBrainStatus()
                 val currentNote = if (wasCurrent) "当前大脑已清空，请在列表里另选一个大脑。" else ""
                 val restoreNote = if (isSeedable) "列表末尾可重新添加。" else ""
@@ -11343,9 +11574,21 @@ class MainActivity : AppCompatActivity() {
      * 不计费。探针用的 Key 是输入框里现填的，不先写 Keystore。
      * 文案只写动作（“测试连接”“正在读取可用模型”），不写实现细节。
      */
-    private fun testGenericModels() {
-        val baseUrl = genericBaseUrl.text.toString().trim().trimEnd('/')
-        val apiKey = genericApiKey.text.toString().trim()
+    /**
+     * 一套通用表单的字段组：设置页的大脑表单与模型页的模型表单结构
+     * 相同、位置不同。预设填充与测试连接按字段组操作，两页各填各的。
+     */
+    private class GenericFormFields(
+        val label: EditText,
+        val baseUrl: EditText,
+        val model: EditText,
+        val apiKey: EditText,
+        val modelsText: TextView,
+    )
+
+    private fun testGenericModels(fields: GenericFormFields) {
+        val baseUrl = fields.baseUrl.text.toString().trim().trimEnd('/')
+        val apiKey = fields.apiKey.text.toString().trim()
         if (baseUrl.isEmpty() || apiKey.isEmpty()) {
             note("请先填写 Base URL 与 API Key，再测试连接。")
             return
@@ -11354,22 +11597,22 @@ class MainActivity : AppCompatActivity() {
             note("Base URL 只允许 https（本机/局域网模型可用 http）。")
             return
         }
-        genericModels.text = "正在读取可用模型…"
+        fields.modelsText.text = "正在读取可用模型…"
         Thread {
             val result = runBlocking { DeepSeekApiClient().listModels(apiKey, baseUrl) }
             runOnUiThread {
                 result.onSuccess { models ->
-                    genericModels.text = if (models.isEmpty()) {
+                    fields.modelsText.text = if (models.isEmpty()) {
                         "该服务没有返回任何模型；可手动填写模型 ID。"
                     } else {
                         "可用模型：" + models.joinToString("、") { it.id }
                     }
-                    if (models.isNotEmpty() && genericModel.text.isBlank()) {
-                        genericModel.setText(models.first().id)
+                    if (models.isNotEmpty() && fields.model.text.isBlank()) {
+                        fields.model.setText(models.first().id)
                     }
                     note("测试连接成功：读到 ${models.size} 个模型。")
                 }.onFailure { e ->
-                    genericModels.text = "测试连接失败：${e.message}"
+                    fields.modelsText.text = "测试连接失败：${e.message}"
                     note("测试连接失败：${e.message}")
                 }
             }
@@ -11462,15 +11705,15 @@ class MainActivity : AppCompatActivity() {
      * （测试连接拉 /models）。与入口 B 独立，数据走
      * [GenericOpenAiPresets]，不与免费组混排。
      */
-    private fun showCommonProviderPicker() {
+    private fun showCommonProviderPicker(fields: GenericFormFields) {
         val presets = GenericOpenAiPresets.PRESETS
         AlertDialog.Builder(this)
             .setTitle("常用模型服务商")
             .setItems(presets.map { it.displayName }.toTypedArray()) { _, which ->
                 val preset = presets[which]
-                genericBrainLabel.setText(preset.displayName)
-                genericBaseUrl.setText(preset.baseUrl)
-                if (preset.note.isNotBlank()) genericModels.text = preset.note
+                fields.label.setText(preset.displayName)
+                fields.baseUrl.setText(preset.baseUrl)
+                if (preset.note.isNotBlank()) fields.modelsText.text = preset.note
                 note("已填入 ${preset.displayName} 的服务地址；填你的 API Key 后点“测试连接”拉模型列表，再保存。")
             }
             .setNegativeButton("取消", null)
