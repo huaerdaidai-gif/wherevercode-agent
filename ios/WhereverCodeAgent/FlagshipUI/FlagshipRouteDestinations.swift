@@ -1390,17 +1390,20 @@ private struct CollaborationAndAgentsScreen: View {
             }
 
             // 块一：添加 Agent
-            Section("添加 Agent") {
+            Section {
                 Button {
                     showAddAgentSheet = true
                 } label: {
                     Label("＋ 添加 Agent", systemImage: "plus.circle.fill")
                         .font(.subheadline.weight(.semibold))
                 }
+            } header: {
+                // 渲染层修正（A5）：List 分节头默认把拉丁字母转大写，与安卓「Agent」大小写不一致，故显式关闭大小写转换
+                Text("添加 Agent").textCase(nil)
             }
 
             // 块二：已添加的 Agent
-            Section("已添加的 Agent（\(agents.count)）") {
+            Section {
                 if agents.isEmpty {
                     Text("还没有添加 Agent。")
                         .font(.subheadline)
@@ -1471,6 +1474,9 @@ private struct CollaborationAndAgentsScreen: View {
                         }
                     }
                 }
+            } header: {
+                // 渲染层修正（A5）：同上，关闭分节头默认大写转换
+                Text("已添加的 Agent（\(agents.count)）").textCase(nil)
             }
 
             if route.id != "agents" && route.id != "team" {

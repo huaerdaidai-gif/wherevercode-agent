@@ -595,8 +595,18 @@ public struct FlagshipShellView: View {
                             navigateTo(nextId)
                         }
                     )
+                    .navigationBarBackButtonHidden(true)
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItemGroup(placement: .topBarLeading) {
+                            // 导航层修正（A6）：系统返回按钮默认带英文「Back」字样，与安卓图标式返回不一致；
+                            // 隐藏系统返回按钮，改用纯 chevron 图标按钮（点按清空 activeRoute 回到一级页）
+                            Button {
+                                activeRoute = nil
+                            } label: {
+                                Image(systemName: "chevron.backward")
+                            }
+                            .accessibilityIdentifier("navigation.back")
+                            .accessibilityLabel("返回")
                             Button {
                                 withAnimation(.easeOut(duration: 0.2)) { isDrawerOpen = true }
                             } label: {
