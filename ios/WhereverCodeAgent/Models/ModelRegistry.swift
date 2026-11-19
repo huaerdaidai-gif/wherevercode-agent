@@ -637,5 +637,29 @@ public final class ModelMigrationManager {
                 }
             }
         }
+
+    }
+
+    /// 订阅授权目录补齐（双端对齐批B）：Qwen / Kimi / Grok 会员是授权
+    /// 入口目录（与安卓种子同序同名），只落模型存储，不动大脑存储；
+    /// 未登录不产生任何模型；用户删过的（墓碑）不复活。与迁移分开：
+    /// 迁移只管大脑→模型的复制，目录补齐是独立一步，由 App 启动时
+    /// 在迁移之后调用。
+    public static func seedSubscriptionDirectory(modelStore: ModelConfigStore) {
+        let directorySeeds: [ModelConfig] = [
+            ModelConfig(modelId: "qwen", kind: .subscription, adapterId: "qwen",
+                        label: "Qwen 会员", baseUrl: nil, model: "", authRef: "qwen"),
+            ModelConfig(modelId: "kimi", kind: .subscription, adapterId: "kimi",
+                        label: "Kimi Code 订阅", baseUrl: nil, model: "", authRef: "kimi"),
+            ModelConfig(modelId: "grok-membership", kind: .subscription, adapterId: "grok-membership",
+                        label: "Grok 会员（实验性）", baseUrl: nil, model: "", authRef: "grok-membership"),
+        ]
+        let existingNow = Set(modelStore.listConfigs().map(\.modelId))
+        let tombstonesNow = modelStore.deletedModelIds()
+        for seed in directorySeeds {
+            if !existingNow.contains(seed.modelId) && !tombstonesNow.contains(seed.modelId) {
+                modelStore.saveConfig(seed)
+            }
+        }
     }
 }

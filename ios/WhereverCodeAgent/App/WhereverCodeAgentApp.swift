@@ -112,6 +112,8 @@ public final class AppState: ObservableObject {
             brainStore: configStore,
             modelStore: modelStore
         )
+        // 订阅授权目录补齐：与安卓同为 4 项（ChatGPT + Qwen/Kimi/Grok 会员）
+        ModelMigrationManager.seedSubscriptionDirectory(modelStore: modelStore)
         mModel.reload()
 
         let composite = CompositeBrainConfigStore(modelStore: modelStore, brainStore: configStore)
