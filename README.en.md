@@ -70,6 +70,16 @@ See [ios/README.md](ios/README.md) for the native Swift/SwiftUI project and buil
 
 No unverified APK/IPA download links are listed here.
 
+## Self-deployment (single-Agent edition, usable now)
+
+You need no server and no one's permission or account:
+
+1. **Install the App**: download the signed Android package from this repository's Releases and install it directly. For iOS, download the unsigned package and self-sign it with your own Apple ID using Sideloadly / AltStore.
+2. **Add a free model key**: under "Control → Models" the App ships presets for 6 free model providers (Google AI Studio, OpenRouter, Groq, SiliconFlow, Zhipu GLM, Cloudflare Workers AI). Register on the provider's site, paste your key into the App, and start chatting at zero cost. Paid models are entirely optional and never enter smart routing by default.
+3. **Connect your devices (Hand, one line)**: on the computer or phone you want to dispatch work to, open a terminal, paste the single Hand command shown in the App, and press Enter — the device and the Agents on it are discovered by the App, and you can then pick an Agent to chat with or dispatch tasks to. Hand is not a separate program to install; the same line works on every device.
+
+**About multi-Agent channels**: channel collaboration (several Agents relaying work in one channel) depends on the MCP server component, which this release does not yet include as a runnable server. It will be published in stages (Tier 1 / 2 / 3). Its deployment shape is already fixed: local (on-device, integrated into the App, zero deployment), LAN, and cross-device (public / mesh remote) topologies are all fully functional with no feature downgrade, and where deployment is needed it takes at most one pasted terminal command. Until then, this release's scope is the single-Agent mode above.
+
 ## Architecture principles
 
 - **Replaceable models and agents:** No permanent vendor-specific brain or worker roles.
