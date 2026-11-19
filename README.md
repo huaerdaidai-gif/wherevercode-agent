@@ -8,6 +8,10 @@
 
 **Android · iOS · Multi-Agent · Apache-2.0**
 
+[简体中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
+
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) · ![Android](https://img.shields.io/badge/Android-in%20development-informational) · ![iOS](https://img.shields.io/badge/iOS-in%20development-informational)
+
 [Android 开发说明](android/README.md) · [iOS 开发说明](ios/README.md) · [安全政策](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 </div>
