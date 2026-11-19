@@ -4953,15 +4953,21 @@ public struct ControlHomeView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 6) {
+            // 自由度标签自成一行、档位 chip 行独占整行宽度：标签与 5 个 chip 同行时
+            // 总宽超过屏幕宽，chip 文字会被 SwiftUI 截断（曾见「3 标准」截成「3…」），
+            // 与安卓控制台同口径修法；chip 文字再加 lineLimit + fixedSize 钉死防截断。
+            VStack(alignment: .leading, spacing: 6) {
                 Text("自由度")
                     .font(.subheadline.weight(.semibold))
+                HStack(spacing: 6) {
                 ForEach(1...5, id: \.self) { level in
                     Button {
                         freedomLevel = level
                     } label: {
                         Text("\(level) \(Self.freedomLevelNames[level - 1])")
                             .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(freedomLevel == level ? Color(red: 0.93, green: 0.92, blue: 0.89) : Color.white, in: Capsule())
@@ -4969,6 +4975,7 @@ public struct ControlHomeView: View {
                             .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                     }
                     .buttonStyle(.plain)
+                }
                 }
             }
 

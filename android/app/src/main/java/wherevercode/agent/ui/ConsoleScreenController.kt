@@ -121,12 +121,14 @@ class ConsoleScreenController(
                 R.color.text_tertiary,
             ).apply { setPadding(0, 0, 0, dp(8)) },
         )
-        val levelRow = UiKit.horizontal(context).apply { setPadding(0, dp(2), 0, dp(6)) }
-        levelRow.addView(
+        // 自由度标签自成一行、档位 chip 行独占整行宽度：标签与 5 个 chip 同行时总宽
+        // 超过屏幕宽，chip 文字会被挤截断（曾见「3 标准」截成「3…」），双端口径一致。
+        content.addView(
             UiKit.text(context, "自由度", 12f, R.color.text_primary, bold = true).apply {
-                setPadding(0, 0, dp(8), 0)
+                setPadding(0, dp(2), 0, dp(4))
             },
         )
+        val levelRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(6)) }
         levelChips.forEach { levelRow.addView(it) }
         content.addView(levelRow)
         val refreshRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(10)) }
