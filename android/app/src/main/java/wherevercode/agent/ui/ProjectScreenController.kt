@@ -62,6 +62,14 @@ class ProjectScreenController(
     private val projectList: LinearLayout,
     private val projectListEmpty: TextView,
     private val buttonAddProject: TextView,
+    // 项目页对齐（双端对齐批C）：筛选片行与导入行（与 iOS 同序同文案）。
+    // 视图可缺省（单测构造不传时不建片、不接线）。
+    private val filterRow: LinearLayout? = null,
+    private val buttonImportLocal: TextView? = null,
+    private val buttonImportGit: TextView? = null,
+    private val buttonImportDevice: TextView? = null,
+    /** 导入行「连接设备项目」：去设备页（项目从设备添加）。 */
+    private val onOpenDevices: () -> Unit = {},
     private val projectStore: ProjectStore,
     /** 家设备 id → 显示名（本机工作区不走这里）。 */
     private val deviceDisplayName: (String) -> String,
@@ -91,6 +99,9 @@ class ProjectScreenController(
     private val onDeleteProject: (Project) -> Unit = {},
 ) {
     companion object {
+        /** 项目筛选片文案（与 iOS ProjectFilter 同序同字）。 */
+        val PROJECT_FILTER_LABELS: List<String> = listOf("全部", "活跃", "本地沙盒", "远端设备")
+
         /** 大文件首档：只读前 512 KB；点“加载更多”后读前 2 MB。 */
         const val READ_TIER_SMALL: Int = 512 * 1024
         const val READ_TIER_LARGE: Int = 2 * 1024 * 1024
@@ -131,6 +142,10 @@ class ProjectScreenController(
     /** 代码查看器是否从项目列表打开（任务详情链接）：是则返回时回列表，否则回文件树。 */
     private var codeOpenedFromList: Boolean = false
 
+    /** 项目筛选片选中项（下标与 [PROJECT_FILTER_LABELS] 对齐）。 */
+    private var projectFilterIndex: Int = 0
+    private val filterChips: MutableList<TextView> = mutableListOf()
+
     init {
         codePane.visibility = View.GONE
         rootLabel.text = "本机工作区 · ${browser.rootPath}"
@@ -139,9 +154,39 @@ class ProjectScreenController(
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
                 searchQuery = s?.toString().orEmpty()
-                render()
+                if (projectListPane.visibility == View.VISIBLE) showProjectList() else render()
             }
         })
+        // 筛选片（批C）：与 iOS 项目页同序同文案；点片即过滤列表。
+        val row = filterRow
+        if (row != null) {
+            PROJECT_FILTER_LABELS.forEachIndexed { index, label ->
+                val chip = UiKit.text(context, label, 12f, R.color.text_primary, bold = true).apply {
+                    setBackgroundResource(R.drawable.bg_chip)
+                    setPadding(
+                        UiKit.dp(context, 10), UiKit.dp(context, 6),
+                        UiKit.dp(context, 10), UiKit.dp(context, 6),
+                    )
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { rightMargin = UiKit.dp(context, 6) }
+                    setOnClickListener {
+                        projectFilterIndex = index
+                        refreshProjectFilterChips()
+                        showProjectList()
+                    }
+                }
+                filterChips += chip
+                row.addView(chip)
+            }
+            refreshProjectFilterChips()
+        }
+        // 导入行（批C）：本地/Git 都走“打开文件夹”唯一入口（对话框里
+        // 按种类分项）；连接设备项目去设备页。
+        buttonImportLocal?.setOnClickListener { onOpenFolder() }
+        buttonImportGit?.setOnClickListener { onOpenFolder() }
+        buttonImportDevice?.setOnClickListener { onOpenDevices() }
         treeMoreButton.setOnClickListener {
             treeLimit += TREE_PAGE_SIZE
             render()
@@ -178,13 +223,41 @@ class ProjectScreenController(
         showProjectList()
     }
 
+    private fun refreshProjectFilterChips() {
+        filterChips.forEachIndexed { index, chip ->
+            chip.setBackgroundResource(
+                if (index == projectFilterIndex) R.drawable.bg_chip_accent else R.drawable.bg_chip,
+            )
+        }
+    }
+
+    /**
+     * 筛选口径与 iOS 一致：全部/活跃不过滤；本地沙盒 = 有本机家；
+     * 远端设备 = 有设备家。
+     */
+    private fun projectMatchesFilter(project: Project): Boolean = when (projectFilterIndex) {
+        2 -> homesOf(project).any { it.homeKind == ProjectHomeKind.LOCAL }
+        3 -> homesOf(project).any { it.homeKind == ProjectHomeKind.DEVICE }
+        else -> true
+    }
+
+    /** 搜索口径与 iOS 一致：项目名 / 仓库地址 / 家路径包含查询词。 */
+    private fun projectMatchesQuery(project: Project): Boolean {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) return true
+        return project.name.contains(q, ignoreCase = true) ||
+            (project.repoUrl?.contains(q, ignoreCase = true) == true) ||
+            homesOf(project).any { it.workspacePath.contains(q, ignoreCase = true) }
+    }
+
     fun showProjectList() {
         exitEditMode(discard = true)
         currentFile = null
         currentRead = null
         codePane.visibility = View.GONE
         treePane.visibility = View.GONE
-        searchInput.visibility = View.GONE
+        searchInput.visibility = View.VISIBLE
+        searchInput.hint = "搜索项目…"
         projectListPane.visibility = View.VISIBLE
         val projects = try {
             projectStore.listProjects()
@@ -193,12 +266,15 @@ class ProjectScreenController(
         }
         rootLabel.text = if (projects.isEmpty()) "还没有项目" else "${projects.size} 个项目"
         projectList.removeAllViews()
-        projectListEmpty.visibility = if (projects.isEmpty()) View.VISIBLE else View.GONE
+        val visible = projects.filter { projectMatchesQuery(it) && projectMatchesFilter(it) }
+        projectListEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
         if (projects.isEmpty()) {
             projectListEmpty.text =
                 "还没有项目。\n打开一个文件夹就能加项目：本机工作区里的文件夹，或已配对设备上的文件夹；也可以粘一个 GitHub / GitLab / Gitee 仓库地址登记位置，经 API 读。\n局域网 NAS 与网盘同步文件夹不用单独选：NAS 挂在设备上就是远程设备文件夹，同步下来的就是本机文件夹。"
+        } else if (visible.isEmpty()) {
+            projectListEmpty.text = "未找到匹配的项目"
         }
-        projects.forEach { project ->
+        visible.forEach { project ->
             projectList.addView(projectRow(project))
         }
         buttonAddProject.setOnClickListener { onOpenFolder() }
@@ -210,6 +286,7 @@ class ProjectScreenController(
         currentDirectory = ""
         projectListPane.visibility = View.GONE
         searchInput.visibility = View.VISIBLE
+        searchInput.hint = "搜索文件…（按文件名匹配）"
         rootLabel.text = "本机工作区 · ${browser.rootPath}"
         showTree()
         render()
@@ -225,6 +302,7 @@ class ProjectScreenController(
         currentDirectory = relativePath.trim('/')
         projectListPane.visibility = View.GONE
         searchInput.visibility = View.VISIBLE
+        searchInput.hint = "搜索文件…（按文件名匹配）"
         rootLabel.text = "本机 · $relativePath"
         var prefix = ""
         relativePath.split("/").filter { it.isNotEmpty() }.forEach { part ->
@@ -327,6 +405,25 @@ class ProjectScreenController(
             },
         )
         row.addView(textCol)
+        // 主分支角标（有 git 家或仓库地址时才显，与 iOS 项目卡同口径）。
+        val isGitHome = home?.homeKind == ProjectHomeKind.GITHUB ||
+            home?.homeKind == ProjectHomeKind.GITLAB ||
+            home?.homeKind == ProjectHomeKind.GITEE
+        if (project.repoUrl != null || isGitHome) {
+            row.addView(
+                UiKit.text(context, project.defaultBranch, 10f, R.color.text_tertiary).apply {
+                    setBackgroundResource(R.drawable.bg_chip)
+                    setPadding(
+                        UiKit.dp(context, 8), UiKit.dp(context, 3),
+                        UiKit.dp(context, 8), UiKit.dp(context, 3),
+                    )
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { leftMargin = UiKit.dp(context, 8) }
+                },
+            )
+        }
         // 前进：只在选中行上出现。点它打开项目（有家浏览家内容，无家去
         // 指定家）。未选中时不占位，列表保持干净。
         row.addView(
