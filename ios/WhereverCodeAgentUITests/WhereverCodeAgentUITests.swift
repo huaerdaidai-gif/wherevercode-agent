@@ -91,7 +91,8 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        XCTAssertTrue(app.staticTexts["频道与协作"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["频道"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["私聊 · 待开发"].firstMatch.exists)
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
@@ -101,6 +102,29 @@ final class WhereverCodeAgentUITests: XCTestCase {
 
         navigate(app, to: "chat")
         XCTAssertTrue(app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 10))
+    }
+
+    func testDrawerSearchPersistsAfterClosing() {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["chat.connectionSummary"].waitForExistence(timeout: 15))
+        let menu = app.buttons["navigation.menu"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        let search = app.textFields["drawer.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        let query = "qzxjvb4726"
+        search.typeText(query)
+        XCTAssertTrue(app.staticTexts["未找到匹配会话"].exists)
+
+        app.buttons["drawer.close"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertEqual(search.value as? String, query)
+        XCTAssertTrue(app.staticTexts["未找到匹配会话"].exists)
     }
 
     private func navigate(_ app: XCUIApplication, to destination: String) {

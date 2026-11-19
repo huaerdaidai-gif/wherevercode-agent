@@ -97,7 +97,7 @@ public enum FlagshipRoutes {
         .init(id: "git", title: "Git 与工作树", parent: .projects, group: "开发", p0: false),
         .init(id: "preview", title: "运行预览", parent: .projects, group: "开发", p0: false),
         .init(id: "team", title: "团队空间", parent: .projects, group: "协作", p0: false),
-        .init(id: "channels", title: "团队频道", parent: .projects, group: "协作", p0: false),
+        .init(id: "channels", title: "频道", parent: .projects, group: "协作", p0: false),
         .init(id: "channel", title: "频道会话", parent: .projects, group: "协作", p0: false),
         .init(id: "agents", title: "Agent", parent: .projects, group: "协作", p0: true),
         .init(id: "agentdetail", title: "Agent 详情", parent: .projects, group: "协作", p0: true),
@@ -212,6 +212,7 @@ public struct PlannedCapabilities: FlagshipCapabilityProvider {
 public struct FlagshipDrawerView: View {
     @Binding public var isOpen: Bool
     @Binding public var selectedMenu: FlagshipDrawerMenu
+    @Binding public var searchChatQuery: String
     public var onSelectConversation: (Conversation) -> Void
     public var onDeleteConversation: ((Conversation) -> Void)?
     public var onOpenSettings: () -> Void
@@ -219,11 +220,11 @@ public struct FlagshipDrawerView: View {
     public var onOpenFeatureCenter: () -> Void
 
     @State private var recentConversations: [Conversation] = []
-    @State private var searchChatQuery = ""
 
     public init(
         isOpen: Binding<Bool>,
         selectedMenu: Binding<FlagshipDrawerMenu>,
+        searchChatQuery: Binding<String>,
         onSelectConversation: @escaping (Conversation) -> Void,
         onDeleteConversation: ((Conversation) -> Void)? = nil,
         onOpenSettings: @escaping () -> Void,
@@ -232,6 +233,7 @@ public struct FlagshipDrawerView: View {
     ) {
         self._isOpen = isOpen
         self._selectedMenu = selectedMenu
+        self._searchChatQuery = searchChatQuery
         self.onSelectConversation = onSelectConversation
         self.onDeleteConversation = onDeleteConversation
         self.onOpenSettings = onOpenSettings
@@ -325,6 +327,7 @@ public struct FlagshipDrawerView: View {
                     TextField("搜索会话与消息…", text: $searchChatQuery)
                         .font(.system(size: 13))
                         .textInputAutocapitalization(.never)
+                        .accessibilityIdentifier("drawer.search")
                     if !searchChatQuery.isEmpty {
                         Button {
                             searchChatQuery = ""
@@ -518,6 +521,7 @@ public struct FlagshipShellView: View {
     @ObservedObject public var appState: AppState
     @ObservedObject public var chatModel: LocalChatModel
     @State private var isDrawerOpen = false
+    @State private var drawerSearchQuery = ""
     @State private var selectedMenu: FlagshipDrawerMenu = .chat
     @State private var activeRoute: FlagshipRoute? = nil
     @State private var isSettingsOpen = false
@@ -659,6 +663,7 @@ public struct FlagshipShellView: View {
                 FlagshipDrawerView(
                     isOpen: $isDrawerOpen,
                     selectedMenu: $selectedMenu,
+                    searchChatQuery: $drawerSearchQuery,
                     onSelectConversation: { conv in
                         chatModel.open(conv)
                         selectedMenu = .chat
@@ -771,12 +776,18 @@ public struct FeatureCenterSheet: View {
                 }
             }
 
+            if selectedGroup == nil || selectedGroup == .feature {
+                Section("控制与安全") {
+                    Button("安全权限与操作审计") { openRoute("audit") }
+                    Button("检查点、恢复与扩展中心") { openRoute("extensions") }
+                }
+            }
+
             Section("注册表入口列表 (\(filteredEntries.count))") {
                 ForEach(filteredEntries) { entry in
                     Button {
                         if entry.status == .implemented {
-                            onDismiss()
-                            onNavigateRoute(entry.routeId)
+                            openRoute(entry.routeId)
                         } else {
                             toastMessage = entry.todoMessage ?? "【待开发】该功能尚未开发"
                         }
@@ -812,5 +823,10 @@ public struct FeatureCenterSheet: View {
                 Button("关闭") { onDismiss() }
             }
         }
+    }
+
+    private func openRoute(_ routeId: String) {
+        onDismiss()
+        onNavigateRoute(routeId)
     }
 }

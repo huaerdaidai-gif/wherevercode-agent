@@ -128,7 +128,7 @@ final class ScreenshotRenderTests: XCTestCase {
     func testScreenshotSelectorAgentOnly() async {
         let state = AppState()
         let image = await snapshot(
-            ModelAndAgentSheet(model: state.chat, onManage: {})
+            ModelAndAgentSheet(model: state.chat, onManageAgents: {})
         )
         attach(image, name: "page-08-selector-agent-only")
     }
@@ -183,6 +183,7 @@ final class ScreenshotRenderTests: XCTestCase {
             FlagshipDrawerView(
                 isOpen: .constant(true),
                 selectedMenu: .constant(.chat),
+                searchChatQuery: .constant(""),
                 onSelectConversation: { _ in },
                 onOpenSettings: {},
                 onNewChat: {}

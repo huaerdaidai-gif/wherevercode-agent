@@ -18,7 +18,6 @@ public struct DevicesView: View {
     @State private var showDeleteConfirm = false
     @State private var statusBanner: String? = nil
     @State private var discoveredPeers: [DiscoveredPeer] = []
-    @State private var selectedDiscoveredPeer: DiscoveredPeer? = nil
     @State private var isScanning = false
 
     public init() {
@@ -64,11 +63,11 @@ public struct DevicesView: View {
                 Text("确定删除设备「\(dev.displayName)」吗？只删这条设备记录：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
             }
         }
-        .sheet(isPresented: $showAddSheet, onDismiss: { selectedDiscoveredPeer = nil }) {
+        .sheet(isPresented: $showAddSheet) {
             AddDeviceSheet(
-                discoveredPeers: discoveredPeers,
-                initialPeer: selectedDiscoveredPeer,
-                onShowInstallGuide: { showInstallSheet = true },
+                discoveredPeers: $discoveredPeers,
+                isScanning: $isScanning,
+                onScan: startLanScan,
                 onSaved: { added in
                     reload()
                     startLanScan()
@@ -100,18 +99,10 @@ public struct DevicesView: View {
     private var discoveryAndInstallSection: some View {
         Section("添加设备") {
             Button {
-                selectedDiscoveredPeer = nil
                 showAddSheet = true
             } label: {
-                HStack {
-                    Label("＋ 添加设备", systemImage: "plus.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    if isScanning {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
+                Label("＋ 添加设备", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
             }
             .accessibilityIdentifier("devices.addButton")
 
@@ -129,39 +120,6 @@ public struct DevicesView: View {
                 }
             }
 
-            if !discoveredPeers.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("附近的设备（点击连接）：")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    ForEach(discoveredPeers) { peer in
-                        Button {
-                            selectedDiscoveredPeer = peer
-                            showAddSheet = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "desktopcomputer")
-                                    .foregroundStyle(.green)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(peer.displayName) (\(peer.host):\(String(peer.port)))")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    Text("指纹: \(String(peer.fingerprintSha256.prefix(16)))…")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(peer.clientStatus == "APPROVED" ? "接入" : "配对")
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 3)
-                                    .background(Color.blue.opacity(0.12), in: Capsule())
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-            }
         }
     }
 
@@ -275,6 +233,7 @@ public struct DevicesView: View {
     }
 
     private func startLanScan() {
+        guard !isScanning else { return }
         isScanning = true
         Task {
             let registeredHosts = devices.compactMap { $0.baseUrl }.map { raw -> String in
@@ -392,9 +351,9 @@ public struct DevicesView: View {
 // MARK: - 添加设备 Sheet
 
 private struct AddDeviceSheet: View {
-    var discoveredPeers: [DiscoveredPeer]
-    var initialPeer: DiscoveredPeer? = nil
-    var onShowInstallGuide: () -> Void
+    @Binding var discoveredPeers: [DiscoveredPeer]
+    @Binding var isScanning: Bool
+    var onScan: () -> Void
     var onSaved: (AgentRecord) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -405,6 +364,8 @@ private struct AddDeviceSheet: View {
     @State private var folder = "~/Projects"
     @State private var pairCode = ""
     @State private var showAdvanced = false
+    @State private var selectedPeer: DiscoveredPeer?
+    @State private var showInstallGuide = false
 
     @State private var isProbing = false
     @State private var probeHello: RemoteHello? = nil
@@ -437,13 +398,9 @@ private struct AddDeviceSheet: View {
                     }
                 }
             }
-            .onAppear {
-                if let peer = initialPeer {
-                    self.name = peer.displayName
-                    self.host = peer.host
-                    self.portStr = String(peer.port)
-                    startProbe()
-                }
+            .onAppear(perform: onScan)
+            .sheet(isPresented: $showInstallGuide) {
+                InstallGuideSheet()
             }
         }
     }
@@ -451,37 +408,46 @@ private struct AddDeviceSheet: View {
     // 步骤一：发现设备或输入地址
     @ViewBuilder
     private var initialDiscoveryAndInputSection: some View {
-        if !discoveredPeers.isEmpty {
-            Section("局域网快速配对") {
-                ForEach(discoveredPeers) { peer in
-                    Button {
-                        self.name = peer.displayName
-                        self.host = peer.host
-                        self.portStr = String(peer.port)
-                        startProbe()
-                    } label: {
-                        HStack {
-                            Image(systemName: "desktopcomputer")
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(peer.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                                Text("\(peer.host):\(String(peer.port))").font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("连接")
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Color.blue.opacity(0.12), in: Capsule())
+        Section("附近的设备") {
+            if discoveredPeers.isEmpty && !isScanning {
+                Text("暂无发现的设备，可在下方手动输入地址。")
+                    .foregroundStyle(.secondary)
+            }
+            if isScanning {
+                ProgressView("正在查找附近的设备…")
+            } else {
+                Button("重新扫描", action: onScan)
+            }
+            ForEach(discoveredPeers) { peer in
+                Button {
+                    selectedPeer = peer
+                    self.name = peer.displayName
+                    self.host = peer.host
+                    self.portStr = String(peer.port)
+                    startProbe()
+                } label: {
+                    HStack {
+                        Image(systemName: "desktopcomputer")
+                            .foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(peer.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            Text("\(peer.host):\(String(peer.port))").font(.caption2).foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        Text("连接")
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.blue.opacity(0.12), in: Capsule())
                     }
                 }
+                .disabled(isProbing)
             }
         }
 
         Section {
             Button {
-                onShowInstallGuide()
+                showInstallGuide = true
             } label: {
                 Label("在新设备上安装 Hand", systemImage: "sparkles")
                     .font(.subheadline.weight(.medium))
@@ -621,7 +587,7 @@ private struct AddDeviceSheet: View {
 
     private func startProbe() {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if cleanName == "agy" || (initialPeer?.displayName.lowercased() == "agy") {
+        if cleanName == "agy" || (selectedPeer?.displayName.lowercased() == "agy") {
             errorMessage = "agy 是 Agent，不得登记为设备。请在 Agent 页面添加。"
             return
         }

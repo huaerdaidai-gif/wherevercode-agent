@@ -2319,7 +2319,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (agents.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle("选择模型 / Agent")
+                .setTitle("选择对话方")
                 .setMessage(
                     if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选。"
                     else "暂无已添加 Agent",
@@ -2342,7 +2342,7 @@ class MainActivity : AppCompatActivity() {
             }
         }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("选择模型 / Agent")
+            .setTitle("选择对话方")
             .setItems(labels) { _, which ->
                 when (val row = rows[which]) {
                     is AgentPickerRow.Suggested -> {
@@ -9549,7 +9549,7 @@ class MainActivity : AppCompatActivity() {
         chatRouteBanner.visibility = View.VISIBLE
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
-                "选择模型 / Agent ⌄"
+                "选择对话方 ⌄"
             } else {
                 "${agent.displayName} ⌄"
             }

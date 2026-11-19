@@ -26,7 +26,7 @@ import wherevercode.agent.core.agent.AgentRecord
  * 输入框大脑胶囊（2026-11-17 定版 supersede 2026-11-11 旧口径）：
  * 大脑已砍出主线——对话改用户自选 Agent/模型，没有大脑在背后路由，
  * 主线聊天里不存在「大脑会话」，胶囊一律不显示（refreshBrainCapsule
- * 恒 GONE）。对话方只由「选择模型 / Agent」选择器呈现，信息不丢。
+ * 恒 GONE）。对话方只由「选择对话方」选择器呈现，信息不丢。
  *
  * 两条回归：
  * - 默认新对话：胶囊隐藏（GONE）。
@@ -97,7 +97,7 @@ class BrainCapsuleVisibilityTest {
         )
         assertEquals(
             "新对话里选择器应回到未选态",
-            "选择模型 / Agent ⌄",
+            "选择对话方 ⌄",
             activity.findViewById<TextView>(R.id.buttonAgentSelect).text.toString(),
         )
 
