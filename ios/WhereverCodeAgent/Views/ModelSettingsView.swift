@@ -83,7 +83,7 @@ public struct ModelSettingsView: View {
 
     @ViewBuilder
     private var addSection: some View {
-        Section("从预设添加模型") {
+        Section {
             Button {
                 showCommonPicker = true
             } label: {
@@ -122,7 +122,7 @@ public struct ModelSettingsView: View {
             } label: {
                 Label("添加通用模型 API（OpenAI 兼容）", systemImage: "plus.circle")
             }
-        }
+        } header: { Text("从预设添加模型").textCase(nil) }
     }
 
     // MARK: - 2. 智能路由配置区
@@ -164,9 +164,7 @@ public struct ModelSettingsView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-        } header: {
-            Text("智能路由")
-        }
+        } header: { Text("智能路由").textCase(nil) }
     }
 
     // MARK: - 3. 已添加模型列表（独立分组呈现）
@@ -174,9 +172,7 @@ public struct ModelSettingsView: View {
     @ViewBuilder
     private var addedModelsSection: some View {
         Section {
-        } header: {
-            Text("已添加的模型")
-        }
+        } header: { Text("已添加的模型").textCase(nil) }
 
         addedModelGroup(model.modelApis, kind: .modelApi, title: "模型 API")
         addedModelGroup(model.cliBrains, kind: .agentRuntime, title: "CLI 会员")
@@ -189,7 +185,7 @@ public struct ModelSettingsView: View {
             seed.kind == kind && deleted.contains(seed.brainId) && model.configStore.getConfig(modelId: seed.brainId) == nil
         }
 
-        return Section(title) {
+        return Section {
             if configs.isEmpty {
                 Text("暂无已添加的\(title)")
                     .font(.subheadline)
@@ -210,7 +206,7 @@ public struct ModelSettingsView: View {
                     }
                 }
             }
-        }
+        } header: { Text(title).textCase(nil) }
     }
 
     private func modelRow(config: ModelConfig) -> some View {
@@ -303,7 +299,7 @@ private struct ModelEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本信息") {
+                Section {
                     TextField("显示名称", text: $label)
                     TextField("服务地址（https://…）", text: $baseUrl)
                         .textInputAutocapitalization(.never)
@@ -311,14 +307,14 @@ private struct ModelEditorView: View {
                     TextField("模型标识（如 gpt-4o）", text: $modelName)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                }
+                } header: { Text("基本信息").textCase(nil) }
 
-                Section("API Key 凭据") {
+                Section {
                     SecureField(model.hasKey(for: config) ? "已保存 Key（留空保持不变）" : "输入 API Key", text: $apiKey)
                     Text("API Key 安全保存在本机 Keychain 中，绝不上传至任何云端。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                } header: { Text("API Key 凭据").textCase(nil) }
 
                 Section {
                     Button(isTestingConnection ? "正在测试连接…" : "测试连接") {
@@ -554,11 +550,11 @@ private struct ModelFreeProviderPickerSheet: View {
 
     private var accountIdView: some View {
         Form {
-            Section("Cloudflare Account ID") {
+            Section {
                 TextField("输入 Account ID", text: $accountId)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-            }
+            } header: { Text("Cloudflare Account ID").textCase(nil) }
             Section {
                 Button("下一步") { step = .inputApiKey }
                     .disabled(accountId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -568,12 +564,12 @@ private struct ModelFreeProviderPickerSheet: View {
 
     private var apiKeyView: some View {
         Form {
-            Section("API Key") {
+            Section {
                 SecureField("输入 \(selectedPreset?.displayName ?? "") API Key", text: $apiKey)
                 if let help = selectedPreset?.keyHelp {
                     Text(help).font(.caption).foregroundStyle(.secondary)
                 }
-            }
+            } header: { Text("API Key").textCase(nil) }
             if let err = liveFetchError {
                 Section { Text(err).font(.caption).foregroundStyle(.red) }
             }
@@ -588,7 +584,7 @@ private struct ModelFreeProviderPickerSheet: View {
 
     private var modelSelectionView: some View {
         List {
-            Section("勾选要添加的模型") {
+            Section {
                 ForEach(Array(modelsToSelect.enumerated()), id: \.offset) { idx, mName in
                     Button {
                         if checkedModelIndices.contains(idx) {
@@ -605,7 +601,7 @@ private struct ModelFreeProviderPickerSheet: View {
                         }
                     }
                 }
-            }
+            } header: { Text("勾选要添加的模型").textCase(nil) }
             Section {
                 Button("添加所选 (\(checkedModelIndices.count))") {
                     saveSelected()
@@ -697,15 +693,15 @@ private struct ModelDeviceDiscoverySheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("探测已登记设备与局域网节点") {
+                Section {
                     Button(isScanning ? "正在探测…" : "重新扫描") {
                         scanEndpoints()
                     }
                     .disabled(isScanning)
-                }
+                } header: { Text("探测已登记设备与局域网节点").textCase(nil) }
 
                 if !candidates.isEmpty {
-                    Section("发现的模型端点") {
+                    Section {
                         ForEach(Array(candidates.enumerated()), id: \.offset) { idx, cand in
                             Button {
                                 if selectedIndices.contains(idx) {
@@ -725,7 +721,7 @@ private struct ModelDeviceDiscoverySheet: View {
                                 }
                             }
                         }
-                    }
+                    } header: { Text("发现的模型端点").textCase(nil) }
 
                     Section {
                         Button("添加所选端点 (\(selectedIndices.count))") {
@@ -776,7 +772,7 @@ private struct ModelRoutingPoolPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("可选模型列表（点击加入/移出降级池）") {
+                Section {
                     if model.configs.isEmpty {
                         Text("暂无已添加的模型，请先在模型页添加模型。")
                             .font(.subheadline)
@@ -797,7 +793,7 @@ private struct ModelRoutingPoolPickerSheet: View {
                             }
                         }
                     }
-                }
+                } header: { Text("可选模型列表（点击加入/移出降级池）").textCase(nil) }
             }
             .navigationTitle("路由降级池配置")
             .navigationBarTitleDisplayMode(.inline)

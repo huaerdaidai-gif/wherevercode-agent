@@ -103,7 +103,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("大脑") {
+                Section {
                     NavigationLink {
                         BrainSettingsView(model: appState.brainSettingsModel)
                     } label: {
@@ -117,8 +117,8 @@ struct SettingsView: View {
                     Text("大脑是可替换的推理后端（DeepSeek、Claude、Grok、Muse Spark、Cloudflare、通用模型 API、ChatGPT 会员）。Key 只存本机 Keychain。没有当前大脑时设备 Agent 与单兵对话不受影响。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-                Section("平台连接") {
+                } header: { Text("大脑").textCase(nil) }
+                Section {
                     TextField("平台地址（https://…）", text: $baseURLText)
                         .accessibilityIdentifier("settings.address")
                         .focused($focusedField, equals: .address)
@@ -184,8 +184,8 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                }
-                Section("平台令牌") {
+                } header: { Text("平台连接").textCase(nil) }
+                Section {
                     Text(tokenSectionStatus)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -220,14 +220,14 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
                     }
-                }
-                Section("连接状态") {
+                } header: { Text("平台令牌").textCase(nil) }
+                Section {
                     connectionStatusContent
                     Button("重新检查连接") {
                         Task { await appState.refreshConnectionStatus() }
                     }
-                }
-                Section("账号与外部连接") {
+                } header: { Text("连接状态").textCase(nil) }
+                Section {
                     LabeledContent("本地使用", value: "无需账号")
                     LabeledContent("云端协作", value: appState.hasToken ? "已配置平台凭证" : "可选登录")
                     LabeledContent("GitHub", value: "未连接 · 授权接入开发中")
@@ -248,15 +248,15 @@ struct SettingsView: View {
                         .buttonStyle(.bordered)
                     }
                     .font(.caption)
-                }
-                Section("关于") {
+                } header: { Text("账号与外部连接").textCase(nil) }
+                Section {
                     LabeledContent("版本", value: Self.versionString)
                     LabeledContent("Bundle ID", value: "wherevercode.agent")
                     LabeledContent("最低系统", value: "iOS 17.0")
                     Text("可用：团队频道（读 / 发 / 实时推送）、我的任务（领取 / 汇报 / 心跳 / 交活 / 放手）、设置与连接状态、大脑管理（内置大脑种子、通用模型 API、Key 存 Keychain、模型列表实时拉取、设当前大脑）、平台令牌生成（issue_agent_token，与安卓同接口；需服务端已部署该工具且本机凭证为 owner，未部署时点生成会如实报错）。阻塞中：审批、暂停 / 恢复 / 停止、改目标与设备管理——服务端无此接口，入口处有明确标注。大脑对话可用（从侧边栏「对话」进入，与当前大脑聊）；单兵对话尚未接入，入口处有明确标注。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                } header: { Text("关于").textCase(nil) }
                 if let saveMessage {
                     Section {
                         Text(saveMessage)

@@ -595,8 +595,18 @@ public struct FlagshipShellView: View {
                             navigateTo(nextId)
                         }
                     )
+                    .navigationBarBackButtonHidden(true)
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItemGroup(placement: .topBarLeading) {
+                            // 导航层修正（A6）：系统返回按钮默认带英文「Back」字样，与安卓图标式返回不一致；
+                            // 隐藏系统返回按钮，改用纯 chevron 图标按钮（点按清空 activeRoute 回到一级页）
+                            Button {
+                                activeRoute = nil
+                            } label: {
+                                Image(systemName: "chevron.backward")
+                            }
+                            .accessibilityIdentifier("navigation.back")
+                            .accessibilityLabel("返回")
                             Button {
                                 withAnimation(.easeOut(duration: 0.2)) { isDrawerOpen = true }
                             } label: {
@@ -764,9 +774,7 @@ public struct FeatureCenterSheet: View {
                         }
                     }
                 }
-            } header: {
-                Text("分组筛选")
-            } footer: {
+            } header: { Text("分组筛选").textCase(nil) } footer: {
                 if let msg = toastMessage {
                     Text(msg)
                         .font(.caption)
@@ -777,13 +785,13 @@ public struct FeatureCenterSheet: View {
             }
 
             if selectedGroup == nil || selectedGroup == .feature {
-                Section("控制与安全") {
+                Section {
                     Button("安全权限与操作审计") { openRoute("audit") }
                     Button("检查点、恢复与扩展中心") { openRoute("extensions") }
-                }
+                } header: { Text("控制与安全").textCase(nil) }
             }
 
-            Section("注册表入口列表 (\(filteredEntries.count))") {
+            Section {
                 ForEach(filteredEntries) { entry in
                     Button {
                         if entry.status == .implemented {
@@ -814,7 +822,7 @@ public struct FeatureCenterSheet: View {
                         }
                     }
                 }
-            }
+            } header: { Text("注册表入口列表 (\(filteredEntries.count))").textCase(nil) }
         }
         .navigationTitle("全部功能 (\(EntryRegistry.ENTRIES.count) 项)")
         .navigationBarTitleDisplayMode(.inline)

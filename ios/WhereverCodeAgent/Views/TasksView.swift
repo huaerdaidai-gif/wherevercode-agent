@@ -23,15 +23,15 @@ struct TaskListContentView: View {
     var body: some View {
         List {
             if let loadError {
-                Section("连接平台失败") {
+                Section {
                     Text(loadError)
                         .font(.subheadline)
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                     Button("重试") { onRetry() }
-                }
+                } header: { Text("连接平台失败").textCase(nil) }
             }
-            Section("我的任务") {
+            Section {
                 if tasks.isEmpty {
                     Text(loadError == nil
                          ? "当前没有分配给你的任务。"
@@ -46,12 +46,12 @@ struct TaskListContentView: View {
                         }
                     }
                 }
-            }
-            Section("说明") {
+            } header: { Text("我的任务").textCase(nil) }
+            Section {
                 Text("一次只领一个任务；领取后租约 2 小时，汇报进度或心跳可续租。平台没有创建 / 指派任务的接口，本页只做已分配任务的领取与交付。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
+            } header: { Text("说明").textCase(nil) }
         }
         .refreshable { onRefresh() }
     }
@@ -92,15 +92,15 @@ struct TasksNotConnectedContentView: View {
     var body: some View {
         List {
             PlatformConnectionCardSection(onGoSettings: onGoSettings)
-            Section("我的任务") {
+            Section {
                 Text("还没有连上平台：任务来自平台分配。连接平台后，这里会列出分配给你的任务。")
                     .foregroundStyle(.secondary)
-            }
-            Section("说明") {
+            } header: { Text("我的任务").textCase(nil) }
+            Section {
                 Text("一次只领一个任务；领取后租约 2 小时，汇报进度或心跳可续租。平台没有创建 / 指派任务的接口，本页只做已分配任务的领取与交付。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
+            } header: { Text("说明").textCase(nil) }
         }
     }
 }
@@ -133,7 +133,7 @@ struct TasksView: View {
                     .accessibilityIdentifier("tasks.scope")
                 if !showPlatform {
                     List {
-                        Section("任务状态概览") {
+                        Section {
                             let workingC = localTasks.filter { $0.state == "working" }.count
                             let reviewC = localTasks.filter { $0.state == "review" || $0.state == "blocked" }.count
                             let queuedC = localTasks.filter { $0.state == "queued" || $0.state == "assigned" || $0.state == "requeued" }.count
@@ -148,8 +148,8 @@ struct TasksView: View {
                                 if let nav = appState.onSelectRoute { nav("compose") } else { onNavigateRoute("compose") }
                             }
                             .font(.subheadline.weight(.semibold))
-                        }
-                        Section("本地任务（\(localTasks.count)）") {
+                        } header: { Text("任务状态概览").textCase(nil) }
+                        Section {
                             if let localError { Text(localError).foregroundStyle(.red) }
                             if localTasks.isEmpty { Text("暂无本地任务，可点击上方「＋ 新建任务」创建。").foregroundStyle(.secondary) }
                             ForEach(localTasks, id: \.taskId) { task in
@@ -168,7 +168,7 @@ struct TasksView: View {
                                     }
                                 }
                             }
-                        }
+                        } header: { Text("本地任务（\(localTasks.count)）").textCase(nil) }
                     }
                 } else if !appState.isConfigured {
                     TasksNotConnectedContentView(
@@ -258,7 +258,7 @@ struct TaskDetailView: View {
 
     var body: some View {
         List {
-            Section("任务") {
+            Section {
                 Text(current.displayTitle).font(.headline)
                 if !current.detail.isEmpty {
                     Text(current.detail)
@@ -275,8 +275,8 @@ struct TaskDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
-            Section("领取与进度") {
+            } header: { Text("任务").textCase(nil) }
+            Section {
                 Button("领取任务") { Task { await run { svc in _ = try await svc.claim(taskID: current.id, expectedVersion: current.version) } } }
                     .disabled(isBusy)
                 TextField("进度说明…", text: $progressText)
@@ -298,8 +298,8 @@ struct TaskDetailView: View {
                     }
                 }
                 .disabled(isBusy)
-            }
-            Section("交活") {
+            } header: { Text("领取与进度").textCase(nil) }
+            Section {
                 TextField("做了什么、怎么验证的…", text: $summaryText)
                 TextField("分支（branch）", text: $branchText)
                 TextField("提交 SHA（commit）", text: $commitText)
@@ -322,8 +322,8 @@ struct TaskDetailView: View {
                     }
                 }
                 .disabled(isBusy || summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !hasEvidence)
-            }
-            Section("服务端无此接口，阻塞中") {
+            } header: { Text("交活").textCase(nil) }
+            Section {
                 ForEach([ReservedFeature.approval, .pauseTask, .resumeTask, .stopTask, .retargetTask], id: \.self) { feature in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(feature.label)
@@ -334,11 +334,11 @@ struct TaskDetailView: View {
                     }
                     .opacity(0.7)
                 }
-            }
+            } header: { Text("服务端无此接口，阻塞中").textCase(nil) }
             if let resultMessage {
-                Section("结果") {
+                Section {
                     Text(resultMessage)
-                }
+                } header: { Text("结果").textCase(nil) }
             }
         }
         .navigationTitle("任务详情")
@@ -399,21 +399,21 @@ private struct LocalTaskDetailView: View {
     @State private var loadError: String?
     var body: some View {
         List {
-            Section("任务") {
+            Section {
                 LabeledContent("编号", value: task.taskId)
                 LabeledContent("状态", value: task.state)
                 if let description = task.description { Text(description) }
                 if let result = task.result { Text(result).textSelection(.enabled) }
                 if let error = task.error { Text(error).foregroundStyle(.red) }
-            }
-            Section("控制") {
+            } header: { Text("任务").textCase(nil) }
+            Section {
                 ForEach(["暂停", "继续", "停止", "修改目标"], id: \.self) { title in
                     Button(title) {}.disabled(true)
                 }
                 Text("iOS 尚未接入本地任务执行器，无法确认控制回执；以上操作不可用。")
                     .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("日志") {
+            } header: { Text("控制").textCase(nil) }
+            Section {
                 if let loadError { Text(loadError).foregroundStyle(.red) }
                 if events.isEmpty { Text("暂无事件") }
                 ForEach(events, id: \.id) { event in
@@ -422,7 +422,7 @@ private struct LocalTaskDetailView: View {
                         if let note = event.note { Text(note).font(.caption) }
                     }
                 }
-            }
+            } header: { Text("日志").textCase(nil) }
         }
         .navigationTitle(task.title.isEmpty ? "任务详情" : task.title)
         .task {
@@ -442,7 +442,7 @@ public struct LocalTaskDetailScreen: View {
 
     public var body: some View {
         List {
-            Section("任务基本信息") {
+            Section {
                 LabeledContent("标题", value: task.title)
                 LabeledContent("当前状态", value: TaskStates.displayLabel(for: task.state, isPaused: task.isPaused))
                 LabeledContent("独立暂停位 (isPaused)", value: task.isPaused ? "true (已暂停)" : "false (正常运行)")
@@ -451,9 +451,9 @@ public struct LocalTaskDetailScreen: View {
                 if let desc = task.description {
                     Text(desc).font(.footnote)
                 }
-            }
+            } header: { Text("任务基本信息").textCase(nil) }
 
-            Section("状态机合法流转与控制操作") {
+            Section {
                 TextField("流转备注（可选）", text: $transitionNote)
                 let allowed = Array(TaskStates.allowedTransitions[task.state] ?? []).sorted()
                 if allowed.isEmpty {
@@ -494,15 +494,15 @@ public struct LocalTaskDetailScreen: View {
                     Button("查看执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
                     Button("交付物") { onNavigateRoute("artifacts") }.buttonStyle(.bordered)
                 }
-            }
+            } header: { Text("状态机合法流转与控制操作").textCase(nil) }
 
             if let err = errorMsg {
-                Section("错误提示") {
+                Section {
                     Text(err).foregroundStyle(.red).font(.caption)
-                }
+                } header: { Text("错误提示").textCase(nil) }
             }
 
-            Section("任务事件审计流 (task_events)") {
+            Section {
                 if events.isEmpty {
                     Text("暂无事件记录").foregroundStyle(.secondary)
                 } else {
@@ -516,7 +516,7 @@ public struct LocalTaskDetailScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("任务事件审计流 (task_events)").textCase(nil) }
         }
         .navigationTitle("本地任务详情")
         .onAppear {

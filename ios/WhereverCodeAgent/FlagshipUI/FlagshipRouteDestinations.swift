@@ -144,12 +144,12 @@ private struct ConversationStreamScreen: View {
 
     var body: some View {
         List {
-            Section("当前会话与连接状态") {
+            Section {
                 LabeledContent("当前大脑", value: chatModel.selectedBrain.isEmpty ? "未选择" : chatModel.selectedBrain)
                 LabeledContent("执行环境", value: chatModel.selectedExecutionTarget)
                 LabeledContent("平台状态", value: appState.connectionStatus.displayText)
-            }
-            Section("消息与工具流 (\(chatModel.messages.count) 条)") {
+            } header: { Text("当前会话与连接状态").textCase(nil) }
+            Section {
                 if chatModel.messages.isEmpty {
                     Text("当前无进行中消息，可返回对话首页发送或从历史会话加载。")
                         .foregroundStyle(.secondary)
@@ -161,7 +161,7 @@ private struct ConversationStreamScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("消息与工具流 (\(chatModel.messages.count) 条)").textCase(nil) }
             PrototypeRouteSections(routeId: "conversation", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -181,7 +181,7 @@ private struct HistoryConversationsScreen: View {
 
     var body: some View {
         List {
-            Section("SQLite 本地会话历史 (\(filtered.count) 条)") {
+            Section {
                 if filtered.isEmpty {
                     Text("暂无历史会话记录")
                         .foregroundStyle(.secondary)
@@ -208,7 +208,7 @@ private struct HistoryConversationsScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("SQLite 本地会话历史 (\(filtered.count) 条)").textCase(nil) }
             PrototypeRouteSections(routeId: "history", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
         .searchable(text: $query, prompt: "按标题或模型搜索会话")
@@ -230,38 +230,38 @@ private struct GlobalSearchScreen: View {
         let routes = FlagshipRoutes.all.filter { q.isEmpty || $0.title.lowercased().contains(q) || $0.id.lowercased().contains(q) }
 
         List {
-            Section("跨模块检索关键词") {
+            Section {
                 TextField("搜索会话、本地任务、项目或 70 屏路由…", text: $keyword)
-            }
-            Section("匹配会话 (\(convs.count))") {
+            } header: { Text("跨模块检索关键词").textCase(nil) }
+            Section {
                 ForEach(convs.prefix(5)) { c in
                     Button(c.title) {
                         chatModel.open(c)
                         onNavigateRoute("chat")
                     }
                 }
-            }
-            Section("匹配任务 (\(tasks.count))") {
+            } header: { Text("匹配会话 (\(convs.count))").textCase(nil) }
+            Section {
                 ForEach(tasks.prefix(5)) { t in
                     Button("\(t.title) [\(t.state)]") {
                         onNavigateRoute("tasks")
                     }
                 }
-            }
-            Section("匹配项目 (\(projects.count))") {
+            } header: { Text("匹配任务 (\(tasks.count))").textCase(nil) }
+            Section {
                 ForEach(projects.prefix(5)) { p in
                     Button(p.project.name) {
                         onNavigateRoute("projects")
                     }
                 }
-            }
-            Section("匹配功能路由 (\(routes.count))") {
+            } header: { Text("匹配项目 (\(projects.count))").textCase(nil) }
+            Section {
                 ForEach(routes.prefix(10)) { r in
                     Button("\(r.title) (\(r.id)) — \(r.parent.rawValue)/\(r.group)") {
                         onNavigateRoute(r.id)
                     }
                 }
-            }
+            } header: { Text("匹配功能路由 (\(routes.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "search", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -276,12 +276,12 @@ private struct VoiceMultimodalScreen: View {
 
     var body: some View {
         Form {
-            Section("iOS 多模态附件与语音权限边界") {
+            Section {
                 Text("• 文件与代码导入：通过系统文件选择器及安全书签访问授权沙盒文件。\n• 语音输入：使用系统麦克风与语音识别入口。\n• 视觉能力校验：当所选模型（纯文本模型）不支持视觉能力时，系统自动注入诚实提示，绝不伪造看图结果。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("添加沙盒文件引用到当前会话") {
+            } header: { Text("iOS 多模态附件与语音权限边界").textCase(nil) }
+            Section {
                 TextField("文件名或相对路径（如 README.md）", text: $attachName)
                 Button("挂载到当前输入栏") {
                     let clean = attachName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -289,15 +289,15 @@ private struct VoiceMultimodalScreen: View {
                     chatModel.attachedFiles.append(clean)
                     attachName = ""
                 }
-            }
-            Section("语音听写草稿转入") {
+            } header: { Text("添加沙盒文件引用到当前会话").textCase(nil) }
+            Section {
                 TextField("使用系统键盘麦克风听写或输入语音内容…", text: $voiceTranscript, axis: .vertical)
                 Button("填入对话首页输入框") {
                     guard !voiceTranscript.isEmpty else { return }
                     chatModel.draft = voiceTranscript
                     voiceTranscript = ""
                 }
-            }
+            } header: { Text("语音听写草稿转入").textCase(nil) }
             PrototypeRouteSections(routeId: "voice", appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -318,14 +318,14 @@ private struct ComposeTaskScreen: View {
 
     var body: some View {
         Form {
-            Section("新建任务（写入本地 SQLite 任务账本 wherevercode-tasks.db）") {
+            Section {
                 TextField("任务目标标题", text: $title)
                 TextField("验收标准与上下文说明", text: $description, axis: .vertical)
                     .lineLimit(3...6)
                 TextField("指派 Agent ID（可选）", text: $assignedAgentId)
                 Stepper("优先级：P\(priority)", value: $priority, in: 0...3)
-            }
-            Section("执行环境与权限声明") {
+            } header: { Text("新建任务（写入本地 SQLite 任务账本 wherevercode-tasks.db）").textCase(nil) }
+            Section {
                 Picker("目标执行环境", selection: $executionEnv) {
                     Text("iPhone 本机大脑与沙盒").tag("iphone_local_sandbox")
                     Text("远端配对设备 (Hand)").tag("remote_device_hand")
@@ -334,7 +334,7 @@ private struct ComposeTaskScreen: View {
                 Text("注：V5 平台 MCP 当前不提供客户端直接建单接口，新建任务将持久化至本机 SQLite 任务表（初始状态 queued），支持完整 10 状态流转与事件审计。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            }
+            } header: { Text("执行环境与权限声明").textCase(nil) }
             if let err = errorMsg {
                 Section { Text(err).foregroundStyle(.red).font(.caption) }
             }
@@ -391,7 +391,7 @@ private struct PlanAndCheckpointsScreen: View {
 
     var body: some View {
         Form {
-            Section("执行计划与幂等键校验器 (Planner.validate)") {
+            Section {
                 TextField("任务 ID", text: $taskId)
                 TextField("计划目标", text: $goalText)
                 TextField("步骤工具名", text: $stepTool)
@@ -405,11 +405,11 @@ private struct PlanAndCheckpointsScreen: View {
                     let errs = PlanValidator.validate(plan, registeredTools: DefaultiOSToolRegistry().registeredToolNames, taskId: taskId)
                     validationResult = errs.isEmpty ? "校验通过：步骤幂等键 (\(action.idempotencyKey)) 与工具白名单合法。" : "校验拒绝：\(errs.joined(separator: "；"))"
                 }
-            }
+            } header: { Text("执行计划与幂等键校验器 (Planner.validate)").textCase(nil) }
             if let res = validationResult {
-                Section("校验结果") {
+                Section {
                     Text(res).font(.footnote)
-                }
+                } header: { Text("校验结果").textCase(nil) }
             }
             PrototypeRouteSections(routeId: "plan", appState: appState, onNavigateRoute: onNavigateRoute)
         }
@@ -424,7 +424,7 @@ private struct QueueAndSchedulerScreen: View {
         let queued = allTasks.filter { $0.state == "queued" || $0.state == "requeued" || $0.state == "assigned" }
         let working = allTasks.filter { $0.state == "working" || $0.state == "blocked" }
         List {
-            Section("排队与待调度任务 (\(queued.count))") {
+            Section {
                 if queued.isEmpty {
                     Text("队列为空").foregroundStyle(.secondary)
                 } else {
@@ -432,8 +432,8 @@ private struct QueueAndSchedulerScreen: View {
                         LabeledContent("\(t.title) (P\(t.priority))", value: TaskStates.displayLabel(for: t.state, isPaused: t.isPaused))
                     }
                 }
-            }
-            Section("并发执行中 / 阻塞中 (\(working.count))") {
+            } header: { Text("排队与待调度任务 (\(queued.count))").textCase(nil) }
+            Section {
                 if working.isEmpty {
                     Text("当前无并发执行任务").foregroundStyle(.secondary)
                 } else {
@@ -441,7 +441,7 @@ private struct QueueAndSchedulerScreen: View {
                         LabeledContent(t.title, value: TaskStates.displayLabel(for: t.state, isPaused: t.isPaused))
                     }
                 }
-            }
+            } header: { Text("并发执行中 / 阻塞中 (\(working.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "queue", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -456,7 +456,7 @@ private struct ApprovalsCenterScreen: View {
 
     var body: some View {
         List {
-            Section("审批门禁说明 (ApprovalGate & MCP 边界)") {
+            Section {
                 Text(ReservedFeature.approval.notImplementedReason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -469,8 +469,8 @@ private struct ApprovalsCenterScreen: View {
                     )
                     store.enqueue(action)
                 }
-            }
-            Section("本机待审批动作队列 (\(store.items.count))") {
+            } header: { Text("审批门禁说明 (ApprovalGate & MCP 边界)").textCase(nil) }
+            Section {
                 if store.items.isEmpty {
                     Text("当前无待审批高危操作").foregroundStyle(.secondary)
                 } else {
@@ -496,7 +496,7 @@ private struct ApprovalsCenterScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("本机待审批动作队列 (\(store.items.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "approvals", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -508,12 +508,12 @@ private struct CodeReviewScreen: View {
     var body: some View {
         let tasks = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "review" || $0.state == "rework" }
         List {
-            Section("审查门禁与机械检查原则") {
+            Section {
                 Text("严格遵循统一契约：机械检查默认状态为 NOT_RUN，未经真实自动化测试不得宣称 PASS。支持从 review 流转至 completed 或打回 rework。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("待审查 / 需返工任务 (\(tasks.count))") {
+            } header: { Text("审查门禁与机械检查原则").textCase(nil) }
+            Section {
                 if tasks.isEmpty {
                     Text("当前没有处于 review 或 rework 状态的任务").foregroundStyle(.secondary)
                 } else {
@@ -523,7 +523,7 @@ private struct CodeReviewScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("待审查 / 需返工任务 (\(tasks.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "review", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -535,12 +535,12 @@ private struct ArtifactsDeliveryScreen: View {
     var body: some View {
         let completed = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "completed" || $0.result != nil }
         List {
-            Section("交付成果聚合说明") {
+            Section {
                 Text("平台任务交付通过服务接口提交分支、提交哈希与 PR 链接；本地任务交付成果保存在本地任务记录中。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("已登记交付物 (\(completed.count))") {
+            } header: { Text("交付成果聚合说明").textCase(nil) }
+            Section {
                 if completed.isEmpty {
                     Text("暂无已完成交付物记录").foregroundStyle(.secondary)
                 } else {
@@ -551,7 +551,7 @@ private struct ArtifactsDeliveryScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("已登记交付物 (\(completed.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "artifacts", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -775,12 +775,12 @@ public struct ProjectsHomeView: View {
         .sheet(isPresented: $showNewProjectSheet) {
             NavigationStack {
                 Form {
-                    Section("项目基本信息") {
+                    Section {
                         TextField("项目名称（如 wherevercode-agent）", text: $newProjectName)
                         TextField("Git 仓库地址（可选）", text: $newProjectRepo)
                         TextField("默认分支", text: $newProjectBranch)
                         TextField("工作区路径（如 Documents/workspace）", text: $newProjectPath)
-                    }
+                    } header: { Text("项目基本信息").textCase(nil) }
                 }
                 .navigationTitle("新建项目")
                 .navigationBarTitleDisplayMode(.inline)
@@ -974,20 +974,20 @@ public struct ProjectWorkspaceDetailView: View {
                 switch selectedTab {
                 case .overview:
                     List {
-                        Section("项目信息") {
+                        Section {
                             LabeledContent("项目名称", value: projectItem.project.name)
                             LabeledContent("默认分支", value: projectItem.project.defaultBranch)
                             if let repo = projectItem.project.repoUrl {
                                 LabeledContent("仓库地址", value: repo)
                             }
                             LabeledContent("来源属性", value: projectItem.project.origin == "LOCAL_SANDBOX" ? "本地沙盒" : projectItem.project.origin)
-                        }
-                        Section("工作区位置") {
+                        } header: { Text("项目信息").textCase(nil) }
+                        Section {
                             ForEach(projectItem.homes) { loc in
                                 LabeledContent(loc.hostId, value: loc.workspacePath)
                             }
-                        }
-                        Section("快捷操作") {
+                        } header: { Text("工作区位置").textCase(nil) }
+                        Section {
                             Button("浏览文件") { onNavigateRoute("files") }
                             Button("开始对话") { onNavigateRoute("conversation") }
                             Button("Git 工作树") { onNavigateRoute("git") }
@@ -996,7 +996,7 @@ public struct ProjectWorkspaceDetailView: View {
                             Button("查看项目任务中心") { onNavigateRoute("tasks") }
                             Button("打开代码编辑器") { onNavigateRoute("editor") }
                             Button("执行环境与终端") { onNavigateRoute("terminal") }
-                        }
+                        } header: { Text("快捷操作").textCase(nil) }
                         PrototypeRouteSections(routeId: "projectdetail", appState: appState, onNavigateRoute: onNavigateRoute)
                     }
                 case .tasks:
@@ -1048,7 +1048,7 @@ private struct SandboxFileBrowserScreen: View {
 
     var body: some View {
         List {
-            Section("iOS 沙盒文件权限边界") {
+            Section {
                 Text("iOS 采用应用沙盒机制：本页直接读写应用沙盒 Documents 目录，跨应用文件通过系统文件选择器安全书签导入。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1060,8 +1060,8 @@ private struct SandboxFileBrowserScreen: View {
                         reload()
                     }
                 }
-            }
-            Section("App 沙盒 Documents 目录文件 (\(files.count))") {
+            } header: { Text("iOS 沙盒文件权限边界").textCase(nil) }
+            Section {
                 if files.isEmpty {
                     Text("暂无沙盒文件，可在上方新建文件。")
                         .font(.caption)
@@ -1077,7 +1077,7 @@ private struct SandboxFileBrowserScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("App 沙盒 Documents 目录文件 (\(files.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "files", appState: appState, onNavigateRoute: onNavigateRoute)
         }
         .onAppear(perform: reload)
@@ -1180,7 +1180,7 @@ private struct UnifiedDiffScreen: View {
         let currLines = curr.components(separatedBy: "\n")
 
         List {
-            Section("逐行变更对比 (Line Diff)") {
+            Section {
                 if !hasDiff {
                     Text("暂无代码变更对比记录。可在代码编辑器中修改并保存文件后查看逐行 Diff。")
                         .font(.caption)
@@ -1205,7 +1205,7 @@ private struct UnifiedDiffScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("逐行变更对比 (Line Diff)").textCase(nil) }
             PrototypeRouteSections(routeId: "diff", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -1220,7 +1220,7 @@ private struct TerminalAndExecutionTargetScreen: View {
 
     var body: some View {
         List {
-            Section("执行环境四态严格区分（反伪造门禁）") {
+            Section {
                 Picker("当前查看的执行面", selection: $selectedTarget) {
                     ForEach(ExecutionTargetKind.allCases) { target in
                         Text(target.badgeTitle).tag(target)
@@ -1265,9 +1265,9 @@ private struct TerminalAndExecutionTargetScreen: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            }
+            } header: { Text("执行环境四态严格区分（反伪造门禁）").textCase(nil) }
 
-            Section("本机进程真实 EngineEvent 日志流 (\(eventLog.listEvents().count) 条)") {
+            Section {
                 let events = eventLog.listEvents()
                 if events.isEmpty {
                     Text("当前进程暂无模型与工具事件").foregroundStyle(.secondary)
@@ -1279,7 +1279,7 @@ private struct TerminalAndExecutionTargetScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("本机进程真实 EngineEvent 日志流 (\(eventLog.listEvents().count) 条)").textCase(nil) }
             PrototypeRouteSections(routeId: "terminal", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -1291,7 +1291,7 @@ private struct GitWorktreeInspectorScreen: View {
     var body: some View {
         let projects = (try? LocalData.shared.projects.listProjects()) ?? []
         List {
-            Section("Git 协作与工作树") {
+            Section {
                 HStack(spacing: 8) {
                     Image(systemName: "clock.arrow.circlepath")
                         .foregroundStyle(.orange)
@@ -1302,8 +1302,8 @@ private struct GitWorktreeInspectorScreen: View {
                 Text("iOS 本机不包含 git CLI 子进程；Git 分支、提交哈希与 PR 链接需通过项目管理、GitHub 服务接口或远端 Hand 协议同步。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("已登记项目的仓库与分支 (\(projects.count))") {
+            } header: { Text("Git 协作与工作树").textCase(nil) }
+            Section {
                 if projects.isEmpty {
                     Text("暂无关联 Git 仓库的项目").foregroundStyle(.secondary)
                 } else {
@@ -1316,7 +1316,7 @@ private struct GitWorktreeInspectorScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("已登记项目的仓库与分支 (\(projects.count))").textCase(nil) }
             PrototypeRouteSections(routeId: "git", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -1329,7 +1329,7 @@ private struct WorkbenchDevExtendedScreen: View {
 
     var body: some View {
         List {
-            Section("\(route.title)") {
+            Section {
                 switch route.id {
                 case "preview":
                     VStack(alignment: .leading, spacing: 6) {
@@ -1351,7 +1351,7 @@ private struct WorkbenchDevExtendedScreen: View {
                 default:
                     Text(route.title)
                 }
-            }
+            } header: { Text("\(route.title)").textCase(nil) }
             PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -1390,17 +1390,20 @@ private struct CollaborationAndAgentsScreen: View {
             }
 
             // 块一：添加 Agent
-            Section("添加 Agent") {
+            Section {
                 Button {
                     showAddAgentSheet = true
                 } label: {
                     Label("＋ 添加 Agent", systemImage: "plus.circle.fill")
                         .font(.subheadline.weight(.semibold))
                 }
+            } header: {
+                // 渲染层修正（A5）：List 分节头默认把拉丁字母转大写，与安卓「Agent」大小写不一致，故显式关闭大小写转换
+                Text("添加 Agent").textCase(nil)
             }
 
             // 块二：已添加的 Agent
-            Section("已添加的 Agent（\(agents.count)）") {
+            Section {
                 if agents.isEmpty {
                     Text("还没有添加 Agent。")
                         .font(.subheadline)
@@ -1471,6 +1474,9 @@ private struct CollaborationAndAgentsScreen: View {
                         }
                     }
                 }
+            } header: {
+                // 渲染层修正（A5）：同上，关闭分节头默认大写转换
+                Text("已添加的 Agent（\(agents.count)）").textCase(nil)
             }
 
             if route.id != "agents" && route.id != "team" {
@@ -1591,13 +1597,11 @@ private struct AddAgentSheet: View {
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                         }
                     }
-                } header: {
-                    Text("自动发现")
-                } footer: {
+                } header: { Text("自动发现").textCase(nil) } footer: {
                     Text("从已配对的设备中批量扫描并一键勾选添加 Agent。")
                 }
 
-                Section("手动配置 Agent") {
+                Section {
                     TextField("Agent 标识（如 my-codex）", text: $newAgentId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -1628,7 +1632,7 @@ private struct AddAgentSheet: View {
                         saveManualAgent()
                     }
                     .disabled(newAgentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && newAgentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+                } header: { Text("手动配置 Agent").textCase(nil) }
 
                 if let scanErrorMessage {
                     Section {
@@ -1702,9 +1706,7 @@ private struct AddAgentSheet: View {
                             }
                         }
                     }
-                } header: {
-                    Text("选择要扫描的设备")
-                } footer: {
+                } header: { Text("选择要扫描的设备").textCase(nil) } footer: {
                     Text("勾选要扫描的已配对设备（默认不勾，勾几个扫几个）。")
                 }
 
@@ -1815,9 +1817,7 @@ private struct AddAgentSheet: View {
                             }
                         }
                     }
-                } header: {
-                    Text("发现的 Agent（\(discoveredItems.count)）")
-                } footer: {
+                } header: { Text("发现的 Agent（\(discoveredItems.count)）").textCase(nil) } footer: {
                     Text("已存在的 Agent 不重复列出；勾选需要添加的条目后确认。")
                 }
 
@@ -1985,7 +1985,7 @@ private struct McpToolsInspectorScreen: View {
             }
 
             // 能力四态标识看板
-            Section("MCP 能力与状态边界（严格区分四态）") {
+            Section {
                 HStack(spacing: 8) {
                     stateBadge(title: "已连接", isOk: appState.settings.validatedBaseURL != nil, note: "通道畅通")
                     stateBadge(title: "已授权", isOk: appState.hasToken, note: "持有 Token")
@@ -1993,9 +1993,9 @@ private struct McpToolsInspectorScreen: View {
                     stateBadge(title: "已实际执行", isOk: toolCallSuccess == true, note: toolCallSuccess == true ? "真实回执" : "未执行")
                 }
                 .padding(.vertical, 4)
-            }
+            } header: { Text("MCP 能力与状态边界（严格区分四态）").textCase(nil) }
 
-            Section("平台连接与 Token 配置") {
+            Section {
                 LabeledContent("服务地址", value: appState.settings.platformBaseURLString)
                 Button("复制服务地址") {
                     UIPasteboard.general.string = appState.settings.platformBaseURLString
@@ -2025,9 +2025,9 @@ private struct McpToolsInspectorScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("平台连接与 Token 配置").textCase(nil) }
 
-            Section("发起真实 MCP tools/call 验证") {
+            Section {
                 Picker("待测试调用工具", selection: $selectedToolToExecute) {
                     Text("agent_channel_list (拉取频道)").tag("agent_channel_list")
                     Text("agent_my_tasks (拉取分配任务)").tag("agent_my_tasks")
@@ -2057,9 +2057,9 @@ private struct McpToolsInspectorScreen: View {
                             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                     }
                 }
-            }
+            } header: { Text("发起真实 MCP tools/call 验证").textCase(nil) }
 
-            Section("生成新 Token（issue_agent_token）") {
+            Section {
                 TextField("签发对象 Agent ID", text: $issueAgentId)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -2082,9 +2082,9 @@ private struct McpToolsInspectorScreen: View {
                 Text("说明：需要当前已保存具备签发权限的平台凭证，生成的令牌将直接存入本机安全存储。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            }
+            } header: { Text("生成新 Token（issue_agent_token）").textCase(nil) }
 
-            Section("Webhook 唤醒与自动触发") {
+            Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("触发器与 Webhook 唤醒").font(.subheadline.weight(.medium))
@@ -2098,9 +2098,9 @@ private struct McpToolsInspectorScreen: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
-            }
+            } header: { Text("Webhook 唤醒与自动触发").textCase(nil) }
 
-            Section("远端 MCP 工具实时探测（\(toolNames.count) 项）") {
+            Section {
                 Button(isLoading ? "正在从平台拉取工具列表…" : "刷新远端 MCP 工具列表") {
                     Task { await fetchTools() }
                 }
@@ -2127,9 +2127,9 @@ private struct McpToolsInspectorScreen: View {
                         }
                     }
                 }
-            }
+            } header: { Text("远端 MCP 工具实时探测（\(toolNames.count) 项）").textCase(nil) }
 
-            Section("客户端已内置对接的 V5 MCP 工具（\(standardV5Tools.count) 项）") {
+            Section {
                 ForEach(standardV5Tools, id: \.name) { item in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -2142,7 +2142,7 @@ private struct McpToolsInspectorScreen: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            }
+            } header: { Text("客户端已内置对接的 V5 MCP 工具（\(standardV5Tools.count) 项）").textCase(nil) }
 
             PrototypeRouteSections(routeId: "mcp", appState: appState, onNavigateRoute: onNavigateRoute)
         }
@@ -2228,7 +2228,7 @@ private struct SkillsManagementScreen: View {
 
     var body: some View {
         List {
-            Section("已注册技能列表 (\(skillStore.skills.count))") {
+            Section {
                 ForEach(skillStore.skills) { skill in
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -2246,8 +2246,8 @@ private struct SkillsManagementScreen: View {
                         .labelsHidden()
                     }
                 }
-            }
-            Section("提炼并添加新技能") {
+            } header: { Text("已注册技能列表 (\(skillStore.skills.count))").textCase(nil) }
+            Section {
                 TextField("技能名称", text: $newName)
                 TextField("技能摘要", text: $newSummary)
                 TextField("触发场景", text: $newTrigger)
@@ -2258,7 +2258,7 @@ private struct SkillsManagementScreen: View {
                     newSummary = ""
                     newTrigger = ""
                 }
-            }
+            } header: { Text("提炼并添加新技能").textCase(nil) }
             PrototypeRouteSections(routeId: routeId, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -2271,7 +2271,7 @@ private struct ConnectionExtendedScreen: View {
 
     var body: some View {
         List {
-            Section("\(route.title)") {
+            Section {
                 switch route.id {
                 case "agentimport":
                     Text("导入现有 Agent：支持将 Codex、Claude Code、OpenCode 等外部 Agent 登记至本机 Agent 目录。")
@@ -2280,7 +2280,7 @@ private struct ConnectionExtendedScreen: View {
                 default:
                     Text(route.title)
                 }
-            }
+            } header: { Text("\(route.title)").textCase(nil) }
             PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -3353,13 +3353,13 @@ public struct ChannelDetailWorkspaceView: View {
         .sheet(isPresented: $showCreateTaskForm) {
             NavigationStack {
                 Form {
-                    Section("任务标题") {
+                    Section {
                         TextField("任务标题", text: $taskTitle)
-                    }
-                    Section("任务说明") {
+                    } header: { Text("任务标题").textCase(nil) }
+                    Section {
                         Text(pendingTaskText)
                             .font(.subheadline)
-                    }
+                    } header: { Text("任务说明").textCase(nil) }
                     Section {
                         Text("确认后进入任务列表（状态：排队）。")
                             .font(.caption)
@@ -4423,7 +4423,7 @@ public struct CreateDirectMessageSheet: View {
     public var body: some View {
         NavigationStack {
             Form {
-                Section("私聊对象") {
+                Section {
                     Picker("对象类型", selection: $recipientType) {
                         ForEach(RecipientType.allCases) { t in
                             Text(t.rawValue).tag(t)
@@ -4445,9 +4445,9 @@ public struct CreateDirectMessageSheet: View {
                     } else {
                         TextField("输入成员账号或姓名", text: $targetUsername)
                     }
-                }
+                } header: { Text("私聊对象").textCase(nil) }
 
-                Section("平台安全规则校验") {
+                Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("✓ 允许：用户 ↔ 用户 私聊")
                             .font(.caption)
@@ -4460,7 +4460,7 @@ public struct CreateDirectMessageSheet: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(.red)
                     }
-                }
+                } header: { Text("平台安全规则校验").textCase(nil) }
 
                 if let err = errorText {
                     Section {
@@ -4531,17 +4531,17 @@ public struct AgentProfileSheet: View {
                 }
 
                 List {
-                    Section("基础信息") {
+                    Section {
                         LabeledContent("唯一标识", value: message.senderId)
                         LabeledContent("身份类型", value: message.isAgent ? "Autonomous Agent" : "Human User")
                         LabeledContent("安全级别", value: "Verified · ATS TLS 强制")
-                    }
+                    } header: { Text("基础信息").textCase(nil) }
 
-                    Section("协作规范") {
+                    Section {
                         Text("长按该 Agent 头像可在频道消息输入框快速插入 @ 召唤该 Agent 参与协作。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
+                    } header: { Text("协作规范").textCase(nil) }
                 }
             }
             .padding(.top, 20)
@@ -4579,22 +4579,22 @@ public struct ChannelSettingsSheet: View {
         NavigationStack {
             Form {
                 if let ch = channel {
-                    Section("频道信息") {
+                    Section {
                         LabeledContent("频道名称", value: "# \(ch.name)")
                         LabeledContent("频道性质", value: ch.isPrivate ? "私有频道" : "公开频道")
                         LabeledContent("讨论主题", value: ch.topic.isEmpty ? "无主题" : ch.topic)
                         LabeledContent("成员总数", value: "\(members.count) 人")
                         LabeledContent("已入驻 Agent", value: "\(members.filter { $0.isAgent }.count) 位")
-                    }
+                    } header: { Text("频道信息").textCase(nil) }
                 } else if let d = dm {
-                    Section("私聊信息") {
+                    Section {
                         LabeledContent("对象姓名", value: d.targetName)
                         LabeledContent("身份类型", value: d.isAgent ? "平台 Agent" : "团队成员")
                         LabeledContent("归属角色", value: d.targetRole)
-                    }
+                    } header: { Text("私聊信息").textCase(nil) }
                 }
 
-                Section("频道成员与入驻 Agent (\(members.count))") {
+                Section {
                     ForEach(members) { m in
                         HStack(spacing: 10) {
                             Circle()
@@ -4648,12 +4648,12 @@ public struct ChannelSettingsSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
                     }
-                }
+                } header: { Text("频道成员与入驻 Agent (\(members.count))").textCase(nil) }
 
-                Section("通知与权限") {
+                Section {
                     Toggle("消息免打扰", isOn: .constant(false))
                     Toggle("忽略未读提示", isOn: .constant(false))
-                }
+                } header: { Text("通知与权限").textCase(nil) }
             }
             .navigationTitle("会话设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -4689,7 +4689,7 @@ public struct InviteAgentSheet: View {
     public var body: some View {
         NavigationStack {
             List {
-                Section("选择已注册 Agent 入驻频道") {
+                Section {
                     if registeredAgents.isEmpty {
                         Text("暂无其他可用 Agent，所有受信任 Agent 均已在频道中。")
                             .font(.caption)
@@ -4737,7 +4737,7 @@ public struct InviteAgentSheet: View {
                             .buttonStyle(.plain)
                         }
                     }
-                }
+                } header: { Text("选择已注册 Agent 入驻频道").textCase(nil) }
             }
             .navigationTitle("邀请 Agent 入驻")
             .navigationBarTitleDisplayMode(.inline)
@@ -5361,7 +5361,7 @@ public struct AccountSettingsView: View {
             }
 
             // 平台连接（呈现用户已保存的地址；未配置就明说未配置）
-            Section("平台连接") {
+            Section {
                 LabeledContent(
                     "平台地址",
                     value: appState.settings.platformBaseURLString.isEmpty
@@ -5391,10 +5391,10 @@ public struct AccountSettingsView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-            }
+            } header: { Text("平台连接").textCase(nil) }
 
             // 分组一：账户
-            Section("账户") {
+            Section {
                 NavigationLink {
                     ProfileEditScreen()
                 } label: {
@@ -5434,10 +5434,10 @@ public struct AccountSettingsView: View {
                     Label("用量与预算", systemImage: "chart.bar")
                 }
                 .foregroundStyle(.primary)
-            }
+            } header: { Text("账户").textCase(nil) }
 
             // 分组二：应用
-            Section("应用") {
+            Section {
                 NavigationLink {
                     ModelSettingsView(model: appState.modelSettingsModel)
                 } label: {
@@ -5516,7 +5516,7 @@ public struct AccountSettingsView: View {
                     Label("首次使用指南", systemImage: "hand.wave")
                 }
                 .foregroundStyle(.primary)
-            }
+            } header: { Text("应用").textCase(nil) }
 
             // 独立开发者入口（收纳诊断与路由矩阵，不在正式界面堆放内部术语）
             Section {
@@ -5552,14 +5552,14 @@ public struct ProfileEditScreen: View {
 
     public var body: some View {
         Form {
-            Section("基本信息") {
+            Section {
                 TextField("昵称", text: $nickname)
                 TextField("邮箱", text: $email)
-            }
-            Section("工作模式") {
+            } header: { Text("基本信息").textCase(nil) }
+            Section {
                 LabeledContent("默认模式", value: "本地优先")
                 LabeledContent("凭证存储", value: "仅保存在本设备安全区域")
-            }
+            } header: { Text("工作模式").textCase(nil) }
         }
         .navigationTitle("个人资料")
         .navigationBarTitleDisplayMode(.inline)
@@ -5569,21 +5569,21 @@ public struct ProfileEditScreen: View {
 public struct PrivacyAndSecurityScreen: View {
     public var body: some View {
         List {
-            Section("凭证安全保护") {
+            Section {
                 Text("所有模型 API Key 与平台令牌均仅保存在本机系统安全存储中，不会随云端备份自动外泄，也不会写入对话记录。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("加密传输保护") {
+            } header: { Text("凭证安全保护").textCase(nil) }
+            Section {
                 Text("应用默认要求使用加密的 HTTPS 连接，防止凭证与代码在网络传输中被窃听。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("敏感信息自动屏蔽") {
+            } header: { Text("加密传输保护").textCase(nil) }
+            Section {
                 Text("界面与日志若检测到密钥或访问令牌格式的字符串，将在展示前自动隐藏。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
+            } header: { Text("敏感信息自动屏蔽").textCase(nil) }
         }
         .navigationTitle("隐私与安全")
         .navigationBarTitleDisplayMode(.inline)
@@ -5626,15 +5626,15 @@ public struct DeveloperDiagnosticsScreen: View {
 
     public var body: some View {
         List {
-            Section("底层运行诊断") {
+            Section {
                 LabeledContent("Keychain 安全级别", value: "WhenUnlockedThisDeviceOnly")
                 LabeledContent("ATS 网络边界", value: "强制 HTTPS (无明文)")
                 LabeledContent("SQLite 状态", value: "WAL 模式 · 正常")
                 Button("打开 Claude 18 屏基线对照 (baseline)") {
                     onNavigateRoute("baseline")
                 }
-            }
-            Section("70 屏功能路由全景 (\(filtered.count)/70)") {
+            } header: { Text("底层运行诊断").textCase(nil) }
+            Section {
                 TextField("搜索 route_id / 标题 / 分组", text: $searchText)
                     .textInputAutocapitalization(.never)
 
@@ -5663,7 +5663,7 @@ public struct DeveloperDiagnosticsScreen: View {
                     }
                     .accessibilityIdentifier("diagnostics.route.\(route.id)")
                 }
-            }
+            } header: { Text("70 屏功能路由全景 (\(filtered.count)/70)").textCase(nil) }
         }
         .navigationTitle("开发者选项")
         .navigationBarTitleDisplayMode(.inline)
@@ -5685,7 +5685,7 @@ private struct OnboardingLocalFirstScreen: View {
 
     var body: some View {
         List {
-            Section("欢迎使用 WhereverCode") {
+            Section {
                 Text("先从本地对话开始。需要跨设备、团队或云端任务时，再连接对应服务。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -5694,7 +5694,7 @@ private struct OnboardingLocalFirstScreen: View {
                 Button("连接设备") { onNavigateRoute("devices") }
                 Button("导入项目") { onNavigateRoute("projects") }
                 Button("配置推理模型") { onNavigateRoute("models") }
-            }
+            } header: { Text("欢迎使用 WhereverCode").textCase(nil) }
             PrototypeRouteSections(routeId: "onboarding", appState: appState, onNavigateRoute: onNavigateRoute)
         }
     }
@@ -5711,7 +5711,7 @@ private struct ConsoleSystemSubScreen: View {
         List {
             switch route.id {
             case "activity", "notifications":
-                Section("实时事件与消息回执流 (\(events.count) 条)") {
+                Section {
                     if events.isEmpty {
                         Text("暂无实时事件").foregroundStyle(.secondary)
                     } else {
@@ -5722,14 +5722,14 @@ private struct ConsoleSystemSubScreen: View {
                             }
                         }
                     }
-                }
+                } header: { Text("实时事件与消息回执流 (\(events.count) 条)").textCase(nil) }
             case "audit":
-                Section("安全与权限边界") {
+                Section {
                     LabeledContent("凭证存储", value: "仅限本机安全存储 (Keychain)")
                     LabeledContent("日志脱敏", value: "自动屏蔽敏感密钥与令牌")
                     LabeledContent("能力四态约束", value: "已连接 → 已授权 → 可调用 → 已实际执行")
-                }
-                Section("工具、审批与唤醒审计流水 (\(auditTrail.count) 条)") {
+                } header: { Text("安全与权限边界").textCase(nil) }
+                Section {
                     if auditTrail.isEmpty {
                         Text("暂无高危审批与调用操作记录").foregroundStyle(.secondary)
                     } else {
@@ -5739,33 +5739,33 @@ private struct ConsoleSystemSubScreen: View {
                                 .padding(.vertical, 1)
                         }
                     }
-                }
+                } header: { Text("工具、审批与唤醒审计流水 (\(auditTrail.count) 条)").textCase(nil) }
             case "usage":
-                Section("Token 用量与成本统计") {
+                Section {
                     let usageEvents = events.filter { $0.kind == "USAGE" }
                     LabeledContent("已记录模型调用事件数", value: "\(usageEvents.count)")
                     ForEach(usageEvents) { u in
                         Text(u.detail).font(.caption)
                     }
-                }
+                } header: { Text("Token 用量与成本统计").textCase(nil) }
             case "sync":
-                Section("跨端同步状态说明") {
+                Section {
                     Text("离线期间的操作保存在本机数据库，收到服务端确认回执后才更新为已送达。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                } header: { Text("跨端同步状态说明").textCase(nil) }
             case "recovery":
-                Section("任务暂停、恢复与回滚") {
+                Section {
                     Text("• 本地对话与任务：支持随时停止当前回复或切换暂停状态。\n• 远端平台任务：\(ReservedFeature.stopTask.notImplementedReason)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("前往任务中心") { onNavigateRoute("tasks") }
-                }
+                } header: { Text("任务暂停、恢复与回滚").textCase(nil) }
             case "baseline":
-                Section("界面与功能基线对照") {
+                Section {
                     LabeledContent("总路由数", value: "\(FlagshipRoutes.all.count) / 70")
                     LabeledContent("一级导航", value: FlagshipDrawerMenu.allCases.map(\.rawValue).joined(separator: "、"))
-                }
+                } header: { Text("界面与功能基线对照").textCase(nil) }
             default:
                 Text(route.title)
             }
@@ -5795,13 +5795,13 @@ private struct ConsoleAutomationSubScreen: View {
         List {
             switch route.id {
             case "triggers":
-                Section("Webhook 唤醒端点与 HMAC 签名配置") {
+                Section {
                     LabeledContent("Webhook URL", value: webhookURLText)
                     LabeledContent("验签方式", value: "HMAC-SHA256 (请求头: X-WhereverCode-Signature)")
                     LabeledContent("订阅事件", value: "git_push, pull_request, chat_mention, cron")
-                }
+                } header: { Text("Webhook 唤醒端点与 HMAC 签名配置").textCase(nil) }
 
-                Section("唤醒四态全链路校验（已连接 → 已授权 → 可调用 → 已实际执行）") {
+                Section {
                     HStack(spacing: 8) {
                         webhookStateBadge(title: "1. 接收请求", state: "已连接", isOk: true)
                         webhookStateBadge(title: "2. 验签合法", state: "已授权", isOk: true)
@@ -5820,34 +5820,34 @@ private struct ConsoleAutomationSubScreen: View {
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
-                }
+                } header: { Text("唤醒四态全链路校验（已连接 → 已授权 → 可调用 → 已实际执行）").textCase(nil) }
             case "wakepolicy":
-                Section("唤醒频率与自治安全策略") {
+                Section {
                     LabeledContent("单小时最大唤醒频次", value: "10 次/小时")
                     LabeledContent("单轮最大工具调用轮数", value: "6 轮")
                     LabeledContent("单轮超时上限", value: "3 分钟")
                     LabeledContent("高危权限阻断", value: "写文件与 Shell 执行需审批中心授权")
                     LabeledContent("离线重试队列", value: "断网事件挂起重试（保留 24 小时）")
-                }
+                } header: { Text("唤醒频率与自治安全策略").textCase(nil) }
             case "automaker":
-                Section("第一步 · 定义自动化目标") {
+                Section {
                     TextField("例如：每当收到新的 PR，自动审查代码并生成报告，关键问题由我审批。", text: $autoGoalText, axis: .vertical)
                         .lineLimit(2...5)
-                }
-                Section("运行护栏与平台边界") {
+                } header: { Text("第一步 · 定义自动化目标").textCase(nil) }
+                Section {
                     LabeledContent("单轮最大工具调用轮数", value: "6 轮")
                     LabeledContent("单轮最大工具调用次数", value: "12 次")
                     LabeledContent("单轮超时上限", value: "3 分钟")
-                }
+                } header: { Text("运行护栏与平台边界").textCase(nil) }
             default:
-                Section("运行护栏与平台边界") {
+                Section {
                     LabeledContent("单轮最大工具调用轮数", value: "6 轮")
                     LabeledContent("单轮最大工具调用次数", value: "12 次")
                     LabeledContent("单轮超时上限", value: "3 分钟")
                     Text("iOS 系统限制后台常驻进程与准点定时唤醒；Webhook 与定时自动化需配合服务端或已连接设备运行。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                } header: { Text("运行护栏与平台边界").textCase(nil) }
             }
             PrototypeRouteSections(routeId: route.id, appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
         }
@@ -5910,7 +5910,7 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
             List {
                 switch route.id {
                 case "extensions", "extensiondetail":
-                    Section("扩展插件中心与生命周期管理 (\(plugins.count))") {
+                    Section {
                         ForEach(plugins) { plugin in
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
@@ -5945,12 +5945,12 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
                             }
                             .padding(.vertical, 4)
                         }
-                    }
+                    } header: { Text("扩展插件中心与生命周期管理 (\(plugins.count))").textCase(nil) }
                     .onAppear {
                         plugins = V5PluginManager.listPlugins()
                     }
                 case "memory":
-                    Section("新增长期记忆") {
+                    Section {
                         TextField("记忆主题（如代码风格偏好）", text: $newMemKey)
                         TextField("记忆内容", text: $newMemVal)
                         Button("保存记忆") {
@@ -5959,8 +5959,8 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
                             newMemKey = ""
                             newMemVal = ""
                         }
-                    }
-                    Section("已保存记忆 (\(LocalData.shared.memoryStore.listEntries().count))") {
+                    } header: { Text("新增长期记忆").textCase(nil) }
+                    Section {
                         let entries = LocalData.shared.memoryStore.listEntries()
                         if entries.isEmpty {
                             Text("暂无长期记忆条目").foregroundStyle(.secondary)
@@ -5972,16 +5972,16 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
                                 }
                             }
                         }
-                    }
+                    } header: { Text("已保存记忆 (\(LocalData.shared.memoryStore.listEntries().count))").textCase(nil) }
                 case "context":
-                    Section("上下文容量与自动压缩") {
+                    Section {
                         LabeledContent("估算容量上限", value: "\(LocalData.shared.contextManager.budgetEstimatedTokens) tokens")
                         Text("当长对话超出容量上限时，自动压缩早期对话并保留关键结论。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
+                    } header: { Text("上下文容量与自动压缩").textCase(nil) }
                 case "research":
-                    Section("联网深度研究") {
+                    Section {
                         TextField("输入检索词…", text: $searchQuery)
                         Button("执行实时检索") {
                             Task {
@@ -6002,13 +6002,13 @@ private struct SettingsIntelligenceAndExtensionsScreen: View {
                                 Text(hit.url).font(.caption2).foregroundStyle(.blue)
                             }
                         }
-                    }
+                    } header: { Text("联网深度研究").textCase(nil) }
                 default:
-                    Section("\(route.title)") {
+                    Section {
                         Text("iOS 端在系统沙盒保护下运行，外部 CLI 与插件通过已授权的远程设备或平台 MCP 接口调用。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
+                    } header: { Text("\(route.title)").textCase(nil) }
                 }
                 PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
             }
@@ -6654,7 +6654,7 @@ public struct PrototypeRouteSections: View {
         if let spec {
             if !spec.selectors.isEmpty {
                 ForEach(Array(spec.selectors.enumerated()), id: \.offset) { _, sel in
-                    Section(selectorTitle(for: sel.0)) {
+                    Section {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(sel.1, id: \.self) { opt in
@@ -6674,12 +6674,12 @@ public struct PrototypeRouteSections: View {
                                 }
                             }
                         }
-                    }
+                    } header: { Text(selectorTitle(for: sel.0)).textCase(nil) }
                 }
             }
 
             if !spec.steps.isEmpty {
-                Section("执行阶段与步骤流") {
+                Section {
                     ForEach(Array(spec.steps.enumerated()), id: \.offset) { idx, st in
                         Button {
                             runStep = idx + 1
@@ -6698,11 +6698,11 @@ public struct PrototypeRouteSections: View {
                             }
                         }
                     }
-                }
+                } header: { Text("执行阶段与步骤流").textCase(nil) }
             }
 
             if !spec.rows.isEmpty {
-                Section("功能入口与关联项") {
+                Section {
                     ForEach(Array(spec.rows.enumerated()), id: \.offset) { _, row in
                         HStack {
                             Text(row.0).font(.subheadline)
@@ -6714,11 +6714,11 @@ public struct PrototypeRouteSections: View {
                             .controlSize(.small)
                         }
                     }
-                }
+                } header: { Text("功能入口与关联项").textCase(nil) }
             }
 
             if !spec.actBtns.isEmpty || !spec.navBtns.isEmpty {
-                Section("操作与快捷跳转") {
+                Section {
                     ForEach(Array(spec.actBtns.enumerated()), id: \.offset) { _, act in
                         Button {
                             handleAction(label: act.0, code: act.1)
@@ -6741,16 +6741,16 @@ public struct PrototypeRouteSections: View {
                             }
                         }
                     }
-                }
+                } header: { Text("操作与快捷跳转").textCase(nil) }
             }
 
             if !spec.lines.isEmpty {
-                Section("规格与状态摘要") {
+                Section {
                     ForEach(Array(spec.lines.enumerated()), id: \.offset) { _, ln in
                         LabeledContent(ln.0, value: ln.1)
                             .font(.subheadline)
                     }
-                }
+                } header: { Text("规格与状态摘要").textCase(nil) }
             }
         }
     }
