@@ -81,6 +81,7 @@ import wherevercode.agent.brain.ModelRouting
 import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
 import wherevercode.agent.models.ModelConfigStore
 import wherevercode.agent.models.ModelEntry
+import wherevercode.agent.models.ConfigDeletionPolicy
 import wherevercode.agent.brain.generic.CustomFreeProviders
 import wherevercode.agent.brain.generic.SharedPreferencesCustomFreeProviderStore
 import wherevercode.agent.brain.generic.DeviceModelDiscovery
@@ -9766,7 +9767,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val signedIn = components.authManager.isSignedIn()
-        val currentBrainId = components.runtimeConfigStore.currentBrainId()
+        val currentBrainId = components.configStore.currentBrainId()
         // V5 C3-C：状态行刷新时同步刷新大脑列表、SIWC 模型行与 CLI 行。
         refreshBrainList()
         // 模型页的已添加列表读独立模型存储、大脑列表读大脑存储
@@ -9808,7 +9809,7 @@ class MainActivity : AppCompatActivity() {
         if (currentBrainId == BrainBootstrap.CLI_BRAIN_ID) {
             buttonSignInChatGpt.visibility = View.GONE
             buttonSignOut.visibility = View.GONE
-            val cliConfig = components.runtimeConfigStore.getConfig(BrainBootstrap.CLI_BRAIN_ID)
+            val cliConfig = components.configStore.getConfig(BrainBootstrap.CLI_BRAIN_ID)
             brainStatus.text = "$name：CLI 会员额度 · " +
                 (cliConfig?.let { BrainLoginRows.cliStatusText(it) } ?: "未配置")
             return
@@ -9821,7 +9822,7 @@ class MainActivity : AppCompatActivity() {
             buttonSignInChatGpt.visibility = View.GONE
             buttonSignOut.visibility = View.GONE
             val manager = components.deviceCodeManagers[currentBrainId]
-            val config = components.runtimeConfigStore.getConfig(currentBrainId)
+            val config = components.configStore.getConfig(currentBrainId)
             val signedIn = manager?.isSignedIn() == true
             val model = config?.model?.takeIf { it.isNotBlank() }
             brainStatus.text = when {
@@ -9845,7 +9846,7 @@ class MainActivity : AppCompatActivity() {
         // 放开切换）：状态行如实写“已连接”（与其它支持工具调用的大脑
         // 同口径，不写“接入中”，也不写“仅 Agent 对话可用”；工具调用
         // 尚未在真机上验证，见切换提示）。
-        val currentConfig = currentBrainId?.let { components.runtimeConfigStore.getConfig(it) }
+        val currentConfig = currentBrainId?.let { components.configStore.getConfig(it) }
         if (currentConfig?.adapterId == BrainLoginRows.GENERIC_ADAPTER_ID) {
             buttonSignInChatGpt.visibility = View.GONE
             buttonSignOut.visibility = View.GONE
@@ -11534,17 +11535,23 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val wasCurrent = modelConfigStore.currentModelId() == config.brainId
-        val isSeedable = config.brainId in BrainBootstrap.SEEDABLE_BRAIN_IDS
+        val hasBrainCopy = components.configStore.getConfig(config.brainId) != null
         Thread {
             modelConfigStore.deleteEntry(config.brainId)
-            if (isSeedable) modelConfigStore.markBuiltinDeleted(config.brainId)
+            if (hasBrainCopy) modelConfigStore.markBuiltinDeleted(config.brainId)
             val authRef = config.authRef
             if (!authRef.isNullOrBlank()) {
-                val stillUsed =
-                    components.configStore.listConfigs().any { it.authRef == authRef } ||
-                        modelConfigStore.listEntries().any { it.authRef == authRef } ||
-                        (::agentStore.isInitialized &&
-                            agentStore.listAgents().any { it.authRef == authRef })
+                val agentAuthRefs = if (::agentStore.isInitialized) {
+                    agentStore.listAgents().map { it.authRef }
+                } else {
+                    emptyList()
+                }
+                val stillUsed = ConfigDeletionPolicy.isAuthRefStillUsed(
+                    authRef,
+                    components.configStore.listConfigs(),
+                    modelConfigStore.listEntries(),
+                    agentAuthRefs,
+                )
                 if (!stillUsed) {
                     try {
                         BrainKeyStore(applicationContext).deleteSecret(authRef)
@@ -11648,16 +11655,37 @@ class MainActivity : AppCompatActivity() {
                     // ignore
                 }
             }
-            try {
-                BrainKeyStore(applicationContext).deleteSecret(authRef)
-            } catch (_: Exception) {
-                // Key 删不掉不拦删除本身：配置删了行就没了，未配的脑
-                // 本来也调不起来；只记日志，不弹给用户。
-                android.util.Log.w("MainActivity", "deleteBrain: key delete failed for $authRef")
-            }
             components.configStore.deleteConfig(config.brainId)
             if (isSeedable) components.configStore.markBrainDeleted(config.brainId)
-            BrainAdapterRegistry.unregisterConfig(config.brainId)
+            val agentAuthRefs = if (::agentStore.isInitialized) {
+                agentStore.listAgents().map { it.authRef }
+            } else {
+                emptyList()
+            }
+            val stillUsed = ConfigDeletionPolicy.isAuthRefStillUsed(
+                authRef,
+                components.configStore.listConfigs(),
+                modelConfigStore.listEntries(),
+                agentAuthRefs,
+            )
+            if (!stillUsed) {
+                try {
+                    BrainKeyStore(applicationContext).deleteSecret(authRef)
+                } catch (_: Exception) {
+                    // Key 删不掉不拦删除本身；只记日志，不弹给用户。
+                    android.util.Log.w("MainActivity", "deleteBrain: key delete failed for $authRef")
+                }
+            }
+            val remaining = components.runtimeConfigStore.getConfig(config.brainId)
+            if (!ConfigDeletionPolicy.remainsInRuntimeView(
+                    config.brainId,
+                    components.runtimeConfigStore,
+                )
+            ) {
+                BrainAdapterRegistry.unregisterConfig(config.brainId)
+            } else {
+                BrainAdapterRegistry.registerConfig(remaining!!)
+            }
             runOnUiThread {
                 if (editingGenericBrainId == config.brainId) exitGenericEditMode()
                 if (editingModelId == config.brainId) exitModelEditMode()

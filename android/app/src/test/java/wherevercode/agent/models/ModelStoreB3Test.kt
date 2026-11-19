@@ -3,6 +3,7 @@ package wherevercode.agent.models
 import android.content.Context
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -126,6 +127,72 @@ class ModelStoreB3Test {
         assertNull(modelStore.getEntry("builtin-x"))
         // 大脑侧的原条目不动（删模型不删大脑）。
         assertTrue(brainStore.getConfig("builtin-x") != null)
+    }
+
+    @Test
+    fun `deleting a migrated custom model keeps it deleted on later top up`() {
+        brainStore.saveConfig(brainConfig("custom-model"))
+        assertTrue(ModelStoreMigration.run(modelStore, brainStore))
+        assertNotNull(modelStore.getEntry("custom-model"))
+
+        modelStore.deleteEntry("custom-model")
+        // Match MainActivity.deleteModel: any retained brain-side copy needs a model tombstone.
+        if (brainStore.getConfig("custom-model") != null) {
+            modelStore.markBuiltinDeleted("custom-model")
+        }
+        assertTrue(ModelStoreMigration.run(modelStore, brainStore))
+
+        assertNull(modelStore.getEntry("custom-model"))
+        assertTrue("custom-model" in modelStore.deletedBuiltinIds())
+        assertNotNull(brainStore.getConfig("custom-model"))
+    }
+
+    @Test
+    fun `brain deletion protects shared keys and adapter while model copy remains`() {
+        val authRef = "shared-key"
+        brainStore.saveConfig(brainConfig("same-id", authRef = authRef))
+        modelStore.saveEntry(ModelEntry.fromBrainConfig(brainConfig("same-id", authRef = authRef)))
+        val runtimeStore = CompositeBrainConfigStore(modelStore, brainStore)
+
+        brainStore.deleteConfig("same-id")
+        assertTrue(
+            ConfigDeletionPolicy.isAuthRefStillUsed(
+                authRef,
+                brainStore.listConfigs(),
+                modelStore.listEntries(),
+                emptyList(),
+            ),
+        )
+        assertTrue(ConfigDeletionPolicy.remainsInRuntimeView("same-id", runtimeStore))
+
+        modelStore.deleteEntry("same-id")
+        brainStore.saveConfig(brainConfig("other-brain", authRef = authRef))
+        assertTrue(
+            ConfigDeletionPolicy.isAuthRefStillUsed(
+                authRef,
+                brainStore.listConfigs(),
+                modelStore.listEntries(),
+                emptyList(),
+            ),
+        )
+        brainStore.deleteConfig("other-brain")
+        assertTrue(
+            ConfigDeletionPolicy.isAuthRefStillUsed(
+                authRef,
+                brainStore.listConfigs(),
+                modelStore.listEntries(),
+                listOf(authRef),
+            ),
+        )
+        assertFalse(
+            ConfigDeletionPolicy.isAuthRefStillUsed(
+                authRef,
+                brainStore.listConfigs(),
+                modelStore.listEntries(),
+                emptyList(),
+            ),
+        )
+        assertFalse(ConfigDeletionPolicy.remainsInRuntimeView("same-id", runtimeStore))
     }
 
     @Test
