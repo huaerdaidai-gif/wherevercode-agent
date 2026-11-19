@@ -192,8 +192,6 @@ public struct BrainSettingsView: View {
     @State private var showRoutingPoolPicker = false
     @State private var showAddGeneric = false
     @State private var newGenericLabel = ""
-    @State private var testStatusMessage: String?
-    @State private var isTestingConnection = false
 
     public init(model: BrainSettingsModel) {
         self.model = model
@@ -221,18 +219,6 @@ public struct BrainSettingsView: View {
                 }
             }
 
-            // 五、测试连接
-            Section("测试当前连接") {
-                Button(isTestingConnection ? "正在测试连接…" : "测试连接") {
-                    Task { await runConnectionProbe() }
-                }
-                .disabled(isTestingConnection)
-                if let testStatusMessage {
-                    Text(testStatusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
         .navigationTitle("模型")
         .onAppear { model.reload() }
@@ -426,23 +412,6 @@ public struct BrainSettingsView: View {
         .foregroundStyle(.primary)
     }
 
-    private func runConnectionProbe() async {
-        isTestingConnection = true
-        defer { isTestingConnection = false }
-        let targetId = model.currentBrainId ?? model.configs.first(where: { model.unusableReason(for: $0) == nil })?.brainId
-        guard let targetId,
-              let cfg = model.configs.first(where: { $0.brainId == targetId }),
-              let adapter = model.registryProvider().get(cfg.adapterId) else {
-            testStatusMessage = "尚未配置可用的 API Key 模型：请点击上方任一模型填入 API Key。"
-            return
-        }
-        switch await adapter.validateCredentials() {
-        case .success:
-            testStatusMessage = "「\(cfg.label)」连接验证通过。"
-        case .failure(let err):
-            testStatusMessage = "「\(cfg.label)」验证失败：\(SecretRedactor.redact(err.localizedDescription))"
-        }
-    }
 }
 
 private struct SectionHeaderView: View {

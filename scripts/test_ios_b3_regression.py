@@ -91,6 +91,13 @@ class TestIosB3Regression(unittest.TestCase):
         # 本地模型不得单独成组
         self.assertNotIn('groupTitle: "本地模型"', added_section)
 
+        # 差异 11 / 补充定位：BrainSettingsView 移除废弃顶层 Section("测试当前连接") 与 runConnectionProbe
+        brain_view_path = os.path.join(APP_DIR, "Views", "BrainSettingsView.swift")
+        with open(brain_view_path, encoding="utf-8") as f:
+            brain_src = f.read()
+        self.assertNotIn('Section("测试当前连接")', brain_src)
+        self.assertNotIn('runConnectionProbe', brain_src)
+
     def test_05_gate_runtime_composite_wiring_and_chat_decoupling(self):
         """门禁 5：接通运行时合并视图，对话层彻底切断对 brainSettingsModel 的依赖"""
         app_path = os.path.join(APP_DIR, "App", "WhereverCodeAgentApp.swift")
