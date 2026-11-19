@@ -211,7 +211,7 @@ final class DataLayerTests: XCTestCase {
         let data = try makeData()
         let platform = AgentRecord.platformAgent(
             agentId: "platform-main", displayName: "平台",
-            platformAgentId: "ios-app", platformHost: "v5.cococolo.xyz")
+            platformAgentId: "ios-app", platformHost: "example.com")
         try data.agents.saveAgent(platform)
         var cli = AgentRecord(
             agentId: "codex-mac", displayName: "Codex", kind: .device,
