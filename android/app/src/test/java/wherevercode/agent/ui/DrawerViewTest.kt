@@ -83,7 +83,7 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `brand header displays WhereverCode Agent`() {
+    fun `brand header displays WhereverCode only`() {
         val drawerView = view()
         val texts = mutableListOf<String>()
         fun collect(view: View) {
@@ -93,16 +93,21 @@ class DrawerViewTest {
             }
         }
         collect(drawerView.root.getChildAt(0))
-        assertTrue(texts.any { it.contains("WhereverCode Agent") })
+        // 双端统一（批A A4）：标题只留 WhereverCode，不带 Agent 后缀与版本串
+        // （版本在「设置 → 关于」）；iOS 抽屉标题同为 WhereverCode。
+        assertTrue(texts.any { it.trim() == "WhereverCode" })
+        assertFalse(texts.any { it.contains("WhereverCode Agent") })
     }
 
     @Test
-    fun `active row is highlighted and loses chevron`() {
+    fun `active row is highlighted and parent rows have no chevron`() {
         val drawerView = view(activeTarget = DrawerController.ID_PROJECTS)
         assertTrue(drawerView.renderedRowIsActive("nav_projects"))
         assertNull(drawerView.renderedRowTrailing("nav_projects"))
         assertFalse(drawerView.renderedRowIsActive("nav_chat"))
-        assertEquals("›", drawerView.renderedRowTrailing("nav_chat"))
+        // 双端统一（批A A3）：四父级行一律无 ›，与 iOS 一致（旧口径是
+        // 非选中行带 ›，已废止）。
+        assertNull(drawerView.renderedRowTrailing("nav_chat"))
     }
 
     @Test
