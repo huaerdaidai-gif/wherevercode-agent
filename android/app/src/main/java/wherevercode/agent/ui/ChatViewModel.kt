@@ -828,7 +828,7 @@ class ChatViewModel : ViewModel() {
     /** 恢复用大脑显示名（无 Agent 的大脑对话；取不到时回落到“大脑”）。 */
     private fun currentBrainLabelForRestore(): String {
         val brainId = try {
-            components?.configStore?.currentBrainId()
+            components?.runtimeConfigStore?.currentBrainId()
         } catch (_: Exception) {
             null
         }
@@ -933,7 +933,7 @@ class ChatViewModel : ViewModel() {
         val imageNoteForNonBrain =
             if (imageDataUrls.isNotEmpty()) "图片无法发给当前对话方：对方看不到图片内容，只收到了图片的文件名。图片要能被看懂，需要发给支持看图片的大脑。"
             else null
-        val currentBrainId = comps.configStore.currentBrainId()
+        val currentBrainId = comps.runtimeConfigStore.currentBrainId()
         // git 家（2026-11-11）：当前聊天项目的当前家是 git 家、且是任务型
         // 指令时，不走远端 CLI 任务通道——远端 Agent 只做设备文件夹的活，
         // git 家没有设备文件夹可下；由本机大脑经该站 API 执行，
@@ -960,7 +960,7 @@ class ChatViewModel : ViewModel() {
             // （落盘配置已能服务该 Agent，或本轮根本不走大脑）时立即
             // 注销，选中时由 startBrainTurn 在轮次终态注销。因 registry
             // 是进程级共享对象，合成配置轮次必须独占准入直至终态。
-            val storedConfigs = comps.configStore.listConfigs()
+            val storedConfigs = comps.runtimeConfigStore.listConfigs()
             val synthBrain = AgentBrainWiring.sessionConfigFor(agent, storedConfigs)
             val sessionLease = synthBrain?.let {
                 AgentBrainSessionGate.tryAcquire(it.brainId)
@@ -1177,7 +1177,7 @@ class ChatViewModel : ViewModel() {
     /** 当前大脑是否支持看图片（按配置的 adapter 自报的 vision 能力）。 */
     private fun brainSupportsVision(comps: BrainBootstrap.BrainComponents, brainId: String?): Boolean {
         val id = brainId ?: return false
-        val config = comps.configStore.listConfigs().firstOrNull { it.brainId == id } ?: return false
+        val config = comps.runtimeConfigStore.listConfigs().firstOrNull { it.brainId == id } ?: return false
         return BrainAdapterRegistry.get(config.adapterId)?.capabilities()?.vision ?: false
     }
 
@@ -1232,7 +1232,7 @@ class ChatViewModel : ViewModel() {
         // 说话就开大脑对话；Agent 对话里大脑只在幕后派活，不开说话轮次。
         // （脑后 Agent：CLI/模型 API 构成的 Agent 本身就是大脑在说话，
         // 抬头写大脑名是实话；远端设备 Agent 走 UseRemoteAgent，不到这里。）
-        val effectiveBrainId = brainIdOverride ?: comps.configStore.currentBrainId()
+        val effectiveBrainId = brainIdOverride ?: comps.runtimeConfigStore.currentBrainId()
         // 合成配置不在落盘存储里，brainLabel 查不到它的名字——它自带
         // 的 label 就是该 Agent 的显示名，如实用它。
         val displayLabel = synthBrainConfig?.label?.takeIf { it.isNotBlank() }
@@ -1466,7 +1466,7 @@ class ChatViewModel : ViewModel() {
             return
         }
         val modelLabel = try {
-            comps.configStore.getConfig(triageBrainId)?.let { config ->
+            comps.runtimeConfigStore.getConfig(triageBrainId)?.let { config ->
                 val name = config.label.takeIf { it.isNotBlank() } ?: triageBrainId
                 val model = config.model.takeIf { it.isNotBlank() }
                 if (model != null) "$name · $model" else name
@@ -3293,7 +3293,7 @@ class ChatViewModel : ViewModel() {
         null -> "未连接"
         // 通用大脑（model-api-<slug> 等）：用配置里的名字；没有配置时
         // 如实写 brainId，不编一个名字。
-        else -> components?.configStore?.getConfig(brainId)?.label?.takeIf { it.isNotBlank() }
+        else -> components?.runtimeConfigStore?.getConfig(brainId)?.label?.takeIf { it.isNotBlank() }
             ?: brainId
     }
 

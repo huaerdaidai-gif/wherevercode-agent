@@ -79,6 +79,8 @@ import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
 import wherevercode.agent.brain.ModelRouting
 import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
+import wherevercode.agent.models.ModelConfigStore
+import wherevercode.agent.models.ModelEntry
 import wherevercode.agent.brain.generic.CustomFreeProviders
 import wherevercode.agent.brain.generic.SharedPreferencesCustomFreeProviderStore
 import wherevercode.agent.brain.generic.DeviceModelDiscovery
@@ -600,6 +602,14 @@ class MainActivity : AppCompatActivity() {
 
     /** 密钥值只进 Keystore（与 BrainConfig 同款规则）。 */
     private val brainKeyStore by lazy { BrainKeyStore(applicationContext) }
+
+    /**
+     * 差异 9（B3）：独立模型存储（模型页专用）。与大脑存储彻底
+     * 分家：模型页增删改只读写这里，设置页「大脑」分节只读大脑
+     * 存储；运行时消费经 BrainComponents.runtimeConfigStore 合并。
+     * 与装配层（BrainBootstrap.build）持有的实例是同一 prefs 文件。
+     */
+    private val modelConfigStore: ModelConfigStore by lazy { ModelConfigStore(applicationContext) }
 
     private lateinit var projectController: ProjectScreenController
     private lateinit var agentController: AgentScreenController
@@ -1446,7 +1456,7 @@ class MainActivity : AppCompatActivity() {
                 OnboardingController.Readiness.NOT_CHECKED,
                 OnboardingController.Readiness.NOT_CHECKED,
             )
-        val currentBrainId = components.configStore.currentBrainId()
+        val currentBrainId = components.runtimeConfigStore.currentBrainId()
         val brain = if (currentBrainId != null && components.isBrainConfigured(currentBrainId)) {
             OnboardingController.Readiness.AVAILABLE
         } else {
@@ -1565,7 +1575,19 @@ class MainActivity : AppCompatActivity() {
             onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
             onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onOpenModels = { showEntry(DrawerController.ID_MODELS) },
-            modelsCount = { brainComponents?.configStore?.listConfigs()?.size ?: 0 },
+            modelsCount = {
+                // 差异 9（B3）：角标只数独立模型存储中模型页会显示的
+                // 条目（与 refreshModelList 同一份 buildRows 可见性
+                // 过滤，角标数严格等于模型页条目数）；不再数大脑存储。
+                // buildRows 的可见性与 isConfigured / siwcSignedIn 无关
+                //（那两个只影响状态文案），故此处传占位值不影响计数。
+                ModelListRows.buildRows(
+                    configs = modelConfigStore.listEntries().map { it.toBrainConfig() },
+                    currentBrainId = modelConfigStore.currentModelId(),
+                    isConfigured = { false },
+                    siwcSignedIn = false,
+                ).size
+            },
             onRefresh = { refreshConsole() },
             onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
             onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
@@ -8205,7 +8227,7 @@ class MainActivity : AppCompatActivity() {
                 // 编辑时已能走落盘配置的既有 Agent 不动（下面的 resolve
                 // 命中 UseBrain 就不重算），只修不通的。
                 val components = brainComponents
-                val configs = components?.configStore?.listConfigs().orEmpty()
+                val configs = components?.runtimeConfigStore?.listConfigs().orEmpty()
                 val isNewAgent = existing == null
                 var dedicatedKeyNote: String? = null
                 val genericBrain: BrainConfig? = when {
@@ -8462,7 +8484,7 @@ class MainActivity : AppCompatActivity() {
                         Thread {
                             try {
                                 val task = TaskComposer.submit(components.taskStore, agentStore, projectStore,
-                                    goal, agentId, projectId, components.configStore.currentBrainId())
+                                    goal, agentId, projectId, components.runtimeConfigStore.currentBrainId())
                                 runOnUiThread {
                                     if (isFinishing || isDestroyed) return@runOnUiThread
                                     complete(null)
@@ -8607,7 +8629,9 @@ class MainActivity : AppCompatActivity() {
         agent: AgentRecord,
         components: BrainBootstrap.BrainComponents,
     ): AgentChatRoute {
-        val configs = components.configStore.listConfigs()
+        // 合并口径（B3 先行、B2 合成叠加）：底表取运行时合并视图，
+        // 模型存储里的条目也算「已有落盘配置」，不重复合成。
+        val configs = components.runtimeConfigStore.listConfigs()
         val synth = AgentBrainWiring.sessionConfigFor(agent, configs)
         if (synth != null) BrainAdapterRegistry.registerConfig(synth)
         try {
@@ -8636,15 +8660,17 @@ class MainActivity : AppCompatActivity() {
                     // 清理（正常在轮次结束时已注销，这里防删除与轮次
                     // 交错）。落盘配置能服务的 Agent（sessionConfigFor
                     // 返回 null）一概不碰——删 Agent 只删 Agent 记录
-                    // 与无主密钥，不动任何大脑/模型条目。
+                    // 与无主密钥，不动任何大脑/模型条目。合成判定读
+                    // 运行时合并视图（B3 口径：模型条目也在视图内）。
                     AgentBrainWiring.sessionConfigFor(
                         agent,
-                        brainComponents?.configStore?.listConfigs().orEmpty(),
+                        brainComponents?.runtimeConfigStore?.listConfigs().orEmpty(),
                     )?.let { BrainAdapterRegistry.unregisterConfig(it.brainId) }
-                    // 密钥清理：没有其他 Agent 记录与大脑配置再用该引用时才删 Keystore 值。
+                    // 密钥清理：没有其他 Agent 记录、模型条目与大脑配置再用该
+                    // 引用时才删 Keystore 值（运行时合并视图 = 模型 + 大脑两边）。
                     if (ref != null) {
                         val stillUsed = agentStore.listAgents().any { it.authRef == ref } ||
-                            (brainComponents?.configStore?.listConfigs()?.any { it.authRef == ref } ?: false)
+                            (brainComponents?.runtimeConfigStore?.listConfigs()?.any { it.authRef == ref } ?: false)
                         if (!stillUsed) {
                             try {
                                 brainKeyStore.deleteSecret(ref)
@@ -9724,11 +9750,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val signedIn = components.authManager.isSignedIn()
-        val currentBrainId = components.configStore.currentBrainId()
+        val currentBrainId = components.runtimeConfigStore.currentBrainId()
         // V5 C3-C：状态行刷新时同步刷新大脑列表、SIWC 模型行与 CLI 行。
         refreshBrainList()
-        // 模型页的已添加列表与大脑列表是同一批连接数据的两处呈现：
-        // 任一处增删改后两处一起刷新，模型页永不拿大脑列表改标题充数。
+        // 模型页的已添加列表读独立模型存储、大脑列表读大脑存储
+        //（差异 9 B3 起两边分家）：任一处增删改后两处一起刷新，
+        // 各读各的存储，模型页永不拿大脑列表改标题充数。
         refreshModelList()
         refreshSiwcModelRow()
         refreshCliRow()
@@ -9765,7 +9792,7 @@ class MainActivity : AppCompatActivity() {
         if (currentBrainId == BrainBootstrap.CLI_BRAIN_ID) {
             buttonSignInChatGpt.visibility = View.GONE
             buttonSignOut.visibility = View.GONE
-            val cliConfig = components.configStore.getConfig(BrainBootstrap.CLI_BRAIN_ID)
+            val cliConfig = components.runtimeConfigStore.getConfig(BrainBootstrap.CLI_BRAIN_ID)
             brainStatus.text = "$name：CLI 会员额度 · " +
                 (cliConfig?.let { BrainLoginRows.cliStatusText(it) } ?: "未配置")
             return
@@ -9778,7 +9805,7 @@ class MainActivity : AppCompatActivity() {
             buttonSignInChatGpt.visibility = View.GONE
             buttonSignOut.visibility = View.GONE
             val manager = components.deviceCodeManagers[currentBrainId]
-            val config = components.configStore.getConfig(currentBrainId)
+            val config = components.runtimeConfigStore.getConfig(currentBrainId)
             val signedIn = manager?.isSignedIn() == true
             val model = config?.model?.takeIf { it.isNotBlank() }
             brainStatus.text = when {
@@ -9802,7 +9829,7 @@ class MainActivity : AppCompatActivity() {
         // 放开切换）：状态行如实写“已连接”（与其它支持工具调用的大脑
         // 同口径，不写“接入中”，也不写“仅 Agent 对话可用”；工具调用
         // 尚未在真机上验证，见切换提示）。
-        val currentConfig = currentBrainId?.let { components.configStore.getConfig(it) }
+        val currentConfig = currentBrainId?.let { components.runtimeConfigStore.getConfig(it) }
         if (currentConfig?.adapterId == BrainLoginRows.GENERIC_ADAPTER_ID) {
             buttonSignInChatGpt.visibility = View.GONE
             buttonSignOut.visibility = View.GONE
@@ -9824,7 +9851,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun brainShortLabel(): String = when (val id = brainComponents?.configStore?.currentBrainId()) {
+    private fun brainShortLabel(): String = when (val id = brainComponents?.runtimeConfigStore?.currentBrainId()) {
         BrainBootstrap.DEEPSEEK_BRAIN_ID -> "DeepSeek"
         BrainBootstrap.GROK_BRAIN_ID -> "Grok"
         BrainBootstrap.MUSE_BRAIN_ID -> "Muse Spark"
@@ -9835,7 +9862,7 @@ class MainActivity : AppCompatActivity() {
         null -> "未连接"
         // 通用大脑显示配置名（label），不贴 brainId（"model-api-zhipu"
         // 这种 id 不是给人看的；放开切换后通用大脑会进聊天胶囊）。
-        else -> brainComponents?.configStore?.getConfig(id)?.label ?: id
+        else -> brainComponents?.runtimeConfigStore?.getConfig(id)?.label ?: id
     }
 
     private fun refreshCloudflareSection() {
@@ -11254,17 +11281,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 已添加模型列表：数据是已配置的模型连接（configStore），行由
-     * [ModelListRows] 按类型分组生成，本页渲染；列表末尾不放添加
-     * 按钮（添加只在上方添加块里）。由 refreshBrainStatus 与进页时
-     * 调用，与大脑列表同刷但各渲染各的。
+     * 已添加模型列表：数据是独立模型存储（[modelConfigStore]，
+     * 差异 9 B3 起不再读大脑存储），行由 [ModelListRows] 按类型
+     * 分组生成，本页渲染；列表末尾不放添加按钮（添加只在上方
+     * 添加块里）。由 refreshBrainStatus 与进页时调用，与大脑列表
+     * 同刷但各读各的存储、各渲染各的。
      */
     private fun refreshModelList() {
         if (!::modelListContainer.isInitialized) return
         val components = brainComponents ?: return
         val rows = ModelListRows.buildRows(
-            configs = components.configStore.listConfigs(),
-            currentBrainId = components.configStore.currentBrainId(),
+            configs = modelConfigStore.listEntries().map { it.toBrainConfig() },
+            currentBrainId = components.runtimeConfigStore.currentBrainId(),
             isConfigured = { brainId -> components.isBrainConfigured(brainId) },
             siwcSignedIn = components.authManager.isSignedIn(),
         )
@@ -11288,7 +11316,7 @@ class MainActivity : AppCompatActivity() {
                     },
                 )
             }
-            val config = components.configStore.getConfig(row.brainId)
+            val config = modelConfigStore.getEntry(row.brainId)?.toBrainConfig()
             modelListContainer.addView(buildModelListRow(row, config))
         }
     }
@@ -11350,7 +11378,8 @@ class MainActivity : AppCompatActivity() {
     /**
      * 模型页保存：与设置页 saveGenericBrain 同一条路径（校验走
      * BrainLoginRows.validateGenericForm、Key 只进 Keystore、保存后
-     * 立即注册进引擎注册表），只是读写本页自己的表单；保存后不自动
+     * 立即注册进引擎注册表），只是读写本页自己的表单、存独立模型
+     * 存储（差异 9 B3 起不再写大脑存储）；保存后不自动
      * 设为当前大脑（同设置页口径）。校验文案经 [ModelListRows.formErrors]
      * 在本页侧换口径：名称为空报「请填写模型名称」，不借大脑文案
      * （红线：不改 BrainLoginRows 的原字符串与行为）。
@@ -11388,7 +11417,7 @@ class MainActivity : AppCompatActivity() {
         }
         Thread {
             if (apiKey.isNotEmpty()) keyStore.putSecret(authRef, apiKey)
-            val current = components.configStore.getConfig(brainId)
+            val current = modelConfigStore.getEntry(brainId)?.toBrainConfig()
                 ?: BrainConfig(
                     brainId = brainId,
                     kind = BrainKind.MODEL_API,
@@ -11408,7 +11437,7 @@ class MainActivity : AppCompatActivity() {
                 model = model,
                 authRef = authRef,
             )
-            components.configStore.saveConfig(saved)
+            modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(saved))
             runOnUiThread {
                 BrainAdapterRegistry.registerConfig(saved)
                 if (editingModelId != null) {
@@ -11461,14 +11490,67 @@ class MainActivity : AppCompatActivity() {
             note("模型还在加载，请稍候再删除。")
             return
         }
-        val isCurrent = components.configStore.currentBrainId() == config.brainId
+        val isCurrent = components.runtimeConfigStore.currentBrainId() == config.brainId
         val agentNames = agentsUsingBrain(config)
         AlertDialog.Builder(this)
             .setTitle(ModelListRows.deleteTitle(config))
             .setMessage(ModelListRows.deleteWarning(config, isCurrent, agentNames))
-            .setPositiveButton("删除") { _, _ -> deleteBrain(config) }
+            .setPositiveButton("删除") { _, _ -> deleteModel(config) }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /**
+     * 模型页删模型（差异 9 B3，与删大脑的 [deleteBrain] 分家）：
+     * 只删独立模型存储里的这一条；内置条目另记模型侧墓碑，启动
+     * 补齐不会把它从大脑存储再复制回来。大脑存储里的同 id 副本
+     * 一字不动（删模型不删大脑、不删 Agent、不删设备）。
+     * Key 按引用计数清理：大脑存储、模型存储、Agent 记录三处都
+     * 不再引用该 authRef 时才删 Keystore 里的值（别处还在用就
+     * 留着）。注册表与合并视图对齐：合并视图里还有大脑侧副本就
+     * 按副本重新注册，没有才注销。删的正是模型侧当前项时，
+     * [ModelConfigStore.deleteEntry] 已顺手清空当前项，不自动切
+     * 到别的模型。
+     */
+    private fun deleteModel(config: BrainConfig) {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再删除。")
+            return
+        }
+        val wasCurrent = modelConfigStore.currentModelId() == config.brainId
+        val isSeedable = config.brainId in BrainBootstrap.SEEDABLE_BRAIN_IDS
+        Thread {
+            modelConfigStore.deleteEntry(config.brainId)
+            if (isSeedable) modelConfigStore.markBuiltinDeleted(config.brainId)
+            val authRef = config.authRef
+            if (!authRef.isNullOrBlank()) {
+                val stillUsed =
+                    components.configStore.listConfigs().any { it.authRef == authRef } ||
+                        modelConfigStore.listEntries().any { it.authRef == authRef } ||
+                        (::agentStore.isInitialized &&
+                            agentStore.listAgents().any { it.authRef == authRef })
+                if (!stillUsed) {
+                    try {
+                        BrainKeyStore(applicationContext).deleteSecret(authRef)
+                    } catch (_: Exception) {
+                        // Key 删不掉不拦删除本身（同 deleteBrain 口径）。
+                        android.util.Log.w("MainActivity", "deleteModel: key delete failed for $authRef")
+                    }
+                }
+            }
+            val remaining = components.runtimeConfigStore.getConfig(config.brainId)
+            if (remaining != null) {
+                BrainAdapterRegistry.registerConfig(remaining)
+            } else {
+                BrainAdapterRegistry.unregisterConfig(config.brainId)
+            }
+            runOnUiThread {
+                if (editingModelId == config.brainId) exitModelEditMode()
+                refreshBrainStatus()
+                val currentNote = if (wasCurrent) "当前模型已清空，请在列表里另选一个。" else ""
+                note("已删除模型 ${config.label}。$currentNote")
+            }
+        }.start()
     }
 
     /** 删除大脑：二次确认。文案由 BrainLoginRows.deleteWarning 生成。 */
@@ -12033,7 +12115,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 if (BrainConfigValidator.validate(config).isNotEmpty()) continue
                 keyStore.putSecret(authRef, key)
-                components.configStore.saveConfig(config)
+                modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(config))
                 savedConfigs += config
                 added++
             }
@@ -12286,7 +12368,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 if (BrainConfigValidator.validate(config).isNotEmpty()) continue
                 keyStore.putSecret(authRef, "local")
-                components.configStore.saveConfig(config)
+                modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(config))
                 savedConfigs += config
                 added++
             }
@@ -12318,7 +12400,8 @@ class MainActivity : AppCompatActivity() {
         }
         val store = SharedPreferencesModelRoutingStore(applicationContext)
         val settings = store.load()
-        val models = components.configStore.listConfigs().filter { it.kind == BrainKind.MODEL_API }
+        val models = modelConfigStore.listEntries().map { it.toBrainConfig() }
+            .filter { it.kind == BrainKind.MODEL_API }
         if (models.isEmpty()) {
             note("还没有任何模型连接：先从预设或手工表单添加模型，再来选路由池。")
             return
