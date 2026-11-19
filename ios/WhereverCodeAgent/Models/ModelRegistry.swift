@@ -1,6 +1,6 @@
 // ModelRegistry.swift
 // WhereverCode Agent — 独立模型注册表与配置存储
-// 依据 Funk 2026-11-19 指示与 ~/awm-work/agy-ios-b3-brief.md：
+// 依据 2026-11-19 指示与 ~/awm-work/agy-ios-b3-brief.md：
 // - 与大脑（BrainConfigStore / brain.configs_json）彻底脱钩，建立模型独立存储；
 // - 独立存储键：model.configs_json（配置列表）、model.current_model_id（当前模型）、model.deleted_builtin_ids_json（墓碑）；
 // - 结构对齐独立模型配置管理，已添加模型列表增删改查全走本存储；

@@ -6,7 +6,7 @@ import org.junit.Test
 import wherevercode.agent.brain.generic.FreeProviderPresets
 
 /**
- * 智能路由的池与守卫：Funk 口径逐项落地——默认关、只在免费之间切、
+ * 智能路由的池与守卫：既定口径逐项落地——默认关、只在免费之间切、
  * 付费须用户开启、池只收模型连接、顺序即优先级。
  */
 class ModelRoutingTest {

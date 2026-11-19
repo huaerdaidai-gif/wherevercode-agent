@@ -249,7 +249,7 @@ class ConsoleSnapshotTest {
 
     @Test
     fun `build counts a device once when it has both a remote entry and a pairing`() {
-        // 2026-11-19 双记录修复：同一台小米 12 在 RemoteDeviceStore 与
+        // 2026-11-19 双记录修复：同一台测试设备 在 RemoteDeviceStore 与
         // 配对存储里各有一条（deviceId 相同）——控制台角标必须与设备
         // 页合并卡同数，只算一台；只有配对记录的设备也算一台。
         val snapshot = ConsoleSnapshot.build(
@@ -258,7 +258,7 @@ class ConsoleSnapshotTest {
             events = emptyList(),
             pendingApproval = null,
             approvalHistory = emptyList(),
-            devices = listOf(RemoteDevice("Android-x", "小米 12", "192.168.1.7", 18743)),
+            devices = listOf(RemoteDevice("Android-x", "测试设备", "192.168.1.10", 18743)),
             pairedDeviceIds = setOf("Android-x", "mac-host"),
             agents = listOf(
                 agent("agy-on-mi12", "AGY", deviceId = "Android-x"),
@@ -267,7 +267,7 @@ class ConsoleSnapshotTest {
             generatedAtEpochSeconds = 400,
             pairings = listOf(
                 wherevercode.agent.core.security.PairingRecord(
-                    "Android-x", "小米 12", "aa".repeat(32),
+                    "Android-x", "测试设备", "aa".repeat(32),
                     state = wherevercode.agent.core.security.PairingState.CONFIRMED,
                     updatedAtEpochSeconds = 1L,
                 ),
@@ -282,7 +282,7 @@ class ConsoleSnapshotTest {
         val mi12 = snapshot.devices.first { it.deviceId == "Android-x" }
         assertTrue(mi12.paired)
         assertEquals(1, mi12.agentCount)
-        assertEquals("192.168.1.7", mi12.host)
+        assertEquals("192.168.1.10", mi12.host)
         // 只有配对记录的 Mac：出一行，地址留空（不编造），计数照实。
         val mac = snapshot.devices.first { it.deviceId == "mac-host" }
         assertTrue(mac.paired)

@@ -18,7 +18,7 @@ class PairingTest {
     private val otherFingerprint = "cd".repeat(32)
 
     private fun peer(fp: String = fingerprint) =
-        DiscoveredPeer("xiaomi12", "小米 12", "192.168.1.7", 8443, fp, listOf("hand"))
+        DiscoveredPeer("testdevice", "测试设备", "192.168.1.10", 8443, fp, listOf("hand"))
 
     private fun manager() = PairingManager(InMemoryPairingTrustStore(), nowEpochSeconds = { 1_000L })
 
@@ -35,7 +35,7 @@ class PairingTest {
     fun confirmOnce_trusts() {
         val m = manager()
         m.requestPairing(peer())
-        m.confirm("xiaomi12")
+        m.confirm("testdevice")
         assertTrue(m.isTrusted(peer()))
         assertNull(m.trustFailureReason(peer()))
     }
@@ -44,8 +44,8 @@ class PairingTest {
     fun revokeAfterConfirm_refuses() {
         val m = manager()
         m.requestPairing(peer())
-        m.confirm("xiaomi12")
-        m.revoke("xiaomi12", "测试：不再信任该设备")
+        m.confirm("testdevice")
+        m.revoke("testdevice", "测试：不再信任该设备")
         assertFalse(m.isTrusted(peer()))
         val reason = m.trustFailureReason(peer())
         assertTrue(reason!!.contains("已撤销"))
@@ -56,12 +56,12 @@ class PairingTest {
     fun reject_doesNotTrust_thenReRequestCanConfirm() {
         val m = manager()
         m.requestPairing(peer())
-        m.reject("xiaomi12", "对方拒绝了配对")
+        m.reject("testdevice", "对方拒绝了配对")
         assertFalse(m.isTrusted(peer()))
         assertTrue(m.trustFailureReason(peer())!!.contains("已拒绝"))
         // 重新发起配对后可以再次确认。
         m.requestPairing(peer())
-        m.confirm("xiaomi12")
+        m.confirm("testdevice")
         assertTrue(m.isTrusted(peer()))
     }
 
@@ -69,7 +69,7 @@ class PairingTest {
     fun fingerprintChanged_requiresRepairing() {
         val m = manager()
         m.requestPairing(peer(fingerprint))
-        m.confirm("xiaomi12")
+        m.confirm("testdevice")
         assertTrue(m.isTrusted(peer(fingerprint)))
         // 对端指纹变了（重装 / 换密钥）：旧信任失效。
         assertFalse(m.isTrusted(peer(otherFingerprint)))
@@ -77,7 +77,7 @@ class PairingTest {
         // 重新配对、核对新指纹后恢复信任。
         val record = m.requestPairing(peer(otherFingerprint))
         assertEquals(PairingState.PENDING, record.state)
-        m.confirm("xiaomi12")
+        m.confirm("testdevice")
         assertTrue(m.isTrusted(peer(otherFingerprint)))
     }
 
@@ -85,7 +85,7 @@ class PairingTest {
     fun confirmTwice_trustsIdempotently() {
         val m = manager()
         m.requestPairing(peer())
-        m.confirm("xiaomi12")
+        m.confirm("testdevice")
         // 已确认且指纹一致时再次请求配对，直接返回已确认记录，不重复弹窗。
         val again = m.requestPairing(peer())
         assertEquals(PairingState.CONFIRMED, again.state)
@@ -94,22 +94,22 @@ class PairingTest {
 
     @Test(expected = IllegalStateException::class)
     fun confirmWithoutRequest_throws() {
-        manager().confirm("xiaomi12")
+        manager().confirm("testdevice")
     }
 
     @Test(expected = IllegalStateException::class)
     fun revokeTwice_throws() {
         val m = manager()
         m.requestPairing(peer())
-        m.confirm("xiaomi12")
-        m.revoke("xiaomi12", "第一次撤销")
-        m.revoke("xiaomi12", "第二次撤销")
+        m.confirm("testdevice")
+        m.revoke("testdevice", "第一次撤销")
+        m.revoke("testdevice", "第二次撤销")
     }
 
     @Test(expected = IllegalStateException::class)
     fun sameAccountAutoTrust_isRefused() {
         // 同账号默认放行已否决：必须本机点一次确认，没有例外。
-        manager().requestSameAccountAutoTrust("xiaomi12")
+        manager().requestSameAccountAutoTrust("testdevice")
     }
 
     @Test
@@ -121,17 +121,17 @@ class PairingTest {
         val store = MigratingPairingTrustStore(memory) { persistent }
         val manager = PairingManager(store, nowEpochSeconds = { 1_000L })
         manager.requestPairing(peer())
-        manager.confirm("xiaomi12")
+        manager.confirm("testdevice")
         assertTrue(manager.isTrusted(peer()))
 
         persistent = InMemoryPairingTrustStore()
         assertTrue(manager.isTrusted(peer()))
-        assertEquals(PairingState.CONFIRMED, persistent.load("xiaomi12")?.state)
+        assertEquals(PairingState.CONFIRMED, persistent.load("testdevice")?.state)
 
         // 迁移后的写入直接进持久化，不再回内存。
-        manager.revoke("xiaomi12", "测试撤销")
-        assertEquals(PairingState.REVOKED, persistent.load("xiaomi12")?.state)
-        assertEquals(PairingState.CONFIRMED, memory.load("xiaomi12")?.state)
+        manager.revoke("testdevice", "测试撤销")
+        assertEquals(PairingState.REVOKED, persistent.load("testdevice")?.state)
+        assertEquals(PairingState.CONFIRMED, memory.load("testdevice")?.state)
 
         // “重启”：新 Manager 接同一持久化存储，信任状态仍在。
         val restarted = PairingManager(persistent, nowEpochSeconds = { 1_000L })
@@ -144,7 +144,7 @@ class PairingTest {
         val store = MigratingPairingTrustStore { null }
         val manager = PairingManager(store, nowEpochSeconds = { 1_000L })
         manager.requestPairing(peer())
-        manager.confirm("xiaomi12")
+        manager.confirm("testdevice")
         assertTrue(manager.isTrusted(peer()))
         assertEquals(1, store.all().size)
     }

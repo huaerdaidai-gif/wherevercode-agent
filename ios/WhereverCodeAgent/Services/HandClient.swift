@@ -1087,7 +1087,7 @@ public actor HandClient {
     }
 
     /// 局域网快速发现（并发探测常见网段与已登记设备地址，严格去重与地址更新）
-    public func discoverLanDevices(knownHosts: [String] = ["192.168.1.4", "100.75.41.0", "127.0.0.1"]) async -> [DiscoveredPeer] {
+    public func discoverLanDevices(knownHosts: [String] = ["127.0.0.1"]) async -> [DiscoveredPeer] {
         var uniqueHosts: [String] = []
         for h in knownHosts {
             let clean = h.trimmingCharacters(in: .whitespacesAndNewlines)

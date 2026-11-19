@@ -74,7 +74,7 @@ final class HandClientTests: XCTestCase {
             sourceDeviceId: "iphone-app",
             targetDeviceId: "mac-host",
             agentId: "codex",
-            folder: "/Users/a1234/v5-codex-work",
+            folder: "/Users/test/v5-codex-work",
             signingKey: signingKey,
             ttlSeconds: 900
         )
@@ -95,7 +95,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertEqual(json["task_id"] as? String, "task-test-123")
         XCTAssertEqual(json["target_device_id"] as? String, "mac-host")
         XCTAssertEqual(json["agent_id"] as? String, "codex")
-        XCTAssertEqual(json["folder"] as? String, "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(json["folder"] as? String, "/Users/test/v5-codex-work")
         XCTAssertNotNil(json["sig_b64"] as? String)
     }
 
@@ -136,8 +136,8 @@ final class HandClientTests: XCTestCase {
 
     // 6. 验证工作区路径正规化
     func testNormalizePath() {
-        XCTAssertEqual(HandClient.normalizePath("/Users/a1234/v5-codex-work/"), "/Users/a1234/v5-codex-work")
-        XCTAssertEqual(HandClient.normalizePath("/Users/a1234//v5-codex-work///"), "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(HandClient.normalizePath("/Users/test/v5-codex-work/"), "/Users/test/v5-codex-work")
+        XCTAssertEqual(HandClient.normalizePath("/Users/test//v5-codex-work///"), "/Users/test/v5-codex-work")
         XCTAssertEqual(HandClient.normalizePath("  /a/b/c  "), "/a/b/c")
         XCTAssertEqual(HandClient.normalizePath(""), "")
     }
@@ -145,13 +145,13 @@ final class HandClientTests: XCTestCase {
     // 7. 验证跨设备工具注册表定义与能力集
     func testCrossDeviceToolRegistryDefinitions() {
         let registry = HandCrossDeviceToolRegistry(
-            host: "100.75.41.0",
+            host: "100.64.0.1",
             port: 18743,
             targetDeviceId: "MacBook-Air",
             agentId: "codex",
-            defaultFolder: "/Users/a1234/v5-codex-work"
+            defaultFolder: "/Users/test/v5-codex-work"
         )
-        XCTAssertEqual(registry.workspaceRoot, "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(registry.workspaceRoot, "/Users/test/v5-codex-work")
 
         let tools = registry.toolsForCapabilities(nil, authorizedTools: [])
         XCTAssertEqual(tools.count, 4)
@@ -170,19 +170,19 @@ final class HandClientTests: XCTestCase {
     // 8. 验证跨设备工具调用合法性校验
     func testCrossDeviceToolRegistryValidation() {
         let registry = HandCrossDeviceToolRegistry(
-            host: "100.75.41.0",
+            host: "100.64.0.1",
             port: 18743,
             targetDeviceId: "MacBook-Air",
             agentId: "codex",
-            defaultFolder: "/Users/a1234/v5-codex-work"
+            defaultFolder: "/Users/test/v5-codex-work"
         )
         let context = ToolContext(
             taskId: "task-test",
             agentId: "codex",
             approvalGate: DenyApprovalGate(),
-            workspaceRoot: "/Users/a1234/v5-codex-work",
+            workspaceRoot: "/Users/test/v5-codex-work",
             deviceId: "MacBook-Air",
-            folder: "/Users/a1234/v5-codex-work"
+            folder: "/Users/test/v5-codex-work"
         )
 
         let validArgs: [String: String] = ["path": ""]
@@ -244,7 +244,7 @@ final class HandClientTests: XCTestCase {
             displayName: "MacBook-Air",
             kind: .device,
             access: .app,
-            baseUrl: "192.168.1.4:18743",
+            baseUrl: "192.168.1.10:18743",
             authRef: "device:\(deviceId):public_key",
             lastTestSummary: "已连接",
             memberConnectionState: "CONNECTED",
@@ -256,7 +256,7 @@ final class HandClientTests: XCTestCase {
         let discoveredPeer = DiscoveredPeer(
             deviceId: deviceId,
             displayName: "MacBook-Air",
-            host: "192.168.1.4",
+            host: "192.168.1.10",
             port: 18743,
             fingerprintSha256: "abcdef1234567890",
             agents: [],
@@ -282,7 +282,7 @@ final class HandClientTests: XCTestCase {
         let sameIpDifferentDevice = DiscoveredPeer(
             deviceId: "another-physical-box",
             displayName: "Another Host",
-            host: "192.168.1.4",
+            host: "192.168.1.10",
             port: 18743,
             fingerprintSha256: "1122334455667788",
             agents: [],
@@ -302,7 +302,7 @@ final class HandClientTests: XCTestCase {
             displayName: "Dynamic Mac",
             kind: .device,
             access: .app,
-            baseUrl: "192.168.1.4:18743",
+            baseUrl: "192.168.1.10:18743",
             deviceId: deviceId
         )
         let childAgent = AgentRecord(
@@ -310,7 +310,7 @@ final class HandClientTests: XCTestCase {
             displayName: "Codex",
             kind: .device,
             access: .cli,
-            baseUrl: "192.168.1.4:18743",
+            baseUrl: "192.168.1.10:18743",
             deviceId: deviceId
         )
         try LocalData.shared.agents.saveAgent(dev)
@@ -407,7 +407,7 @@ final class HandClientTests: XCTestCase {
             displayName: "Re-Pair Mac",
             kind: .device,
             access: .app,
-            baseUrl: "192.168.1.4:18743",
+            baseUrl: "192.168.1.10:18743",
             authRef: "device:\(devId):public_key",
             memberConnectionState: "CONNECTED",
             deviceId: devId
@@ -462,7 +462,7 @@ final class HandClientTests: XCTestCase {
             displayName: "MacBook-Air",
             kind: .device,
             access: .app,
-            baseUrl: "192.168.1.4:18743",
+            baseUrl: "192.168.1.10:18743",
             lastTestSummary: "已连接",
             memberConnectionState: "CONNECTED",
             deviceId: "MacBook-Air"
@@ -493,7 +493,7 @@ final class HandClientTests: XCTestCase {
         // 验证两台 Mac 独立共存，绝不根据包含 "Mac" 按名字猜测合并
         XCTAssertNotEqual(afterLegacy.agentId, afterReal.agentId)
         XCTAssertEqual(afterReal.memberConnectionState, "CONNECTED")
-        XCTAssertEqual(afterReal.baseUrl, "192.168.1.4:18743")
+        XCTAssertEqual(afterReal.baseUrl, "192.168.1.10:18743")
         // 验证云端 Agent 完好无损
         XCTAssertEqual(afterCloud.kind, .cloud)
 
@@ -624,7 +624,7 @@ final class HandClientTests: XCTestCase {
             displayName: "MacBook-Air",
             kind: .device,
             access: .app,
-            baseUrl: "192.168.1.4:18743",
+            baseUrl: "192.168.1.10:18743",
             lastTestSummary: "已连接",
             memberConnectionState: "CONNECTED",
             deviceId: "MacBook-Air"
@@ -646,7 +646,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: k70Id))
         storedAir = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: "MacBook-Air"))
         XCTAssertEqual(storedAir.memberConnectionState, "CONNECTED")
-        XCTAssertEqual(storedAir.baseUrl, "192.168.1.4:18743")
+        XCTAssertEqual(storedAir.baseUrl, "192.168.1.10:18743")
 
         // 清理
         try? LocalData.shared.agents.deleteAgent(agentId: "MacBook-Air")
@@ -664,7 +664,7 @@ final class HandClientTests: XCTestCase {
             displayName: "Xiaomi 12 · Hand",
             kind: .device,
             access: .app,
-            baseUrl: "100.94.147.89:18743",
+            baseUrl: "100.64.0.1:18743",
             lastTestSummary: "已连接",
             memberConnectionState: "CONNECTED",
             deviceId: devId,
@@ -676,7 +676,7 @@ final class HandClientTests: XCTestCase {
             displayName: "agy",
             kind: .device,
             access: .cli,
-            baseUrl: "100.94.147.89:18743",
+            baseUrl: "100.64.0.1:18743",
             lastTestSummary: "设备 Agent · /data/data/com.termux/files/home",
             memberConnectionState: "CONNECTED",
             deviceId: devId,
@@ -739,7 +739,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertTrue(isTask)
 
         let testDev = "Android-x"
-        let folderFallback = testDev.contains("Android") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work"
+        let folderFallback = testDev.contains("Android") ? "/data/data/com.termux/files/home" : "/Users/test/v5-codex-work"
         XCTAssertFalse(folderFallback.isEmpty)
         XCTAssertTrue(folderFallback.hasPrefix("/"))
     }

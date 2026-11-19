@@ -53,8 +53,8 @@ class DeviceDedupeRenderTest {
 
     private fun mi12Device() = RemoteDevice(
         deviceId = "Android-x",
-        displayName = "小米 12",
-        host = "192.168.1.7",
+        displayName = "测试设备",
+        host = "192.168.1.10",
         port = 18743,
         lastSeenEpochSeconds = 1794000000,
         lastServerStatus = "APPROVED",
@@ -62,7 +62,7 @@ class DeviceDedupeRenderTest {
 
     private fun mi12Pairing() = PairingRecord(
         deviceId = "Android-x",
-        displayName = "小米 12",
+        displayName = "测试设备",
         fingerprintSha256 = "ab".repeat(32),
         state = PairingState.CONFIRMED,
         updatedAtEpochSeconds = 1L,
@@ -86,7 +86,7 @@ class DeviceDedupeRenderTest {
         ) { }
         val text = collectText(list)
         // 设备名只出现一次 = 只出一张卡（合并前配对卡与远程卡各一张）。
-        assertEquals(1, occurrences(text, "小米 12"))
+        assertEquals(1, occurrences(text, "测试设备"))
         // 合并卡上带承载数与配对卡原有的撤销入口，合并没丢功能。
         assertTrue(text.contains("承载：2 个 Agent"))
         assertTrue(text.contains("撤销配对"))
@@ -102,7 +102,7 @@ class DeviceDedupeRenderTest {
             {}, {}, {}, {},
         )
         val text = collectText(list)
-        assertEquals(1, occurrences(text, "小米 12"))
+        assertEquals(1, occurrences(text, "测试设备"))
         assertTrue(text.contains("承载：0 个 Agent"))
         assertTrue(text.contains("已配对"))
     }

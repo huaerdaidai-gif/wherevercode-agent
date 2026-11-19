@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 自定义免费服务商（预留扩展口，Funk 2026-11-18 23:43 令）：
+ * 自定义免费服务商（预留扩展口，2026-11-18 23:43 定）：
  * 名单（[FreeProviderPresets]）上没有的免费服务商，用户可以自己
  * 加一家——名称 + 服务地址 + 名单形态（拉取 /models 或填固定
  * 名单），存本机后与内置预设走同一条添加流程（填 key → 拉阵列

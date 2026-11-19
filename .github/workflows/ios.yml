@@ -152,8 +152,60 @@ jobs:
             -destination "platform=iOS Simulator,id=$UDID" \
             -derivedDataPath .build/derived \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"
-          xcrun simctl boot "$UDID" || true
-          xcrun simctl bootstatus "$UDID" -b
+          # Boot wedge detection (2026-11-19, run #201 evidence): a wedged
+          # CoreSimulator boot prints NOTHING (9.4 min of total silence),
+          # while a healthy bootstatus streams status lines continuously.
+          # So the criterion is idle output, not total time: 120s without a
+          # single new line = wedged -> kill, dump simulator state, fail
+          # fast. Total caps stay as a backstop (boot 120s, bootstatus 300s).
+          run_with_idle_cap() {
+            local idle_cap="$1" total_cap="$2"; shift 2
+            local logf shown=0 waited=0 last_output=0 size rc
+            logf="$(mktemp)"
+            "$@" >"$logf" 2>&1 &
+            local pid=$!
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 10
+              waited=$((waited + 10))
+              size=$(stat -f %z "$logf")
+              if [ "$size" -gt "$shown" ]; then
+                tail -c +$((shown + 1)) "$logf"
+                shown=$size
+                last_output=$waited
+              fi
+              if [ $((waited - last_output)) -ge "$idle_cap" ]; then
+                echo "WEDGED: no output for ${idle_cap}s from: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+              if [ "$waited" -ge "$total_cap" ]; then
+                echo "TIMEOUT: total ${total_cap}s exceeded: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+            done
+            wait "$pid"; rc=$?
+            size=$(stat -f %z "$logf")
+            if [ "$size" -gt "$shown" ]; then
+              tail -c +$((shown + 1)) "$logf"
+            fi
+            rm -f "$logf"
+            return $rc
+          }
+          run_with_idle_cap 120 120 xcrun simctl boot "$UDID" || true
+          if ! run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; then
+            echo "simulator boot did not complete; simulator state:"
+            xcrun simctl list devices available | grep "$UDID" || true
+            exit 1
+          fi
           mkdir -p .build/live-launch
           xcrun simctl list devices available > .build/live-launch/devices.txt
           xcrun simctl install "$UDID" .build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app

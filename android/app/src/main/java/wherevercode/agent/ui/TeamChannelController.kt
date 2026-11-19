@@ -80,6 +80,10 @@ class TeamChannelController(
     private val onRefresh: () -> Unit,
     private val onCreateTask: ((String, () -> Unit) -> Unit)? = null,
     private val onReconnect: () -> Unit = {},
+    /** 未连接空态里的「前往 Agent 管理」（双端对齐批D，与 iOS 同文同钮）。 */
+    private val onOpenAgentManagement: () -> Unit = {},
+    /** 页头「＋ 新建」（与 iOS 同位同序；菜单内容由调用方给）。 */
+    private val onCreateNew: () -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -133,11 +137,30 @@ class TeamChannelController(
     private var asTask = false
 
     init {
-        root.addView(
+        val titleRow = UiKit.horizontal(context)
+        titleRow.addView(
             UiKit.text(context, "频道", 20f, R.color.text_primary, bold = true).apply {
-                setPadding(dp(16), dp(12), dp(16), dp(2))
+                setPadding(dp(16), dp(12), dp(8), dp(2))
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
             },
         )
+        titleRow.addView(
+            UiKit.text(context, "＋ 新建", 13f, R.color.text_primary, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip)
+                setPadding(dp(12), dp(7), dp(12), dp(7))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    rightMargin = dp(16)
+                    topMargin = dp(10)
+                }
+                setOnClickListener { onCreateNew() }
+            },
+        )
+        root.addView(titleRow)
         root.addView(
             UiKit.text(
                 context,
@@ -314,6 +337,17 @@ class TeamChannelController(
         bodyContainer.removeAllViews()
         if (!snapshot.configured) {
             bodyContainer.addView(note(snapshot.setupHint))
+            bodyContainer.addView(
+                UiKit.text(context, "前往 Agent 管理", 12f, R.color.accent, bold = true).apply {
+                    setBackgroundResource(R.drawable.bg_chip_accent)
+                    setPadding(dp(14), dp(8), dp(14), dp(8))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(10) }
+                    setOnClickListener { onOpenAgentManagement() }
+                },
+            )
             return
         }
         bodyContainer.addView(membersRow(snapshot))

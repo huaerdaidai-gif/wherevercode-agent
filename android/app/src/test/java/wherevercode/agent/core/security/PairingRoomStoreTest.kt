@@ -43,13 +43,13 @@ class PairingRoomStoreTest {
     }
 
     private fun record(
-        deviceId: String = "xiaomi12",
+        deviceId: String = "testdevice",
         state: PairingState = PairingState.CONFIRMED,
         peerPublicKey: ByteArray? = byteArrayOf(1, 2, 3, 4),
         reason: String? = null,
     ) = PairingRecord(
         deviceId = deviceId,
-        displayName = "小米 12",
+        displayName = "测试设备",
         fingerprintSha256 = fingerprint,
         peerPublicKey = peerPublicKey,
         state = state,
@@ -58,29 +58,29 @@ class PairingRoomStoreTest {
     )
 
     private fun peer() =
-        DiscoveredPeer("xiaomi12", "小米 12", "192.168.1.7", 8443, fingerprint, listOf("hand"))
+        DiscoveredPeer("testdevice", "测试设备", "192.168.1.10", 8443, fingerprint, listOf("hand"))
 
     @Test
     fun `save load remove and all round-trip`() {
-        assertNull(store.load("xiaomi12"))
+        assertNull(store.load("testdevice"))
         assertTrue(store.all().isEmpty())
         store.save(record())
         store.save(record(deviceId = "k70", state = PairingState.PENDING, peerPublicKey = null))
-        val back = store.load("xiaomi12")!!
-        assertEquals("小米 12", back.displayName)
+        val back = store.load("testdevice")!!
+        assertEquals("测试设备", back.displayName)
         assertEquals(fingerprint, back.fingerprintSha256)
         assertArrayEquals(byteArrayOf(1, 2, 3, 4), back.peerPublicKey)
         assertEquals(PairingState.CONFIRMED, back.state)
         assertEquals(1_000L, back.updatedAtEpochSeconds)
         assertNull(store.load("k70")!!.peerPublicKey)
-        assertEquals(setOf("xiaomi12", "k70"), store.all().map { it.deviceId }.toSet())
+        assertEquals(setOf("testdevice", "k70"), store.all().map { it.deviceId }.toSet())
         // Saving again overwrites (upsert), it never duplicates.
         store.save(record(state = PairingState.REVOKED, reason = "不再信任"))
         assertEquals(2, store.all().size)
-        assertEquals(PairingState.REVOKED, store.load("xiaomi12")!!.state)
-        assertEquals("不再信任", store.load("xiaomi12")!!.reason)
-        store.remove("xiaomi12")
-        assertNull(store.load("xiaomi12"))
+        assertEquals(PairingState.REVOKED, store.load("testdevice")!!.state)
+        assertEquals("不再信任", store.load("testdevice")!!.reason)
+        store.remove("testdevice")
+        assertNull(store.load("testdevice"))
         assertEquals(listOf("k70"), store.all().map { it.deviceId })
         // Removing an unknown device is a no-op.
         store.remove("missing")
@@ -91,22 +91,22 @@ class PairingRoomStoreTest {
         val manager = PairingManager(store, nowEpochSeconds = { 1_000L })
         manager.requestPairing(peer())
         assertFalse(manager.isTrusted(peer()))
-        manager.confirm("xiaomi12", byteArrayOf(9, 8, 7))
+        manager.confirm("testdevice", byteArrayOf(9, 8, 7))
         assertTrue(manager.isTrusted(peer()))
-        assertArrayEquals(byteArrayOf(9, 8, 7), manager.peerPublicKey("xiaomi12"))
-        manager.revoke("xiaomi12", "测试：不再信任该设备")
+        assertArrayEquals(byteArrayOf(9, 8, 7), manager.peerPublicKey("testdevice"))
+        manager.revoke("testdevice", "测试：不再信任该设备")
         assertFalse(manager.isTrusted(peer()))
         assertTrue(manager.trustFailureReason(peer())!!.contains("已撤销"))
         // The revoked record is still in the store after the round-trip.
-        assertEquals(PairingState.REVOKED, store.load("xiaomi12")!!.state)
+        assertEquals(PairingState.REVOKED, store.load("testdevice")!!.state)
     }
 
     @Test
     fun `an unrecognised stored state decodes fail-closed as rejected`() {
         db.pairingDao().upsert(
             PairingEntity(
-                deviceId = "xiaomi12",
-                displayName = "小米 12",
+                deviceId = "testdevice",
+                displayName = "测试设备",
                 fingerprintSha256 = fingerprint,
                 peerPublicKey = null,
                 state = "BOGUS",
@@ -114,7 +114,7 @@ class PairingRoomStoreTest {
                 updatedAtEpochSeconds = 1_000L,
             ),
         )
-        val back = store.load("xiaomi12")!!
+        val back = store.load("testdevice")!!
         assertEquals(PairingState.REJECTED, back.state)
         assertFalse(PairingManager(store).isTrusted(peer()))
     }

@@ -56,8 +56,8 @@ class ConsoleScreenController(
     private val onToast: (String) -> Unit = {},
     private val onOpenModels: () -> Unit = {},
     private val modelsCount: () -> Int = { 0 },
-    /** 平台根地址（已规范化：只要 scheme + host + 可选端口）。 */
-    private val platformRoot: () -> String = { "https://v5.cococolo.xyz" },
+    /** 平台根地址（已规范化：只要 scheme + host + 可选端口）。未配置时为空串。 */
+    private val platformRoot: () -> String = { "" },
     /** 本机是否已保存平台 Token。无 Token 时总览按钮是「配置 Token」。 */
     private val hasPlatformToken: () -> Boolean = { false },
 ) {
@@ -272,7 +272,7 @@ class ConsoleScreenController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleGroup.addView(UiKit.text(context, "服务连接与运行概览", 11f, R.color.text_secondary, bold = true))
-        titleGroup.addView(UiKit.text(context, platformRoot(), 14f, R.color.text_primary, bold = true).apply {
+        titleGroup.addView(UiKit.text(context, platformRoot().ifBlank { "未配置" }, 14f, R.color.text_primary, bold = true).apply {
             setPadding(0, dp(2), 0, 0)
         })
         topRow.addView(titleGroup)
@@ -1099,17 +1099,15 @@ class ConsoleScreenController(
         private const val KEY_LEVEL = "freedom_level"
         private const val KEY_HIDDEN = "hidden_modules"
 
-        /** 未配置平台地址时的公开根（与总览原先写死的主机一致，无路径）。 */
-        const val DEFAULT_PLATFORM_ROOT = "https://v5.cococolo.xyz"
-
         /**
          * 总览卡上的根地址：只要 `https://host` 或 `https://host:port`。
          * 去掉协议重复、路径（如 `/api/open/v1/mcp`）、查询和末尾斜杠。
-         * 空白或解析失败时用 [DEFAULT_PLATFORM_ROOT]，不展示半截地址。
+         * 平台地址不预置任何默认值：空白或解析失败时返回空串，
+         * 总览卡按空串显示「未配置」，不拿任何写死的主机冒充已配置。
          */
         fun normalizedPlatformRoot(raw: String?): String {
             val trimmed = raw?.trim()?.trimEnd('/').orEmpty()
-            if (trimmed.isBlank()) return DEFAULT_PLATFORM_ROOT
+            if (trimmed.isBlank()) return ""
             val withScheme = when {
                 trimmed.startsWith("https://", ignoreCase = true) -> trimmed
                 trimmed.startsWith("http://", ignoreCase = true) ->
@@ -1119,10 +1117,10 @@ class ConsoleScreenController(
             return try {
                 val uri = java.net.URI(withScheme)
                 val host = uri.host?.trim().orEmpty()
-                if (host.isEmpty()) DEFAULT_PLATFORM_ROOT
+                if (host.isEmpty()) ""
                 else if (uri.port > 0) "https://$host:${uri.port}" else "https://$host"
             } catch (_: Exception) {
-                DEFAULT_PLATFORM_ROOT
+                ""
             }
         }
 

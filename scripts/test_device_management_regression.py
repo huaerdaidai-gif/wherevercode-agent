@@ -24,8 +24,12 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 
-MAC_HOST = "100.75.41.0"
+MAC_HOST = os.environ.get("WC_TEST_MAC_HOST", "")
 MAC_PORT = 18743
+MAC_USER = os.environ.get("WC_TEST_MAC_USER", "user")
+SSH_KEY = os.path.expanduser(os.environ.get("WC_TEST_SSH_KEY", "~/.ssh/id_ed25519"))
+HAND_DIR = os.environ.get("WC_TEST_HAND_DIR", f"/Users/{MAC_USER}/Library/Application Support/WhereverCode/V5Hand")
+HAND_DIR_REMOTE = HAND_DIR.replace(" ", "\\ ")
 
 def hkdf_sha256(ikm: bytes, salt: bytes, info: bytes, length: int) -> bytes:
     return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(ikm)
@@ -85,7 +89,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
                 "displayName": "MacBook-Air",
                 "kind": "DEVICE",
                 "access": "APP",
-                "baseUrl": "192.168.1.4:18743",
+                "baseUrl": "192.168.1.10:18743",
                 "authRef": "device:MacBook-Air:public_key",
                 "memberConnectionState": "CONNECTED",
                 "deviceId": "MacBook-Air",
@@ -101,7 +105,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
             {
                 "deviceId": "MacBook-Air",
                 "displayName": "MacBook-Air",
-                "host": "192.168.1.4",
+                "host": "192.168.1.10",
                 "port": 18743,
                 "clientStatus": "APPROVED",
                 "agents": [{"agentId": "codex", "displayName": "Codex"}]
@@ -141,7 +145,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
         updated = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
         self.assertEqual(len(updated), 1)
         self.assertEqual(updated[0]["memberConnectionState"], "CONNECTED")
-        self.assertEqual(updated[0]["baseUrl"], "192.168.1.4:18743")
+        self.assertEqual(updated[0]["baseUrl"], "192.168.1.10:18743")
         self.assertIn("局域网在线", updated[0]["lastTestSummary"])
 
     def test_02_dynamic_ip_change_propagation(self):
@@ -153,7 +157,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
                 "displayName": "MacBook-Air",
                 "kind": "DEVICE",
                 "access": "APP",
-                "baseUrl": "192.168.1.4:18743",
+                "baseUrl": "192.168.1.10:18743",
                 "deviceId": dev_id,
                 "memberConnectionState": "CONNECTED"
             },
@@ -162,7 +166,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
                 "displayName": "Codex (MacBook-Air)",
                 "kind": "DEVICE",
                 "access": "CLI",
-                "baseUrl": "192.168.1.4:18743",
+                "baseUrl": "192.168.1.10:18743",
                 "deviceId": dev_id,
                 "memberConnectionState": "CONNECTED"
             }
@@ -243,7 +247,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
                 "displayName": "MacBook-Air",
                 "kind": "DEVICE",
                 "access": "APP",
-                "baseUrl": "192.168.1.4:18743",
+                "baseUrl": "192.168.1.10:18743",
                 "deviceId": "MacBook-Air",
                 "memberConnectionState": "CONNECTED"
             }
@@ -291,7 +295,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
                 "displayName": "MacBook-Air",
                 "kind": "DEVICE",
                 "access": "APP",
-                "baseUrl": "192.168.1.4:18743",
+                "baseUrl": "192.168.1.10:18743",
                 "deviceId": "MacBook-Air",
                 "memberConnectionState": "CONNECTED"
             }
@@ -364,7 +368,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
             "agentId": "MacBook-Air",
             "displayName": "MacBook-Air",
             "kind": "DEVICE",
-            "baseUrl": "192.168.1.4:18743",
+            "baseUrl": "192.168.1.10:18743",
             "deviceId": "MacBook-Air",
             "authRef": "device:MacBook-Air:public_key"
         }
@@ -372,7 +376,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
         other_peer = {
             "deviceId": "rogue-or-second-host",
             "displayName": "MacBook-Air", # 同名
-            "host": "192.168.1.4",        # 同 IP
+            "host": "192.168.1.10",        # 同 IP
             "port": 18743
         }
 
@@ -407,7 +411,7 @@ class TestDeviceManagementRegression(unittest.TestCase):
                 "displayName": "MacBook-Air",
                 "kind": "DEVICE",
                 "access": "APP",
-                "baseUrl": "192.168.1.4:18743",
+                "baseUrl": "192.168.1.10:18743",
                 "deviceId": "MacBook-Air",
                 "memberConnectionState": "CONNECTED",
                 "lastTestSummary": "已连接（在线）"
@@ -435,13 +439,13 @@ class TestDeviceManagementRegression(unittest.TestCase):
         self.assertEqual(len(after_del), 1)
         self.assertEqual(after_del[0]["agentId"], "MacBook-Air")
         self.assertEqual(after_del[0]["memberConnectionState"], "CONNECTED")
-        self.assertEqual(after_del[0]["baseUrl"], "192.168.1.4:18743")
+        self.assertEqual(after_del[0]["baseUrl"], "192.168.1.10:18743")
 
     def test_05_live_mac_host_unpair_and_repair_loop(self):
         """回归 5：连接真实 Mac 开发主机 (MacBook-Air) 执行取消配对、凭据失效与重新配对验证"""
-        ssh_key = os.path.expanduser("~/.ssh/infra_ed25519")
+        ssh_key = SSH_KEY
         if not os.path.exists(ssh_key):
-            self.skipTest("环境未配置 Mac 主机 SSH 密钥 (~/.ssh/infra_ed25519)，跳过远端真机回环")
+            self.skipTest("环境未配置 Mac 主机 SSH 密钥 ，跳过远端真机回环")
 
         cli_priv = X25519PrivateKey.generate()
         cli_pub = cli_priv.public_key().public_bytes_raw()
@@ -449,9 +453,9 @@ class TestDeviceManagementRegression(unittest.TestCase):
 
         # 1. 旋转新配对码
         cmd = subprocess.run([
-            "ssh", "-i", os.path.expanduser("~/.ssh/infra_ed25519"), "-o", "BatchMode=yes",
-            f"a1234@{MAC_HOST}",
-            "/Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand/.venv/bin/python /Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand/current/hand_server.py --state-dir /Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand pair-code --rotate"
+            "ssh", "-i", SSH_KEY, "-o", "BatchMode=yes",
+            f"{MAC_USER}@{MAC_HOST}",
+            f"{HAND_DIR_REMOTE}/.venv/bin/python {HAND_DIR_REMOTE}/current/hand_server.py --state-dir {HAND_DIR_REMOTE} pair-code --rotate"
         ], capture_output=True, text=True, check=True)
         pair_code = cmd.stdout.strip().splitlines()[0].strip()
         self.assertEqual(len(pair_code), 6)
@@ -512,9 +516,9 @@ class TestDeviceManagementRegression(unittest.TestCase):
 
         # 7. 清理该测试客户端
         subprocess.run([
-            "ssh", "-i", os.path.expanduser("~/.ssh/infra_ed25519"), "-o", "BatchMode=yes",
-            f"a1234@{MAC_HOST}",
-            f"/Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand/.venv/bin/python /Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand/current/hand_server.py --state-dir /Users/a1234/Library/Application\\ Support/WhereverCode/V5Hand pair-revoke {client_id}"
+            "ssh", "-i", SSH_KEY, "-o", "BatchMode=yes",
+            f"{MAC_USER}@{MAC_HOST}",
+            f"{HAND_DIR_REMOTE}/.venv/bin/python {HAND_DIR_REMOTE}/current/hand_server.py --state-dir {HAND_DIR_REMOTE} pair-revoke {client_id}"
         ], capture_output=True, text=True)
 
     def test_10_resource_separation_device_agent_model_independence(self):

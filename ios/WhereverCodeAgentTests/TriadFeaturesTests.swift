@@ -158,8 +158,8 @@ final class TriadFeaturesTests: XCTestCase {
         XCTAssertEqual(lanCandidates.map(\.serviceName), ["Ollama", "LM Studio", "vLLM"])
 
         // Tailscale 专网 (100.64/10) 走 http
-        let tailscaleCandidates = DeviceModelDiscovery.candidateBaseUrls(host: "100.75.41.0")
-        XCTAssertTrue(tailscaleCandidates.allSatisfy { $0.baseUrl.hasPrefix("http://100.75.41.0:") })
+        let tailscaleCandidates = DeviceModelDiscovery.candidateBaseUrls(host: "100.64.0.1")
+        XCTAssertTrue(tailscaleCandidates.allSatisfy { $0.baseUrl.hasPrefix("http://100.64.0.1:") })
 
         // 公网地址走 https
         let publicCandidates = DeviceModelDiscovery.candidateBaseUrls(host: "api.myremote.com")

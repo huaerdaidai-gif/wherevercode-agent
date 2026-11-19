@@ -1,13 +1,11 @@
 // WhereverCode Agent — iOS
 //
 // App settings: the platform address and the selected channel id.
-// The platform address is PREFILLED with the platform's public MCP
-// endpoint (`defaultPlatformBaseURLString`) so a fresh install does
-// not make the user type a long URL on a phone keyboard; the value
-// is a public address, not a credential, and the user can edit it at
-// any time. Once the user has saved their own non-empty address it
-// is kept verbatim — the prefill never overwrites it (see
-// `SettingsStore.load`). The channel is chosen by TAPPING a channel
+// No platform address is baked in: a fresh install starts
+// unconfigured (empty) and every surface says 「未配置」 until the
+// user saves their own address; a saved non-empty address is kept
+// verbatim (see `SettingsStore.load`). Local use never depends on
+// the platform address. The channel is chosen by TAPPING a channel
 // in the Settings picker or the conversation list; the id is stored
 // here, but the main path never asks the user to type it. The token
 // is NOT stored here; it lives in the Keychain (see KeychainStore).
@@ -22,28 +20,25 @@ public struct AppSettings: Equatable {
     /// (`https://host/api/open/v1/mcp`) or the bare base
     /// (`https://host`): validation strips any path and the client
     /// appends the API paths itself, so the two forms are identical
-    /// in effect. Prefilled with `defaultPlatformBaseURLString`
-    /// until the user saves their own.
+    /// in effect. Starts empty (unconfigured) until the user
+    /// saves their own.
     public var platformBaseURLString: String
     /// The selected channel. Stored as an id, chosen by tapping —
     /// see `ChannelSelection`.
     public var channelID: String
 
-    /// The platform's public MCP endpoint, prefilled as the default
-    /// platform address. This is the same endpoint every client of
-    /// this platform uses (Android composes it as
-    /// `https://<host>/api/open/v1/mcp` from its host field); it is a
-    /// well-known public address, not a private address and not a
-    /// credential.
-    public static let defaultPlatformBaseURLString = "https://v5.cococolo.xyz/api/open/v1/mcp"
+    /// No platform address is baked in. A fresh install starts
+    /// unconfigured (empty): the address only ever comes from the
+    /// user's own saved configuration, and every surface must say
+    /// 「未配置」 while it is empty instead of showing a preset host.
+    public static let defaultPlatformBaseURLString = ""
     public static let defaultPlatformBaseURL = defaultPlatformBaseURLString
 
-    /// The team channel this app opens by default. This is a channel
-    /// identifier, not a server address and not a credential; after
-    /// connecting, the user picks the channel by tapping in
-    /// Settings, and a single visible channel is selected
-    /// automatically (see `ChannelSelection`).
-    public static let defaultChannelID = "ab6379bfa1574c70bc8989cdd70dfcce"
+    /// No channel is baked in either. After connecting, the user
+    /// picks the channel by tapping in Settings, and a single
+    /// visible channel is selected automatically
+    /// (see `ChannelSelection`).
+    public static let defaultChannelID = ""
 
     public init(
         platformBaseURLString: String = AppSettings.defaultPlatformBaseURLString,
@@ -89,7 +84,7 @@ public struct AppSettings: Equatable {
     ///   never hide inside the address.
     /// - Trailing slashes and paths are stripped: only scheme + host
     ///   (+ port) are kept, the API paths are appended by the client.
-    ///   This is why the prefilled full endpoint URL and a bare host
+    ///   This is why a full endpoint URL and a bare host
     ///   behave identically.
     public var validatedBaseURL: URL? {
         let trimmed = platformBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,18 +123,14 @@ public enum SettingsStore {
     private static let channelIDKey = "wherevercode.channelID"
 
     public static func load(defaults: UserDefaults = .standard) -> AppSettings {
-        // Prefill policy: a saved non-empty address is the user's own
-        // choice and is kept verbatim. "Never saved" and "saved
-        // empty" both fall back to the prefilled public endpoint —
-        // a saved empty value can only be the untouched pre-prefill
-        // form persisted by a stray save tap, and an empty address
-        // cannot connect to anything anyway.
+        // No-prefill policy: a saved non-empty address is the user's
+        // own choice and is kept verbatim. "Never saved" and "saved
+        // empty" both stay empty (unconfigured) — nothing is ever
+        // substituted behind the user's back.
         let savedAddress = defaults.string(forKey: baseURLKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return AppSettings(
-            platformBaseURLString: savedAddress.isEmpty
-                ? AppSettings.defaultPlatformBaseURLString
-                : savedAddress,
+            platformBaseURLString: savedAddress,
             channelID: defaults.string(forKey: channelIDKey) ?? AppSettings.defaultChannelID
         )
     }

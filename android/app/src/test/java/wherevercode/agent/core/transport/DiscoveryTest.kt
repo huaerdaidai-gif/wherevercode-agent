@@ -21,12 +21,12 @@ class DiscoveryTest {
     fun parseTxtRecord_fullRecord_parses() {
         val parsed = Discovery.parseTxtRecord(
             txtBytes(
-                "id" to "xiaomi12",
+                "id" to "testdevice",
                 "fp" to fingerprint,
                 "caps" to "hand,relay",
             ),
         )
-        assertEquals("xiaomi12", parsed?.deviceId)
+        assertEquals("testdevice", parsed?.deviceId)
         assertEquals(fingerprint, parsed?.fingerprintSha256)
         assertEquals(listOf("hand", "relay"), parsed?.capabilities)
     }
@@ -109,11 +109,11 @@ class DiscoveryTest {
 
     @Test
     fun toDiscoveredPeer_valid_buildsPeer() {
-        val txt = Discovery.ParsedTxtRecord("xiaomi12", fingerprint, listOf("hand"))
-        val peer = Discovery.toDiscoveredPeer("小米 12", "192.168.1.7", 8443, txt)
-        assertEquals("xiaomi12", peer?.deviceId)
-        assertEquals("小米 12", peer?.displayName)
-        assertEquals("192.168.1.7", peer?.host)
+        val txt = Discovery.ParsedTxtRecord("testdevice", fingerprint, listOf("hand"))
+        val peer = Discovery.toDiscoveredPeer("测试设备", "192.168.1.10", 8443, txt)
+        assertEquals("testdevice", peer?.deviceId)
+        assertEquals("测试设备", peer?.displayName)
+        assertEquals("192.168.1.10", peer?.host)
         assertEquals(8443, peer?.port)
         assertEquals(fingerprint, peer?.fingerprintSha256)
         assertEquals(listOf("hand"), peer?.capabilities)
@@ -121,10 +121,10 @@ class DiscoveryTest {
 
     @Test
     fun toDiscoveredPeer_badHostOrPort_returnsNull() {
-        val txt = Discovery.ParsedTxtRecord("xiaomi12", fingerprint, emptyList())
-        assertNull(Discovery.toDiscoveredPeer("小米 12", "", 8443, txt))
-        assertNull(Discovery.toDiscoveredPeer("小米 12", "   ", 8443, txt))
-        assertNull(Discovery.toDiscoveredPeer("小米 12", "192.168.1.7", 0, txt))
-        assertNull(Discovery.toDiscoveredPeer("小米 12", "192.168.1.7", 65536, txt))
+        val txt = Discovery.ParsedTxtRecord("testdevice", fingerprint, emptyList())
+        assertNull(Discovery.toDiscoveredPeer("测试设备", "", 8443, txt))
+        assertNull(Discovery.toDiscoveredPeer("测试设备", "   ", 8443, txt))
+        assertNull(Discovery.toDiscoveredPeer("测试设备", "192.168.1.10", 0, txt))
+        assertNull(Discovery.toDiscoveredPeer("测试设备", "192.168.1.10", 65536, txt))
     }
 }

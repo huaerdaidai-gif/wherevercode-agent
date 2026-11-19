@@ -126,7 +126,7 @@ struct SettingsView: View {
                         .onSubmit { focusedField = nil }
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("已预填平台公开地址，可改；填主机名或完整端点都可以。只接受 https；不信任自签证书，不关闭 ATS。")
+                    Text("没有预置地址：填你自己的平台主机名或完整端点。只接受 https；不信任自签证书，不关闭 ATS。不填也不影响本地使用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     switch appState.settings.validation {

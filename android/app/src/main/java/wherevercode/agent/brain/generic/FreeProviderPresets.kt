@@ -1,7 +1,7 @@
 package wherevercode.agent.brain.generic
 
 /**
- * 免费 token 模型服务商预设（三件套之三，Funk 2026-11-18 定案）：
+ * 免费 token 模型服务商预设（三件套之三，2026-11-18 定案）：
  * 项目主打开源免费——用户自己去服务商注册、领免费 API key、填进
  * App，即可开始干活；key 只存本机 Keystore，这里永远不预填 key。
  *
@@ -10,7 +10,7 @@ package wherevercode.agent.brain.generic
  * 的免费 key」。
  *
  * 名单逐家按官方文档/定价页核验（2026-11-18，证据见项目核验记录
- * preset-verification.md）。入选标准经 Funk 2026-11-18 23:26 裁定：
+ * preset-verification.md）。入选标准经 2026-11-18 23:26 裁定：
  * 免费 API 真能用即可，不强制有 GET /models 列表接口——没有列表
  * 接口的两家（智谱、Cloudflare）以 [FreeModelListMode.FIXED] 内置
  * 官方免费模型名单入列，名单来源写在各条注记里，后续可随官方目录

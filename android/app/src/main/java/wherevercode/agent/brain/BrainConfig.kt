@@ -190,7 +190,7 @@ object BrainConfigValidator {
         // (RFC 1918) — a model server on the user's own Mac/PC/phone
         // in the same LAN — or a shared/mesh address (RFC 6598
         // 100.64/10, e.g. a Tailscale peer): auto-discovery is not
-        // limited to the LAN (Funk 2026-11-18 23:56). Public http
+        // limited to the LAN (2026-11-18 23:56). Public http
         // stays refused, and a hostname is never treated as LAN
         // (it cannot be verified as local).
         if (lower.startsWith("http://")) {

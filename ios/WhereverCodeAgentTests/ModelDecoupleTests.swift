@@ -1,6 +1,6 @@
 // ModelDecoupleTests.swift
 // WhereverCode Agent — iOS 模型页与大脑脱钩单元测试
-// 依据 Funk 2026-11-19 指示与 ~/awm-work/agy-ios-b3-brief.md：
+// 依据 2026-11-19 指示与 ~/awm-work/agy-ios-b3-brief.md：
 // 1. 验证模型独立存储键 "model.configs_json" 与 "brain.configs_json" 完全隔离；
 // 2. 验证模型配置独立增删改查生命周期、adapterId、authRef 规范与墓碑机制；
 // 3. 验证模型三分组（模型 API、CLI 会员、订阅授权，本地模型并入模型 API）；

@@ -245,7 +245,7 @@ public struct DevicesView: View {
                 return String(clean.split(separator: ":").first ?? "")
             }.filter { !$0.isEmpty }
 
-            var probeHosts = ["192.168.1.4", "100.75.41.0", "127.0.0.1"]
+            var probeHosts = ["127.0.0.1"]
             for h in registeredHosts {
                 if !probeHosts.contains(h) { probeHosts.append(h) }
             }
@@ -464,7 +464,7 @@ private struct AddDeviceSheet: View {
 
         Section("手动连接信息") {
             TextField("设备名称（如 Mac Studio / K70-Termux）", text: $name)
-            TextField("IP 或 Tailscale 主机名（如 100.x.x.x / 192.168.1.4）", text: $host)
+            TextField("IP 或 Tailscale 主机名（如 100.x.x.x）", text: $host)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
 
@@ -848,7 +848,7 @@ private struct DeviceDetailSheet: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(width: 44, alignment: .leading)
-                        TextField("如 192.168.1.4:18743", text: Binding(
+                        TextField("如 100.x.x.x:18743", text: Binding(
                             get: { device.baseUrl ?? "" },
                             set: { val in
                                 device.baseUrl = val.trimmingCharacters(in: .whitespacesAndNewlines)

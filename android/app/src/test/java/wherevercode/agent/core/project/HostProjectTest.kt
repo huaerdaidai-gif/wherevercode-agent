@@ -211,7 +211,7 @@ class HostProjectTest {
         // 各 Agent 的工作文件夹，点开即浏览，不用先注册项目。
         val devices = listOf(
             RemoteDevice(deviceId = "remote-device", displayName = "远程设备", host = "192.0.2.10", port = 18743),
-            RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743),
+            RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743),
         )
         val sources = deviceProjectSources(
             devices,
@@ -262,7 +262,7 @@ class HostProjectTest {
         // 有 projectHost 位但没有可路由的 Agent 文件夹：进了流程也选不
         // 出家文件夹，不进列表。
         val capable = RemoteDevice(
-            deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743,
+            deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743,
             capabilities = handServerCapabilities(),
         )
         assertTrue(capable.capabilities.projectHost)
@@ -280,8 +280,8 @@ class HostProjectTest {
     fun `project host usable devices - mixed devices keep only routable ones`() {
         val devices = listOf(
             RemoteDevice(deviceId = "remote-device", displayName = "远程设备", host = "192.0.2.10", port = 18743),
-            RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743),
-            RemoteDevice(deviceId = "Android-x", displayName = "xiaomi12", host = "192.168.1.7", port = 18743),
+            RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743),
+            RemoteDevice(deviceId = "Android-x", displayName = "testdevice", host = "192.168.1.10", port = 18743),
         )
         val usable = projectHostUsableDevices(devices, setOf("remote-device", "Android-x"))
         assertEquals(listOf("remote-device", "Android-x"), usable.map { it.deviceId })
@@ -318,7 +318,7 @@ class HostProjectTest {
 
     @Test
     fun `device source availability - confirmed with key is available`() {
-        val device = RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743)
+        val device = RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743)
         val (available, reason) = deviceSourceAvailability(device, pairingRecord("mac", PairingState.CONFIRMED))
         assertTrue(available)
         assertEquals(null, reason)
@@ -327,7 +327,7 @@ class HostProjectTest {
     @Test
     fun `device source availability - pairing states map to the device list labels`() {
         // 与设备列表 buildRemoteDeviceRows 同一口径：CONFIRMED 以外一律不可用。
-        val device = RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743)
+        val device = RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743)
         assertEquals(false to "未配对（不可用）", deviceSourceAvailability(device, null))
         assertEquals(false to "待确认（不可用）", deviceSourceAvailability(device, pairingRecord("mac", PairingState.PENDING)))
         assertEquals(false to "已拒绝（不可用）", deviceSourceAvailability(device, pairingRecord("mac", PairingState.REJECTED)))
@@ -336,7 +336,7 @@ class HostProjectTest {
 
     @Test
     fun `device source availability - confirmed without peer key cannot route`() {
-        val device = RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743)
+        val device = RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743)
         assertEquals(
             false to "配对未完成（不可用）",
             deviceSourceAvailability(device, pairingRecord("mac", PairingState.CONFIRMED, peerKey = false)),
@@ -352,7 +352,7 @@ class HostProjectTest {
     fun `device project sources keep unavailable sources greyed instead of dropping them`() {
         val devices = listOf(
             RemoteDevice(deviceId = "remote-device", displayName = "远程设备", host = "192.0.2.10", port = 18743),
-            RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743),
+            RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743),
         )
         val sources = deviceProjectSources(
             devices,
@@ -378,7 +378,7 @@ class HostProjectTest {
     @Test
     fun `device project sources default to all available for old callers`() {
         val sources = deviceProjectSources(
-            listOf(RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.4", port = 18743)),
+            listOf(RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743)),
             listOf(agent("codex", "Codex", "mac", "/Users/example-user")),
         )
         assertEquals(1, sources.size)

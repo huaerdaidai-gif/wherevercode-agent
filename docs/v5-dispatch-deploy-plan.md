@@ -32,7 +32,7 @@
    - 同一平台家族的另外两个连接器只读对比：
      - `WhereverCode` 有 23 个工具，包含派工工具 `start_task`（带 `agent`/`reviewer` 参数，能把任务派进云端 Agent 的待领队列），以及 `get_task` 和 `list_agents`。
      - `WhereverCode-xai` 有 22 个工具，正好少了 `start_task`。
-   - 由此可知，平台已有的派工能力叫 `start_task` / `get_task`，并且按权限隐藏；154.9.26.46 上 ChatGPT 和 grok-bot 用的凭证都看不到它。
+   - 由此可知，平台已有的派工能力叫 `start_task` / `get_task`，并且按权限隐藏；VPS_IP 上 ChatGPT 和 grok-bot 用的凭证都看不到它。
 
 ## 3. 本分支已交付（可验证）
 
@@ -100,6 +100,6 @@ V5 服务端源码不在本仓库，也不在任何允许访问的分支上；�
 ## 8. 需要所有者本人明确授权的事项
 
 1. 指定 V5 服务端代码的位置和负责人，并批准在那里实现第 4 节的改动。
-2. 批准把该版本部署到 154.9.26.46，并在验收时打开 `V5_MCP_DISPATCH_TOOLS_ENABLED`。
+2. 批准把该版本部署到 VPS_IP，并在验收时打开 `V5_MCP_DISPATCH_TOOLS_ENABLED`。
 3. 批准给 `chatgpt` 加 dispatch scope（只限验收项目）并签发令牌，由所有者本人填进 ChatGPT 连接器。
 4. 可选：如果想先走不改 V5 的路线，需要所有者本人在手机上打开 App 的“MCP 派工”开关，并批准一条公网 HTTPS 隧道。手机 App 没有公网地址，见 `docs/mcp-dispatch-20261113.md` 第 6 节。

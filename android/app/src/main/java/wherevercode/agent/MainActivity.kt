@@ -1637,6 +1637,8 @@ class MainActivity : AppCompatActivity() {
                 startTeamChannelFeed()
                 refreshTeamChannel()
             },
+            onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
+            onCreateNew = { showChannelCreateMenu() },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -1875,7 +1877,7 @@ class MainActivity : AppCompatActivity() {
         screenAgents.findViewById<View>(R.id.buttonAddAgent).visibility =
             if (devicesOnly) View.GONE else View.VISIBLE
         // 设备页与 Agent 页共用头部行：设备模式下页内标题改「设备」
-        // （入口与页标题前后一致，Funk 2026-11-18 定版）；刷新钮是
+        // （入口与页标题前后一致，2026-11-18 定版）；刷新钮是
         // Agent 列表专用，设备模式隐藏。
         screenAgents.findViewById<TextView>(R.id.agentScreenTitle).text =
             if (devicesOnly) "设备" else "Agent"
@@ -2911,7 +2913,7 @@ class MainActivity : AppCompatActivity() {
                 refreshPairingSnapshot()
                 // P1 能力卡：hello 成功，存仓库快照。
                 noteHelloForCapabilityCards(hello)
-                // 添加设备独立（Funk 2026-11-19）：配对只完成配对，
+                // 添加设备独立（2026-11-19）：配对只完成配对，
                 // 不再顺带建 Agent 记录——发现 Agent 由 Agent 页的
                 // 批量自动发现开关与手动入口独立触发，互不关联。
                 // hello 报的 Agent 文件夹仍作下面添加项目的候选
@@ -5947,6 +5949,26 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * 频道页「＋ 新建」菜单（双端对齐批D，与 iOS 同位同序同两项）：
+     * 本端的频道由平台配置、App 内没有新建频道的真实通道，两项都
+     * 给诚实「待开发」提示，不造假频道。
+     */
+    private fun showChannelCreateMenu() {
+        ListDialog.show(
+            this,
+            "新建",
+            null,
+            listOf("新建频道", "发起私聊"),
+        ) { which ->
+            if (which == 0) {
+                toast("【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。")
+            } else {
+                toast("【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）")
+            }
+        }
+    }
+
     private fun refreshTeamChannel() {
         if (!::teamChannelController.isInitialized) return
         if (teamChannelRefreshRunning) return
@@ -5986,7 +6008,9 @@ class MainActivity : AppCompatActivity() {
         teamChannelController.render(
             TeamChannelSnapshot(
                 configured = endpoint != null,
-                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent。",
+                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
+                    "并在表单的平台凭证栏填入 App 的平台凭证" +
+                    "（由你的平台管理员签发）。",
                 channelId = endpoint?.second.orEmpty(),
                 connectionState = teamChannelFeed?.connectionState
                     ?: ChannelConnectionState.STOPPED,
@@ -8709,7 +8733,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 控制台总览的平台根地址。优先已添加平台 Agent 的主机，否则用构建配置；
-     * 都没有时由 [ConsoleScreenController.normalizedPlatformRoot] 回落到公开根。
+     * 都没有时为空串，总览显示「未配置」——平台地址不预置任何默认值。
      * 控制器初始化早于 [agentStore]，未就绪时只走默认。
      */
     private fun normalizedConsolePlatformRoot(): String {
@@ -12026,7 +12050,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 三件套之三·入口 B「免费 token 模型服务商」（2026-11-18，Funk
+     * 三件套之三·入口 B「免费 token 模型服务商」（2026-11-18，
      * 定案：以免费为主、项目主打开源免费）：选一家 → 填自己注册好
      * 的免费 Key → LIVE 组拉 /models、FIXED 组用内置官方免费名单
      * → 勾选 → 逐个生成 MODEL_API 配置（extra 标 tier=free 供智能
@@ -12225,7 +12249,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 自定义免费服务商（预留扩展口，Funk 2026-11-18 23:43）：名单
+     * 自定义免费服务商（预留扩展口，2026-11-18 23:43）：名单
      * 上没有的免费服务商，用户填名称 + 地址 + 名单形态即可加，
      * 存本机后与内置预设走同一条流程。内置名单（官方核验）与
      * 自定义（用户自加）分开存储、呈现标注，不合并。
@@ -12354,7 +12378,7 @@ class MainActivity : AppCompatActivity() {
             probeModelSources(sources)
             return
         }
-        // 先勾选、再扫描（Funk 2026-11-19，与 Agent 批量发现同口径）：
+        // 先勾选、再扫描（2026-11-19，与 Agent 批量发现同口径）：
         // 默认一个都不勾，用户明确勾了哪个来源才探哪个。
         val checked = BooleanArray(sources.size) { false }
         AlertDialog.Builder(this)
@@ -12484,7 +12508,7 @@ class MainActivity : AppCompatActivity() {
      * 模型连接（标注免费/付费），勾选进池；池顺序按现有顺序保留、
      * 新勾选的按列表顺序追加。切换规则：可重试失败（额度/限流/
      * 5xx）按池顺序切，401/400 不切；默认只在免费之间切，「允许
-     * 付费」打开后付费才进池（Funk 定案：以免费为主、付费可选）。
+     * 付费」打开后付费才进池（定案：以免费为主、付费可选）。
      */
     private fun showRoutingPoolPicker() {
         val components = brainComponents ?: run {

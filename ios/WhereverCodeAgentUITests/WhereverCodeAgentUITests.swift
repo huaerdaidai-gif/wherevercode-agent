@@ -65,21 +65,28 @@ final class WhereverCodeAgentUITests: XCTestCase {
         navigate(app, to: "settings")
         snap(app, "ui-02-settings")
 
-        // --- Platform address is preset as static text row, not user-typed.
-        let addressText = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@ OR identifier == 'settings.address'", "v5.cococolo.xyz")
-        ).firstMatch
+        // --- No platform address is baked in: a fresh install shows
+        // the settings address row as 未配置 and must not claim any
+        // preset host or a valid status it does not have.
+        let addressRow = app.descendants(matching: .any)["settings.address"].firstMatch
         XCTAssertTrue(
-            addressText.waitForExistence(timeout: 10),
-            "Settings must display preset platform address as static text"
+            addressRow.waitForExistence(timeout: 10),
+            "Settings must display the platform address row"
         )
-
-        let validStatus = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "地址有效。")
+        let bakedHost = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "example.com")
+        ).firstMatch
+        XCTAssertFalse(bakedHost.exists, "Settings must not display any baked-in platform host")
+        let unconfigured = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "未配置")
         ).firstMatch
         XCTAssertTrue(
-            validStatus.waitForExistence(timeout: 10),
-            "Settings must show 地址有效。 status"
+            unconfigured.waitForExistence(timeout: 10),
+            "Settings must show 未配置 while no platform address is configured"
+        )
+        XCTAssertFalse(
+            app.staticTexts["地址有效。"].firstMatch.exists,
+            "Settings must not claim 地址有效。 while unconfigured"
         )
 
         // Dismiss settings sheet
@@ -91,8 +98,17 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        XCTAssertTrue(app.staticTexts["频道"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.descendants(matching: .any)["私聊 · 待开发"].firstMatch.exists)
+        // 批D 对话框直达后的频道页契约：未配凭证时直接显示未连接空态
+        // （全文提示 + 「前往 Agent 管理」钮）；频道/私聊分段与列表收进
+        // 频道切换面板，不再常驻页头（旧列表先行形态的断言随形态退役）。
+        let channelHint = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "频道还没法连")
+        ).firstMatch
+        XCTAssertTrue(
+            channelHint.waitForExistence(timeout: 10),
+            "Channels page must show the unconfigured hint in dialog-first form"
+        )
+        XCTAssertTrue(app.buttons["前往 Agent 管理"].firstMatch.exists)
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
