@@ -405,6 +405,20 @@ public final class PosixTcpSocket {
         #endif
     }
 
+    /// 执行 Agent 时不能继续沿用握手的 10 秒接收超时。
+    /// 仅调整接收等待，发送超时仍由 connect() 控制。
+    public func setReceiveTimeout(seconds: Double) throws {
+        #if canImport(Darwin)
+        guard fd >= 0 else { throw HandClientError.connectionFailed("Socket 未连接") }
+        let whole = max(1, Int(seconds))
+        var tv = timeval(tv_sec: __darwin_time_t(whole), tv_usec: 0)
+        guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv,
+                         socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            throw HandClientError.connectionFailed("设置接收超时失败：errno \(errno)")
+        }
+        #endif
+    }
+
     public func writeFrame(_ payload: Data) throws {
         #if canImport(Darwin)
         guard fd >= 0 else { throw HandClientError.connectionFailed("Socket 未连接") }
@@ -789,6 +803,12 @@ public actor HandClient {
             let plainCall = try JSONSerialization.data(withJSONObject: callEnv)
             let sealedCall = try HandCrypto.seal(sessionKey: sessionKey, plaintext: plainCall)
             try sock.writeFrame(sealedCall)
+
+            // Hand 执行 CLI 可能在首条进度前思考数十秒。握手使用 10 秒，
+            // 但任务执行应按服务端任务超时等待，避免将模型思考误报为断线。
+            let requestedTimeout = Double(args["timeout"] ?? "") ?? 600.0
+            let runWait = min(3630.0, max(30.0, requestedTimeout + 30.0))
+            try sock.setReceiveTimeout(seconds: action == "run" ? runWait : 30.0)
 
             // 4. 读取回包循环
             while true {
