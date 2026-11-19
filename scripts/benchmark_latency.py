@@ -5,6 +5,7 @@ MAC_HOST = os.environ.get('WC_BENCH_MAC_HOST', '')  # set WC_BENCH_MAC_HOST to y
 MAC_USER = os.environ.get('WC_BENCH_MAC_USER', 'user')
 MAC_HOME = f'/Users/{MAC_USER}'
 MAC_PORT = 18743
+SSH_KEY = os.path.expanduser(os.environ.get('WC_BENCH_SSH_KEY', '~/.ssh/id_ed25519'))  # set WC_BENCH_SSH_KEY to your SSH key path
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -71,7 +72,7 @@ def main():
     # 1. Rotate Pair Code
     t0 = time.perf_counter()
     out = subprocess.check_output([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), f'{MAC_USER}@{MAC_HOST}',
+        'ssh', '-i', SSH_KEY, f'{MAC_USER}@{MAC_HOST}',
         f"'{MAC_HOME}/Library/Application Support/WhereverCode/V5Hand/wherevercode-hand' pair-code --rotate --raw"
     ]).decode().strip()
     pair_code = out.split()[0]
@@ -159,7 +160,7 @@ def main():
     # Cleanup
     clean_cmd = f"python3 -c 'import json; path=\"{MAC_HOME}/Library/Application Support/WhereverCode/V5Hand/paired_clients.json\"; d=json.load(open(path)); d.pop(\"{client_id}\", None); json.dump(d, open(path, \"w\"), indent=2)'"
     subprocess.run([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), f'{MAC_USER}@{MAC_HOST}',
+        'ssh', '-i', SSH_KEY, f'{MAC_USER}@{MAC_HOST}',
         clean_cmd
     ], check=True)
 
