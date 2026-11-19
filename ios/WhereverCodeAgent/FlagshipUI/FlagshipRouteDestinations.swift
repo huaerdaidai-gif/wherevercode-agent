@@ -2573,7 +2573,6 @@ public struct ChannelsHomeView: View {
     @State private var selectedPartition: ChannelPartition = .channels
     @State private var searchQuery = ""
     @State private var showSwitchPanel = false
-    @State private var showCreateChannelSheet = false
     @State private var showCreateDMSheet = false
     @State private var showPolicyAlert = false
     @State private var policyAlertMessage = ""
@@ -2664,13 +2663,6 @@ public struct ChannelsHomeView: View {
         }
         .sheet(isPresented: $showSwitchPanel) {
             switchPanel
-        }
-        .sheet(isPresented: $showCreateChannelSheet) {
-            CreateChannelSheet(appState: appState) { newChannel in
-                channels.insert(newChannel, at: 0)
-                activeWorkspaceChannel = newChannel
-                activeWorkspaceDM = nil
-            }
         }
         .sheet(isPresented: $showCreateDMSheet) {
             CreateDirectMessageSheet(appState: appState) { newDM in
@@ -2764,7 +2756,8 @@ public struct ChannelsHomeView: View {
 
             Menu {
                 Button {
-                    showCreateChannelSheet = true
+                    policyAlertMessage = "【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。"
+                    showPolicyAlert = true
                 } label: {
                     Label("新建频道", systemImage: "number")
                 }
@@ -3396,7 +3389,14 @@ public struct ChannelDetailWorkspaceView: View {
             description: pendingTaskText,
             state: "queued"
         )
-        _ = try? LocalData.shared.tasks.createTask(task)
+        do {
+            _ = try LocalData.shared.tasks.createTask(task)
+        } catch {
+            // 创建失败必须让用户看见，且不清空输入、不关表单（R7 N5）。
+            sendErrorMessage = "创建任务失败：\(error.localizedDescription)"
+            showSendErrorAlert = true
+            return
+        }
         composerText = ""
         replyingTo = nil
         showCreateTaskForm = false
@@ -3820,37 +3820,32 @@ public struct ChannelDetailWorkspaceView: View {
             return
         }
 
-        guard feed != nil && (connectionState == .live || connectionState == .polling) else {
+        // 「仅讨论」：经平台真实发送（agent_channel_post）。成功后消息由
+        // feed 回推显示，不插入本地假消息；失败显示真实错误、保留输入。
+        // 讨论就是讨论——不建任务、不自动派工（R7 B3）。
+        guard let transport = appState.makeChannelTransport() else {
             sendErrorMessage = "频道尚未连接；消息未发送。"
             showSendErrorAlert = true
             return
         }
-
-        let now = Date()
-        let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
-        let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
-
-        let newMsg = V5ChannelMessage(
-            id: UUID().uuidString,
-            senderId: "user-me",
-            senderName: "我",
-            isAgent: false,
-            text: text.isEmpty ? "分享了附件" : text,
-            timestamp: timeStr,
-            fullDateTime: fullDateStr,
-            replyToId: replyingTo?.id,
-            replyToText: replyingTo?.text,
-            attachmentName: selectedAttachment?.fileName,
-            attachmentType: selectedAttachment?.fileType,
-            attachmentSize: selectedAttachment?.fileSize
-        )
-        messages.append(newMsg)
-        composerText = ""
-        replyingTo = nil
-        selectedAttachment = nil
-
-        // 自然语言派工与多 Agent 协同流转处理
-        processNaturalLanguageDispatch(text: text, timeStr: timeStr, fullDateStr: fullDateStr)
+        var postText = text
+        if let att = selectedAttachment {
+            postText += (postText.isEmpty ? "" : "\n") + "（附件：\(att.fileName)）"
+        }
+        if postText.isEmpty { postText = "分享了附件" }
+        let replyTo = replyingTo?.id
+        let channelID = currentChannelId
+        Task {
+            do {
+                _ = try await transport.postMessage(channelID: channelID, text: postText, replyTo: replyTo)
+                composerText = ""
+                replyingTo = nil
+                selectedAttachment = nil
+            } catch {
+                sendErrorMessage = (error as? McpError)?.message ?? "发送失败。"
+                showSendErrorAlert = true
+            }
+        }
     }
 
     // MARK: - 文件分区
@@ -4248,83 +4243,6 @@ public struct ChannelDetailWorkspaceView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
     }
 
-    private func processNaturalLanguageDispatch(text: String, timeStr: String, fullDateStr: String) {
-        guard !text.isEmpty else { return }
-
-        // 1. 查找被 @ 的 Agent
-        var targetAgent: V5ChannelMember? = nil
-        for member in members where member.isAgent {
-            if text.contains("@\(member.name)") || text.lowercased().contains("@\(member.name.lowercased())") {
-                targetAgent = member
-                break
-            }
-        }
-
-        // 2. 如果未明确 @ 但包含任务动词，指派给首位在位 Agent
-        let taskVerbs = ["派工", "任务", "开发", "测试", "实现", "修复", "优化", "审查", "重构", "检查"]
-        let hasTaskIntent = taskVerbs.contains(where: { text.contains($0) })
-        if targetAgent == nil && hasTaskIntent {
-            targetAgent = members.first(where: { $0.isAgent })
-        }
-
-        guard let agent = targetAgent else { return }
-
-        // 3. 提取干净的任务标题
-        var taskTitle = text
-        for prefix in ["@\(agent.name)", "@\(agent.name.lowercased())", "请", "协助", "派工：", "任务："] {
-            taskTitle = taskTitle.replacingOccurrences(of: prefix, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if taskTitle.isEmpty { taskTitle = "协同执行任务 (\(text.prefix(20)))" }
-
-        // 4. 调用 LocalTaskStore 创建正式任务 (初始状态 queued)
-        let chId = currentChannelId
-        let newTaskId = "task-" + UUID().uuidString.prefix(8)
-        let newTask = LocalTask(
-            taskId: String(newTaskId),
-            projectId: channelItem?.associatedProjectId,
-            sessionId: chId,
-            title: taskTitle,
-            description: "来自频道 [\(displayName)] 自然语言派发：\(text)",
-            state: "queued",
-            assignedAgentId: agent.agentRecordId ?? agent.id,
-            priority: 1
-        )
-
-        do {
-            _ = try LocalData.shared.tasks.createTask(newTask)
-            // 5. Agent 认领任务并流转: queued -> assigned -> working
-            _ = try LocalData.shared.tasks.transition(
-                taskId: newTask.taskId,
-                to: "assigned",
-                note: "Agent [\(agent.name)] 认领任务并建立租约"
-            )
-            _ = try LocalData.shared.tasks.transition(
-                taskId: newTask.taskId,
-                to: "working",
-                note: "Agent [\(agent.name)] 开始执行任务"
-            )
-
-            // 6. 频道回传执行与认领消息
-            let replyMsg = V5ChannelMessage(
-                id: UUID().uuidString,
-                senderId: agent.id,
-                senderName: agent.name,
-                isAgent: true,
-                text: "已认领并开始执行任务：「\(taskTitle)」。正在分析上下文并准备工具调用...",
-                timestamp: timeStr,
-                fullDateTime: fullDateStr,
-                linkedTaskId: newTask.taskId,
-                linkedTaskTitle: taskTitle,
-                linkedTaskState: "working"
-            )
-            messages.append(replyMsg)
-            reloadWorkspaceTasks()
-        } catch {
-            sendErrorMessage = "派发任务失败: \(error.localizedDescription)"
-            showSendErrorAlert = true
-        }
-    }
-
     private func submitTaskForReview(taskId: String) {
         do {
             _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "review", note: "Agent 执行完成，提交人工审查")
@@ -4482,69 +4400,6 @@ public struct ChannelDetailWorkspaceView: View {
 }
 
 // MARK: - 辅助弹窗与选择器
-
-public struct CreateChannelSheet: View {
-    @ObservedObject public var appState: AppState
-    public var onCreated: (V5ChannelItem) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var name = ""
-    @State private var topic = ""
-    @State private var isPrivate = false
-    @State private var selectedProject = ""
-
-    public var body: some View {
-        NavigationStack {
-            Form {
-                Section("频道信息") {
-                    TextField("频道名称（例如：移动端重构）", text: $name)
-                    TextField("讨论主题与简介", text: $topic)
-                    Toggle("设为私有频道", isOn: $isPrivate)
-                }
-
-                Section("关联项目（可选）") {
-                    Picker("项目", selection: $selectedProject) {
-                        Text("不关联项目").tag("")
-                        Text("WhereverCode V5").tag("proj-wherevercode")
-                        Text("iOS Native").tag("proj-ios")
-                    }
-                }
-
-                Section("安全规范提示") {
-                    Text("频道成员可包含团队用户与受信任的 Agent。频道所有消息与执行操作受统一审计保护。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("新建频道")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("创建") {
-                        let newCh = V5ChannelItem(
-                            id: "ch-\(UUID().uuidString.prefix(6))",
-                            name: name.isEmpty ? "未命名频道" : name,
-                            topic: topic,
-                            isPrivate: isPrivate,
-                            associatedProjectId: selectedProject.isEmpty ? nil : selectedProject,
-                            associatedProjectName: selectedProject.isEmpty ? nil : "关联项目",
-                            memberCount: 2,
-                            agentCount: 1,
-                            lastMessageText: "频道已创建",
-                            lastMessageTime: "刚刚"
-                        )
-                        onCreated(newCh)
-                        dismiss()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-    }
-}
 
 public struct CreateDirectMessageSheet: View {
     @ObservedObject public var appState: AppState
