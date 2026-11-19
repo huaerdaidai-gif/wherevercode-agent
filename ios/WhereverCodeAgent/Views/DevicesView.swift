@@ -259,14 +259,18 @@ public struct DevicesView: View {
         if device.agentId != devId {
             try? LocalData.shared.agents.deleteAgent(agentId: device.agentId)
         }
-        reload()
+        // 删除后只刷新列表，不跑历史迁移，避免改写其它记录。
+        reload(runLegacyMigration: false)
     }
 
     // MARK: - 辅助方法
 
-    private func reload() {
+    private func reload(runLegacyMigration: Bool = true) {
         do {
-            try? LocalData.shared.agents.migrateLegacyDeviceRecords()
+            // 删除回调不走历史迁移：删设备只动目标设备记录与配对信任。
+            if runLegacyMigration {
+                try? LocalData.shared.agents.migrateLegacyDeviceRecords()
+            }
             devices = try LocalData.shared.agents.listAgents().filter { $0.isDeviceHost }
             loadError = nil
         } catch {

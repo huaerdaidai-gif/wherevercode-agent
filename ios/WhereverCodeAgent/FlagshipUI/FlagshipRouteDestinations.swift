@@ -3154,6 +3154,7 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var activeTasks: [LocalTask] = []
     @State private var members: [V5ChannelMember] = []
     @State private var connectionState: ChannelConnectionState = .stopped
+    @State private var connectionError: String? = nil
     @State private var feed: ChannelFeed? = nil
     @State private var realOnlineAgentCount: Int? = nil
 
@@ -3294,7 +3295,7 @@ public struct ChannelDetailWorkspaceView: View {
         case .connecting:
             return "○ 正在连接频道…"
         case .polling:
-            return "○ 轮询兜底"
+            return "○ 轮询兜底（推送已断）" + (connectionError.map { "：\($0)" } ?? "")
         case .stopped:
             return "○ 频道未连接"
         }
@@ -4256,9 +4257,10 @@ public struct ChannelDetailWorkspaceView: View {
             webSocketURL: wsURL,
             tokenProvider: appState.tokenProvider
         )
-        newFeed.onStateChange = { state, _ in
+        newFeed.onStateChange = { state, error in
             Task { @MainActor in
                 self.connectionState = state
+                self.connectionError = error
             }
         }
         self.feed = newFeed
