@@ -1,31 +1,98 @@
+<div align="center">
+
 # WhereverCode Agent
 
-An experimental, Android-first independent AI agent application for working with projects, tools, and tasks.
+**One workspace. Every Agent.**
 
-> **Development status:** Source code is under active development. The presence of a feature in source does not mean it has been verified on a real Android device. No prebuilt APK or fully validated release is promised by this repository.
+面向 Android 与 iOS 的开源 AI Agent 工作台：连接对话、项目、任务、模型与设备。
 
-## Scope
+**Android · iOS · Multi-Agent · Apache-2.0**
 
-This repository is **wherevercode-agent**, the standalone app. It is not the older `wherevercode` orchestration platform. Core single-agent operation should not require that older platform or its channels.
+[Android 开发说明](android/README.md) · [iOS 开发说明](ios/README.md) · [安全政策](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
-## Android
+</div>
 
-See [Android setup and architecture notes](android/README.md). The Android build uses Gradle, Kotlin and Chaquopy; local build instructions are in [android/README.md](android/README.md). This source repository does not include GitHub Actions workflows. An APK build may need network access to download dependencies and provision a Node runtime. The repository currently does not include a Gradle Wrapper; a compatible Gradle installation is required.
+> **开发中 / Work in progress（截至 2026-11-20 的文档核对）**：项目仍在快速迭代。源码存在、UI 可见、单元测试通过、模拟器运行、真机安装和端到端验收是不同的证据层级。不要把设计目标或历史交付记录当成当前 main 的已验收功能。本文不承诺可直接安装的稳定 APK / IPA。
 
-Debug APKs built from this source use local debug signing. They may **not** update APKs signed with the historical shared debug key; an uninstall or separate migration strategy may be needed. Do not treat a debug-signed APK as a production release.
+## 项目是什么
 
-## Security
+WhereverCode Agent 希望把 AI 对话、项目文件、任务执行、多 Agent 协作和设备控制放进一个**极简但功能完整**的移动工作台。Agent 不绑定固定厂商或角色；用户可以按任务选择模型、执行者与设备，并监督任务进度、审批和结果。
 
-See [SECURITY.md](SECURITY.md) for private vulnerability reporting and credential handling. Do not commit signing keys, tokens or private infrastructure configuration.
+本仓库 `wherevercode-agent` 是独立 App 项目，**不是**旧的 `wherevercode` 平台。核心单兵能力不应以旧平台服务或频道作为强制依赖；远程协作能力则取决于实际接入的服务与权限。
 
-## Contributing
+## 产品体验与双端统一
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Reports should distinguish unit tests, CI build results, and actual-device verification.
+产品目标是 **Claude / Codex 式简洁界面、抽屉收纳、能力不缩水**。Android 与 iOS 应遵循相同的信息架构、菜单命名、状态语义和权限边界，而不是只追求页面外观相似。
 
-## License
+| 区域 | 目标体验 |
+| --- | --- |
+| **对话** | 自然语言交流、选择 Agent/模型、发起任务并查看执行反馈 |
+| **项目** | 项目来源、文件、上下文、交付物与任务关联 |
+| **频道 / 协作** | 在有权限的频道中交流、跟进任务；不能假定所有服务端能力都存在 |
+| **控制** | 设备、Agent、模型、连接、执行状态、审计与高级配置统一收纳 |
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+导航结构是**产品目标**，不代表两端在 main 中已逐屏一致。2026-11-19 的双端对齐工作涉及频道入口、控制台与交互差异；应以最新审计、实际代码和设备截图逐项验收，不在 README 宣称“已全部统一”。
 
-## Release readiness
+## 当前实现与验证边界
 
-Before the repository is made public, verify the *entire reachable Git history and all branches/tags* for private keys, tokens and user data; rotate any exposed credentials; verify third-party license notices; and publish a clean release snapshot. Removing a file in the current branch does not remove it from history.
+| 范围 | 仓库中可核实的线索 | 仍需独立验证 |
+| --- | --- | --- |
+| Android | Kotlin / Gradle / Chaquopy；本地任务、执行控制及 UI 相关源码与审计记录 | 当前 main 的完整构建、CLI 运行、真机执行、升级签名和双端 UI 对齐 |
+| iOS | Swift / SwiftUI 客户端源码及频道、任务、连接、Keychain 等开发文档 | 最新 main 的编译、签名、安装、真实服务端接线与 Android 行为一致性 |
+| 多 Agent / 多设备 | 本地执行、任务租约、控制栅栏、远程通信等代码和设计记录 | 每条跨设备路径的真实授权、执行回执、故障恢复与端到端验收 |
+| 自主循环 / 自动化 | 已有任务调度、重试和部分恢复机制的审计线索 | 耐久触发器、跨重启去重、预算、完整自动恢复等不能视为已交付 |
+| 安全 | 权限、停止确认、写入门禁、签名隔离等已有实现与要求 | 全仓审计、发布前密钥与许可证检查、实机回归 |
+
+证据状态统一采用：**规划中 → UI 入口 → 源码实现 → 自动化测试 → 模拟器验证 → 真机验证 → 端到端验收**。只标注有证据的最高级别；缺失证据写“未验证”，不猜测。
+
+开发审计线索：[P0 审计与实施门禁](docs/p0/README.md)。该文档包含历史分支和当时的缺口，**不是当前 main 的完整验收报告**。
+
+## 构建与安装
+
+### Android
+
+参考 [android/README.md](android/README.md) 中的构建要求与脚本。文档记录了 JDK 17、Gradle 8.2.1、Android SDK 34、Chaquopy 15.0.1 / Python 3.11 等环境要求；实际版本请优先以当前 Gradle 配置为准。
+
+```sh
+# 配置 JAVA_HOME、ANDROID_HOME 与兼容的 Gradle 后
+./scripts/build-android-p0.sh
+```
+
+仓库可能不包含完整 Gradle Wrapper。默认 debug 包与正式包的包名、签名及数据隔离；**debug APK 不等于可覆盖升级的正式发行包**。安装前核对签名、版本、ABI 与运行环境。编译成功不代表内置 Node / Agent CLI 已可用。
+
+### iOS
+
+参考 [ios/README.md](ios/README.md)。iOS 使用原生 Swift / SwiftUI 工程，构建需要兼容的 macOS / Xcode 环境；安装需要合规签名。**unsigned IPA 不是可直接安装的正式发布包**。iOS 文档包含阶段性服务端接口说明，是否仍准确须与当前服务端核对。
+
+目前不在首页提供未经核实的 APK / IPA 下载链接，也不将历史 CI 描述视为当前工作流存在的证明。
+
+## 架构原则
+
+- **模型与 Agent 可替换**：不把“推理大脑”或执行角色写死到单一厂商。
+- **本地优先、远程可选**：本地单兵可独立运行；跨设备连接必须明确授权。
+- **人可介入**：暂停、停止、改目标、审批、重试要以实际回执与状态机为准。
+- **执行可追踪**：区分“已请求”“已派发”“执行中”“已确认完成”和“失败/待确认”。
+- **默认安全**：工具、文件写入、设备控制和令牌操作遵守最小权限；失败不得伪报成功。
+
+## 路线图（目标，不等于完成承诺）
+
+1. **双端一致性**：按审计逐项统一导航、频道、控制台、空态、错误态与权限提示。
+2. **真实运行闭环**：完成 Android/iOS 构建、安装、关键操作和跨设备回执验收。
+3. **自主任务循环**：规划 → 执行 → 检查 → 纠错/重试 → 恢复，并提供明确的用户控制权。
+4. **开源交付体验**：经过核实的截图、版本说明、构建流程、许可证与贡献文档。
+
+## 截图与演示
+
+双端截图应来自**可追溯的当前版本**，注明平台、设备/模拟器、commit 与测试状态。设计原型与真实运行截图必须分开标注。完成核实后再加入首页展示，避免使用过时原型冒充当前产品。
+
+## 安全、贡献与许可证
+
+- [SECURITY.md](SECURITY.md)：漏洞报告与凭据处理。
+- [CONTRIBUTING.md](CONTRIBUTING.md)：贡献范围、测试证据和代码审查要求。
+- [LICENSE](LICENSE)：Apache License 2.0。
+
+不要提交 Token、私钥、签名文件、个人数据或私有基础设施配置。公开发布前须检查**全部可达 Git 历史、分支、标签及第三方许可证**；仅从最新提交删除敏感文件不等于清除历史。
+
+---
+
+*WhereverCode Agent 为独立开源项目；兼容第三方 Agent、模型或服务不代表官方合作或背书。*
