@@ -65,21 +65,28 @@ final class WhereverCodeAgentUITests: XCTestCase {
         navigate(app, to: "settings")
         snap(app, "ui-02-settings")
 
-        // --- Platform address is preset as static text row, not user-typed.
-        let addressText = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@ OR identifier == 'settings.address'", "v5.cococolo.xyz")
-        ).firstMatch
+        // --- No platform address is baked in: a fresh install shows
+        // the settings address row as 未配置 and must not claim any
+        // preset host or a valid status it does not have.
+        let addressRow = app.descendants(matching: .any)["settings.address"].firstMatch
         XCTAssertTrue(
-            addressText.waitForExistence(timeout: 10),
-            "Settings must display preset platform address as static text"
+            addressRow.waitForExistence(timeout: 10),
+            "Settings must display the platform address row"
         )
-
-        let validStatus = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "地址有效。")
+        let bakedHost = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "cococolo")
+        ).firstMatch
+        XCTAssertFalse(bakedHost.exists, "Settings must not display any baked-in platform host")
+        let unconfigured = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "未配置")
         ).firstMatch
         XCTAssertTrue(
-            validStatus.waitForExistence(timeout: 10),
-            "Settings must show 地址有效。 status"
+            unconfigured.waitForExistence(timeout: 10),
+            "Settings must show 未配置 while no platform address is configured"
+        )
+        XCTAssertFalse(
+            app.staticTexts["地址有效。"].firstMatch.exists,
+            "Settings must not claim 地址有效。 while unconfigured"
         )
 
         // Dismiss settings sheet

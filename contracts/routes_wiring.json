@@ -655,7 +655,7 @@
     "acceptance_status": "IMPLEMENTED_UNVERIFIED",
     "route_reachability": "可达 (一级抽屉「项目」→ 二级分组「连接」→ mcp)",
     "actual_interaction": "点击向 V5 平台发起 JSON-RPC tools/list 探测并展示返回的真实工具名列表",
-    "data_source": "MCP: tools/list (https://v5.cococolo.xyz/api/open/v1/mcp)",
+    "data_source": "MCP: tools/list（平台地址来自用户配置）",
     "interface_status": "McpClient.listToolNames 已接通",
     "test_result": "静态契约 PASS + MCP 协议封装测试 PASS；真机联网未测"
   },
@@ -1425,7 +1425,7 @@
     "acceptance_status": "ADAPTER_PENDING",
     "route_reachability": "可达 (一级抽屉「项目」→ 二级分组「连接」→ network)",
     "actual_interaction": "查看 ATS HTTPS 强制策略、WebSocket 频道连接与本地局域网推理说明",
-    "data_source": "AppSettings (https://v5.cococolo.xyz/api/open/v1/mcp)",
+    "data_source": "AppSettings（平台地址来自用户配置）",
     "interface_status": "ADAPTER_PENDING：HTTPS/WSS 已接通，多路径自动探测与中继网关策略待开发",
     "test_result": "静态契约 PASS"
   },

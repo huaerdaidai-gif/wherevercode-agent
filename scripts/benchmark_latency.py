@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import socket, json, hashlib, os, time, base64, subprocess, hmac, sys
 
-MAC_HOST = '100.75.41.0'
+MAC_HOST = os.environ.get('WC_BENCH_MAC_HOST', '')  # set WC_BENCH_MAC_HOST to your Mac's address; no address is baked in
+MAC_USER = os.environ.get('WC_BENCH_MAC_USER', 'user')
+MAC_HOME = f'/Users/{MAC_USER}'
 MAC_PORT = 18743
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
@@ -69,8 +71,8 @@ def main():
     # 1. Rotate Pair Code
     t0 = time.perf_counter()
     out = subprocess.check_output([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), 'a1234@100.75.41.0',
-        "'/Users/a1234/Library/Application Support/WhereverCode/V5Hand/wherevercode-hand' pair-code --rotate --raw"
+        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), f'{MAC_USER}@{MAC_HOST}',
+        f"'{MAC_HOME}/Library/Application Support/WhereverCode/V5Hand/wherevercode-hand' pair-code --rotate --raw"
     ]).decode().strip()
     pair_code = out.split()[0]
     measurements['ssh_rotate_pair_code_ms'] = round((time.perf_counter() - t0) * 1000, 2)
@@ -100,7 +102,7 @@ def main():
     measurements['hello_rtt_ms'] = round((t_hello - t_conn) * 1000, 2)
     measurements['pair_confirm_rtt_ms'] = round((t_pair - t_hello) * 1000, 2)
 
-    folder = '/Users/a1234/v5-codex-work'
+    folder = f'{MAC_HOME}/v5-codex-work'
     target_dev = 'MacBook-Air'
     agent_id = 'codex'
     task_id = 'task-bench-' + str(int(time.time()))
@@ -155,9 +157,9 @@ def main():
     })
 
     # Cleanup
-    clean_cmd = f"python3 -c 'import json; path=\"/Users/a1234/Library/Application Support/WhereverCode/V5Hand/paired_clients.json\"; d=json.load(open(path)); d.pop(\"{client_id}\", None); json.dump(d, open(path, \"w\"), indent=2)'"
+    clean_cmd = f"python3 -c 'import json; path=\"{MAC_HOME}/Library/Application Support/WhereverCode/V5Hand/paired_clients.json\"; d=json.load(open(path)); d.pop(\"{client_id}\", None); json.dump(d, open(path, \"w\"), indent=2)'"
     subprocess.run([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), 'a1234@100.75.41.0',
+        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), f'{MAC_USER}@{MAC_HOST}',
         clean_cmd
     ], check=True)
 

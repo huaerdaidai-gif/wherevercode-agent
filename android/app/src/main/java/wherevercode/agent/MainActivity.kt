@@ -8733,7 +8733,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 控制台总览的平台根地址。优先已添加平台 Agent 的主机，否则用构建配置；
-     * 都没有时由 [ConsoleScreenController.normalizedPlatformRoot] 回落到公开根。
+     * 都没有时为空串，总览显示「未配置」——平台地址不预置任何默认值。
      * 控制器初始化早于 [agentStore]，未就绪时只走默认。
      */
     private fun normalizedConsolePlatformRoot(): String {

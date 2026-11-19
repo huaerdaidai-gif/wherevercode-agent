@@ -5076,9 +5076,10 @@ public struct ControlHomeView: View {
     }
 
     /// 概览卡只显示主机（与安卓同口径）；完整地址在 MCP 页内查看与复制。
+    /// 未配置时显示「未配置」，不拿任何写死主机冒充已配置。
     private var overviewHostText: String {
         let raw = appState.settings.platformBaseURLString
-        if raw.isEmpty { return "https://v5.cococolo.xyz" }
+        if raw.isEmpty { return "未配置" }
         if let host = URL(string: raw)?.host { return "https://\(host)" }
         return raw
     }
@@ -5504,16 +5505,36 @@ public struct AccountSettingsView: View {
                 .padding(.vertical, 6)
             }
 
-            // 平台连接（静态呈现预置地址与有效状态，定版行为）
+            // 平台连接（呈现用户已保存的地址；未配置就明说未配置）
             Section("平台连接") {
-                LabeledContent("平台地址", value: appState.settings.platformBaseURLString)
-                    .accessibilityIdentifier("settings.address")
+                LabeledContent(
+                    "平台地址",
+                    value: appState.settings.platformBaseURLString.isEmpty
+                        ? "未配置"
+                        : appState.settings.platformBaseURLString
+                )
+                .accessibilityIdentifier("settings.address")
                 HStack {
                     Text("地址状态")
                     Spacer()
-                    Text("地址有效。")
-                        .font(.subheadline)
-                        .foregroundStyle(.green)
+                    switch appState.settings.validation {
+                    case .ok:
+                        Text("地址有效。")
+                            .font(.subheadline)
+                            .foregroundStyle(.green)
+                    case .missingBaseURL:
+                        Text("未配置")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    case .invalidBaseURL(let detail):
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                    case .missingChannelID:
+                        Text("地址有效，尚未选择频道。")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
 
@@ -5906,12 +5927,21 @@ private struct ConsoleAutomationSubScreen: View {
     @State private var autoGoalText = ""
     @State private var simulatedWebhookResult: String?
 
+    /// Webhook 地址由已配置的平台地址拼出；未配置时显示「未配置」，
+    /// 不写死任何平台主机。
+    private var webhookURLText: String {
+        guard let base = appState.settings.validatedBaseURL,
+              let host = base.host else { return "未配置" }
+        let port = base.port.map { ":\($0)" } ?? ""
+        return "https://\(host)\(port)/api/open/v1/webhook"
+    }
+
     var body: some View {
         List {
             switch route.id {
             case "triggers":
                 Section("Webhook 唤醒端点与 HMAC 签名配置") {
-                    LabeledContent("Webhook URL", value: "https://v5.cococolo.xyz/api/open/v1/webhook")
+                    LabeledContent("Webhook URL", value: webhookURLText)
                     LabeledContent("验签方式", value: "HMAC-SHA256 (请求头: X-WhereverCode-Signature)")
                     LabeledContent("订阅事件", value: "git_push, pull_request, chat_mention, cron")
                 }

@@ -262,14 +262,15 @@ class ConsoleScreenControllerTest {
     @Test
     fun `overview shows a normalized root and the token action`() {
         assertEquals(
-            "https://v5.cococolo.xyz",
-            ConsoleScreenController.normalizedPlatformRoot("https://v5.cococolo.xyz/api/open/v1/mcp/"),
+            "https://platform.example.test",
+            ConsoleScreenController.normalizedPlatformRoot("https://platform.example.test/api/open/v1/mcp/"),
         )
         assertEquals(
             "https://example.invalid:8443",
             ConsoleScreenController.normalizedPlatformRoot("example.invalid:8443/api/open/v1/mcp"),
         )
-        assertEquals("https://v5.cococolo.xyz", ConsoleScreenController.normalizedPlatformRoot("  "))
+        // 平台地址无任何预置默认：空白规范化为空串，总览显示「未配置」。
+        assertEquals("", ConsoleScreenController.normalizedPlatformRoot("  "))
         assertEquals("配置 Token", ConsoleScreenController.connectionActionLabel(false))
         assertEquals("管理连接", ConsoleScreenController.connectionActionLabel(true))
 
@@ -282,13 +283,13 @@ class ConsoleScreenControllerTest {
             onOpenAgents = {},
             onRefresh = {},
             platformRoot = {
-                ConsoleScreenController.normalizedPlatformRoot("https://v5.cococolo.xyz/api/open/v1/mcp")
+                ConsoleScreenController.normalizedPlatformRoot("https://platform.example.test/api/open/v1/mcp")
             },
             hasPlatformToken = { true },
         )
         withToken.renderLoading()
         val texts = allTexts(withToken.root)
-        assertContains(texts, "https://v5.cococolo.xyz")
+        assertContains(texts, "https://platform.example.test")
         assertNotContains(texts, "/api/open/v1/mcp")
         assertContains(texts, "管理连接")
         assertNotContains(texts, "配置 Token")

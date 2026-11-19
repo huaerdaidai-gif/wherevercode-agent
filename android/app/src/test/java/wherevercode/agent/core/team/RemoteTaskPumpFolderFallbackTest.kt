@@ -64,7 +64,7 @@ class RemoteTaskPumpFolderFallbackTest {
     private val peer = DiscoveredPeer(
         deviceId = "mac",
         displayName = "Mac",
-        host = "192.168.1.4",
+        host = "192.168.1.10",
         port = 18743,
         fingerprintSha256 = "ab".repeat(32),
         capabilities = listOf("hand"),
@@ -72,7 +72,7 @@ class RemoteTaskPumpFolderFallbackTest {
     private val device = RemoteDevice(
         deviceId = "mac",
         displayName = "Mac",
-        host = "192.168.1.4",
+        host = "192.168.1.10",
         port = 18743,
         addedAtEpochSeconds = 1_794_334_408L,
     )

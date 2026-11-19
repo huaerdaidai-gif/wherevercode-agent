@@ -9,12 +9,12 @@ class DeviceModelDiscoveryTest {
 
     @Test
     fun `candidate urls cover the three common local servers`() {
-        val candidates = DeviceModelDiscovery.candidateBaseUrls("192.168.1.4")
+        val candidates = DeviceModelDiscovery.candidateBaseUrls("192.168.1.10")
         assertEquals(
             listOf(
-                "Ollama" to "http://192.168.1.4:11434/v1",
-                "LM Studio" to "http://192.168.1.4:1234/v1",
-                "vLLM" to "http://192.168.1.4:8000/v1",
+                "Ollama" to "http://192.168.1.10:11434/v1",
+                "LM Studio" to "http://192.168.1.10:1234/v1",
+                "vLLM" to "http://192.168.1.10:8000/v1",
             ),
             candidates,
         )
@@ -28,8 +28,8 @@ class DeviceModelDiscoveryTest {
 
     @Test
     fun `tailnet hosts are probed over http, public hosts over https`() {
-        val tailnet = DeviceModelDiscovery.candidateBaseUrls("100.75.41.0")
-        assertTrue(tailnet.all { it.second.startsWith("http://100.75.41.0:") })
+        val tailnet = DeviceModelDiscovery.candidateBaseUrls("100.64.0.1")
+        assertTrue(tailnet.all { it.second.startsWith("http://100.64.0.1:") })
         val pub = DeviceModelDiscovery.candidateBaseUrls("203.0.113.9")
         assertTrue(pub.all { it.second.startsWith("https://203.0.113.9:") })
         val pubName = DeviceModelDiscovery.candidateBaseUrls("models.example.com")
