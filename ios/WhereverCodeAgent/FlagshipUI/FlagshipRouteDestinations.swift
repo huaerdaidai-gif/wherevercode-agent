@@ -5523,6 +5523,13 @@ public struct AccountSettingsView: View {
                     Label("首次使用指南", systemImage: "hand.wave")
                 }
                 .foregroundStyle(.primary)
+
+                // 大脑入口（已砍下放角落：主设置留一行安静入口，进现成 BrainSettingsView，页面内容不动）
+                NavigationLink {
+                    BrainSettingsView(model: appState.brainSettingsModel)
+                } label: {
+                    Label("大脑", systemImage: "brain.head.profile")
+                }
             } header: { Text("应用").textCase(nil) }
 
             // 独立开发者入口（收纳诊断与路由矩阵，不在正式界面堆放内部术语）
