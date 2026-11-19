@@ -168,11 +168,11 @@ class ModelStoreB3Test {
     @Test
     fun `composite prefers the model store on id clash`() {
         brainStore.saveConfig(brainConfig("same", model = "brain-model"))
-        brainStore.saveConfig(brainConfig("brain-only"))
+        brainStore.saveConfig(brainConfig("brain-only", model = "brain-model"))
         modelStore.saveEntry(
             ModelEntry.fromBrainConfig(brainConfig("same", model = "model-model")),
         )
-        modelStore.saveEntry(ModelEntry.fromBrainConfig(brainConfig("model-only")))
+        modelStore.saveEntry(ModelEntry.fromBrainConfig(brainConfig("model-only", model = "model-model")))
 
         val composite = CompositeBrainConfigStore(modelStore, brainStore)
         assertEquals("model-model", composite.getConfig("same")!!.model)
