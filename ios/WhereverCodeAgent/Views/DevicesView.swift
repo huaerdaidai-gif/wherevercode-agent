@@ -97,7 +97,7 @@ public struct DevicesView: View {
 
     @ViewBuilder
     private var discoveryAndInstallSection: some View {
-        Section("添加设备") {
+        Section {
             Button {
                 showAddSheet = true
             } label: {
@@ -120,14 +120,14 @@ public struct DevicesView: View {
                 }
             }
 
-        }
+        } header: { Text("添加设备").textCase(nil) }
     }
 
     // MARK: - 二、已添加设备列表
 
     @ViewBuilder
     private var registeredDevicesSection: some View {
-        Section("已添加设备") {
+        Section {
             if let loadError {
                 Text(loadError).foregroundStyle(.red)
             }
@@ -184,7 +184,7 @@ public struct DevicesView: View {
                     showDeleteConfirm = true
                 }
             }
-        }
+        } header: { Text("已添加设备").textCase(nil) }
     }
 
     private func deviceStatusSummary(_ device: AgentRecord, hostedCount: Int) -> String {
@@ -412,7 +412,7 @@ private struct AddDeviceSheet: View {
     // 步骤一：发现设备或输入地址
     @ViewBuilder
     private var initialDiscoveryAndInputSection: some View {
-        Section("附近的设备") {
+        Section {
             if discoveredPeers.isEmpty && !isScanning {
                 Text("暂无发现的设备，可在下方手动输入地址。")
                     .foregroundStyle(.secondary)
@@ -447,7 +447,7 @@ private struct AddDeviceSheet: View {
                 }
                 .disabled(isProbing)
             }
-        }
+        } header: { Text("附近的设备").textCase(nil) }
 
         Section {
             Button {
@@ -456,13 +456,11 @@ private struct AddDeviceSheet: View {
                 Label("在新设备上安装 Hand", systemImage: "sparkles")
                     .font(.subheadline.weight(.medium))
             }
-        } header: {
-            Text("尚未安装 Hand？")
-        } footer: {
+        } header: { Text("尚未安装 Hand？").textCase(nil) } footer: {
             Text("支持输入局域网 IP、Tailscale 专网 IP (100.x.x.x) 或 Tailscale MagicDNS 域名。")
         }
 
-        Section("手动连接信息") {
+        Section {
             TextField("设备名称（如 Mac Studio / K70-Termux）", text: $name)
             TextField("IP 或 Tailscale 主机名（如 100.x.x.x）", text: $host)
                 .textInputAutocapitalization(.never)
@@ -478,7 +476,7 @@ private struct AddDeviceSheet: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
-        }
+        } header: { Text("手动连接信息").textCase(nil) }
 
         if let errorMessage {
             Section {
@@ -511,7 +509,7 @@ private struct AddDeviceSheet: View {
     // 步骤二：核对公钥指纹与输入 6 位配对码
     @ViewBuilder
     private func pairingVerificationSection(hello: RemoteHello) -> some View {
-        Section("目标设备信息") {
+        Section {
             LabeledContent("设备名称", value: hello.displayName)
             LabeledContent("设备 ID", value: hello.deviceId)
             if hello.clientStatus == "APPROVED" {
@@ -523,9 +521,9 @@ private struct AddDeviceSheet: View {
                         .foregroundStyle(.green)
                 }
             }
-        }
+        } header: { Text("目标设备信息").textCase(nil) }
 
-        Section("核对服务端指纹（SHA-256）") {
+        Section {
             VStack(alignment: .leading, spacing: 6) {
                 Text(hello.fingerprintSha256)
                     .font(.system(size: 11, design: .monospaced))
@@ -538,9 +536,9 @@ private struct AddDeviceSheet: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-        }
+        } header: { Text("核对服务端指纹（SHA-256）").textCase(nil) }
 
-        Section("输入配对码") {
+        Section {
             if hello.clientStatus == "APPROVED" {
                 Text("此 iPhone 已被远端批准，可直接完成添加。")
                     .font(.footnote)
@@ -578,7 +576,7 @@ private struct AddDeviceSheet: View {
                     }
                 }
             }
-        }
+        } header: { Text("输入配对码").textCase(nil) }
 
         if let errorMessage {
             Section {
@@ -732,7 +730,7 @@ private struct InstallGuideSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("选择目标设备系统") {
+                Section {
                     Picker("操作系统", selection: $selectedOs) {
                         ForEach(DeviceTargetOs.allCases) { os in
                             Label(os.rawValue, systemImage: os.iconName).tag(os)
@@ -748,9 +746,9 @@ private struct InstallGuideSheet: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                }
+                } header: { Text("选择目标设备系统").textCase(nil) }
 
-                Section("一键安装命令") {
+                Section {
                     let cmd = DeviceInstallGuide.installCommand(for: selectedOs)
                     VStack(alignment: .leading, spacing: 8) {
                         Text(cmd)
@@ -779,9 +777,9 @@ private struct InstallGuideSheet: View {
                             }
                         }
                     }
-                }
+                } header: { Text("一键安装命令").textCase(nil) }
 
-                Section("操作说明") {
+                Section {
                     ForEach(Array(DeviceInstallGuide.stepInstructions(for: selectedOs).enumerated()), id: \.offset) { idx, step in
                         HStack(alignment: .top, spacing: 8) {
                             Text("\(idx + 1).")
@@ -791,15 +789,15 @@ private struct InstallGuideSheet: View {
                                 .font(.subheadline)
                         }
                     }
-                }
+                } header: { Text("操作说明").textCase(nil) }
 
                 if selectedOs == .mac || selectedOs == .linux || selectedOs == .vps {
-                    Section("卸载命令") {
+                    Section {
                         Text(DeviceInstallGuide.uninstallCommand(for: selectedOs))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
-                    }
+                    } header: { Text("卸载命令").textCase(nil) }
                 }
             }
             .navigationTitle("在新设备上安装 Hand")
@@ -836,7 +834,7 @@ private struct DeviceDetailSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("设备标识与连接") {
+                Section {
                     LabeledContent("设备名称", value: device.displayName)
                     LabeledContent("设备 ID", value: device.deviceId ?? device.agentId)
                     LabeledContent("连接状态") {
@@ -871,7 +869,7 @@ private struct DeviceDetailSheet: View {
                             .font(.caption)
                             .foregroundStyle(probeResult.contains("成功") ? .green : .red)
                     }
-                }
+                } header: { Text("设备标识与连接").textCase(nil) }
 
                 if let hello = remoteHello {
                     Section {
@@ -892,14 +890,12 @@ private struct DeviceDetailSheet: View {
                             onNavigateRoute("agents")
                         }
                         .font(.caption)
-                    } header: {
-                        Text("承载 Agent（只读关联信息 · \(hello.agents.count) 个）")
-                    } footer: {
+                    } header: { Text("承载 Agent（只读关联信息 · \(hello.agents.count) 个）").textCase(nil) } footer: {
                         Text("设备仅作为执行宿主，点此卡片只管理设备连接本身；要修改、配置或增删 Agent，请前往 Agent 管理。")
                     }
                 }
 
-                Section("工作区目录授权") {
+                Section {
                     TextField("工作目录路径", text: Binding(
                         get: { device.deviceFolder ?? "" },
                         set: { val in
@@ -921,9 +917,9 @@ private struct DeviceDetailSheet: View {
                             .font(.caption)
                             .foregroundStyle(authResult.contains("成功") ? .green : .red)
                     }
-                }
+                } header: { Text("工作区目录授权").textCase(nil) }
 
-                Section("远程文件管理 (Hand 协议)") {
+                Section {
                     Button(isListingFiles ? "正在读取目录…" : "列出授权工作区文件 (listDirectory)") {
                         loadDirectoryFiles()
                     }
@@ -946,9 +942,9 @@ private struct DeviceDetailSheet: View {
                             .font(.caption)
                             .foregroundStyle(.blue)
                     }
-                }
+                } header: { Text("远程文件管理 (Hand 协议)").textCase(nil) }
 
-                Section("管理操作") {
+                Section {
                     Button("查看关联任务") { onNavigateRoute("tasks") }
                     if isLocallyAuthorized {
                         Button("取消配对并撤销凭据", role: .destructive) {
@@ -958,7 +954,7 @@ private struct DeviceDetailSheet: View {
                     Button("删除设备", role: .destructive) {
                         showDeleteConfirm = true
                     }
-                }
+                } header: { Text("管理操作").textCase(nil) }
             }
             .navigationTitle("设备详情")
             .navigationBarTitleDisplayMode(.inline)

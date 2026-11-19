@@ -33,7 +33,7 @@ struct PlatformConnectionCardSection: View {
     let onGoSettings: () -> Void
 
     var body: some View {
-        Section("平台连接") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Label("平台未连接", systemImage: "wifi.slash")
                     .font(.headline)
@@ -44,7 +44,7 @@ struct PlatformConnectionCardSection: View {
                     .buttonStyle(.borderedProminent)
             }
             .padding(.vertical, 4)
-        }
+        } header: { Text("平台连接").textCase(nil) }
     }
 }
 
@@ -105,7 +105,7 @@ struct ConversationHomeContentView: View {
                     }
                 }
             }
-            Section("团队频道") {
+            Section {
                 if !platformConnected {
                     Text("连接平台后在这里查看和进入频道")
                         .font(.subheadline)
@@ -125,12 +125,12 @@ struct ConversationHomeContentView: View {
                         }
                     }
                 }
-            }
-            Section("其他对话") {
+            } header: { Text("团队频道").textCase(nil) }
+            Section {
                 Text("本地模型对话可从侧边栏「对话」进入，无需平台连接。")
                     .font(.caption).foregroundStyle(.secondary)
                 ReservedFeatureRow(feature: .singleAgentChat)
-            }
+            } header: { Text("其他对话").textCase(nil) }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -150,15 +150,15 @@ struct ChannelListContentView: View {
     var body: some View {
         List {
             if let loadError {
-                Section("连接平台失败") {
+                Section {
                     Text(loadError)
                         .font(.subheadline)
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                     Button("重试") { onRetry() }
-                }
+                } header: { Text("连接平台失败").textCase(nil) }
             }
-            Section("团队频道") {
+            Section {
                 if channels.isEmpty {
                     Text(loadError == nil
                          ? "没有可见的频道。请确认 Token 有权访问频道，或在设置里检查平台地址。"
@@ -173,12 +173,12 @@ struct ChannelListContentView: View {
                         }
                     }
                 }
-            }
-            Section("其他对话") {
+            } header: { Text("团队频道").textCase(nil) }
+            Section {
                 Text("本地模型对话可从侧边栏「对话」进入，无需平台连接。")
                     .font(.caption).foregroundStyle(.secondary)
                 ReservedFeatureRow(feature: .singleAgentChat)
-            }
+            } header: { Text("其他对话").textCase(nil) }
         }
         .refreshable { onRefresh() }
     }
@@ -253,12 +253,12 @@ struct ChatListView: View {
                     )
                 } else {
                     List {
-                        Section("团队频道") {
+                        Section {
                             Text("平台尚未连接").font(.headline)
                             Text("频道需要平台连接；本地对话、项目与任务记录仍可从侧边栏使用。")
                                 .font(.subheadline).foregroundStyle(.secondary)
                             Button("去设置") { appState.goToSettings() }
-                        }
+                        } header: { Text("团队频道").textCase(nil) }
                     }
                 }
             }

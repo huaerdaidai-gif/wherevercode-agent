@@ -1317,7 +1317,7 @@ public struct LocalChatHomeView: View {
                             model.showHistory = false
                         }
                     }
-                    Section("历史会话") {
+                    Section {
                         if filteredHistory.isEmpty {
                             Text("暂无保存的本地会话").foregroundStyle(.secondary)
                         } else {
@@ -1370,7 +1370,7 @@ public struct LocalChatHomeView: View {
                                 model.deleteConversations(at: offsets, in: filteredHistory)
                             }
                         }
-                    }
+                    } header: { Text("历史会话").textCase(nil) }
                 }
                 .navigationTitle("会话")
                 .searchable(text: $query, prompt: "搜索历史会话")
@@ -1850,7 +1850,7 @@ public struct ProjectSourcePickerSheet: View {
     public var body: some View {
         NavigationStack {
             List {
-                Section("选择来源") {
+                Section {
                     ForEach(ProjectSourceRegistry.shared.all(data: model.data), id: \.id) { p in
                         NavigationLink {
                             ProjectSourceTargetList(model: model, provider: p) { dismiss() }
@@ -1871,7 +1871,7 @@ public struct ProjectSourcePickerSheet: View {
                         }
                     }
                     .id(refresh)
-                }
+                } header: { Text("选择来源").textCase(nil) }
                 Section {
                     TextField("名称（如 公司 WebDAV）", text: $customTitle)
                     TextField("地址（https:// / ssh:// …）", text: $customEndpoint)
@@ -1882,9 +1882,7 @@ public struct ProjectSourcePickerSheet: View {
                         customTitle = ""; customEndpoint = ""; refresh += 1
                     }
                     .disabled(customTitle.isEmpty || customEndpoint.isEmpty)
-                } header: {
-                    Text("扩展来源")
-                } footer: {
+                } header: { Text("扩展来源").textCase(nil) } footer: {
                     Text("来源可扩展：新增类型以接入模块注册，未接入的来源会如实显示状态。选择任何来源都不会自动获得命令执行权限。")
                 }
             }
@@ -1906,15 +1904,15 @@ private struct ProjectSourceTargetList: View {
         let status = provider.status(data: model.data)
         let targets = provider.targets(data: model.data)
         List {
-            Section("连接状态") {
+            Section {
                 Label(status.text, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.circle")
                     .foregroundStyle(status.isReady ? Color.green : Color.orange)
                 if !status.isReady, provider.id == "lan" || provider.id == "remote" || provider.id == "vps" {
                     Button("去添加 / 配对设备") { model.appState.onSelectRoute?("devices"); onDone() }
                 }
-            }
+            } header: { Text("连接状态").textCase(nil) }
             if status.isReady {
-                Section("选择设备 / 项目") {
+                Section {
                     if targets.isEmpty { Text("没有可选项").foregroundStyle(.secondary) }
                     ForEach(targets) { t in
                         Button {
@@ -1931,13 +1929,13 @@ private struct ProjectSourceTargetList: View {
                             }
                         }
                     }
-                }
+                } header: { Text("选择设备 / 项目").textCase(nil) }
                 if selected != nil {
-                    Section("工作路径") {
+                    Section {
                         TextField("路径", text: $path)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                    }
+                    } header: { Text("工作路径").textCase(nil) }
                     Section {
                         Button("确认") {
                             model.projectSource = ProjectSourceBinding(
@@ -1986,7 +1984,7 @@ public struct ModelAndAgentSheet: View {
         let agents = availableAgents
         NavigationStack {
             List {
-                Section("智能建议") {
+                Section {
                     if let suggestion = suggestedAgent(from: agents) {
                         Button {
                             model.selectAgentInCurrentSession(suggestion.agent)
@@ -2002,7 +2000,7 @@ public struct ModelAndAgentSheet: View {
                         Text("暂无明确建议，请手动选择 Agent。")
                             .foregroundStyle(.secondary)
                     }
-                }
+                } header: { Text("智能建议").textCase(nil) }
 
                 Section {
                     if agents.isEmpty {
@@ -2042,9 +2040,7 @@ public struct ModelAndAgentSheet: View {
                             }
                         }
                     }
-                } header: {
-                    Text("可选 Agent（设备 / 平台 / 云端）")
-                }
+                } header: { Text("可选 Agent（设备 / 平台 / 云端）").textCase(nil) }
 
                 Section {
                     Button("管理 Agent") { dismiss(); onManageAgents() }

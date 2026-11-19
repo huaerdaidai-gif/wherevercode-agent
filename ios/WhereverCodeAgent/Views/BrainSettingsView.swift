@@ -210,13 +210,13 @@ public struct BrainSettingsView: View {
 
             // 四、恢复内置模型
             if !model.restorableBrainIds.isEmpty {
-                Section("恢复内置模型") {
+                Section {
                     ForEach(model.restorableBrainIds, id: \.self) { brainId in
                         Button("恢复 \(BrainBootstrap.seedConfigFor(brainId: brainId)?.label ?? brainId)") {
                             model.restore(brainId: brainId)
                         }
                     }
-                }
+                } header: { Text("恢复内置模型").textCase(nil) }
             }
 
         }
@@ -258,7 +258,7 @@ public struct BrainSettingsView: View {
 
     @ViewBuilder
     private var addSection: some View {
-        Section("从预设添加模型") {
+        Section {
             Button {
                 showCommonPicker = true
             } label: {
@@ -298,14 +298,14 @@ public struct BrainSettingsView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-        }
+        } header: { Text("从预设添加模型").textCase(nil) }
     }
 
     // MARK: - 2. 智能路由区（顶层可见，不折叠）
 
     @ViewBuilder
     private var routingSection: some View {
-        Section("智能路由") {
+        Section {
             Toggle("智能路由（自动切换模型）", isOn: Binding(
                 get: { model.routingSettings.enabled },
                 set: { val in
@@ -341,7 +341,7 @@ public struct BrainSettingsView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-        }
+        } header: { Text("智能路由").textCase(nil) }
     }
 
     // MARK: - 3. 已添加的模型（分类呈现）
@@ -361,7 +361,7 @@ public struct BrainSettingsView: View {
 
     @ViewBuilder
     private var addedModelsSection: some View {
-        Section("已添加的模型") {
+        Section {
             if model.configs.isEmpty {
                 Text("还没有添加模型。")
                     .font(.subheadline)
@@ -395,7 +395,7 @@ public struct BrainSettingsView: View {
                     }
                 }
             }
-        }
+        } header: { Text("已添加的模型").textCase(nil) }
     }
 
     @ViewBuilder
@@ -631,9 +631,7 @@ private struct FreeProviderPickerSheet: View {
                 TextField("Cloudflare Account ID", text: $accountId)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-            } header: {
-                Text("输入 Account ID")
-            } footer: {
+            } header: { Text("输入 Account ID").textCase(nil) } footer: {
                 Text("可在 Cloudflare 控制台右侧侧边栏查看。")
             }
 
@@ -660,11 +658,11 @@ private struct FreeProviderPickerSheet: View {
                     }
                 }
 
-                Section("API Key") {
+                Section {
                     SecureField("粘贴 API Key（只存本机 Keychain）", text: $apiKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                }
+                } header: { Text("API Key").textCase(nil) }
 
                 if isFetchingLiveModels {
                     HStack(spacing: 8) {
@@ -718,7 +716,7 @@ private struct FreeProviderPickerSheet: View {
 
     private var modelSelectionView: some View {
         List {
-            Section("勾选要添加的模型") {
+            Section {
                 ForEach(Array(modelsToSelect.enumerated()), id: \.offset) { idx, modelId in
                     Button {
                         if checkedModelIndices.contains(idx) {
@@ -738,7 +736,7 @@ private struct FreeProviderPickerSheet: View {
                         }
                     }
                 }
-            }
+            } header: { Text("勾选要添加的模型").textCase(nil) }
 
             Section {
                 Button("添加所选 (\(checkedModelIndices.count))") {
@@ -800,14 +798,14 @@ private struct CustomFreeProviderDialog: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("服务商信息") {
+                Section {
                     TextField("服务商名称（如 我的实验室）", text: $name)
                     TextField("服务地址（如 https://api.example.com/v1）", text: $baseUrl)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                }
+                } header: { Text("服务商信息").textCase(nil) }
 
-                Section("模型列表模式") {
+                Section {
                     Picker("模式", selection: $listMode) {
                         Text("实时拉取 (/models)").tag(FreeModelListMode.live)
                         Text("固定模型名单").tag(FreeModelListMode.fixed)
@@ -819,7 +817,7 @@ private struct CustomFreeProviderDialog: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
-                }
+                } header: { Text("模型列表模式").textCase(nil) }
 
                 if let errorMessage {
                     Section {
@@ -981,7 +979,7 @@ private struct DeviceModelDiscoverySheet: View {
 
     private var modelsView: some View {
         List {
-            Section("勾选要添加的模型") {
+            Section {
                 ForEach(Array(discoveredModels.enumerated()), id: \.offset) { idx, item in
                     Button {
                         if checkedDiscoveredIndices.contains(idx) {
@@ -1004,7 +1002,7 @@ private struct DeviceModelDiscoverySheet: View {
                         }
                     }
                 }
-            }
+            } header: { Text("勾选要添加的模型").textCase(nil) }
 
             Button("添加所选 (\(checkedDiscoveredIndices.count))") {
                 saveDiscovered()
@@ -1100,7 +1098,7 @@ private struct RoutingPoolPickerSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("路由池候选模型") {
+                Section {
                     if availableModels.isEmpty {
                         Text("还没有任何模型连接：先添加模型，再来选路由池。")
                             .font(.subheadline)
@@ -1135,7 +1133,7 @@ private struct RoutingPoolPickerSheet: View {
                             }
                         }
                     }
-                }
+                } header: { Text("路由池候选模型").textCase(nil) }
             }
             .navigationTitle("智能路由池（按顺序切换）")
             .navigationBarTitleDisplayMode(.inline)
@@ -1211,7 +1209,7 @@ private struct BrainEditorView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Section("基本信息") {
+                    Section {
                         TextField("名称", text: $label)
                         TextField("服务地址（https://…）", text: $baseUrl)
                             .textInputAutocapitalization(.never)
@@ -1231,8 +1229,8 @@ private struct BrainEditorView: View {
                                 }
                             }
                         }
-                    }
-                    Section("模型") {
+                    } header: { Text("基本信息").textCase(nil) }
+                    Section {
                         TextField("模型名", text: $modelName)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -1270,8 +1268,8 @@ private struct BrainEditorView: View {
                             }
                             .foregroundStyle(.primary)
                         }
-                    }
-                    Section("API Key") {
+                    } header: { Text("模型").textCase(nil) }
+                    Section {
                         SecureField(
                             model.hasKey(for: original) ? "已保存（留空不改，输入则替换）" : "粘贴 API Key",
                             text: $apiKey)
@@ -1280,7 +1278,7 @@ private struct BrainEditorView: View {
                         Text("只存本机 Keychain，不显示、不写日志、不经过平台服务器。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
+                    } header: { Text("API Key").textCase(nil) }
                 }
                 Section {
                     if model.currentBrainId != original.brainId {
