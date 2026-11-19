@@ -91,16 +91,45 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        XCTAssertTrue(app.staticTexts["频道与协作"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["频道"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["私聊 · 待开发"].firstMatch.exists)
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
 
         navigate(app, to: "console")
         snap(app, "ui-06-console")
+        let webhook = app.buttons["control.card.automation"].firstMatch
+        reveal(webhook, in: app)
+        XCTAssertTrue(webhook.waitForExistence(timeout: 5))
+        webhook.tap()
+        let webhookNotice = app.alerts["【待开发】Webhook 尚未开发"]
+        XCTAssertTrue(webhookNotice.waitForExistence(timeout: 5))
+        webhookNotice.buttons["我知道了"].tap()
 
         navigate(app, to: "chat")
         XCTAssertTrue(app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 10))
+    }
+
+    func testDrawerSearchPersistsAfterClosing() {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["chat.connectionSummary"].waitForExistence(timeout: 15))
+        let menu = app.buttons["navigation.menu"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        let search = app.textFields["drawer.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        let query = "qzxjvb4726"
+        search.typeText(query)
+        app.buttons["drawer.close"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertEqual(search.value as? String, query)
+        XCTAssertTrue(app.staticTexts["未找到匹配会话"].exists)
     }
 
     private func navigate(_ app: XCUIApplication, to destination: String) {
@@ -229,11 +258,14 @@ final class WhereverCodeAgentUITests: XCTestCase {
             app.staticTexts["可选 Agent（设备 / 平台 / 云端）"].firstMatch.waitForExistence(timeout: 5),
             "选择器必须保留可选 Agent 列表"
         )
-        let manageBtn = app.buttons["管理模型与连接"].firstMatch
-        XCTAssertTrue(manageBtn.waitForExistence(timeout: 5), "选择器必须保留「管理模型与连接」入口")
+        XCTAssertTrue(app.staticTexts["智能建议"].firstMatch.exists, "选择器必须显示智能建议")
+        let manageBtn = app.buttons["管理 Agent"].firstMatch
+        reveal(manageBtn, in: app)
+        XCTAssertTrue(manageBtn.waitForExistence(timeout: 5), "选择器必须保留「管理 Agent」入口")
         let ruleText = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "单选规则：对话框仅保留一个勾选的 Agent")
         ).firstMatch
+        reveal(ruleText, in: app)
         XCTAssertTrue(ruleText.waitForExistence(timeout: 5), "单选规则文案应只提 Agent")
 
         snap(app, "ui-03-agent-selector")

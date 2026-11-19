@@ -85,7 +85,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:visibility="gone">
 
             <TextView
                 android:id="@+id/deviceSectionTitle"
@@ -114,7 +115,8 @@
             android:layout_marginTop="8dp"
             android:orientation="vertical"
             android:background="@drawable/bg_card"
-            android:padding="14dp">
+            android:padding="14dp"
+            android:visibility="gone">
         </LinearLayout>
 
     </LinearLayout>

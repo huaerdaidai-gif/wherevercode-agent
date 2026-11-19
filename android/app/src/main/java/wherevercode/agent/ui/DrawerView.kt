@@ -23,7 +23,7 @@ import wherevercode.agent.R
  * 4. 最近会话区与会话搜索
  * 5. 分割线
  * 6. 底部固定账号（设置）与「＋ 新对话」
- * 7. 最底部「全部功能（89 项全表）」入口
+ * 7. 最底部「全部功能（N 项）」入口
  *
  * 旧入口（设备/Agent/任务队列与审批/Webhook/事件/用量）进「控制」页入口列表；
  * 其余进全部功能注册表（保证每个旧入口在 控制 或 全部功能 里有可见入口，功能只规范呈现、不砍）。
@@ -221,7 +221,7 @@ class DrawerView(
         // 4. 底部固定账号（设置）与新对话
         addBottomAccountSection(rows)
 
-        // 5. 抽屉最底部：全部功能（89 项全表）集中入口
+        // 5. 抽屉最底部：全部功能（N 项）集中入口
         addFeatureCenterEntry(rows)
 
         renderedRowList = rows
@@ -364,11 +364,14 @@ class DrawerView(
     private fun buildSearchBox(): LinearLayout {
         val searchBox = UiKit.horizontal(context).apply {
             background = UiKit.rounded(context, R.color.bg_card, 10, R.color.divider, 1)
-            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setPadding(dp(10), dp(6), dp(10), dp(6))
             gravity = Gravity.CENTER_VERTICAL
+            // 高度不写死：原先写死 38dp、上下内边距各 4dp，输入框可用高度只剩
+            // 30dp 硬顶；字段自身又零内边距（见下），真机上字形下半被裁（200 实证）。
+            // 改为随内容定高，框高由内边距 + 字段高度决定，外观高度基本不变。
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(38),
+                LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
                 bottomMargin = dp(8)
             }
@@ -382,6 +385,9 @@ class DrawerView(
             setTextColor(UiKit.color(context, R.color.text_primary))
             setHintTextColor(UiKit.color(context, R.color.text_tertiary))
             background = null
+            // 背景置空后，系统 EditText 默认背景附带的纵向内边距一并消失，
+            // 字段零留白时字形上下界贴着字段内界、绘制时下半被裁；补回纵向内边距。
+            setPadding(0, dp(3), 0, dp(3))
             isSingleLine = true
             // 软件绘制：避开抽屉滑动时硬件层缓存造成的文字双重绘制（重影）。
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)
@@ -560,7 +566,7 @@ class DrawerView(
 
     private fun addFeatureCenterEntry(rows: MutableList<RenderedRow>) {
         val totalCount = EntryRegistry.ENTRIES.size
-        val label = "全部功能（${totalCount} 项全表）"
+        val label = "全部功能（${totalCount} 项）"
         rows += RenderedRow(
             id = "nav_feature_center",
             label = label,

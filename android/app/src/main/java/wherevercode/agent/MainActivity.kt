@@ -79,6 +79,9 @@ import wherevercode.agent.brain.deepseek.DeepSeekBrainAdapter
 import wherevercode.agent.brain.devicecode.DeviceCodeConfigs
 import wherevercode.agent.brain.ModelRouting
 import wherevercode.agent.brain.SharedPreferencesModelRoutingStore
+import wherevercode.agent.models.ModelConfigStore
+import wherevercode.agent.models.ModelEntry
+import wherevercode.agent.models.ConfigDeletionPolicy
 import wherevercode.agent.brain.generic.CustomFreeProviders
 import wherevercode.agent.brain.generic.SharedPreferencesCustomFreeProviderStore
 import wherevercode.agent.brain.generic.DeviceModelDiscovery
@@ -109,6 +112,7 @@ import wherevercode.agent.core.agent.enabledAgents
 import wherevercode.agent.core.agent.setAgentEnabled
 import wherevercode.agent.core.agent.AgentSecretEdit
 import wherevercode.agent.core.agent.AgentStore
+import wherevercode.agent.core.agent.AgentSecretReferencePolicy
 import wherevercode.agent.core.autonomy.AutonomyMode
 import wherevercode.agent.core.autonomy.AutonomyPolicy
 import wherevercode.agent.core.autonomy.AutonomyStore
@@ -257,6 +261,8 @@ import wherevercode.agent.core.task.SharedPreferencesEvalLogStore
 import wherevercode.agent.core.task.SharedPreferencesRouterSettings
 import wherevercode.agent.core.task.SharedPreferencesRoutingDecisionLog
 import wherevercode.agent.core.task.TaskDatabase
+import wherevercode.agent.core.task.TaskDatabaseProvider
+import wherevercode.agent.core.team.RoomTeamMemberStore
 import wherevercode.agent.core.task.TaskLibraryGrouping
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskRetry
@@ -600,6 +606,14 @@ class MainActivity : AppCompatActivity() {
 
     /** 密钥值只进 Keystore（与 BrainConfig 同款规则）。 */
     private val brainKeyStore by lazy { BrainKeyStore(applicationContext) }
+
+    /**
+     * 差异 9（B3）：独立模型存储（模型页专用）。与大脑存储彻底
+     * 分家：模型页增删改只读写这里，设置页「大脑」分节只读大脑
+     * 存储；运行时消费经 BrainComponents.runtimeConfigStore 合并。
+     * 与装配层（BrainBootstrap.build）持有的实例是同一 prefs 文件。
+     */
+    private val modelConfigStore: ModelConfigStore by lazy { ModelConfigStore(applicationContext) }
 
     private lateinit var projectController: ProjectScreenController
     private lateinit var agentController: AgentScreenController
@@ -1446,7 +1460,7 @@ class MainActivity : AppCompatActivity() {
                 OnboardingController.Readiness.NOT_CHECKED,
                 OnboardingController.Readiness.NOT_CHECKED,
             )
-        val currentBrainId = components.configStore.currentBrainId()
+        val currentBrainId = components.runtimeConfigStore.currentBrainId()
         val brain = if (currentBrainId != null && components.isBrainConfigured(currentBrainId)) {
             OnboardingController.Readiness.AVAILABLE
         } else {
@@ -1565,12 +1579,26 @@ class MainActivity : AppCompatActivity() {
             onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
             onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onOpenModels = { showEntry(DrawerController.ID_MODELS) },
-            modelsCount = { brainComponents?.configStore?.listConfigs()?.size ?: 0 },
+            modelsCount = {
+                // 差异 9（B3）：角标只数独立模型存储中模型页会显示的
+                // 条目（与 refreshModelList 同一份 buildRows 可见性
+                // 过滤，角标数严格等于模型页条目数）；不再数大脑存储。
+                // buildRows 的可见性与 isConfigured / siwcSignedIn 无关
+                //（那两个只影响状态文案），故此处传占位值不影响计数。
+                ModelListRows.buildRows(
+                    configs = modelConfigStore.listEntries().map { it.toBrainConfig() },
+                    currentBrainId = modelConfigStore.currentModelId(),
+                    isConfigured = { false },
+                    siwcSignedIn = false,
+                ).size
+            },
             onRefresh = { refreshConsole() },
             onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
             onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
             onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
             onToast = { msg -> toast(msg) },
+            platformRoot = { normalizedConsolePlatformRoot() },
+            hasPlatformToken = { hasSavedPlatformToken() },
         )
         screenConsole = consoleController.root
         container.addView(screenConsole)
@@ -1635,7 +1663,7 @@ class MainActivity : AppCompatActivity() {
         val sections = listOf(
             "聊天" to "在首页输入框发一句话，${brainDisplayName()}会推理并调用工具。写文件与命令执行前会弹审批，通过才执行；拒绝或界面销毁后授权立即作废。",
             "暂停 / 停止 / 改目标" to "运行中的轮次可在聊天页控制行点“暂停/停止”，或在任务页点“暂停/停止/改目标”。停止会二次确认；停止后本轮不会自动续跑。",
-            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（89 项全表）」。",
+            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（${EntryRegistry.ENTRIES.size} 项）」。",
             "项目" to "项目页可浏览工作区文件、查看与编辑代码（保存前二次确认，可撤销/保留）、问 Agent。终端页未实现，不在项目页里伪装。",
             "Agent 与团队" to "Agent 页可添加云端模型 API、订阅授权 Agent、本机 CLI Agent、设备上的 Agent、平台 Agent（webhook 唤醒）或云端 Agent（MCP 连接器），可对话、指派、测试、编辑、移除。设备管理在独立的设备页；未配对设备标“不可用”。",
             "教我使用" to "交互式导师尚未实现。先按上面几节用；遇到问题回首页直接问${brainDisplayName()}。",
@@ -1658,7 +1686,7 @@ class MainActivity : AppCompatActivity() {
         val root = UiKit.vertical(this)
         dialogView.addView(root)
         root.addView(
-            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项全表）", 18f, R.color.text_primary, bold = true).apply {
+            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项）", 18f, R.color.text_primary, bold = true).apply {
                 setPadding(0, 0, 0, dp(12))
             }
         )
@@ -1710,7 +1738,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                     textCol.addView(titleRow)
-                    val subtitle = entry.note ?: entry.todoMessage ?: entry.target
+                    val subtitle = EntryRegistry.listSubtitle(entry)
                     if (subtitle.isNotEmpty()) {
                         textCol.addView(
                             UiKit.text(this, subtitle, 11f, R.color.text_secondary)
@@ -1852,11 +1880,8 @@ class MainActivity : AppCompatActivity() {
             screenAgents.findViewById<View>(id).visibility =
                 if (devicesOnly) View.GONE else View.VISIBLE
         }
-        screenAgents.findViewById<View>(R.id.deviceSectionHeader).visibility =
-            if (devicesOnly) View.VISIBLE else View.GONE
-        deviceInfo.visibility = if (devicesOnly) View.VISIBLE else View.GONE
-        screenAgents.findViewById<TextView>(R.id.deviceSectionTitle).text =
-            if (devicesOnly) "设备" else "本机设备"
+        screenAgents.findViewById<View>(R.id.deviceSectionHeader).visibility = View.GONE
+        deviceInfo.visibility = View.GONE
         if (devicesOnly) {
             screenAgents.post { (screenAgents as ScrollView).scrollTo(0, 0) }
         }
@@ -2319,7 +2344,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (agents.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle("选择模型 / Agent")
+                .setTitle("选择对话方")
                 .setMessage(
                     if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选。"
                     else "暂无已添加 Agent",
@@ -2342,7 +2367,7 @@ class MainActivity : AppCompatActivity() {
             }
         }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("选择模型 / Agent")
+            .setTitle("选择对话方")
             .setItems(labels) { _, which ->
                 when (val row = rows[which]) {
                     is AgentPickerRow.Suggested -> {
@@ -2914,15 +2939,15 @@ class MainActivity : AppCompatActivity() {
      */
     private fun discoverAgentsFromDevices() {
         Thread {
-            val devices = try {
-                remoteDeviceStore.listDevices()
+            val (devices, pairings) = try {
+                remoteDeviceStore.listDevices() to pairingStore.all()
             } catch (_: Exception) {
-                emptyList()
-            }
-            val pairings = try {
-                pairingStore.all()
-            } catch (_: Exception) {
-                emptyList()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("读取设备或配对记录失败，已取消重新发现。")
+                    }
+                }
+                return@Thread
             }
             val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
                 .map { it.deviceId }.toSet()
@@ -2963,12 +2988,34 @@ class MainActivity : AppCompatActivity() {
     private fun scanDevicesForAgents(devices: List<RemoteDevice>) {
         toast("正在扫描 ${devices.size} 台设备…")
         Thread {
-            val existingIds = try {
-                agentStore.listAgents().map { it.agentId }.toSet()
+            val existingById = try {
+                agentStore.listAgents().associateBy { it.agentId }
             } catch (_: Exception) {
-                emptySet()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("读取 Agent 记录失败，已停止扫描，未执行改绑。")
+                    }
+                }
+                return@Thread
+            }
+            val knownDeviceIds = try {
+                DeviceAgentDiscovery.knownDeviceIds(
+                    remoteDeviceStore.listDevices().map { it.deviceId },
+                    pairingStore.all().map { it.deviceId },
+                )
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("读取设备或配对记录失败，已停止扫描，未执行改绑。")
+                    }
+                }
+                return@Thread
             }
             val found = mutableListOf<Pair<RemoteDevice, RemoteAgentInfo>>()
+            // 已属另一台现存设备 / 已手工添加的 Agent 不进勾选单，但计数明示，
+            // 不静默吞（Bug① 守卫：手工记录绝不当作改绑候选）。
+            val conflictIds = mutableSetOf<String>()
+            val manualIds = mutableSetOf<String>()
             var scanned = 0
             for (device in devices) {
                 try {
@@ -2995,8 +3042,29 @@ class MainActivity : AppCompatActivity() {
                     }
                     noteHelloForCapabilityCards(hello)
                     hello.agents
-                        .filter { it.available && it.folder.isNotBlank() && it.agentId !in existingIds }
-                        .forEach { found += device to it }
+                        .filter { it.available && it.folder.isNotBlank() }
+                        .forEach { info ->
+                            val boundDeviceId = existingById[info.agentId]?.deviceId
+                            when {
+                                // 还没有记录 → 新发现，进勾选单。
+                                info.agentId !in existingById -> found += device to info
+                                // 已绑在本台设备上 → 已在，不重复列。
+                                boundDeviceId == device.deviceId -> Unit
+                                // 没绑设备、或绑的设备已删 → 只有带自动发现标记的
+                                // 记录才是改绑候选，进勾选单（确认时由
+                                // DeviceAgentDiscovery 改绑）；手工添加的绝不
+                                // 改绑（Bug① 守卫），不进勾选单、只计数明示。
+                                boundDeviceId == null || boundDeviceId !in knownDeviceIds -> {
+                                    if (existingById[info.agentId]?.addHint == DeviceAgentDiscovery.AUTO_DISCOVERED_HINT) {
+                                        found += device to info
+                                    } else {
+                                        manualIds += info.agentId
+                                    }
+                                }
+                                // 绑在另一台现存设备上 → 冲突，不列，明示。
+                                else -> conflictIds += info.agentId
+                            }
+                        }
                     scanned++
                 } catch (_: Exception) {
                     // 单台连不上就跳过，不把整批卡死。
@@ -3004,10 +3072,22 @@ class MainActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
+                // 未列出的两类都明示，不静默吞：已属别台设备 / 已手工添加。
+                val notListed = buildList {
+                    if (conflictIds.isNotEmpty()) add("${conflictIds.size} 个 Agent 已属于其他设备")
+                    if (manualIds.isNotEmpty()) add("${manualIds.size} 个 Agent 已手工添加")
+                }
                 when {
                     scanned == 0 -> toast("没有连上任何一台设备。")
+                    found.isEmpty() && notListed.isNotEmpty() ->
+                        toast("扫描完成：没有可添加的 Agent；另有 ${notListed.joinToString("；")}，未列出。")
                     found.isEmpty() -> toast("扫描完成：没有可添加的 Agent。")
-                    else -> showDiscoveredAgentsPicker(found)
+                    else -> {
+                        if (notListed.isNotEmpty()) {
+                            toast("另有 ${notListed.joinToString("；")}，未列出。")
+                        }
+                        showDiscoveredAgentsPicker(found)
+                    }
                 }
             }
         }.start()
@@ -3031,19 +3111,35 @@ class MainActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
                 Thread {
-                    var createdTotal = 0
+                    val knownDeviceIds = try {
+                        DeviceAgentDiscovery.knownDeviceIds(
+                            remoteDeviceStore.listDevices().map { it.deviceId },
+                            pairingStore.all().map { it.deviceId },
+                        )
+                    } catch (_: Exception) {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                toast("读取设备或配对记录失败，已取消添加和改绑。")
+                            }
+                        }
+                        return@Thread
+                    } + selected.map { it.first.deviceId }
+                    val summaries = mutableListOf<String>()
                     selected.groupBy({ it.first }, { it.second })
                         .forEach { (device, infos) ->
-                            val (created, _) = DeviceAgentDiscovery.discover(
+                            val (toSave, result) = DeviceAgentDiscovery.discover(
                                 device.deviceId,
                                 infos,
                                 agentStore.listAgents(),
+                                knownDeviceIds,
                             )
-                            created.forEach { agentStore.saveAgent(it) }
-                            createdTotal += created.size
+                            toSave.forEach { agentStore.saveAgent(it) }
+                            summaries += DeviceAgentDiscovery.summarize(result)
                         }
                     runOnUiThread {
-                        toast("已添加 $createdTotal 个 Agent。")
+                        // 结果明示：新建/改绑/已在/重名跳过都报实话，
+                        // 不只报一个总数（冲突不许静默吞）。
+                        toast(summaries.joinToString("；"))
                         refreshAgents()
                     }
                 }.start()
@@ -5357,6 +5453,7 @@ class MainActivity : AppCompatActivity() {
                     // 控制台设备数与设备页同一份合并清单（同 deviceId
                     // 只算一次，只有配对记录的也算一台）。
                     pairings = pairingRecords,
+                    mcpTokenConfigured = platformCredentialStore.loadPlatformToken() != null,
                 )
             }
             runOnUiThread {
@@ -5706,6 +5803,7 @@ class MainActivity : AppCompatActivity() {
             append("|history:").append(snapshot.approvalHistory.size)
             append("|devices:").append(snapshot.devices.size)
             append("|agents:").append(snapshot.agents.size)
+            append("|mcpToken:").append(snapshot.mcpTokenConfigured)
         }
     }
 
@@ -7258,12 +7356,10 @@ class MainActivity : AppCompatActivity() {
         screenAgents.findViewById<View>(R.id.buttonAgentRefresh).setOnClickListener { refreshAgents() }
         screenAgents.findViewById<View>(R.id.buttonDeviceRefresh).setOnClickListener { refreshAgents() }
         screenAgents.findViewById<View>(R.id.buttonAddAgent).setOnClickListener { showAgentForm(null) }
-        agentController.renderDevice(deviceLines())
     }
 
     private fun refreshAgents() {
         val devicesOnly = currentEntry == DrawerController.ID_DEVICES
-        agentController.renderDevice(deviceLines())
         // V5 设备点按刷新修复（2026-11-11）：此前设备页先调
         // showDevicesLoading() 清空整个列表，再等 5 秒 mDNS 发现才重
         // 画——点完设备列表先空白 5 秒，看着像卡住；清空又把
@@ -7353,7 +7449,6 @@ class MainActivity : AppCompatActivity() {
         val scrollView = screenAgents as ScrollView
         val savedY = scrollView.scrollY
         agentController.clearAgents()
-        agentController.renderDevice(deviceLines())
         agentController.renderDevices(
             discovered,
             pairings,
@@ -8125,11 +8220,14 @@ class MainActivity : AppCompatActivity() {
                 }
                 // 添加 Agent → 大脑接线（V5 紧急开发，2026-11-11）：表单以前
                 // 只存 AgentRecord，不建 BrainConfig，聊天路由找不到配置，
-                // Agent 永远“未接入”。MODEL_API（非 Manus）在此顺带配好
-                // 通用大脑，保存后就能直接对话；编辑时已接好的线不动
-                // （已能走通的既有大脑不拆），只修不通的。
+                // Agent 永远“未接入”。当时在此顺带落盘一条通用大脑配置；
+                // 差异 18 方案 A（B2）起不再落盘：这里只算出通用配置的
+                // id 与密钥引用给记录和 Keystore 用，配置本体由发送路径
+                // 按记录现场合成（内存，见 AgentBrainWiring.sessionConfigFor）；
+                // 编辑时已能走落盘配置的既有 Agent 不动（下面的 resolve
+                // 命中 UseBrain 就不重算），只修不通的。
                 val components = brainComponents
-                val configs = components?.configStore?.listConfigs().orEmpty()
+                val configs = components?.runtimeConfigStore?.listConfigs().orEmpty()
                 val isNewAgent = existing == null
                 var dedicatedKeyNote: String? = null
                 val genericBrain: BrainConfig? = when {
@@ -8214,16 +8312,16 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     subNote = "订阅 Agent 需先在设置里完成 ChatGPT 登录才能对话"
                 }
-                // 先存大脑与 Key，再存记录：大脑存失败时记录也不存，
-                // 不留“记录在、大脑不在”的半截状态。
+                // 差异 18 方案 A（B2）：先存 Key，再存记录——大脑配置
+                // 不再落盘，记录自带地址/模型/密钥引用，发送时现场
+                // 合成内存配置；删 Agent 后模型页与设置页大脑列表都
+                // 不留残留条目。Key 存失败时记录也不存，不留半截状态。
                 try {
                     if (genericBrain != null) {
                         val key = keyToStore
                         if (key != null) {
                             genericBrain.authRef?.let { brainKeyStore.putSecret(it, key) }
                         }
-                        components?.configStore?.saveConfig(genericBrain)
-                        BrainAdapterRegistry.registerConfig(genericBrain)
                     } else if (AgentSecretEdit.shouldWriteSecret(secret) && authRef != null) {
                         brainKeyStore.putSecret(authRef, secret)
                     }
@@ -8258,7 +8356,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 dialog.dismiss()
                 val note = when {
-                    genericBrain != null -> "（已配好通用大脑，可直接对话）"
+                    genericBrain != null -> "（可直接对话）"
                     dedicatedKeyNote != null -> "（$dedicatedKeyNote）"
                     cliNote != null -> "（$cliNote）"
                     subNote != null -> "（$subNote）"
@@ -8331,14 +8429,7 @@ class MainActivity : AppCompatActivity() {
                         if (isNew) {
                             // 阶段 A：提示必须与实际路由一致。未接入的目标如实
                             // 写“未接入”，不写“消息走大脑”。
-                            val route = AgentChatRouter.resolve(
-                                agent,
-                                components.configStore.listConfigs(),
-                                components::isBrainConfigured,
-                                isRemoteAgent = ::isRemoteAgent,
-                                isManusConfigured = ::isManusConfigured,
-                                isPlatformAgentConfigured = ::isPlatformAgentConfigured,
-                            )
+                            val route = resolveAgentRouteForDisplay(agent, components)
                             // 阶段 B：远端 Agent 的任务由远端泵发到设备上执行，
                             // 不再是“等它认领（跨设备执行待 P2）”。
                             // 阶段 C：Manus 的任务型指令直接在聊天里创建
@@ -8393,7 +8484,7 @@ class MainActivity : AppCompatActivity() {
                         Thread {
                             try {
                                 val task = TaskComposer.submit(components.taskStore, agentStore, projectStore,
-                                    goal, agentId, projectId, components.configStore.currentBrainId())
+                                    goal, agentId, projectId, components.runtimeConfigStore.currentBrainId())
                                 runOnUiThread {
                                     if (isFinishing || isDestroyed) return@runOnUiThread
                                     complete(null)
@@ -8527,6 +8618,36 @@ class MainActivity : AppCompatActivity() {
         return DeviceProbeResult.Available(device.displayName, info.displayName, info.folder)
     }
 
+    /**
+     * 差异 18 方案 A（B2）：显示用路由判定（打开会话的路由说明、
+     * 顶部横幅的「未接入」标注）——必须与发送路径同口径：临时把
+     * Agent 的内存合成配置挂进引擎注册表再判定，判完即卸，不落盘、
+     * 不残留。落盘配置能服务的 Agent（sessionConfigFor 返回 null）
+     * 走原判定，不受影响。
+     */
+    private fun resolveAgentRouteForDisplay(
+        agent: AgentRecord,
+        components: BrainBootstrap.BrainComponents,
+    ): AgentChatRoute {
+        // 合并口径（B3 先行、B2 合成叠加）：底表取运行时合并视图，
+        // 模型存储里的条目也算「已有落盘配置」，不重复合成。
+        val configs = components.runtimeConfigStore.listConfigs()
+        val synth = AgentBrainWiring.sessionConfigFor(agent, configs)
+        if (synth != null) BrainAdapterRegistry.registerConfig(synth)
+        try {
+            return AgentChatRouter.resolve(
+                agent,
+                if (synth != null) configs + synth else configs,
+                components::isBrainConfigured,
+                isRemoteAgent = ::isRemoteAgent,
+                isManusConfigured = ::isManusConfigured,
+                isPlatformAgentConfigured = ::isPlatformAgentConfigured,
+            )
+        } finally {
+            if (synth != null) BrainAdapterRegistry.unregisterConfig(synth.brainId)
+        }
+    }
+
     private fun removeAgent(agent: AgentRecord) {
         AlertDialog.Builder(this)
             .setTitle("移除 Agent")
@@ -8535,10 +8656,34 @@ class MainActivity : AppCompatActivity() {
                 Thread {
                     val ref = agent.authRef
                     agentStore.deleteAgent(agent.agentId)
-                    // 密钥清理：没有其他 Agent 记录与大脑配置再用该引用时才删 Keystore 值。
+                    // 差异 18 方案 A（B2）：内存合成配置的注册残留兜底
+                    // 清理（正常在轮次结束时已注销，这里防删除与轮次
+                    // 交错）。落盘配置能服务的 Agent（sessionConfigFor
+                    // 返回 null）一概不碰——删 Agent 只删 Agent 记录
+                    // 与无主密钥，不动任何大脑/模型条目。合成判定读
+                    // 运行时合并视图（B3 口径：模型条目也在视图内）。
+                    AgentBrainWiring.sessionConfigFor(
+                        agent,
+                        brainComponents?.runtimeConfigStore?.listConfigs().orEmpty(),
+                    )?.let { BrainAdapterRegistry.unregisterConfig(it.brainId) }
+                    // 密钥清理：只有确认没有其他 Agent 记录、模型条目与大脑
+                    // 配置引用该密钥时才删。组件未就绪或查询失败都按“仍被引用”
+                    // 处理，避免把未知误当成无人使用而删除共用密钥。
                     if (ref != null) {
-                        val stillUsed = agentStore.listAgents().any { it.authRef == ref } ||
-                            (brainComponents?.configStore?.listConfigs()?.any { it.authRef == ref } ?: false)
+                        val stillUsed = try {
+                            val runtimeConfigStore = brainComponents?.runtimeConfigStore
+                            runtimeConfigStore == null ||
+                                AgentSecretReferencePolicy.isReferenced(
+                                    authRef = ref,
+                                    agentAuthRefs = agentStore.listAgents().map { it.authRef },
+                                    brainConfigAuthRefs = runtimeConfigStore.listConfigs().map { it.authRef },
+                                    teamMemberAuthRefs = RoomTeamMemberStore(
+                                        TaskDatabaseProvider.get(applicationContext),
+                                    ).listMembers().map { it.authRef },
+                                )
+                        } catch (_: Exception) {
+                            true
+                        }
                         if (!stillUsed) {
                             try {
                                 brainKeyStore.deleteSecret(ref)
@@ -8554,6 +8699,52 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /**
+     * 控制台总览的平台根地址。优先已添加平台 Agent 的主机，否则用构建配置；
+     * 都没有时由 [ConsoleScreenController.normalizedPlatformRoot] 回落到公开根。
+     * 控制器初始化早于 [agentStore]，未就绪时只走默认。
+     */
+    private fun normalizedConsolePlatformRoot(): String {
+        val configured = if (::agentStore.isInitialized) {
+            try {
+                agentStore.listAgents()
+                    .firstOrNull { PlatformAgent.isPlatformAgentRecord(it) && !it.platformHost.isNullOrBlank() }
+                    ?.platformHost
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        return ConsoleScreenController.normalizedPlatformRoot(
+            configured?.takeIf { it.isNotBlank() } ?: PlatformAgent.DEFAULT_PLATFORM_HOST,
+        )
+    }
+
+    /** 本机 Keystore 里是否已有平台 Token。读失败按未配置，按钮显示「配置 Token」。 */
+    private fun hasSavedPlatformToken(): Boolean = try {
+        !platformCredentialStore.loadPlatformToken().isNullOrBlank()
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * 本机信息原在设备页（型号 / 系统 / ABI / 包 / 电池优化 / 前台服务）。
+     * 设备页只留添加与已添加两块；这段原样挪到设置页「开发者诊断」。
+     */
+    private fun bindLocalDeviceDiagnostics() {
+        val box = screenSettings.findViewById<LinearLayout>(R.id.settingsLocalDeviceInfo) ?: return
+        box.removeAllViews()
+        deviceLines().forEachIndexed { index, line ->
+            box.addView(
+                UiKit.text(this, line, 11f, R.color.text_secondary).apply {
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                    if (index > 0) setPadding(0, dp(5), 0, 0)
+                },
+            )
+        }
     }
 
     private fun deviceLines(): List<String> {
@@ -8754,6 +8945,7 @@ class MainActivity : AppCompatActivity() {
         // Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接设备的 Hand）。
         bindHandSyncSettings()
         bindSettingsNavigation()
+        bindLocalDeviceDiagnostics()
     }
 
     private fun bindSettingsNavigation() {
@@ -9492,16 +9684,7 @@ class MainActivity : AppCompatActivity() {
         val text = if (agent == null) {
             "当前设备：本机 · 对话方：${brainDisplayName()}$projectSuffix"
         } else {
-            val route = brainComponents?.let {
-                AgentChatRouter.resolve(
-                    agent,
-                    it.configStore.listConfigs(),
-                    it::isBrainConfigured,
-                    isRemoteAgent = ::isRemoteAgent,
-                    isManusConfigured = ::isManusConfigured,
-                    isPlatformAgentConfigured = ::isPlatformAgentConfigured,
-                )
-            }
+            val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
             val suffix = if (route is AgentChatRoute.NotRoutable) "（未接入）" else ""
             "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix$projectSuffix$directSuffix"
         }
@@ -9549,7 +9732,7 @@ class MainActivity : AppCompatActivity() {
         chatRouteBanner.visibility = View.VISIBLE
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
-                "选择模型 / Agent ⌄"
+                "选择对话方 ⌄"
             } else {
                 "${agent.displayName} ⌄"
             }
@@ -9630,8 +9813,9 @@ class MainActivity : AppCompatActivity() {
         val currentBrainId = components.configStore.currentBrainId()
         // V5 C3-C：状态行刷新时同步刷新大脑列表、SIWC 模型行与 CLI 行。
         refreshBrainList()
-        // 模型页的已添加列表与大脑列表是同一批连接数据的两处呈现：
-        // 任一处增删改后两处一起刷新，模型页永不拿大脑列表改标题充数。
+        // 模型页的已添加列表读独立模型存储、大脑列表读大脑存储
+        //（差异 9 B3 起两边分家）：任一处增删改后两处一起刷新，
+        // 各读各的存储，模型页永不拿大脑列表改标题充数。
         refreshModelList()
         refreshSiwcModelRow()
         refreshCliRow()
@@ -9727,7 +9911,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun brainShortLabel(): String = when (val id = brainComponents?.configStore?.currentBrainId()) {
+    private fun brainShortLabel(): String = when (val id = brainComponents?.runtimeConfigStore?.currentBrainId()) {
         BrainBootstrap.DEEPSEEK_BRAIN_ID -> "DeepSeek"
         BrainBootstrap.GROK_BRAIN_ID -> "Grok"
         BrainBootstrap.MUSE_BRAIN_ID -> "Muse Spark"
@@ -9738,7 +9922,7 @@ class MainActivity : AppCompatActivity() {
         null -> "未连接"
         // 通用大脑显示配置名（label），不贴 brainId（"model-api-zhipu"
         // 这种 id 不是给人看的；放开切换后通用大脑会进聊天胶囊）。
-        else -> brainComponents?.configStore?.getConfig(id)?.label ?: id
+        else -> brainComponents?.runtimeConfigStore?.getConfig(id)?.label ?: id
     }
 
     private fun refreshCloudflareSection() {
@@ -11157,17 +11341,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 已添加模型列表：数据是已配置的模型连接（configStore），行由
-     * [ModelListRows] 按类型分组生成，本页渲染；列表末尾不放添加
-     * 按钮（添加只在上方添加块里）。由 refreshBrainStatus 与进页时
-     * 调用，与大脑列表同刷但各渲染各的。
+     * 已添加模型列表：数据是独立模型存储（[modelConfigStore]，
+     * 差异 9 B3 起不再读大脑存储），行由 [ModelListRows] 按类型
+     * 分组生成，本页渲染；列表末尾不放添加按钮（添加只在上方
+     * 添加块里）。由 refreshBrainStatus 与进页时调用，与大脑列表
+     * 同刷但各读各的存储、各渲染各的。
      */
     private fun refreshModelList() {
         if (!::modelListContainer.isInitialized) return
         val components = brainComponents ?: return
         val rows = ModelListRows.buildRows(
-            configs = components.configStore.listConfigs(),
-            currentBrainId = components.configStore.currentBrainId(),
+            configs = modelConfigStore.listEntries().map { it.toBrainConfig() },
+            currentBrainId = components.runtimeConfigStore.currentBrainId(),
             isConfigured = { brainId -> components.isBrainConfigured(brainId) },
             siwcSignedIn = components.authManager.isSignedIn(),
         )
@@ -11191,7 +11376,7 @@ class MainActivity : AppCompatActivity() {
                     },
                 )
             }
-            val config = components.configStore.getConfig(row.brainId)
+            val config = modelConfigStore.getEntry(row.brainId)?.toBrainConfig()
             modelListContainer.addView(buildModelListRow(row, config))
         }
     }
@@ -11253,10 +11438,17 @@ class MainActivity : AppCompatActivity() {
     /**
      * 模型页保存：与设置页 saveGenericBrain 同一条路径（校验走
      * BrainLoginRows.validateGenericForm、Key 只进 Keystore、保存后
-     * 立即注册进引擎注册表），只是读写本页自己的表单；保存后不自动
+     * 立即注册进引擎注册表），只是读写本页自己的表单、存独立模型
+     * 存储（差异 9 B3 起不再写大脑存储）；保存后不自动
      * 设为当前大脑（同设置页口径）。校验文案经 [ModelListRows.formErrors]
      * 在本页侧换口径：名称为空报「请填写模型名称」，不借大脑文案
      * （红线：不改 BrainLoginRows 的原字符串与行为）。
+     *
+     * 新建条目的来源标记由 [ModelListRows.newFormEntryExtra] 按服务
+     * 地址反查内置名单决定（Bug②，B2）：名单外手打条目写
+     * model_origin=manual 显示「自定义」，预设预填（地址命中名单）
+     * 写 preset 不误标；编辑已有条目走 copy 保留原 extra，不覆盖
+     * 其来源标记，无标记的旧条目不回填。
      */
     private fun saveModel() {
         val components = brainComponents ?: run {
@@ -11285,7 +11477,7 @@ class MainActivity : AppCompatActivity() {
         }
         Thread {
             if (apiKey.isNotEmpty()) keyStore.putSecret(authRef, apiKey)
-            val current = components.configStore.getConfig(brainId)
+            val current = modelConfigStore.getEntry(brainId)?.toBrainConfig()
                 ?: BrainConfig(
                     brainId = brainId,
                     kind = BrainKind.MODEL_API,
@@ -11294,6 +11486,7 @@ class MainActivity : AppCompatActivity() {
                     baseUrl = baseUrl,
                     model = model,
                     authRef = authRef,
+                    extra = ModelListRows.newFormEntryExtra(baseUrl),
                     fallbackBrainIds = emptyList(),
                 )
             val saved = current.copy(
@@ -11304,7 +11497,7 @@ class MainActivity : AppCompatActivity() {
                 model = model,
                 authRef = authRef,
             )
-            components.configStore.saveConfig(saved)
+            modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(saved))
             runOnUiThread {
                 BrainAdapterRegistry.registerConfig(saved)
                 if (editingModelId != null) {
@@ -11357,14 +11550,73 @@ class MainActivity : AppCompatActivity() {
             note("模型还在加载，请稍候再删除。")
             return
         }
-        val isCurrent = components.configStore.currentBrainId() == config.brainId
+        val isCurrent = components.runtimeConfigStore.currentBrainId() == config.brainId
         val agentNames = agentsUsingBrain(config)
         AlertDialog.Builder(this)
             .setTitle(ModelListRows.deleteTitle(config))
             .setMessage(ModelListRows.deleteWarning(config, isCurrent, agentNames))
-            .setPositiveButton("删除") { _, _ -> deleteBrain(config) }
+            .setPositiveButton("删除") { _, _ -> deleteModel(config) }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /**
+     * 模型页删模型（差异 9 B3，与删大脑的 [deleteBrain] 分家）：
+     * 只删独立模型存储里的这一条；内置条目另记模型侧墓碑，启动
+     * 补齐不会把它从大脑存储再复制回来。大脑存储里的同 id 副本
+     * 一字不动（删模型不删大脑、不删 Agent、不删设备）。
+     * Key 按引用计数清理：大脑存储、模型存储、Agent 记录三处都
+     * 不再引用该 authRef 时才删 Keystore 里的值（别处还在用就
+     * 留着）。注册表与合并视图对齐：合并视图里还有大脑侧副本就
+     * 按副本重新注册，没有才注销。删的正是模型侧当前项时，
+     * [ModelConfigStore.deleteEntry] 已顺手清空当前项，不自动切
+     * 到别的模型。
+     */
+    private fun deleteModel(config: BrainConfig) {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再删除。")
+            return
+        }
+        val wasCurrent = modelConfigStore.currentModelId() == config.brainId
+        val hasBrainCopy = components.configStore.getConfig(config.brainId) != null
+        Thread {
+            modelConfigStore.deleteEntry(config.brainId)
+            if (hasBrainCopy) modelConfigStore.markBuiltinDeleted(config.brainId)
+            val authRef = config.authRef
+            if (!authRef.isNullOrBlank()) {
+                val agentAuthRefs = if (::agentStore.isInitialized) {
+                    agentStore.listAgents().map { it.authRef }
+                } else {
+                    emptyList()
+                }
+                val stillUsed = ConfigDeletionPolicy.isAuthRefStillUsed(
+                    authRef,
+                    components.configStore.listConfigs(),
+                    modelConfigStore.listEntries(),
+                    agentAuthRefs,
+                )
+                if (!stillUsed) {
+                    try {
+                        BrainKeyStore(applicationContext).deleteSecret(authRef)
+                    } catch (_: Exception) {
+                        // Key 删不掉不拦删除本身（同 deleteBrain 口径）。
+                        android.util.Log.w("MainActivity", "deleteModel: key delete failed for $authRef")
+                    }
+                }
+            }
+            val remaining = components.runtimeConfigStore.getConfig(config.brainId)
+            if (remaining != null) {
+                BrainAdapterRegistry.registerConfig(remaining)
+            } else {
+                BrainAdapterRegistry.unregisterConfig(config.brainId)
+            }
+            runOnUiThread {
+                if (editingModelId == config.brainId) exitModelEditMode()
+                refreshBrainStatus()
+                val currentNote = if (wasCurrent) "当前模型已清空，请在列表里另选一个。" else ""
+                note("已删除模型 ${config.label}。$currentNote")
+            }
+        }.start()
     }
 
     /** 删除大脑：二次确认。文案由 BrainLoginRows.deleteWarning 生成。 */
@@ -11446,16 +11698,37 @@ class MainActivity : AppCompatActivity() {
                     // ignore
                 }
             }
-            try {
-                BrainKeyStore(applicationContext).deleteSecret(authRef)
-            } catch (_: Exception) {
-                // Key 删不掉不拦删除本身：配置删了行就没了，未配的脑
-                // 本来也调不起来；只记日志，不弹给用户。
-                android.util.Log.w("MainActivity", "deleteBrain: key delete failed for $authRef")
-            }
             components.configStore.deleteConfig(config.brainId)
             if (isSeedable) components.configStore.markBrainDeleted(config.brainId)
-            BrainAdapterRegistry.unregisterConfig(config.brainId)
+            val agentAuthRefs = if (::agentStore.isInitialized) {
+                agentStore.listAgents().map { it.authRef }
+            } else {
+                emptyList()
+            }
+            val stillUsed = ConfigDeletionPolicy.isAuthRefStillUsed(
+                authRef,
+                components.configStore.listConfigs(),
+                modelConfigStore.listEntries(),
+                agentAuthRefs,
+            )
+            if (!stillUsed) {
+                try {
+                    BrainKeyStore(applicationContext).deleteSecret(authRef)
+                } catch (_: Exception) {
+                    // Key 删不掉不拦删除本身；只记日志，不弹给用户。
+                    android.util.Log.w("MainActivity", "deleteBrain: key delete failed for $authRef")
+                }
+            }
+            val remaining = components.runtimeConfigStore.getConfig(config.brainId)
+            if (!ConfigDeletionPolicy.remainsInRuntimeView(
+                    config.brainId,
+                    components.runtimeConfigStore,
+                )
+            ) {
+                BrainAdapterRegistry.unregisterConfig(config.brainId)
+            } else {
+                BrainAdapterRegistry.registerConfig(remaining!!)
+            }
             runOnUiThread {
                 if (editingGenericBrainId == config.brainId) exitGenericEditMode()
                 if (editingModelId == config.brainId) exitModelEditMode()
@@ -11923,12 +12196,13 @@ class MainActivity : AppCompatActivity() {
                     extra = mapOf(
                         FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
                         FreeProviderPresets.EXTRA_PRESET to preset.id,
+                        ModelListRows.EXTRA_MODEL_ORIGIN to ModelListRows.ORIGIN_PRESET,
                     ),
                     fallbackBrainIds = emptyList(),
                 )
                 if (BrainConfigValidator.validate(config).isNotEmpty()) continue
                 keyStore.putSecret(authRef, key)
-                components.configStore.saveConfig(config)
+                modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(config))
                 savedConfigs += config
                 added++
             }
@@ -12175,12 +12449,13 @@ class MainActivity : AppCompatActivity() {
                     extra = mapOf(
                         FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
                         "discovery" to "device",
+                        ModelListRows.EXTRA_MODEL_ORIGIN to ModelListRows.ORIGIN_DEVICE_DISCOVERED,
                     ),
                     fallbackBrainIds = emptyList(),
                 )
                 if (BrainConfigValidator.validate(config).isNotEmpty()) continue
                 keyStore.putSecret(authRef, "local")
-                components.configStore.saveConfig(config)
+                modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(config))
                 savedConfigs += config
                 added++
             }
@@ -12212,7 +12487,8 @@ class MainActivity : AppCompatActivity() {
         }
         val store = SharedPreferencesModelRoutingStore(applicationContext)
         val settings = store.load()
-        val models = components.configStore.listConfigs().filter { it.kind == BrainKind.MODEL_API }
+        val models = modelConfigStore.listEntries().map { it.toBrainConfig() }
+            .filter { it.kind == BrainKind.MODEL_API }
         if (models.isEmpty()) {
             note("还没有任何模型连接：先从预设或手工表单添加模型，再来选路由池。")
             return

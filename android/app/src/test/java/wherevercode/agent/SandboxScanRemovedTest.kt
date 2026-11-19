@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -93,6 +94,14 @@ class SandboxScanRemovedTest {
             assertNotNull(activity.findViewById<View>(R.id.buttonAddAgent))
             assertNotNull(activity.findViewById<View>(R.id.deviceSectionHeader))
             assertNotNull(activity.findViewById<View>(R.id.deviceInfo))
+            // 本机信息已离开设备页，收到设置页开发者诊断。
+            assertEquals(View.GONE, activity.findViewById<View>(R.id.deviceSectionHeader).visibility)
+            assertEquals(View.GONE, activity.findViewById<View>(R.id.deviceInfo).visibility)
+            val diagnostics = activity.findViewById<View>(R.id.settingsLocalDeviceInfo)
+            assertNotNull(diagnostics)
+            val diagnosticText = collectTexts(diagnostics).joinToString("\n")
+            assertTrue(diagnosticText.contains("型号："))
+            assertTrue(diagnosticText.contains("电池优化："))
         } finally {
             controller.pause().stop().destroy()
         }

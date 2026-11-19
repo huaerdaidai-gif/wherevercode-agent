@@ -22,12 +22,17 @@ import wherevercode.agent.AndroidApprovalGate
 import wherevercode.agent.brain.AgentChatRoute
 import wherevercode.agent.brain.AgentChatRouter
 import wherevercode.agent.brain.BrainAdapterRegistry
+import wherevercode.agent.brain.BrainConfig
+import wherevercode.agent.brain.generic.GenericOpenAiBrainAdapter
 import wherevercode.agent.brain.BrainEvent
 import wherevercode.agent.brain.Message
 import wherevercode.agent.brain.SettledTaskEvidence
 import wherevercode.agent.brain.SkillRefiner
 import wherevercode.agent.brain.siwc.BrainBootstrap
+import wherevercode.agent.core.agent.AgentBrainWiring
+import wherevercode.agent.core.agent.AgentBrainSessionGate
 import wherevercode.agent.core.agent.AgentRecord
+import wherevercode.agent.core.agent.SessionBrainConfigStore
 import wherevercode.agent.core.project.DispatchFolderSource
 import wherevercode.agent.core.project.GitRepoRef
 import wherevercode.agent.core.project.folderFallbackReason
@@ -823,7 +828,7 @@ class ChatViewModel : ViewModel() {
     /** 恢复用大脑显示名（无 Agent 的大脑对话；取不到时回落到“大脑”）。 */
     private fun currentBrainLabelForRestore(): String {
         val brainId = try {
-            components?.configStore?.currentBrainId()
+            components?.runtimeConfigStore?.currentBrainId()
         } catch (_: Exception) {
             null
         }
@@ -928,7 +933,7 @@ class ChatViewModel : ViewModel() {
         val imageNoteForNonBrain =
             if (imageDataUrls.isNotEmpty()) "图片无法发给当前对话方：对方看不到图片内容，只收到了图片的文件名。图片要能被看懂，需要发给支持看图片的大脑。"
             else null
-        val currentBrainId = comps.configStore.currentBrainId()
+        val currentBrainId = comps.runtimeConfigStore.currentBrainId()
         // git 家（2026-11-11）：当前聊天项目的当前家是 git 家、且是任务型
         // 指令时，不走远端 CLI 任务通道——远端 Agent 只做设备文件夹的活，
         // git 家没有设备文件夹可下；由本机大脑经该站 API 执行，
@@ -949,14 +954,52 @@ class ChatViewModel : ViewModel() {
         if (agent != null) {
             // 阶段 A：选中 Agent 的消息按 Agent 路由，不再无条件走全局大脑。
             // NotRoutable 时诚实报错、不发出、不回落（尤其不回落 ChatGPT）。
-            return when (val route = AgentChatRouter.resolve(
-                agent,
-                comps.configStore.listConfigs(),
-                comps::isBrainConfigured,
-                isRemoteAgent = remoteAgentCheck ?: { false },
-                isManusConfigured = manusConfiguredCheck ?: { false },
-                isPlatformAgentConfigured = platformConfiguredCheck ?: { false },
-            )) {
+            // 差异 18 方案 A（B2）：「云端模型 API」Agent 不再落盘大脑
+            // 配置，发送时按记录现场合成一份内存配置——先注册进引擎
+            // 注册表（纯内存），路由的配置列表也带上它；路由没选它
+            // （落盘配置已能服务该 Agent，或本轮根本不走大脑）时立即
+            // 注销，选中时由 startBrainTurn 在轮次终态注销。因 registry
+            // 是进程级共享对象，合成配置轮次必须独占准入直至终态。
+            val storedConfigs = comps.runtimeConfigStore.listConfigs()
+            val synthBrain = AgentBrainWiring.sessionConfigFor(agent, storedConfigs)
+            val sessionLease = synthBrain?.let {
+                AgentBrainSessionGate.tryAcquire(it.brainId)
+            }
+            if (synthBrain != null && sessionLease == null) {
+                return SendResult(false, "另一个模型 API Agent 正在使用共享大脑注册表，请稍后重试。")
+            }
+            if (synthBrain != null) BrainAdapterRegistry.registerConfig(synthBrain)
+            val route = try {
+                AgentChatRouter.resolve(
+                    agent,
+                    if (synthBrain != null) storedConfigs + synthBrain else storedConfigs,
+                    comps::isBrainConfigured,
+                    isRemoteAgent = remoteAgentCheck ?: { false },
+                    isManusConfigured = manusConfiguredCheck ?: { false },
+                    isPlatformAgentConfigured = platformConfiguredCheck ?: { false },
+                )
+            } catch (e: Exception) {
+                if (sessionLease != null && AgentBrainSessionGate.isOwner(sessionLease) &&
+                    synthBrain != null && BrainAdapterRegistry.configFor(synthBrain.brainId) === synthBrain
+                ) {
+                    BrainAdapterRegistry.unregisterConfig(synthBrain.brainId)
+                }
+                sessionLease?.let(AgentBrainSessionGate::release)
+                return SendResult(false, "无法解析 Agent 路由：${e.message ?: "未知错误"}")
+            }
+            val turnSynth = (route as? AgentChatRoute.UseBrain)?.let { useBrain ->
+                synthBrain?.takeIf { it.brainId == useBrain.brainId }
+            }
+            if (synthBrain != null && turnSynth == null &&
+                sessionLease != null && AgentBrainSessionGate.isOwner(sessionLease) &&
+                BrainAdapterRegistry.configFor(synthBrain.brainId) === synthBrain
+            ) {
+                BrainAdapterRegistry.unregisterConfig(synthBrain.brainId)
+            }
+            if (turnSynth == null || agent.deviceId != null) {
+                sessionLease?.let(AgentBrainSessionGate::release)
+            }
+            return when (route) {
                 is AgentChatRoute.UseBrain -> {
                     // 大脑/Agent 边界（maintainer 2026-11-12，一个对话、一个说话者）：
                     // 远端设备 Agent 对话里大脑绝不能以说话者身份开口。
@@ -978,16 +1021,32 @@ class ChatViewModel : ViewModel() {
                             attachments = attachments,
                             imageNote = imageNoteForNonBrain,
                         )
-                    } else startBrainTurn(
-                        comps,
-                        displayText,
-                        brainIdOverride = route.brainId,
-                        allowFailover = false,
-                        modelPrompt = modelText,
-                        attachments = attachments,
-                        imageDataUrls = imageDataUrls,
-                        webSearchEnabled = webSearchEnabled,
-                    )
+                    } else {
+                        val result = try {
+                            startBrainTurn(
+                                comps,
+                                displayText,
+                                brainIdOverride = route.brainId,
+                                allowFailover = false,
+                                modelPrompt = modelText,
+                                attachments = attachments,
+                                imageDataUrls = imageDataUrls,
+                                webSearchEnabled = webSearchEnabled,
+                                synthBrainConfig = turnSynth,
+                                sessionLease = sessionLease.takeIf { turnSynth != null },
+                            )
+                        } catch (e: Exception) {
+                            if (turnSynth != null &&
+                                sessionLease != null && AgentBrainSessionGate.isOwner(sessionLease) &&
+                                BrainAdapterRegistry.configFor(turnSynth.brainId) === turnSynth
+                            ) {
+                                BrainAdapterRegistry.unregisterConfig(turnSynth.brainId)
+                            }
+                            sessionLease?.let(AgentBrainSessionGate::release)
+                            return SendResult(false, "无法启动大脑轮次：${e.message ?: "未知错误"}")
+                        }
+                        result
+                    }
                 }
                 // 阶段 B：远程设备 Agent 走 Hand 直连，不走任何大脑。
                 // V5 修复（2026-11-11）：任务型指令走任务通道——建分派
@@ -1118,7 +1177,7 @@ class ChatViewModel : ViewModel() {
     /** 当前大脑是否支持看图片（按配置的 adapter 自报的 vision 能力）。 */
     private fun brainSupportsVision(comps: BrainBootstrap.BrainComponents, brainId: String?): Boolean {
         val id = brainId ?: return false
-        val config = comps.configStore.listConfigs().firstOrNull { it.brainId == id } ?: return false
+        val config = comps.runtimeConfigStore.listConfigs().firstOrNull { it.brainId == id } ?: return false
         return BrainAdapterRegistry.get(config.adapterId)?.capabilities()?.vision ?: false
     }
 
@@ -1137,8 +1196,28 @@ class ChatViewModel : ViewModel() {
         imageDataUrls: List<String> = emptyList(),
         /** 网页搜索开关；默认关。 */
         webSearchEnabled: Boolean = false,
+        /**
+         * 差异 18 方案 A（B2）：本轮的大脑是 Agent 的内存合成配置
+         * （未落盘）时传入（由 send() 的路由决定）。轮次内把通用
+         * 适配器临时换成绑定该配置的实例——注册实例按全局当前
+         * 大脑取配置，合成配置不在落盘存储里、当前大脑也可能正
+         * 指向别的大脑；轮次终态恢复注册实例并注销合成配置。
+        */
+        synthBrainConfig: BrainConfig? = null,
+        /** 仅合成配置轮次持有的共享 registry 独占 lease。 */
+        sessionLease: AgentBrainSessionGate.Lease? = null,
     ): SendResult {
         if (!active.compareAndSet(false, true)) {
+            // 轮次没起：合成配置的注册由本函数负责收尾，这里先
+            // 注销，不留内存残留。
+            if (synthBrainConfig != null) {
+                if (sessionLease != null && AgentBrainSessionGate.isOwner(sessionLease) &&
+                    BrainAdapterRegistry.configFor(synthBrainConfig.brainId) === synthBrainConfig
+                ) {
+                    BrainAdapterRegistry.unregisterConfig(synthBrainConfig.brainId)
+                }
+            }
+            sessionLease?.let(AgentBrainSessionGate::release)
             return SendResult(false, "上一轮还在执行。")
         }
         comps.turnController.begin()
@@ -1153,8 +1232,11 @@ class ChatViewModel : ViewModel() {
         // 说话就开大脑对话；Agent 对话里大脑只在幕后派活，不开说话轮次。
         // （脑后 Agent：CLI/模型 API 构成的 Agent 本身就是大脑在说话，
         // 抬头写大脑名是实话；远端设备 Agent 走 UseRemoteAgent，不到这里。）
-        val effectiveBrainId = brainIdOverride ?: comps.configStore.currentBrainId()
-        val displayLabel = brainLabel(effectiveBrainId)
+        val effectiveBrainId = brainIdOverride ?: comps.runtimeConfigStore.currentBrainId()
+        // 合成配置不在落盘存储里，brainLabel 查不到它的名字——它自带
+        // 的 label 就是该 Agent 的显示名，如实用它。
+        val displayLabel = synthBrainConfig?.label?.takeIf { it.isNotBlank() }
+            ?: brainLabel(effectiveBrainId)
         val turnId = timeline.beginUserTurn(prompt, displayLabel, true)
         if (introNote != null) timeline.appendStatusNote(turnId, introNote)
         attachToTurn(turnId, attachments, null)
@@ -1168,15 +1250,28 @@ class ChatViewModel : ViewModel() {
         }
         publish(true)
 
-        scope.launch {
+        val turnJob = scope.launch {
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
             var doneReason: String? = null
+            var taskId: String? = null
+            var sessionAdapter: GenericOpenAiBrainAdapter? = null
             // 阶段 1（U3）：轮次开任务。失败返回 null 时本轮只走聊天。
             // 记实际执行的大脑（Agent 会话是 override 的大脑，不是全局选择）。
-            val taskId = turnRecorder?.beginTurn(prompt, convId, effectiveBrainId, currentProjectId())
             try {
+                taskId = turnRecorder?.beginTurn(prompt, convId, effectiveBrainId, currentProjectId())
+                // 差异 18 方案 A（B2）：本轮走 Agent 的内存合成配置时，把
+                // 通用适配器临时换成绑定该配置的实例（存储视图 + 显式
+                // brainId）；恢复在 finally 里，与注销合成配置配对。
+                if (synthBrainConfig != null) {
+                    val adapter = GenericOpenAiBrainAdapter(
+                        SessionBrainConfigStore(comps.configStore, synthBrainConfig),
+                        comps.genericCredentialStore,
+                    ) { synthBrainConfig.brainId }
+                    sessionAdapter = adapter
+                    BrainAdapterRegistry.registerAdapter(adapter)
+                }
                 comps.engine.chat(
                     convId,
                     prompt,
@@ -1244,6 +1339,23 @@ class ChatViewModel : ViewModel() {
                 terminalStatus = TurnStatus.ERROR
                 terminalError = "调用${displayLabel}失败：${e.message ?: "未知错误"}"
             } finally {
+                // 差异 18 方案 A（B2）：恢复通用适配器的注册实例并
+                // 注销本轮的内存合成配置——合成配置只活一轮，不落盘、
+                // 不残留（与 send() 里的 registerConfig 配对）。
+                if (synthBrainConfig != null) {
+                    val ownsRegistry = sessionLease != null && AgentBrainSessionGate.isOwner(sessionLease)
+                    if (ownsRegistry && sessionAdapter != null &&
+                        BrainAdapterRegistry.get(sessionAdapter.adapterId) === sessionAdapter
+                    ) {
+                        BrainAdapterRegistry.registerAdapter(comps.genericAdapter)
+                    }
+                    if (ownsRegistry &&
+                        BrainAdapterRegistry.configFor(synthBrainConfig.brainId) === synthBrainConfig
+                    ) {
+                        BrainAdapterRegistry.unregisterConfig(synthBrainConfig.brainId)
+                    }
+                    sessionLease?.let(AgentBrainSessionGate::release)
+                }
                 timeline.cancelRunningTools(turnId)
                 val snapshot = timeline.snapshot()
                 val turn = snapshot.turns.lastOrNull { it.id == turnId }
@@ -1306,6 +1418,18 @@ class ChatViewModel : ViewModel() {
                 onTurnFinished?.invoke()
             }
         }
+        // If the parent scope is already cancelled, the coroutine body (and its
+        // finally block) may never start. Reclaim only this turn's registration.
+        turnJob.invokeOnCompletion {
+            if (synthBrainConfig != null && sessionLease != null &&
+                AgentBrainSessionGate.isOwner(sessionLease)
+            ) {
+                if (BrainAdapterRegistry.configFor(synthBrainConfig.brainId) === synthBrainConfig) {
+                    BrainAdapterRegistry.unregisterConfig(synthBrainConfig.brainId)
+                }
+                AgentBrainSessionGate.release(sessionLease)
+            }
+        }
         return SendResult(true)
     }
 
@@ -1342,7 +1466,7 @@ class ChatViewModel : ViewModel() {
             return
         }
         val modelLabel = try {
-            comps.configStore.getConfig(triageBrainId)?.let { config ->
+            comps.runtimeConfigStore.getConfig(triageBrainId)?.let { config ->
                 val name = config.label.takeIf { it.isNotBlank() } ?: triageBrainId
                 val model = config.model.takeIf { it.isNotBlank() }
                 if (model != null) "$name · $model" else name
@@ -3169,7 +3293,7 @@ class ChatViewModel : ViewModel() {
         null -> "未连接"
         // 通用大脑（model-api-<slug> 等）：用配置里的名字；没有配置时
         // 如实写 brainId，不编一个名字。
-        else -> components?.configStore?.getConfig(brainId)?.label?.takeIf { it.isNotBlank() }
+        else -> components?.runtimeConfigStore?.getConfig(brainId)?.label?.takeIf { it.isNotBlank() }
             ?: brainId
     }
 

@@ -103,18 +103,18 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("模型") {
+                Section("大脑") {
                     NavigationLink {
                         BrainSettingsView(model: appState.brainSettingsModel)
                     } label: {
                         HStack {
-                            Text("管理模型")
+                            Text("管理大脑")
                             Spacer()
                             Text(currentBrainSummary)
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("模型是可替换的推理后端（DeepSeek、Claude、Grok、Muse Spark、Cloudflare、通用模型 API、ChatGPT 会员）。Key 只存本机 Keychain。没有当前模型时设备 Agent 与单兵对话不受影响。")
+                    Text("大脑是可替换的推理后端（DeepSeek、Claude、Grok、Muse Spark、Cloudflare、通用模型 API、ChatGPT 会员）。Key 只存本机 Keychain。没有当前大脑时设备 Agent 与单兵对话不受影响。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -262,7 +262,9 @@ public final class LocalChatModel: ObservableObject {
         get { (try? data.kv.get("chat.defaultBrainId")) ?? nil ?? "" }
         set {
             try? data.kv.set("chat.defaultBrainId", newValue.isEmpty ? nil : newValue)
-            appState.brainConfigStore.setCurrentBrainId(newValue.isEmpty ? nil : newValue)
+            appState.modelSettingsModel.configStore.setCurrentModelId(newValue.isEmpty ? nil : newValue)
+            appState.modelSettingsModel.reload()
+            appState.modelSettingsModel.onChange()
         }
     }
 
@@ -345,7 +347,7 @@ public final class LocalChatModel: ObservableObject {
         if let cid = conversationID {
             try? data.conversations.updateConversationBrain(
                 id: cid,
-                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : (selectedAgent?.displayName ?? selectedAgent?.agentId)
+                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : nil
             )
         }
     }
@@ -380,8 +382,10 @@ public final class LocalChatModel: ObservableObject {
 
     /// Brains that can actually serve a chat right now.
     public var usableBrains: [BrainConfig] {
-        appState.brainSettingsModel.configs.filter {
-            appState.brainSettingsModel.unusableReason(for: $0) == nil
+        let configs = appState.compositeBrainConfigStore.listConfigs()
+        return configs.filter { cfg in
+            let modelCfg = ModelConfig.fromBrainConfig(cfg)
+            return appState.modelSettingsModel.unusableReason(for: modelCfg) == nil
         }
     }
 
@@ -395,18 +399,18 @@ public final class LocalChatModel: ObservableObject {
         }
         if let cfg = appState.brainRegistry.configFor(selectedBrain),
            appState.brainRegistry.get(cfg.adapterId) != nil {
-            if cfg.authRef == nil || appState.brainSettingsModel.hasKey(for: cfg) {
+            if cfg.authRef == nil || appState.modelSettingsModel.hasKey(for: ModelConfig.fromBrainConfig(cfg)) {
                 return (selectedBrain, nil)
             }
         }
         let usable = usableBrains
-        if let current = appState.brainConfigStore.currentBrainId(),
+        if let current = appState.modelSettingsModel.currentModelId,
            usable.contains(where: { $0.brainId == current }) {
             return (current, nil)
         }
         if let first = usable.first { return (first.brainId, nil) }
-        if let cfg = appState.brainSettingsModel.configs.first(where: { $0.brainId == selectedBrain }),
-           let reason = appState.brainSettingsModel.unusableReason(for: cfg) {
+        if let cfg = appState.compositeBrainConfigStore.getConfig(brainId: selectedBrain),
+           let reason = appState.modelSettingsModel.unusableReason(for: ModelConfig.fromBrainConfig(cfg)) {
             return (nil, "「\(cfg.label)」不可用：\(reason)。请到 设置 › 模型 连接一个可用的模型。")
         }
         if let cfg = appState.brainRegistry.configFor(selectedBrain),
@@ -652,7 +656,7 @@ public final class LocalChatModel: ObservableObject {
             do {
                 if conversationID == nil {
                     let conversation = try data.conversations.createConversation(
-                        brainId: agent.displayName,
+                        brainId: nil,
                         title: String(text.prefix(48))
                     )
                     try? data.kv.set(draftKey, nil)
@@ -1188,6 +1192,16 @@ public struct LocalChatHomeView: View {
             .padding(.top, 10)
             .padding(.bottom, 8)
 
+            Text(connectionSummaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16)
+                .accessibilityIdentifier("chat.connectionSummary")
+
             // 主体消息流或 Claude 风格极简留白问候区
             ScrollViewReader { proxy in
                 ScrollView {
@@ -1405,7 +1419,7 @@ public struct LocalChatHomeView: View {
         if message.source == "codex_control" { return "系统" }
         if message.source.hasPrefix("brain:") {
             let bid = String(message.source.dropFirst(6))
-            if let cfg = model.appState.brainSettingsModel.configs.first(where: { $0.brainId == bid }) {
+            if let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: bid) {
                 return cfg.label
             }
             return bid
@@ -1416,7 +1430,7 @@ public struct LocalChatHomeView: View {
         if let ag = model.selectedAgent {
             return ag.displayName
         }
-        if let cfg = model.appState.brainSettingsModel.configs.first(where: { $0.brainId == model.selectedBrain }) {
+        if let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain) {
             return cfg.label
         }
         return "Assistant"
@@ -1945,40 +1959,58 @@ private struct ProjectSourceTargetList: View {
 /// 对话方选择器（严格遵循定版规范：仅列出可选 Agent，整节移除已配置模型，单选规则仅提 Agent）
 public struct ModelAndAgentSheet: View {
     @ObservedObject var model: LocalChatModel
-    var onManage: () -> Void
-    var onManageAgents: (() -> Void)? = nil
+    var onManageAgents: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     private var availableAgents: [AgentRecord] {
-        let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
-        let childDeviceIds = Set(allAgents.filter { $0.kind == .device && $0.access == .cli }.compactMap { $0.deviceId })
-        return allAgents.filter { ag in
-            guard ag.enabled else { return false }
-            if ag.kind == .device && ag.access == .app && ag.agentId == ag.deviceId && childDeviceIds.contains(ag.agentId) {
-                return false
-            }
-            return true
+        let allAgents = (try? model.data.agents.listAgents()) ?? []
+        return allAgents.filter { $0.enabled && !$0.isDeviceHost && $0.kind != .localModel }
+    }
+
+    private func suggestedAgent(from agents: [AgentRecord]) -> (agent: AgentRecord, reason: String)? {
+        let candidates = agents.filter { $0.kind != .device || $0.memberConnectionState == "CONNECTED" }
+        if let target = model.projectSource.targetId,
+           let match = candidates.first(where: { $0.kind == .device && $0.deviceId == target && $0.dispatchable }) {
+            return (match, "与当前项目使用同一台已连接设备")
         }
+        if let match = candidates.first(where: { $0.agentId == model.defaultAgentId }) {
+            return (match, "你设置的默认 Agent")
+        }
+        if candidates.count == 1, let match = candidates.first {
+            return (match, "当前唯一符合建议条件的 Agent")
+        }
+        return nil
     }
 
     public var body: some View {
+        let agents = availableAgents
         NavigationStack {
             List {
-                Section {
-                    if availableAgents.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("暂无已启用的 Agent：可在「Agent 与团队」中添加，或在设备配对后连接。")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Button("前往 Agent 与团队管理") {
-                                dismiss()
-                                onManageAgents?()
+                Section("智能建议") {
+                    if let suggestion = suggestedAgent(from: agents) {
+                        Button {
+                            model.selectAgentInCurrentSession(suggestion.agent)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label(suggestion.agent.displayName, systemImage: "sparkles")
+                                Text(suggestion.reason)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.caption)
                         }
-                        .padding(.vertical, 2)
                     } else {
-                        ForEach(availableAgents) { ag in
+                        Text("暂无明确建议，请手动选择 Agent。")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    if agents.isEmpty {
+                        Text("暂无已启用的 Agent：可在「Agent 与团队」中添加，或在设备配对后连接。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(agents) { ag in
                             let isSelected = (model.selectedAgent?.agentId == ag.agentId)
                             HStack {
                                 Button {
@@ -2015,7 +2047,7 @@ public struct ModelAndAgentSheet: View {
                 }
 
                 Section {
-                    Button("管理模型与连接") { dismiss(); onManage() }
+                    Button("管理 Agent") { dismiss(); onManageAgents() }
                 } footer: {
                     Text("单选规则：对话框仅保留一个勾选的 Agent，由用户自选对话方。")
                 }
@@ -2040,8 +2072,8 @@ public struct ChatComposerBar: View {
         if let ag = model.selectedAgent {
             return ag.displayName + (ag.dispatchable ? "" : "（仅对话）")
         }
-        let cfg = model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
-        guard let cfg else { return "选择模型 / Agent" }
+        let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
+        guard let cfg else { return "选择对话方" }
         return cfg.model.isEmpty ? cfg.label : cfg.model
     }
 
@@ -2143,7 +2175,6 @@ public struct ChatComposerBar: View {
         .sheet(isPresented: $showModelSheet) {
             ModelAndAgentSheet(
                 model: model,
-                onManage: { onSelectRoute("models") },
                 onManageAgents: { onSelectRoute("agents") }
             )
             .presentationDetents([.medium, .large])

@@ -247,7 +247,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="已添加模型"
+            android:text="已添加的模型"
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />

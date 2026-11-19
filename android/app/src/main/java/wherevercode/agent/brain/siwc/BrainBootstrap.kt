@@ -56,6 +56,9 @@ import wherevercode.agent.brain.SkillRefiner
 import wherevercode.agent.brain.SkillStore
 import wherevercode.agent.brain.RoomConversationStore
 import wherevercode.agent.brain.SharedPreferencesBrainConfigStore
+import wherevercode.agent.models.CompositeBrainConfigStore
+import wherevercode.agent.models.ModelConfigStore
+import wherevercode.agent.models.ModelStoreMigration
 import wherevercode.agent.brain.ToolRegistry
 import wherevercode.agent.brain.TurnController
 import wherevercode.agent.core.autonomy.AutonomyGate
@@ -557,6 +560,15 @@ object BrainBootstrap {
          */
         val autonomyStore: AutonomyStore? = null,
         val autonomyGate: AutonomyGate? = null,
+        /**
+         * 差异 9（B3）：运行时合并视图（模型存储优先、大脑存储兜底，
+         * 见 models 包 [CompositeBrainConfigStore]）。生产经 build()
+         * 传入 Composite；直接构造的测试默认 = [configStore]（纯大脑
+         * 存储，行为与 B3 之前一致）。消费纪律：引擎 / 适配器 / 路由 /
+         * 聊天发送路径读本字段；设置页「大脑」分节只读 [configStore]
+         * 本体，绝不经本字段。
+         */
+        val runtimeConfigStore: BrainConfigStore = configStore,
     ) {
         /**
          * True when the given brain is configured and ready for a turn.
@@ -608,7 +620,13 @@ object BrainBootstrap {
                 // 通用大脑的 id 一律不算已配置。本机模型例外：地址是
                 // 127.0.0.1/localhost 时可无 Key（与连接测试探针同口径，
                 // 见 AgentConnectionTester.testModelApi）。
-                val config = configStore.getConfig(brainId)
+                // 差异 9（B3）与差异 18 方案 A（B2）的合并口径：通用模型
+                // 条目住在独立模型存储里，先读运行时合并视图（模型
+                // 优先）；Agent 发送时临时注册进引擎注册表的内存合成
+                // 配置不在任何落盘存储里，再从注册表兜底取。一线大脑
+                // 的分支仍读 configStore 本体（配置节在设置页大脑侧）。
+                val config = runtimeConfigStore.getConfig(brainId)
+                    ?: BrainAdapterRegistry.configFor(brainId)
                 config != null &&
                     config.adapterId == GenericOpenAiBrainAdapter.ADAPTER_ID &&
                     (config.authRef?.let { genericCredentialStore.loadApiKey(it) } != null ||
@@ -1290,6 +1308,18 @@ object BrainBootstrap {
             configStore.deleteConfig(CLI_BRAIN_ID)
         }
 
+        // ---- 差异 9（B3）：独立模型存储 + 运行时合并视图 -------------
+        // 迁移排在全部种子写完之后：首启时种子配置（含一线提供方）
+        // 先落大脑存储，这段再把模型三分组复制进独立模型存储
+        // （幂等补齐 + 一次性状态同步，崩溃安全；复制不移动，大脑
+        // 存储字节不变）。Composite 只在本装配层构建：引擎、通用
+        // 适配器、智能路由、任务执行器读它；设置页「大脑」分节
+        // 继续读 configStore 本体。模型存储的写只经模型页。
+        val modelConfigStore = ModelConfigStore(appContext)
+        ModelStoreMigration.run(modelConfigStore, configStore)
+        val runtimeConfigStore: BrainConfigStore =
+            CompositeBrainConfigStore(modelConfigStore, configStore)
+
         // ---- 通用 OpenAI 兼容大脑 (C3 第二阶段 W-adapter) -------------
         // 一个 adapterId "model-api-generic" 服务全部用户自建的通用大脑：
         // brainId 由用户标签 slug 化（BrainLoginRows.genericBrainId，
@@ -1305,11 +1335,11 @@ object BrainBootstrap {
         // 是错的，设置页加的通用大脑从未真正接线）。
         val genericCredentialStore = KeystoreGenericOpenAiCredentialStore.create(appContext)
         val genericAdapter = GenericOpenAiBrainAdapter(
-            configStore = configStore,
+            configStore = runtimeConfigStore,
             credentialStore = genericCredentialStore,
         )
         BrainAdapterRegistry.registerAdapter(genericAdapter)
-        configStore.listConfigs().forEach { BrainAdapterRegistry.registerConfig(it) }
+        runtimeConfigStore.listConfigs().forEach { BrainAdapterRegistry.registerConfig(it) }
 
         // ---- Engine (M2, unchanged) ------------------------------------
         // currentBrainId reads the persisted selection: if the user has
@@ -1351,7 +1381,7 @@ object BrainBootstrap {
             tools = toolRegistry,
             eventLog = eventLog,
             approvalGate = approvalGate,
-            currentBrainId = { configStore.currentBrainId() },
+            currentBrainId = { runtimeConfigStore.currentBrainId() },
             failoverPolicy = FailoverPolicy(fallbackBrainIds = cloudflareFallback),
             // 三件套之三·智能路由（2026-11-18）：总开关打开时，MODEL_API
             // 模型连接的轮次改走路由池政策（实时读设置，下一轮即生效）；
@@ -1361,9 +1391,9 @@ object BrainBootstrap {
                 if (!routingSettings.enabled) {
                     null
                 } else {
-                    configStore.getConfig(brainId)
+                    runtimeConfigStore.getConfig(brainId)
                         ?.takeIf { it.kind == BrainKind.MODEL_API }
-                        ?.let { ModelRouting.policyFor(routingSettings, configStore.listConfigs(), brainId) }
+                        ?.let { ModelRouting.policyFor(routingSettings, runtimeConfigStore.listConfigs(), brainId) }
                 }
             },
             controlState = { turnController.snapshot() },
@@ -1414,7 +1444,7 @@ object BrainBootstrap {
                     engine.chat(
                         task.taskId,
                         pipelineOrchestrator.coderPacket(task).toPromptText(),
-                        brainIdOverride = task.brainId ?: configStore.currentBrainId(),
+                        brainIdOverride = task.brainId ?: runtimeConfigStore.currentBrainId(),
                         projectId = task.projectId,
                     ).collect { event ->
                         when (event) {
@@ -1558,6 +1588,7 @@ object BrainBootstrap {
             capabilityCardStore = capabilityCardStore,
             autonomyStore = autonomyStore,
             autonomyGate = autonomyGate,
+            runtimeConfigStore = runtimeConfigStore,
         )
 
         // P2 自动执行（2026-11-11）：规划者自动起草 + 审查者自动执行的泵。
@@ -1583,7 +1614,7 @@ object BrainBootstrap {
             reviewerCandidates = {
                 val out = ArrayList<PipelineOrchestrator.ReviewerCandidate>()
                 try {
-                    configStore.listConfigs().forEach { config ->
+                    runtimeConfigStore.listConfigs().forEach { config ->
                         if (components.isBrainConfigured(config.brainId)) {
                             out += PipelineOrchestrator.ReviewerCandidate(
                                 agentId = config.brainId,
