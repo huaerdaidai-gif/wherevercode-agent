@@ -1045,7 +1045,6 @@ class ChatViewModel : ViewModel() {
                             sessionLease?.let(AgentBrainSessionGate::release)
                             return SendResult(false, "无法启动大脑轮次：${e.message ?: "未知错误"}")
                         }
-                        if (result.accepted && turnSynth != null) leaseHandedOff = true
                         result
                     }
                 }
