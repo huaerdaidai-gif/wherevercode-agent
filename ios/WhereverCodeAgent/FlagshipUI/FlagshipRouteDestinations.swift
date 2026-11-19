@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 public struct FlagshipRouteDestinationView: View {
     public let route: FlagshipRoute
@@ -1996,6 +1997,9 @@ private struct McpToolsInspectorScreen: View {
 
             Section("平台连接与 Token 配置") {
                 LabeledContent("服务地址", value: appState.settings.platformBaseURLString)
+                Button("复制服务地址") {
+                    UIPasteboard.general.string = appState.settings.platformBaseURLString
+                }
                 LabeledContent("凭证状态", value: appState.hasToken ? "已保存 Token (已授权)" : "未配置 Token (未授权)")
                 SecureField("粘贴平台 Token（v5_ 开头，仅存本机钥匙串）", text: $tokenInput)
                     .textInputAutocapitalization(.never)
@@ -4861,6 +4865,8 @@ public struct ControlHomeView: View {
         VStack(spacing: 0) {
             topNavBar
 
+            consoleHeader
+
             ScrollView {
                 VStack(spacing: 16) {
                     statusOverviewCard(
@@ -4880,16 +4886,6 @@ public struct ControlHomeView: View {
                     )
 
                     dashboardQuickRowsCard
-
-                    Button(action: reloadLocalRecords) {
-                        Label("刷新", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("control.refresh")
-
-                    Text("数据全部来自本机真实记录；没有数据就明说暂无，不编数字。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 .padding(16)
             }
@@ -4906,6 +4902,65 @@ public struct ControlHomeView: View {
         allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
         modelsCount = appState.modelConfigStore.listConfigs().count
         pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
+    }
+
+    /// 概览卡只显示主机（与安卓同口径）；完整地址在 MCP 页内查看与复制。
+    private var overviewHostText: String {
+        let raw = appState.settings.platformBaseURLString
+        if raw.isEmpty { return "https://v5.cococolo.xyz" }
+        if let host = URL(string: raw)?.host { return "https://\(host)" }
+        return raw
+    }
+
+    /// 自由度档位（1 小白 / 2 普通 / 3 标准 / 4 进阶 / 5 高阶，默认 3，
+    /// 本机持久化；与安卓控制台同一口径，PROJECT.md §3.2）。
+    @AppStorage("console.freedomLevel") private var freedomLevel = 3
+
+    private static let freedomLevelNames = ["小白", "普通", "标准", "进阶", "高阶"]
+
+    /// 页头（与安卓控制台同序）：副文案 → 自由度选择 → 刷新行。
+    @ViewBuilder
+    private var consoleHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("全局总览：所有设备、所有 Agent、所有任务、进度、日志、状态都在这里，一眼看全，不用再问进度。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Text("自由度")
+                    .font(.subheadline.weight(.semibold))
+                ForEach(1...5, id: \.self) { level in
+                    Button {
+                        freedomLevel = level
+                    } label: {
+                        Text("\(level) \(Self.freedomLevelNames[level - 1])")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(freedomLevel == level ? Color(red: 0.93, green: 0.92, blue: 0.89) : Color.white, in: Capsule())
+                            .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button(action: reloadLocalRecords) {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("control.refresh")
+
+                Text("数据全部来自本机真实记录；没有数据就明说暂无，不编数字。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder
@@ -4954,7 +5009,7 @@ public struct ControlHomeView: View {
                     Text("服务连接与运行概览")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(appState.settings.platformBaseURLString.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformBaseURLString)
+                    Text(overviewHostText)
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                 }
@@ -5052,32 +5107,107 @@ public struct ControlHomeView: View {
                 title: "用量",
                 subtitle: "查看模型调用消耗与任务预算策略",
                 icon: "chart.xyaxis.line",
-                badge: "用量",
+                badge: "待开发",
                 routeId: "usage"
             )
 
         }
     }
 
+    /// 总览面板（与安卓控制台同口径）：任务统计、设备/Agent/模型计数、
+    /// 进行中任务、待审批、设备与 Agent 状态、最近事件；无数据时在
+    /// 面板内明说暂无，不编数字。
     @ViewBuilder
     private var dashboardQuickRowsCard: some View {
-        let activeTasks = tasks.filter { $0.state == "working" || $0.state == "queued" }
+        let working = tasks.filter { $0.state == "working" }
+        let waiting = tasks.filter { $0.state == "queued" || $0.state == "assigned" }
+        let completed = tasks.filter { $0.state == "completed" || $0.state == "done" }
+        let failed = tasks.filter { $0.state == "failed" }
+        let cancelled = tasks.filter { $0.state == "cancelled" || $0.state == "canceled" || $0.state == "stopped" }
+        let active = tasks.filter { $0.state == "working" || $0.state == "queued" || $0.state == "assigned" }
+        let devices = allAgents.filter { $0.isDeviceHost }
+        let agents = allAgents.filter { !$0.isDeviceHost && $0.kind != .localModel }
+        let recent = tasks.sorted { $0.updatedAt > $1.updatedAt }.prefix(3)
+
         VStack(alignment: .leading, spacing: 8) {
-            Text("运行脉络")
+            Text("总览")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            if activeTasks.isEmpty {
-                Text("暂无运行中的任务与活动脉络")
+
+            Text("任务：进行中 \(working.count) · 等待 \(waiting.count) · 已完成 \(completed.count) · 失败 \(failed.count) · 已停止 \(cancelled.count)")
+                .font(.caption)
+            Text("设备 \(devices.count) 台 · Agent \(agents.count + 1) 个（含本机 App）· 模型 \(modelsCount) 个 · 待审批 \(pendingApprovals) 个")
+                .font(.caption)
+
+            Text("进行中任务")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            if active.isEmpty {
+                Text("暂无进行中任务。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
             } else {
-                ForEach(activeTasks.prefix(3), id: \.taskId) { t in
+                ForEach(active.prefix(5), id: \.taskId) { t in
                     HStack {
                         Text(t.title.isEmpty ? t.taskId : t.title).font(.caption).lineLimit(1)
                         Spacer()
-                        Button("查看") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered).controlSize(.mini)
+                        Text(t.state).font(.caption2).foregroundStyle(.secondary)
                     }
+                }
+                if active.count > 5 {
+                    Text("还有 \(active.count - 5) 个进行中任务，见任务模块。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text("待审批")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            Text(pendingApprovals == 0 ? "暂无待审批。" : "\(pendingApprovals) 个待审批。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("设备与 Agent 状态")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            if devices.isEmpty && agents.isEmpty {
+                Text("暂无远程设备；本机 App 在运行。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(devices, id: \.agentId) { d in
+                    Text("▸ \(d.displayName) · \(d.baseUrl ?? "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                ForEach(agents, id: \.agentId) { a in
+                    let n = tasks.filter { $0.assignedAgentId == a.agentId }.count
+                    Text("▸ \(a.displayName) · \(n) 个任务")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Text("最近事件")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            if recent.isEmpty {
+                Text("暂无运行事件。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(recent), id: \.taskId) { t in
+                    Text("▸ \(t.title.isEmpty ? t.taskId : t.title) · \(t.state)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
         }

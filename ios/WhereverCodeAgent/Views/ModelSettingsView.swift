@@ -252,6 +252,14 @@ public struct ModelSettingsView: View {
     }
 
     private func rowSubtitle(config: ModelConfig) -> String {
+        if config.kind == .subscription {
+            // 订阅授权行只报登录状态（与安卓同口径）：ChatGPT 看 SIWC
+            // 凭证，其余会员在 iOS 上尚未接入登录，一律未登录。
+            if config.modelId == "siwc-chatgpt" {
+                return model.hasKey(for: config) ? "认证通过" : "未连接"
+            }
+            return "未登录"
+        }
         let m = config.model.isEmpty ? "未选模型" : config.model
         let keyStatus = model.hasKey(for: config) ? "已填 Key" : "未填 Key"
         if let summary = config.lastTestSummary, !summary.isEmpty {
