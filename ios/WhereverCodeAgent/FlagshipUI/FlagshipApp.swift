@@ -352,7 +352,7 @@ public struct FlagshipDrawerView: View {
                                 Text(searchChatQuery.isEmpty ? "暂无历史会话" : "未找到匹配会话")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                Text("点击右下角「＋ 新对话」开始")
+                                Text("点「新对话」开始")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary.opacity(0.8))
                             }
@@ -816,7 +816,7 @@ public struct FeatureCenterSheet: View {
                 }
             }
         }
-        .navigationTitle("全部功能 (\(EntryRegistry.ENTRIES.count) 项)")
+        .navigationTitle("全部功能（\(EntryRegistry.ENTRIES.count) 项全表）")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

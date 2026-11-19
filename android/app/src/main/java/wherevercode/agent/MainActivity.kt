@@ -1663,7 +1663,7 @@ class MainActivity : AppCompatActivity() {
         val sections = listOf(
             "聊天" to "在首页输入框发一句话，${brainDisplayName()}会推理并调用工具。写文件与命令执行前会弹审批，通过才执行；拒绝或界面销毁后授权立即作废。",
             "暂停 / 停止 / 改目标" to "运行中的轮次可在聊天页控制行点“暂停/停止”，或在任务页点“暂停/停止/改目标”。停止会二次确认；停止后本轮不会自动续跑。",
-            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（${EntryRegistry.ENTRIES.size} 项）」。",
+            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（${EntryRegistry.ENTRIES.size} 项全表）」。",
             "项目" to "项目页可浏览工作区文件、查看与编辑代码（保存前二次确认，可撤销/保留）、问 Agent。终端页未实现，不在项目页里伪装。",
             "Agent 与团队" to "Agent 页可添加云端模型 API、订阅授权 Agent、本机 CLI Agent、设备上的 Agent、平台 Agent（webhook 唤醒）或云端 Agent（MCP 连接器），可对话、指派、测试、编辑、移除。设备管理在独立的设备页；未配对设备标“不可用”。",
             "教我使用" to "交互式导师尚未实现。先按上面几节用；遇到问题回首页直接问${brainDisplayName()}。",
@@ -1686,7 +1686,7 @@ class MainActivity : AppCompatActivity() {
         val root = UiKit.vertical(this)
         dialogView.addView(root)
         root.addView(
-            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项）", 18f, R.color.text_primary, bold = true).apply {
+            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项全表）", 18f, R.color.text_primary, bold = true).apply {
                 setPadding(0, 0, 0, dp(12))
             }
         )
@@ -1872,14 +1872,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configureAgentScreenForDevices(devicesOnly: Boolean) {
-        val agentOnlyIds = listOf(
-            R.id.agentHeader,
-            R.id.buttonAddAgent,
-        )
-        agentOnlyIds.forEach { id ->
-            screenAgents.findViewById<View>(id).visibility =
-                if (devicesOnly) View.GONE else View.VISIBLE
-        }
+        // 双端统一（批A A7）：设备页要有页内标题「设备」（入口与页面标题
+        // 前后一致）；此前整块隐藏 agentHeader 把标题也藏了。现标题区
+        // 常显、只换标题文字，设备模式只隐藏「＋ 添加 Agent」钮。
+        screenAgents.findViewById<View>(R.id.agentHeader).visibility = View.VISIBLE
+        screenAgents.findViewById<TextView>(R.id.agentScreenTitle).text =
+            if (devicesOnly) "设备" else "Agent"
+        screenAgents.findViewById<View>(R.id.buttonAddAgent).visibility =
+            if (devicesOnly) View.GONE else View.VISIBLE
         screenAgents.findViewById<View>(R.id.deviceSectionHeader).visibility = View.GONE
         deviceInfo.visibility = View.GONE
         if (devicesOnly) {

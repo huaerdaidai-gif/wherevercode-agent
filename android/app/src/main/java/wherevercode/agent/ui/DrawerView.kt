@@ -238,19 +238,10 @@ class DrawerView(
         val titleRow = UiKit.horizontal(context).apply {
             gravity = Gravity.BOTTOM
         }
+        // 双端统一（批A A4）：抽屉标题只留 WhereverCode（与 iOS 一致）；
+        // 版本号在「设置 → 关于」里看，标题不再带版本串。
         titleRow.addView(
-            UiKit.text(context, "WhereverCode Agent", 18f, R.color.text_primary, bold = true)
-        )
-        val versionName = try {
-            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            "v${pInfo.versionName}"
-        } catch (_: Exception) {
-            "v5.0"
-        }
-        titleRow.addView(
-            UiKit.text(context, " $versionName", 12f, R.color.text_secondary).apply {
-                setPadding(dp(6), 0, 0, dp(2))
-            }
+            UiKit.text(context, "WhereverCode", 18f, R.color.text_primary, bold = true)
         )
         brandColumn.addView(titleRow)
         row.addView(brandColumn)
@@ -281,7 +272,8 @@ class DrawerView(
                 (menu.id == "nav_channels" && activeTarget == DrawerController.ID_TEAM_CHANNEL) ||
                 (menu.id == "nav_projects" && activeTarget == DrawerController.ID_PROJECTS))
             val badge = badges.badgeFor(menu.id)
-            val trailing = if (isActive) null else "›"
+            // 双端统一（批A A3）：四父级行无角标箭头，与 iOS 一致，不再显示 ›。
+            val trailing: String? = null
             rows += RenderedRow(
                 id = menu.id,
                 label = menu.label,
@@ -456,7 +448,7 @@ class DrawerView(
             emptyNotice.addView(
                 UiKit.text(
                     context,
-                    "点击下方「＋ 新对话」开始",
+                    "点「新对话」开始",
                     11f,
                     R.color.text_tertiary,
                 ).apply { setPadding(0, dp(4), 0, 0) },
@@ -566,7 +558,7 @@ class DrawerView(
 
     private fun addFeatureCenterEntry(rows: MutableList<RenderedRow>) {
         val totalCount = EntryRegistry.ENTRIES.size
-        val label = "全部功能（${totalCount} 项）"
+        val label = "全部功能（${totalCount} 项全表）"
         rows += RenderedRow(
             id = "nav_feature_center",
             label = label,

@@ -111,7 +111,7 @@ public struct ModelSettingsView: View {
                 showDiscoveryPicker = true
             } label: {
                 HStack {
-                    Label("局域网与设备模型探测", systemImage: "network")
+                    Label("自动发现设备上的模型", systemImage: "network")
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
@@ -173,6 +173,12 @@ public struct ModelSettingsView: View {
 
     @ViewBuilder
     private var addedModelsSection: some View {
+        // 双端统一（批A A9）：补「已添加的模型」总标题（安卓现行），再接分组名。
+        Section {
+            EmptyView()
+        } header: {
+            Text("已添加的模型")
+        }
         addedModelGroup(model.modelApis, kind: .modelApi, title: "模型 API")
         addedModelGroup(model.cliBrains, kind: .agentRuntime, title: "CLI 会员")
         addedModelGroup(model.subscriptions, kind: .subscription, title: "订阅授权")

@@ -1389,6 +1389,8 @@ private struct CollaborationAndAgentsScreen: View {
             }
 
             // 块一：添加 Agent
+            // 双端统一（批A A5）：Section 头默认被系统渲染成全大写（AGENT），
+            // 与安卓「Agent」不一致；textCase(nil) 保持原文大小写。
             Section("添加 Agent") {
                 Button {
                     showAddAgentSheet = true
@@ -1397,6 +1399,7 @@ private struct CollaborationAndAgentsScreen: View {
                         .font(.subheadline.weight(.semibold))
                 }
             }
+            .textCase(nil)
 
             // 块二：已添加的 Agent
             Section("已添加的 Agent（\(agents.count)）") {
@@ -1471,6 +1474,7 @@ private struct CollaborationAndAgentsScreen: View {
                     }
                 }
             }
+            .textCase(nil)
 
             if route.id != "agents" && route.id != "team" {
                 PrototypeRouteSections(routeId: route.id, appState: appState, onNavigateRoute: onNavigateRoute)
@@ -5088,13 +5092,14 @@ public struct ControlHomeView: View {
 
     @ViewBuilder
     private func statusStatItem(_ title: String, value: String) -> some View {
+        // 双端统一（批A A10）：与安卓一致——标签在上、数字在下。
         VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .serif))
-                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .serif))
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
         }
     }
 

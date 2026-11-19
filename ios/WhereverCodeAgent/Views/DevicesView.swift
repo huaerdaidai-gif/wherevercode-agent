@@ -42,6 +42,10 @@ public struct DevicesView: View {
             registeredDevicesSection
         }
         .navigationTitle("设备")
+        // 双端统一（批A A6）：宿主给 pushed 页统一加了 ☰，系统返回钮又显示
+        // 英文「Back」，两者并存冲突；本页隐藏系统返回钮，只留 ☰（经抽屉
+        // 回控制页），与本 App 一级页抽屉导航口径一致。
+        .navigationBarBackButtonHidden(true)
         .refreshable {
             reload()
             startLanScan()
