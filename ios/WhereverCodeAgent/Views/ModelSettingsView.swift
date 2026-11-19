@@ -19,6 +19,9 @@ public struct ModelSettingsView: View {
     @State private var showRoutingPoolPicker = false
     @State private var showAddGeneric = false
     @State private var newGenericLabel = ""
+    /// 订阅授权目录行（批B B6）的诚实提示。
+    @State private var showSubscriptionNotice = false
+    @State private var subscriptionNoticeText = ""
 
     public init(model: ModelSettingsModel) {
         self.model = model
@@ -51,6 +54,11 @@ public struct ModelSettingsView: View {
         }
         .sheet(isPresented: $showRoutingPoolPicker) {
             ModelRoutingPoolPickerSheet(model: model)
+        }
+        .alert("订阅授权", isPresented: $showSubscriptionNotice) {
+            Button("我知道了", role: .cancel) {}
+        } message: {
+            Text(subscriptionNoticeText)
         }
         .alert("添加通用模型 API", isPresented: $showAddGeneric) {
             TextField("名称（如 OpenAI）", text: $newGenericLabel)
@@ -211,8 +219,35 @@ public struct ModelSettingsView: View {
                     }
                 }
             }
+
+            // 订阅授权目录（批B B6，与安卓同 4 条同序）：ChatGPT 是真配置
+            // （在 configs 里）；Qwen / Kimi / Grok 是授权入口目录——按裁定
+            // 它们不算模型、未授权不产生任何模型配置，只在展示层补齐目录
+            // 行，状态统一「未登录」，点按给诚实提示（iOS 会员登录尚未接入）。
+            if kind == .subscription {
+                let present = Set(configs.map(\.label))
+                ForEach(Self.subscriptionCatalog.filter { !present.contains($0) }, id: \.self) { name in
+                    Button {
+                        subscriptionNoticeText = "「\(name)」会员登录在 iOS 上尚未接入：这里仅作授权入口目录展示，未授权不会产生任何模型。"
+                        showSubscriptionNotice = true
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(name).font(.headline)
+                                Text("未登录").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                }
+            }
         }
     }
+
+    /// 订阅授权目录（安卓同序）：ChatGPT 之外的三家。
+    private static let subscriptionCatalog = ["Qwen 会员", "Kimi Code 订阅", "Grok 会员（实验性）"]
 
     private func modelRow(config: ModelConfig) -> some View {
         Button {
@@ -253,6 +288,11 @@ public struct ModelSettingsView: View {
     }
 
     private func rowSubtitle(config: ModelConfig) -> String {
+        // 订阅授权条目（批B B6）：状态文案与安卓统一为「未连接/已连接」，
+        // 不再用模型口径的「未选模型 · 未填 Key」。
+        if config.kind == .subscription {
+            return model.hasKey(for: config) ? "已连接" : "未连接"
+        }
         let m = config.model.isEmpty ? "未选模型" : config.model
         let keyStatus = model.hasKey(for: config) ? "已填 Key" : "未填 Key"
         if let summary = config.lastTestSummary, !summary.isEmpty {

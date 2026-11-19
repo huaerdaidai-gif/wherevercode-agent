@@ -127,8 +127,29 @@
             android:textColor="@color/text_primary"
             android:textSize="11sp" />
 
+        <!-- 手工添加入口行（批B B7，与 iOS 同形态）：行进入式——点这行才
+             展开下面的手工表单，平时收起，不再整页摊开。 -->
+        <Button
+            android:id="@+id/buttonModelManualForm"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:text="添加通用模型 API（OpenAI 兼容）"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
         <!-- 手工添加表单：就在本页添加块里（常用预设选中后也填这里），
-             不在下方列表里、更不在设置页。 -->
+             不在下方列表里、更不在设置页。批B B7 起收进可折叠容器：
+             默认收起，点上面的入口行（或预设预填/编辑已有模型时）展开。 -->
+        <LinearLayout
+            android:id="@+id/modelManualFormContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -239,6 +260,8 @@
                 android:textAllCaps="false"
                 android:textColor="@color/accent"
                 android:textSize="11sp" />
+        </LinearLayout>
+
         </LinearLayout>
 
         <!-- 已添加模型块：模型自己的列表（ModelListRows 按类型分组

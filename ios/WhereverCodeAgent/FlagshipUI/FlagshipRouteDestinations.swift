@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 public struct FlagshipRouteDestinationView: View {
     public let route: FlagshipRoute
@@ -2000,6 +2001,17 @@ private struct McpToolsInspectorScreen: View {
 
             Section("平台连接与 Token 配置") {
                 LabeledContent("服务地址", value: appState.settings.platformBaseURLString)
+                // 双端统一（批B B3）：完整 MCP 地址明示 + 一键复制。
+                LabeledContent("完整 MCP 地址", value: appState.settings.mcpEndpoint?.absoluteString ?? "地址无效")
+                Button {
+                    if let endpoint = appState.settings.mcpEndpoint?.absoluteString {
+                        UIPasteboard.general.string = endpoint
+                        statusBanner = "完整 MCP 地址已复制。"
+                    }
+                } label: {
+                    Label("复制完整 MCP 地址", systemImage: "doc.on.doc")
+                }
+                .disabled(appState.settings.mcpEndpoint == nil)
                 LabeledContent("凭证状态", value: appState.hasToken ? "已保存 Token (已授权)" : "未配置 Token (未授权)")
                 SecureField("粘贴平台 Token（v5_ 开头，仅存本机钥匙串）", text: $tokenInput)
                     .textInputAutocapitalization(.never)
@@ -4844,6 +4856,9 @@ public struct ControlHomeView: View {
     @State private var modelsCount = 0
     @State private var pendingApprovals = 0
     @State private var showWebhookNotice = false
+    /// 自由度档位（批B B1 补齐，与安卓控制台同一组五档；本机持久化，
+    /// 默认 3 标准，与安卓 SharedPreferences 口径同义）。
+    @AppStorage("console.freedomLevel") private var freedomLevel: Int = 3
 
     public init(
         appState: AppState,
@@ -4867,6 +4882,8 @@ public struct ControlHomeView: View {
 
             ScrollView {
                 VStack(spacing: 16) {
+                    consoleHeaderBlock
+
                     statusOverviewCard(
                         workingCount: workingCount,
                         queuedCount: queuedCount,
@@ -4883,17 +4900,13 @@ public struct ControlHomeView: View {
                         pendingApprovals: pendingApprovals
                     )
 
-                    dashboardQuickRowsCard
-
-                    Button(action: reloadLocalRecords) {
-                        Label("刷新", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("control.refresh")
-
-                    Text("数据全部来自本机真实记录；没有数据就明说暂无，不编数字。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    overviewPanel(
+                        workingCount: workingCount,
+                        queuedCount: queuedCount,
+                        pendingApprovals: pendingApprovals,
+                        agentsCount: agentsCount,
+                        devicesCount: devicesCount
+                    )
                 }
                 .padding(16)
             }
@@ -4950,6 +4963,134 @@ public struct ControlHomeView: View {
         .padding(.bottom, 12)
     }
 
+    /// 控制台页顶块（批B B1+B2，与安卓页顶同序同文案）：副文案、自由度
+    /// 五档选择器、刷新钮 + 诚实文案。此前 iOS 无副文案与自由度、刷新在
+    /// 页底，现统一到页顶。
+    @ViewBuilder
+    private var consoleHeaderBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("全局总览：所有设备、所有 Agent、所有任务、进度、日志、状态都在这里，一眼看全，不用再问进度。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Text("自由度")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                ForEach(1...5, id: \.self) { level in
+                    let names = ["小白", "普通", "标准", "进阶", "高阶"]
+                    Button {
+                        freedomLevel = level
+                    } label: {
+                        Text("\(level) \(names[level - 1])")
+                            .font(.caption2.weight(freedomLevel == level ? .bold : .regular))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                freedomLevel == level ? Color(red: 0.93, green: 0.92, blue: 0.89) : Color.white,
+                                in: Capsule()
+                            )
+                            .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                            .foregroundStyle(Color(red: 0.25, green: 0.24, blue: 0.22))
+                    }
+                    .accessibilityIdentifier("control.freedom.\(level)")
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button(action: reloadLocalRecords) {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("control.refresh")
+
+                Text("数据全部来自本机真实记录；没有数据就明说暂无，不编数字。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 页底「总览」面板（批B B4，与安卓总览面板同形态）：任务统计、设备·
+    /// Agent·模型计数、进行中、待审批、设备与 Agent 状态、最近事件都在
+    /// 这一块里；无数据时在面板内明说暂无。此前 iOS 另起一个「运行脉络」
+    /// 空态盒，两套形态，现并入本面板。
+    @ViewBuilder
+    private func overviewPanel(workingCount: Int, queuedCount: Int, pendingApprovals: Int, agentsCount: Int, devicesCount: Int) -> some View {
+        let completedCount = tasks.filter { $0.state == "completed" }.count
+        let failedCount = tasks.filter { $0.state == "failed" }.count
+        let cancelledCount = tasks.filter { $0.state == "cancelled" }.count
+        let activeTasks = tasks.filter { $0.state == "working" || $0.state == "queued" || $0.state == "assigned" }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("总览")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("任务：进行中 \(workingCount) · 等待 \(queuedCount) · 已完成 \(completedCount) · 失败 \(failedCount) · 已停止 \(cancelledCount)")
+                .font(.caption)
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+            Text("设备 \(devicesCount) 台 · Agent \(agentsCount + 1) 个（含本机 App） · 模型 \(modelsCount) 个 · 待审批 \(pendingApprovals) 个")
+                .font(.caption)
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+
+            Text("进行中任务")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            if activeTasks.isEmpty {
+                Text("暂无进行中任务。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(activeTasks.prefix(3), id: \.taskId) { t in
+                    HStack {
+                        Text(t.title.isEmpty ? t.taskId : t.title).font(.caption).lineLimit(1)
+                        Spacer()
+                        Button("查看") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered).controlSize(.mini)
+                    }
+                }
+            }
+
+            Text("待审批")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            Text(pendingApprovals > 0 ? "\(pendingApprovals) 个待审批。" : "暂无待审批。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("设备与 Agent 状态")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            if allAgents.isEmpty {
+                Text("暂无远程设备；本机 App 在运行。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(allAgents, id: \.agentId) { ag in
+                    Text("▸ \(ag.displayName) · \(ag.memberConnectionState == "CONNECTED" ? "已连接" : "未连接")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Text("最近事件")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            Text("暂无运行事件。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1))
+    }
+
     @ViewBuilder
     private func statusOverviewCard(workingCount: Int, queuedCount: Int, attentionCount: Int, pendingApprovals: Int, agentsCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -4958,7 +5099,9 @@ public struct ControlHomeView: View {
                     Text("服务连接与运行概览")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(appState.settings.platformBaseURLString.isEmpty ? "https://v5.cococolo.xyz" : appState.settings.platformBaseURLString)
+                    // 双端统一（批B B3）：概览卡只显示主机根地址（安卓现行
+                    // 口径）；完整 MCP 地址在 MCP 卡页内看，并可复制。
+                    Text(appState.settings.validatedBaseURL?.absoluteString ?? "https://v5.cococolo.xyz")
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                 }
@@ -5056,38 +5199,11 @@ public struct ControlHomeView: View {
                 title: "用量",
                 subtitle: "查看模型调用消耗与任务预算策略",
                 icon: "chart.xyaxis.line",
-                badge: "用量",
+                badge: "待开发",
                 routeId: "usage"
             )
 
         }
-    }
-
-    @ViewBuilder
-    private var dashboardQuickRowsCard: some View {
-        let activeTasks = tasks.filter { $0.state == "working" || $0.state == "queued" }
-        VStack(alignment: .leading, spacing: 8) {
-            Text("运行脉络")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            if activeTasks.isEmpty {
-                Text("暂无运行中的任务与活动脉络")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
-            } else {
-                ForEach(activeTasks.prefix(3), id: \.taskId) { t in
-                    HStack {
-                        Text(t.title.isEmpty ? t.taskId : t.title).font(.caption).lineLimit(1)
-                        Spacer()
-                        Button("查看") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered).controlSize(.mini)
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1))
     }
 
     @ViewBuilder

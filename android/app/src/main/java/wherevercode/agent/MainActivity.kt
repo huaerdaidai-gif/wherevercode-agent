@@ -11241,6 +11241,8 @@ class MainActivity : AppCompatActivity() {
     // 分节彻底分家：不借大脑列表、不改大脑标题、不动 brain/ 行为。
     // ------------------------------------------------------------------
 
+    /** 手工表单容器（批B B7 行进入式）：默认收起，入口行/预填/编辑时展开。 */
+    private var modelManualFormContainer: View? = null
     private lateinit var modelListContainer: LinearLayout
     private lateinit var modelFormLabel: EditText
     private lateinit var modelFormBaseUrl: EditText
@@ -11272,6 +11274,8 @@ class MainActivity : AppCompatActivity() {
         modelFormApiKey = screenModels.findViewById(R.id.modelFormApiKey)
         modelFormModels = screenModels.findViewById(R.id.modelFormModels)
         screenModels.findViewById<View>(R.id.buttonModelCommonProviders).setOnClickListener {
+            // 预设选中后名称/地址预填进手工表单：先展开表单，选完就能接着填 Key。
+            expandModelManualForm()
             showCommonProviderPicker(modelFormFields())
         }
         screenModels.findViewById<View>(R.id.buttonModelFreeProviders).setOnClickListener {
@@ -11279,6 +11283,11 @@ class MainActivity : AppCompatActivity() {
         }
         screenModels.findViewById<View>(R.id.buttonModelDiscover).setOnClickListener {
             discoverDeviceModels()
+        }
+        modelManualFormContainer = screenModels.findViewById(R.id.modelManualFormContainer)
+        screenModels.findViewById<View>(R.id.buttonModelManualForm).setOnClickListener {
+            val container = modelManualFormContainer ?: return@setOnClickListener
+            container.visibility = if (container.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
         modelRoutingCheck = screenModels.findViewById(R.id.checkModelRoutingPage)
         modelRoutingPaidCheck = screenModels.findViewById(R.id.checkModelRoutingAllowPaid)
@@ -11514,8 +11523,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 编辑通用模型连接：预填本页表单（Key 留空 = 不换），名称不可改。 */
+    /** 展开手工表单（批B B7）：入口行、预设预填、编辑已有模型共用。 */
+    private fun expandModelManualForm() {
+        modelManualFormContainer?.visibility = View.VISIBLE
+    }
+
     private fun startEditModel(config: BrainConfig) {
         if (!::modelFormLabel.isInitialized) return
+        expandModelManualForm()
         editingModelId = config.brainId
         modelFormLabel.setText(config.label)
         modelFormLabel.isEnabled = false
