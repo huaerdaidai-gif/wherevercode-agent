@@ -70,14 +70,14 @@ class ModelPageLayoutTest {
         val texts = allTexts(root)
         val joined = texts.joinToString("\n")
         assertTrue(joined.contains("添加模型"))
-        assertTrue(joined.contains("已添加模型"))
+        assertTrue(joined.contains("已添加的模型"))
         assertTrue(joined.contains("常用模型服务商"))
         assertTrue(joined.contains("免费 token 模型服务商"))
         assertTrue(joined.contains("自动发现设备上的模型"))
         // 模型页不借大脑：全页文案不出现“大脑”。
         assertFalse("模型页文案不得出现“大脑”：$joined", joined.contains("大脑"))
         // 两块顺序：添加块在已添加块之前。
-        assertTrue(texts.indexOf("添加模型") < texts.indexOf("已添加模型"))
+        assertTrue(texts.indexOf("添加模型") < texts.indexOf("已添加的模型"))
     }
 
     /**

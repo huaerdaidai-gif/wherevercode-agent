@@ -56,6 +56,10 @@ class ConsoleScreenController(
     private val onToast: (String) -> Unit = {},
     private val onOpenModels: () -> Unit = {},
     private val modelsCount: () -> Int = { 0 },
+    /** 平台根地址（已规范化：只要 scheme + host + 可选端口）。 */
+    private val platformRoot: () -> String = { "https://v5.cococolo.xyz" },
+    /** 本机是否已保存平台 Token。无 Token 时总览按钮是「配置 Token」。 */
+    private val hasPlatformToken: () -> Boolean = { false },
 ) {
     val root: ScrollView = ScrollView(context).apply {
         visibility = View.GONE
@@ -268,16 +272,18 @@ class ConsoleScreenController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleGroup.addView(UiKit.text(context, "服务连接与运行概览", 11f, R.color.text_secondary, bold = true))
-        titleGroup.addView(UiKit.text(context, "https://v5.cococolo.xyz", 14f, R.color.text_primary, bold = true).apply {
+        titleGroup.addView(UiKit.text(context, platformRoot(), 14f, R.color.text_primary, bold = true).apply {
             setPadding(0, dp(2), 0, 0)
         })
         topRow.addView(titleGroup)
 
-        // 差异 6（2026-11-19）：概览卡按钮随 MCP Token 真实状态切换——已配 Token
-        // 是“管理连接”，未配是“配置 Token”。快照为空（加载中）时沿用“管理连接”。
+        // 差异 6（B1）与 D 类文案（B4）的合并口径：概览卡按钮随 Token
+        // 真实状态切换——有快照时以快照的 mcpTokenConfigured 为准
+        // （快照由真实凭证状态构建），加载中（快照为空）时读实时
+        // hasPlatformToken。两路同源，不会互相矛盾。
         val btnManage = UiKit.text(
             context,
-            if (snapshot != null && !snapshot.mcpTokenConfigured) "配置 Token" else "管理连接",
+            connectionActionLabel(snapshot?.mcpTokenConfigured ?: hasPlatformToken()),
             11f, R.color.accent, bold = true,
         ).apply {
             setBackgroundResource(R.drawable.bg_chip_accent)
@@ -420,13 +426,14 @@ class ConsoleScreenController(
             isTodo = snapshot != null && !snapshot.mcpTokenConfigured,
             onClick = { onOpenMcp() },
         ))
+        val webhook = webhookEntryPresentation()
         container.addView(controlCard(
             title = "Webhook",
             subtitle = "配置 Webhook、定时巡检、触发器与自主执行护栏",
             iconRes = R.drawable.ic_clock,
-            badge = "待开发",
-            isTodo = true,
-            onClick = { onToast("【待开发】Webhook 尚未开发") },
+            badge = webhook.badge,
+            isTodo = webhook.todo,
+            onClick = { onToast(webhook.message) },
         ))
         container.addView(controlCard(
             title = "任务",
@@ -1091,5 +1098,64 @@ class ConsoleScreenController(
     companion object {
         private const val KEY_LEVEL = "freedom_level"
         private const val KEY_HIDDEN = "hidden_modules"
+
+        /** 未配置平台地址时的公开根（与总览原先写死的主机一致，无路径）。 */
+        const val DEFAULT_PLATFORM_ROOT = "https://v5.cococolo.xyz"
+
+        /**
+         * 总览卡上的根地址：只要 `https://host` 或 `https://host:port`。
+         * 去掉协议重复、路径（如 `/api/open/v1/mcp`）、查询和末尾斜杠。
+         * 空白或解析失败时用 [DEFAULT_PLATFORM_ROOT]，不展示半截地址。
+         */
+        fun normalizedPlatformRoot(raw: String?): String {
+            val trimmed = raw?.trim()?.trimEnd('/').orEmpty()
+            if (trimmed.isBlank()) return DEFAULT_PLATFORM_ROOT
+            val withScheme = when {
+                trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+                trimmed.startsWith("http://", ignoreCase = true) ->
+                    "https://" + trimmed.substring("http://".length)
+                else -> "https://$trimmed"
+            }
+            return try {
+                val uri = java.net.URI(withScheme)
+                val host = uri.host?.trim().orEmpty()
+                if (host.isEmpty()) DEFAULT_PLATFORM_ROOT
+                else if (uri.port > 0) "https://$host:${uri.port}" else "https://$host"
+            } catch (_: Exception) {
+                DEFAULT_PLATFORM_ROOT
+            }
+        }
+
+        /** 有 Token 才能管理连接；没有就直说去配置。 */
+        fun connectionActionLabel(hasToken: Boolean): String =
+            if (hasToken) "管理连接" else "配置 Token"
+
+        /**
+         * 控制台 Webhook 卡的角标和点按提示，只读 [EntryRegistry]。
+         * 注册表里带 Webhook 的待开发条目是 feature_unified_access。
+         */
+        fun webhookEntryPresentation(): WebhookEntryPresentation {
+            val entry = EntryRegistry.find("feature_unified_access")
+                ?: EntryRegistry.ENTRIES.firstOrNull { candidate ->
+                    candidate.title.contains("Webhook") ||
+                        candidate.todoMessage?.contains("Webhook") == true
+                }
+            val todo = entry == null || entry.status == EntryRegistry.Status.TODO
+            val badge = when {
+                entry == null -> EntryRegistry.Status.TODO.label
+                todo -> entry.status.label
+                else -> entry.status.label
+            }
+            val message = entry?.todoMessage?.takeIf { it.contains("待开发") }
+                ?: "【待开发】Webhook 尚未开发"
+            return WebhookEntryPresentation(badge = badge, message = message, todo = todo)
+        }
     }
 }
+
+/** Webhook 控制卡从注册表读出的呈现（角标 + 点按的诚实提示）。 */
+data class WebhookEntryPresentation(
+    val badge: String,
+    val message: String,
+    val todo: Boolean,
+)

@@ -400,6 +400,24 @@ object EntryRegistry {
 
     fun byGroup(group: Group): List<Entry> = ENTRIES.filter { it.group == group }
 
+    /**
+     * 「全部功能」每行副标题。有中文说明或待开发提示就用它；
+     * 否则不把英文 route id（target）露出来，改用中文分组名。
+     */
+    fun listSubtitle(entry: Entry): String {
+        val note = entry.note?.takeIf { it.isNotBlank() }
+        if (note != null) return note
+        val todo = entry.todoMessage?.takeIf { it.isNotBlank() }
+        if (todo != null) return todo
+        val target = entry.target
+        if (target.isNotBlank() && !isEnglishRouteId(target)) return target
+        return entry.group.label
+    }
+
+    /** 纯英文 route / screen / action id（如 code_editor、new_conversation）。 */
+    fun isEnglishRouteId(value: String): Boolean =
+        value.matches(Regex("[A-Za-z][A-Za-z0-9_./:-]*"))
+
     /** 首页问候区 4 个建议 pill（按注册表顺序：开发一个 App / 导入项目并交付 / 组织多 Agent 团队 / 自动化任务）。 */
     fun homeSuggestions(): List<Entry> = byGroup(Group.HOME_SUGGESTION)
 
