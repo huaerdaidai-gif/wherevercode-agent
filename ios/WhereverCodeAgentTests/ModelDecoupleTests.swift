@@ -454,19 +454,12 @@ final class ModelDecoupleTests: XCTestCase {
         let newProviderKey = IndependentCustomFreeProviderStore.keyStorage
         let legacyPreset = FreeProviderPreset(
             id: "custom-legacy",
-            name: "Legacy Custom",
-            defaultBaseUrl: "https://legacy.example.com",
-            defaultModel: "legacy-v1",
-            apiKeyPlaceholder: "key",
-            keyHelpUrl: "",
-            signupGuideUrl: "",
-            verifyUrl: "",
-            catalogUrl: "",
-            modelsUrl: "",
-            recommendedModelHint: "",
-            catalogHint: "",
-            docUrl: "",
-            catalogParserType: "static"
+            displayName: "Legacy Custom",
+            fixedModels: ["legacy-v1"],
+            listMode: .fixed,
+            baseUrlTemplate: "https://legacy.example.com",
+            keyHelp: "key",
+            note: "legacy"
         )
         let legacyProviderData = try JSONEncoder().encode([legacyPreset])
         userDefaults.set(legacyProviderData, forKey: legacyProviderKey)
@@ -479,19 +472,12 @@ final class ModelDecoupleTests: XCTestCase {
         // 新增新服务商
         let newPreset = FreeProviderPreset(
             id: "custom-new",
-            name: "New Provider",
-            defaultBaseUrl: "https://new.example.com",
-            defaultModel: "new-v1",
-            apiKeyPlaceholder: "key",
-            keyHelpUrl: "",
-            signupGuideUrl: "",
-            verifyUrl: "",
-            catalogUrl: "",
-            modelsUrl: "",
-            recommendedModelHint: "",
-            catalogHint: "",
-            docUrl: "",
-            catalogParserType: "static"
+            displayName: "New Provider",
+            fixedModels: ["new-v1"],
+            listMode: .fixed,
+            baseUrlTemplate: "https://new.example.com",
+            keyHelp: "key",
+            note: "new"
         )
         providerStore.add(newPreset)
         XCTAssertEqual(providerStore.list().count, 2)

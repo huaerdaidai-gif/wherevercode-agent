@@ -61,11 +61,11 @@ public struct ModelSettingsView: View {
                     let config = ModelConfig(
                         modelId: modelId,
                         kind: .modelApi,
-                        adapterId: "generic",
+                        adapterId: GenericOpenAiBrainAdapter.adapterId,
                         label: name,
                         baseUrl: "https://api.openai.com/v1",
                         model: "",
-                        authRef: "model:\(modelId):key"
+                        authRef: "model-api:\(modelId)"
                     )
                     model.saveConfig(config)
                     editing = config
@@ -345,11 +345,11 @@ private struct ModelCommonProviderPickerSheet: View {
                     let config = ModelConfig(
                         modelId: modelId,
                         kind: .modelApi,
-                        adapterId: "generic",
+                        adapterId: GenericOpenAiBrainAdapter.adapterId,
                         label: preset.displayName,
                         baseUrl: preset.baseUrl,
                         model: "",
-                        authRef: "model:\(modelId):key"
+                        authRef: "model-api:\(modelId)"
                     )
                     model.saveConfig(config)
                     dismiss()

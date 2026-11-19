@@ -43,6 +43,13 @@ class TestIosB3Regression(unittest.TestCase):
         self.assertNotIn('adapterId = "generic"', src)
         self.assertNotIn('adapterId: "generic"', src)
 
+        # ModelSettingsView 中的新建模型路径亦统一对齐 GenericOpenAiBrainAdapter.adapterId
+        view_path = os.path.join(APP_DIR, "Views", "ModelSettingsView.swift")
+        with open(view_path, encoding="utf-8") as f:
+            view_src = f.read()
+        self.assertNotIn('adapterId: "generic"', view_src)
+        self.assertNotIn('adapterId = "generic"', view_src)
+
     def test_02_gate_auth_ref_contract(self):
         """门禁 2：authRef 统一对齐 model-api:<modelId>"""
         reg_path = os.path.join(APP_DIR, "Models", "ModelRegistry.swift")
@@ -51,6 +58,13 @@ class TestIosB3Regression(unittest.TestCase):
 
         self.assertIn('let authRef = "model-api:\\(modelId)"', src)
         self.assertNotIn('let authRef = "model:\\(modelId):key"', src)
+
+        # ModelSettingsView 中的新建模型路径亦统一对齐 model-api:<modelId>
+        view_path = os.path.join(APP_DIR, "Views", "ModelSettingsView.swift")
+        with open(view_path, encoding="utf-8") as f:
+            view_src = f.read()
+        self.assertNotIn('"model:\\(modelId):key"', view_src)
+        self.assertIn('"model-api:\\(modelId)"', view_src)
 
     def test_03_gate_is_local_url_deduplication(self):
         """门禁 3：删除自写 isLocalUrl，统一复用 BrainConfigValidator.isLocalModelUrl"""
