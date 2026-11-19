@@ -96,9 +96,9 @@ class HandClientTest {
     private val signingKey = "test-signing-key".toByteArray(Charsets.UTF_8)
 
     private val peer = DiscoveredPeer(
-        deviceId = "xiaomi12",
-        displayName = "小米 12",
-        host = "192.168.1.7",
+        deviceId = "testdevice",
+        displayName = "测试设备",
+        host = "192.168.1.10",
         port = 8443,
         fingerprintSha256 = "ab".repeat(32),
         capabilities = listOf("hand"),
@@ -121,7 +121,7 @@ class HandClientTest {
         seq = seq,
         taskId = "task-1",
         agentId = "muse",
-        sourceDeviceId = "xiaomi12",
+        sourceDeviceId = "testdevice",
         targetDeviceId = "k70",
         folder = "/proj",
         action = "read",
@@ -200,7 +200,7 @@ class HandClientTest {
         assertEquals("task-1", envelope?.taskId)
         val credential = parseTaskCredential(envelope?.args?.get("credential").orEmpty())
         assertEquals("task-1", credential?.taskId)
-        assertEquals("xiaomi12", credential?.targetDeviceId)
+        assertEquals("testdevice", credential?.targetDeviceId)
         assertEquals("/proj", credential?.folder)
         assertFalse(credential == null)
     }

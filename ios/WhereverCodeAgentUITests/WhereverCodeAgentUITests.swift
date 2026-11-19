@@ -74,7 +74,7 @@ final class WhereverCodeAgentUITests: XCTestCase {
             "Settings must display the platform address row"
         )
         let bakedHost = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "cococolo")
+            NSPredicate(format: "label CONTAINS %@", "example.com")
         ).firstMatch
         XCTAssertFalse(bakedHost.exists, "Settings must not display any baked-in platform host")
         let unconfigured = app.staticTexts.matching(

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import socket, json, hashlib, os, time, base64, subprocess, hmac, sys
 
-MAC_HOST = '100.75.41.0'
+MAC_HOST = os.environ.get('WC_TEST_MAC_HOST', '')
 MAC_PORT = 18743
+MAC_USER = os.environ.get('WC_TEST_MAC_USER', 'user')
+SSH_KEY = os.environ.get('WC_TEST_SSH_KEY', '~/.ssh/id_ed25519')
+HAND_DIR = os.environ.get('WC_TEST_HAND_DIR', f'/Users/{MAC_USER}/Library/Application Support/WhereverCode/V5Hand')
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -108,8 +111,8 @@ def main():
     # 0. Rotate a fresh pair code on Mac Dev Host
     print("[0/6] Rotating fresh pairing code via SSH on Mac host...")
     out = subprocess.check_output([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), 'a1234@100.75.41.0',
-        "'/Users/a1234/Library/Application Support/WhereverCode/V5Hand/wherevercode-hand' pair-code --rotate --raw"
+        'ssh', '-i', os.path.expanduser(SSH_KEY), f'{MAC_USER}@{MAC_HOST}',
+        f"'{HAND_DIR}/wherevercode-hand' pair-code --rotate --raw"
     ]).decode().strip()
     pair_code = out.split()[0]
     print(f"      Rotated Pair Code: {pair_code}")
@@ -146,15 +149,15 @@ def main():
     s.close()
     print("      -> Pairing verified: PASS")
 
-    folder = '/Users/a1234/v5-codex-work'
+    folder = os.environ.get('WC_TEST_WORK_FOLDER', f'/Users/{MAC_USER}/v5-codex-work')
     target_dev = srv_hello.get('device_id', 'MacBook-Air')
     agent_id = 'codex'
     task_id = 'task-closedloop-' + base64.b32encode(os.urandom(4)).decode().lower()
 
     # Pre-grant folder for codex
     subprocess.run([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), 'a1234@100.75.41.0',
-        f"'/Users/a1234/Library/Application Support/WhereverCode/V5Hand/wherevercode-hand' grant {agent_id} '{folder}'"
+        'ssh', '-i', os.path.expanduser(SSH_KEY), f'{MAC_USER}@{MAC_HOST}',
+        f"'{HAND_DIR}/wherevercode-hand' grant {agent_id} '{folder}'"
     ], check=True, stdout=subprocess.DEVNULL)
 
     # 3. Cross-Device Tool Operations: list, write, read
@@ -198,8 +201,8 @@ def main():
     # 6. Clean up temporary test client from paired_clients.json
     print("[6/6] Cleaning up test client credentials on Mac dev host...")
     subprocess.run([
-        'ssh', '-i', os.path.expanduser('~/.ssh/infra_ed25519'), 'a1234@100.75.41.0',
-        f'python3 -c "import json; path=\\\"/Users/a1234/Library/Application Support/WhereverCode/V5Hand/paired_clients.json\\\"; d=json.load(open(path)); d.pop(\\\"{client_id}\\\", None); json.dump(d, open(path,\\\"w\\\"), indent=2)"'
+        'ssh', '-i', os.path.expanduser(SSH_KEY), f'{MAC_USER}@{MAC_HOST}',
+        f'python3 -c "import json; path=\\\"{HAND_DIR}/paired_clients.json\\\"; d=json.load(open(path)); d.pop(\\\"{client_id}\\\", None); json.dump(d, open(path,\\\"w\\\"), indent=2)"'
     ], check=True)
 
     print("\n=======================================================")

@@ -74,7 +74,7 @@ final class HandClientTests: XCTestCase {
             sourceDeviceId: "iphone-app",
             targetDeviceId: "mac-host",
             agentId: "codex",
-            folder: "/Users/a1234/v5-codex-work",
+            folder: "/Users/test/v5-codex-work",
             signingKey: signingKey,
             ttlSeconds: 900
         )
@@ -95,7 +95,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertEqual(json["task_id"] as? String, "task-test-123")
         XCTAssertEqual(json["target_device_id"] as? String, "mac-host")
         XCTAssertEqual(json["agent_id"] as? String, "codex")
-        XCTAssertEqual(json["folder"] as? String, "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(json["folder"] as? String, "/Users/test/v5-codex-work")
         XCTAssertNotNil(json["sig_b64"] as? String)
     }
 
@@ -136,8 +136,8 @@ final class HandClientTests: XCTestCase {
 
     // 6. 验证工作区路径正规化
     func testNormalizePath() {
-        XCTAssertEqual(HandClient.normalizePath("/Users/a1234/v5-codex-work/"), "/Users/a1234/v5-codex-work")
-        XCTAssertEqual(HandClient.normalizePath("/Users/a1234//v5-codex-work///"), "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(HandClient.normalizePath("/Users/test/v5-codex-work/"), "/Users/test/v5-codex-work")
+        XCTAssertEqual(HandClient.normalizePath("/Users/test//v5-codex-work///"), "/Users/test/v5-codex-work")
         XCTAssertEqual(HandClient.normalizePath("  /a/b/c  "), "/a/b/c")
         XCTAssertEqual(HandClient.normalizePath(""), "")
     }
@@ -149,9 +149,9 @@ final class HandClientTests: XCTestCase {
             port: 18743,
             targetDeviceId: "MacBook-Air",
             agentId: "codex",
-            defaultFolder: "/Users/a1234/v5-codex-work"
+            defaultFolder: "/Users/test/v5-codex-work"
         )
-        XCTAssertEqual(registry.workspaceRoot, "/Users/a1234/v5-codex-work")
+        XCTAssertEqual(registry.workspaceRoot, "/Users/test/v5-codex-work")
 
         let tools = registry.toolsForCapabilities(nil, authorizedTools: [])
         XCTAssertEqual(tools.count, 4)
@@ -174,15 +174,15 @@ final class HandClientTests: XCTestCase {
             port: 18743,
             targetDeviceId: "MacBook-Air",
             agentId: "codex",
-            defaultFolder: "/Users/a1234/v5-codex-work"
+            defaultFolder: "/Users/test/v5-codex-work"
         )
         let context = ToolContext(
             taskId: "task-test",
             agentId: "codex",
             approvalGate: DenyApprovalGate(),
-            workspaceRoot: "/Users/a1234/v5-codex-work",
+            workspaceRoot: "/Users/test/v5-codex-work",
             deviceId: "MacBook-Air",
-            folder: "/Users/a1234/v5-codex-work"
+            folder: "/Users/test/v5-codex-work"
         )
 
         let validArgs: [String: String] = ["path": ""]
@@ -664,7 +664,7 @@ final class HandClientTests: XCTestCase {
             displayName: "Xiaomi 12 · Hand",
             kind: .device,
             access: .app,
-            baseUrl: "100.94.147.89:18743",
+            baseUrl: "100.64.0.1:18743",
             lastTestSummary: "已连接",
             memberConnectionState: "CONNECTED",
             deviceId: devId,
@@ -676,7 +676,7 @@ final class HandClientTests: XCTestCase {
             displayName: "agy",
             kind: .device,
             access: .cli,
-            baseUrl: "100.94.147.89:18743",
+            baseUrl: "100.64.0.1:18743",
             lastTestSummary: "设备 Agent · /data/data/com.termux/files/home",
             memberConnectionState: "CONNECTED",
             deviceId: devId,
@@ -739,7 +739,7 @@ final class HandClientTests: XCTestCase {
         XCTAssertTrue(isTask)
 
         let testDev = "Android-x"
-        let folderFallback = testDev.contains("Android") ? "/data/data/com.termux/files/home" : "/Users/a1234/v5-codex-work"
+        let folderFallback = testDev.contains("Android") ? "/data/data/com.termux/files/home" : "/Users/test/v5-codex-work"
         XCTAssertFalse(folderFallback.isEmpty)
         XCTAssertTrue(folderFallback.hasPrefix("/"))
     }

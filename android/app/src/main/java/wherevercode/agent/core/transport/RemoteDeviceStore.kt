@@ -419,7 +419,7 @@ fun agentCountsByDevice(agentDeviceIds: List<String?>): Map<String, Int> =
  * 里同 deviceId 的配对信任记录（两者合起来才是这台设备在 App 里的
  * 完整登记；只删设备条目会让配对卡在下次刷新时单独冒出来，等于
  * 没删干净）。绝不级联：该设备上的 Agent 记录（AgentStore）、项目、
- * 会话一概不动（Funk 概念分离硬规则：删设备只删设备、删 Agent 只
+ * 会话一概不动（概念分离硬规则：删设备只删设备、删 Agent 只
  * 删 Agent；设备重加后，原有 Agent 记录按 deviceId 仍归这台设备）。
  * 返回 true = 原本确有一条设备条目被删。
  */

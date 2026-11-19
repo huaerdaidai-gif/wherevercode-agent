@@ -152,7 +152,7 @@ class AgentScreenController(
         onDeleteRemote: ((RemoteDevice) -> Unit)? = null,
         onAddRemote: (() -> Unit)? = null,
     ) {
-        // 设备页只留两块（Funk 2026-11-19，与 Agent 页同逻辑）：
+        // 设备页只留两块（2026-11-19，与 Agent 页同逻辑）：
         // 添加设备 + 已添加设备；附近发现的设备是添加流程的一部分。
         if (onAddRemote != null) {
             val addRow = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(10)) }

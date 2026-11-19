@@ -10,7 +10,7 @@ import wherevercode.agent.brain.BrainConfigValidator
  * 添加的模型配置不与设备关联，删设备不删模型。
  *
  * 探测是只读 GET，不推理、不计费；端点没响应/没模型就跳过，不把
- * 「探不到」说成「设备坏了」。发现不限于局域网（Funk 2026-11-18
+ * 「探不到」说成「设备坏了」。发现不限于局域网（2026-11-18
  * 23:56）：已配对设备无论在局域网、Tailscale 还是公网都探——
  * 本机/私有/网状网段地址走 http，公网地址走 https（公网明文
  * http 永远拒绝，见 BrainConfigValidator 的地址规则）。

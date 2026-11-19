@@ -27,7 +27,7 @@ class PipelineRemoteCallerTest {
     private val peer = DiscoveredPeer(
         deviceId = "mac",
         displayName = "Mac",
-        host = "192.168.1.7",
+        host = "192.168.1.10",
         port = 18743,
         fingerprintSha256 = "ab".repeat(32),
         capabilities = listOf("hand"),

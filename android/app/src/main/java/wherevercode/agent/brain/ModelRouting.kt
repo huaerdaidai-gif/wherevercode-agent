@@ -5,7 +5,7 @@ import org.json.JSONArray
 import wherevercode.agent.brain.generic.FreeProviderPresets
 
 /**
- * 智能路由（三件套之三，Funk 2026-11-18 定案）：
+ * 智能路由（三件套之三，2026-11-18 定案）：
  * - 以免费为主、付费可选：路由默认只在免费模型之间切换；付费模型
  *   只有在用户主动打开 [ModelRoutingSettings.allowPaid] 后才进池。
  * - v1 只做优先级顺序 + 故障切换：遇可重试失败（402 额度/429 限流

@@ -10,7 +10,7 @@ import wherevercode.agent.brain.generic.GenericOpenAiPresets
 /**
  * 模型页“已添加模型”的行数据（纯逻辑，无 Android 依赖，可单测）。
  *
- * 与设置页大脑列表彻底分家（2026-11-19，Funk 定：大脑已砍开放一边，
+ * 与设置页大脑列表彻底分家（2026-11-19，定版：大脑已砍开放一边，
  * 模型页不许拿大脑列表改标题充数）：数据源是已配置的模型连接
  * （configStore 里的 BrainConfig 本来就是模型连接：模型 API 地址、
  * CLI 会员、订阅授权），在这里按连接类型分组呈现——模型 API /

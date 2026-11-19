@@ -3,7 +3,7 @@
 - **实施任务**：iOS 控制台补齐「模型」卡，与「设备」「Agent」并列，点进现有模型页，角标为真实已添加模型数
 - **执行分支**：`feat/ios-model-card-20261119`
 - **基线分支与 HEAD**：`origin/main` @ `b640601bde72c1984138604992aa1c0596329d90`
-- **派发与审批**：Funk 2026-11-19 批示「合 + 抓紧下一步」；Muse 派发简报 `~/agy-ios-model-card-brief.md`
+- **派发与审批**：2026-11-19 批示「合 + 抓紧下一步」；Muse 派发简报 `~/agy-ios-model-card-brief.md`
 
 ---
 

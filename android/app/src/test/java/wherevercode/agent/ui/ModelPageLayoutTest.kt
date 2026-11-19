@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
 import wherevercode.agent.R
 
 /**
- * 模型页解耦布局回归（2026-11-19，Funk 定：大脑已砍开放一边，模型页
+ * 模型页解耦布局回归（2026-11-19，定版：大脑已砍开放一边，模型页
  * 不许拿大脑分节改名充数）：
  * - screen_models 是独立一页：添加块（两预设分开、自动发现、智能
  *   路由、本页表单）在上、已添加块在下，全页无“大脑”字样。

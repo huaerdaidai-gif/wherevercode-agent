@@ -5,7 +5,7 @@
 - **拉分支基线 HEAD**：`origin/main` @ `acaa60d34e258af3268f59bf8f3b1b189f0b9854` (Merge feat/model-page-decouple-20261119)
 - **定点绿标提交**：`b867fc25e8a0a177748a3dfd0593078a15e3c2f6`
 - **iOS CI 门禁结果**：**#175 绿标通过**（Run ID: [44419590620](https://github.com/huaerdaidai-gif/wherevercode-agent/actions/runs/44419590620)）
-- **依据与规范**：Funk 2026-11-19 批示「大脑已砍开放一边，不许改名、不许借用」；Grok 独立审查报告 (`review/grok-ios-model-audit-20261119`)；派发简报 `~/agy-ios-model-decouple-brief.md` 及第七修定点指令
+- **依据与规范**：2026-11-19 批示「大脑已砍开放一边，不许改名、不许借用」；Grok 独立审查报告 (`review/grok-ios-model-audit-20261119`)；派发简报 `~/agy-ios-model-decouple-brief.md` 及第七修定点指令
 
 ---
 

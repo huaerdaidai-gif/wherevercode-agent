@@ -281,7 +281,7 @@ class HostProjectTest {
         val devices = listOf(
             RemoteDevice(deviceId = "remote-device", displayName = "远程设备", host = "192.0.2.10", port = 18743),
             RemoteDevice(deviceId = "mac", displayName = "Mac", host = "192.168.1.10", port = 18743),
-            RemoteDevice(deviceId = "Android-x", displayName = "xiaomi12", host = "192.168.1.7", port = 18743),
+            RemoteDevice(deviceId = "Android-x", displayName = "testdevice", host = "192.168.1.10", port = 18743),
         )
         val usable = projectHostUsableDevices(devices, setOf("remote-device", "Android-x"))
         assertEquals(listOf("remote-device", "Android-x"), usable.map { it.deviceId })

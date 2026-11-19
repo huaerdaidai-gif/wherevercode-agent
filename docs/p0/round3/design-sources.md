@@ -4,9 +4,9 @@
 
 | 输入 | 来源 | SHA-256 |
 |---|---|---|
-| Claude 原始 18 屏整理版 | https://drive.google.com/file/d/1Ppwk89ULB983rPV8mmL0PBufMQkbHkUB/view | d77b4d9dc7c24d4249b455cd71d290226cd677b71905e58c29dffb6389a8e01e |
-| 旗舰 UI HTML（脚本实含 70 个 pages 条目，页脚仍写 60） | https://drive.google.com/file/d/1i4J4IpTw4ZT70b0aZdwlAbqRopHPyCzi/view | 76cc2603006caa0e49e8c06c60838ca26daa235f38c66fbc2111fd21ec670ae8 |
-| 下一阶段自动化/网络架构规格 | https://drive.google.com/file/d/10M4G_miZh7pinnYQSJGPyiKDzMuqjf3n/view | 421081178e450515dcadda5e1b7ce661379ef9cf1c2caa3c75bbeb6f06bf759d |
+| Claude 原始 18 屏整理版 | Google Drive 文件（链接已脱敏） | d77b4d9dc7c24d4249b455cd71d290226cd677b71905e58c29dffb6389a8e01e |
+| 旗舰 UI HTML（脚本实含 70 个 pages 条目，页脚仍写 60） | Google Drive 文件（链接已脱敏） | 76cc2603006caa0e49e8c06c60838ca26daa235f38c66fbc2111fd21ec670ae8 |
+| 下一阶段自动化/网络架构规格 | Google Drive 文件（链接已脱敏） | 421081178e450515dcadda5e1b7ce661379ef9cf1c2caa3c75bbeb6f06bf759d |
 
 原始准备包 ZIP、精确文件名 `claude_reference.html`、`prototype.html` 及其原有 UI 映射表仍未定位。因此本轮对照是以上可确认来源的重新提取，不宣称读到了未取得的准备包或其映射表。
 

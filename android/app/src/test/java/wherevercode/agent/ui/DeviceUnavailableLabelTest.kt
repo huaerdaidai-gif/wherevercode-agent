@@ -37,7 +37,7 @@ class DeviceUnavailableLabelTest {
     private fun peer() = DiscoveredPeer(
         deviceId = "dev-k70",
         displayName = "K70",
-        host = "192.168.1.3",
+        host = "192.168.1.11",
         port = 18080,
         fingerprintSha256 = "ab".repeat(32),
         capabilities = listOf("hand"),
@@ -103,7 +103,7 @@ class DeviceUnavailableLabelTest {
         val rows = buildRemoteDeviceRows(
             listOf(
                 RemoteDevice("remote-device", "远程设备", "192.0.2.10", 18743),
-                RemoteDevice("Android-x", "小米 12", "192.168.1.7", 18743),
+                RemoteDevice("Android-x", "测试设备", "192.168.1.10", 18743),
             ),
             listOf(record(PairingState.CONFIRMED).copy(deviceId = "remote-device", displayName = "远程设备")),
         )
@@ -112,13 +112,13 @@ class DeviceUnavailableLabelTest {
         val text = collectText(list)
         assertTrue(text.contains("远程设备"))
         assertTrue(text.contains("远程设备"))
-        assertTrue(text.contains("小米 12"))
+        assertTrue(text.contains("测试设备"))
         // V5 公网直连（2026-11-11）：列表只标走线（内网）与端口，
         // 不贴完整 IP。
         assertTrue(text.contains("内网"))
         assertTrue(text.contains("端口 18743"))
         assertFalse(text.contains("192.0.2.10"))
-        assertFalse(text.contains("192.168.1.7"))
+        assertFalse(text.contains("192.168.1.10"))
         assertTrue(text.contains("配对：已完成"))
         assertTrue(text.contains("配对：未完成"))
         assertTrue(text.contains("当前在线：未检测"))

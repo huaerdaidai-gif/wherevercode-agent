@@ -1,5 +1,5 @@
 // ModelSettingsView.swift
-// 独立模型管理视图（对齐 Funk 2026-11-19 指示与 ~/agy-ios-model-decouple-brief.md）
+// 独立模型管理视图（对齐 2026-11-19 指示与 ~/agy-ios-model-decouple-brief.md）
 // - 结构对齐「添加 ＋ 已添加」两块；
 // - 预设（常用/免费 token 双入口）与智能路由在「添加」块；
 // - 「已添加」分组列表完全基于独立 ModelRegistry / ModelConfigStore，绝不读写 brain.configs_json；
