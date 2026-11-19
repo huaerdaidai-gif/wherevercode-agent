@@ -83,7 +83,7 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `brand header displays WhereverCode Agent`() {
+    fun `brand header displays WhereverCode`() {
         val drawerView = view()
         val texts = mutableListOf<String>()
         fun collect(view: View) {
@@ -93,7 +93,7 @@ class DrawerViewTest {
             }
         }
         collect(drawerView.root.getChildAt(0))
-        assertTrue(texts.any { it.contains("WhereverCode Agent") })
+        assertTrue(texts.any { it == "WhereverCode" })
     }
 
     @Test
