@@ -91,8 +91,17 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        XCTAssertTrue(app.staticTexts["频道"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.descendants(matching: .any)["私聊 · 待开发"].firstMatch.exists)
+        // 批D 对话框直达后的频道页契约：未配凭证时直接显示未连接空态
+        // （全文提示 + 「前往 Agent 管理」钮）；频道/私聊分段与列表收进
+        // 频道切换面板，不再常驻页头（旧列表先行形态的断言随形态退役）。
+        let channelHint = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "频道还没法连")
+        ).firstMatch
+        XCTAssertTrue(
+            channelHint.waitForExistence(timeout: 10),
+            "Channels page must show the unconfigured hint in dialog-first form"
+        )
+        XCTAssertTrue(app.buttons["前往 Agent 管理"].firstMatch.exists)
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
