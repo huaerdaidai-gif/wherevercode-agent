@@ -219,7 +219,7 @@ class ArbitrationStore:
         """Move this arbiter to a newer term (explicit failover step)."""
         with self._lock:
             self._check_open()
-            if new_term <= self._max_seen_term and new_term <= self._term:
+            if new_term <= self._max_seen_term or new_term <= self._term:
                 raise StoreError(
                     f"term must increase monotonically: current {self._term}, "
                     f"max seen {self._max_seen_term}, requested {new_term}"
@@ -345,6 +345,13 @@ class ArbitrationStore:
                         raise ClaimDenied(
                             f"effect_key {effect_key} already consumed; "
                             "executor claim can never be re-granted"
+                        )
+                    if row["state"] in ("indeterminate", "human_required"):
+                        raise ClaimDenied(
+                            f"effect_key {effect_key} is {row['state']}; "
+                            "executor claim is never granted from the "
+                            "abnormal path (SPEC-P0: one-way to human "
+                            "resolution or authoritative confirmation)"
                         )
                     # One transaction: claim row + consumed mark + state.
                     self._conn.execute(

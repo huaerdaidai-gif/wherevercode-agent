@@ -120,6 +120,25 @@ class TestClaimRules(StoreTestBase):
             # After lease expiry the resumed executor must not proceed.
             self.assertFalse(s.revalidate_claim("ek1", "actor-1", now=2000.0))
 
+    def test_abnormal_states_never_grant_executor_claim(self):
+        # R7 B2 regression: an effect parked in the abnormal path
+        # (indeterminate / human_required, consumed still 0) must never
+        # be re-granted an executor claim, and claim() must not flip its
+        # state back to claimed. SPEC-P0 section 2: the abnormal path is
+        # one-way to human resolution or authoritative confirmation.
+        for abnormal in ("indeterminate", "human_required"):
+            with self.open_store() as s:
+                s.register_effect("ek1", "cmd-1", "dev-a", state="transported")
+                s.set_state("ek1", abnormal)
+                with self.assertRaises(ClaimDenied):
+                    s.claim("ek1", "actor-1")
+                self.assertEqual(s.get_effect("ek1")["state"], abnormal)
+                self.assertFalse(s.is_consumed("ek1"))
+                # The notifier role stays available: a human can still
+                # be notified about the parked effect.
+                nb = s.claim("ek1", "watcher", role=ROLE_NOTIFIER)
+                self.assertFalse(nb.can_inject)
+
 
 class TestMultiProcessClaim(StoreTestBase):
     """T1 regression (independent test failure, 2026-11-19): with a
@@ -193,6 +212,26 @@ class TestTermGuard(StoreTestBase):
                 s.advance_term(2)
             s.advance_term(4)
             self.assertEqual(s.term, 4)
+
+    def test_advance_term_below_max_seen_rejected(self):
+        # R7 B1 regression: while stale (a higher term has been seen),
+        # advancing to a term still at or below max_seen must be
+        # rejected and must not clear the stale flag; only advancing
+        # past every seen term makes the arbiter fresh. SPEC-P0
+        # sections 2/3: a lagging term never grants executable claims.
+        with self.open_store() as s:
+            s.register_effect("ek1", "cmd-1", "dev-a", state="transported")
+            s.note_seen_term(5)
+            self.assertTrue(s.stale)
+            with self.assertRaises(StoreError):
+                s.advance_term(3)
+            self.assertTrue(s.stale)
+            with self.assertRaises(StaleTermError):
+                s.claim("ek1", "actor-1")
+            s.advance_term(6)
+            self.assertFalse(s.stale)
+            c = s.claim("ek1", "actor-1")
+            self.assertTrue(c.can_inject)
 
 
 if __name__ == "__main__":
