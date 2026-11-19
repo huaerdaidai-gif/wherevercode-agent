@@ -8557,11 +8557,18 @@ class MainActivity : AppCompatActivity() {
                 Thread {
                     val ref = agent.authRef
                     agentStore.deleteAgent(agent.agentId)
-                    // 密钥清理：没有其他 Agent 记录、模型条目与大脑配置再用该
-                    // 引用时才删 Keystore 值（运行时合并视图 = 模型 + 大脑两边）。
+                    // 密钥清理：只有确认没有其他 Agent 记录、模型条目与大脑
+                    // 配置引用该密钥时才删。组件未就绪或查询失败都按“仍被引用”
+                    // 处理，避免把未知误当成无人使用而删除共用密钥。
                     if (ref != null) {
-                        val stillUsed = agentStore.listAgents().any { it.authRef == ref } ||
-                            (brainComponents?.runtimeConfigStore?.listConfigs()?.any { it.authRef == ref } ?: false)
+                        val stillUsed = try {
+                            val runtimeConfigStore = brainComponents?.runtimeConfigStore
+                            runtimeConfigStore == null ||
+                                agentStore.listAgents().any { it.authRef == ref } ||
+                                runtimeConfigStore.listConfigs().any { it.authRef == ref }
+                        } catch (_: Exception) {
+                            true
+                        }
                         if (!stillUsed) {
                             try {
                                 brainKeyStore.deleteSecret(ref)
