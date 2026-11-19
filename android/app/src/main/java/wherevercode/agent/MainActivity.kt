@@ -2914,15 +2914,15 @@ class MainActivity : AppCompatActivity() {
      */
     private fun discoverAgentsFromDevices() {
         Thread {
-            val devices = try {
-                remoteDeviceStore.listDevices()
+            val (devices, pairings) = try {
+                remoteDeviceStore.listDevices() to pairingStore.all()
             } catch (_: Exception) {
-                emptyList()
-            }
-            val pairings = try {
-                pairingStore.all()
-            } catch (_: Exception) {
-                emptyList()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("读取设备或配对记录失败，已取消重新发现。")
+                    }
+                }
+                return@Thread
             }
             val confirmedIds = pairings.filter { it.state == PairingState.CONFIRMED }
                 .map { it.deviceId }.toSet()
@@ -2966,12 +2966,25 @@ class MainActivity : AppCompatActivity() {
             val existingById = try {
                 agentStore.listAgents().associateBy { it.agentId }
             } catch (_: Exception) {
-                emptyMap()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("读取 Agent 记录失败，已停止扫描，未执行改绑。")
+                    }
+                }
+                return@Thread
             }
             val knownDeviceIds = try {
-                remoteDeviceStore.listDevices().map { it.deviceId }.toSet()
+                DeviceAgentDiscovery.knownDeviceIds(
+                    remoteDeviceStore.listDevices().map { it.deviceId },
+                    pairingStore.all().map { it.deviceId },
+                )
             } catch (_: Exception) {
-                emptySet()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("读取设备或配对记录失败，已停止扫描，未执行改绑。")
+                    }
+                }
+                return@Thread
             }
             val found = mutableListOf<Pair<RemoteDevice, RemoteAgentInfo>>()
             // 已属另一台现存设备 / 已手工添加的 Agent 不进勾选单，但计数明示，
@@ -3074,9 +3087,17 @@ class MainActivity : AppCompatActivity() {
                 }
                 Thread {
                     val knownDeviceIds = try {
-                        remoteDeviceStore.listDevices().map { it.deviceId }.toSet()
+                        DeviceAgentDiscovery.knownDeviceIds(
+                            remoteDeviceStore.listDevices().map { it.deviceId },
+                            pairingStore.all().map { it.deviceId },
+                        )
                     } catch (_: Exception) {
-                        emptySet()
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                toast("读取设备或配对记录失败，已取消添加和改绑。")
+                            }
+                        }
+                        return@Thread
                     } + selected.map { it.first.deviceId }
                     val summaries = mutableListOf<String>()
                     selected.groupBy({ it.first }, { it.second })

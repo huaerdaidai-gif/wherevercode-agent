@@ -19,6 +19,31 @@ import wherevercode.agent.core.transport.RemoteAgentInfo
  */
 class DeviceAgentDiscoveryTest {
 
+    @Test
+    fun `pairing-only device remains known and its auto-discovered agent is not rebound`() {
+        val existing = manual(
+            "codex",
+            "pairing-only-device",
+            "/workspace/old-codex",
+            addHint = DeviceAgentDiscovery.AUTO_DISCOVERED_HINT,
+        )
+        val knownDeviceIds = DeviceAgentDiscovery.knownDeviceIds(
+            remoteDeviceIds = setOf("new-device"),
+            pairedDeviceIds = setOf("pairing-only-device"),
+        )
+
+        val (toSave, result) = DeviceAgentDiscovery.discover(
+            "new-device",
+            listOf(hello("codex", "Codex", "/data/codex")),
+            listOf(existing),
+            knownDeviceIds,
+        )
+
+        assertTrue(toSave.isEmpty())
+        assertTrue(result.rebound.isEmpty())
+        assertEquals(listOf("codex"), result.skippedCollision)
+    }
+
     private fun hello(
         agentId: String,
         displayName: String,

@@ -54,13 +54,22 @@ object DeviceAgentDiscovery {
     const val AUTO_DISCOVERED_HINT: String = "添加设备时自动发现"
 
     /**
+     * 当前设备存在集合：设备记录与配对信任记录任一仍存在，就不能把其
+     * Agent 误判为旧设备已删。调用方必须让两类存储都读取成功后再调用。
+     */
+    fun knownDeviceIds(
+        remoteDeviceIds: Collection<String>,
+        pairedDeviceIds: Collection<String>,
+    ): Set<String> = (remoteDeviceIds + pairedDeviceIds).toSet()
+
+    /**
      * 按 hello 列表算出该新建/改绑的记录。返回（需落盘的记录，去重
      * 结果）：第一项含新建记录与改绑后的旧记录，调用方全部落盘。
      * 新建记录全部通过 [AgentRecord.validate]（binary 取 agentId，
      * 与 DeviceAgentForm 的默认口径一致）。
      *
-     * [knownDeviceIds] 是当前设备列表的全部 deviceId（应含本次扫描
-     * 的 [deviceId]）：旧记录绑的设备不在此集合里，即视为设备已删，
+     * [knownDeviceIds] 是设备记录与配对信任记录的全部 deviceId（应含
+     * 本次扫描的 [deviceId]）：旧记录绑的设备不在此集合里，即视为设备已删，
      * 走改绑而不是冲突跳过。
      */
     fun discover(
