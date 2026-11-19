@@ -134,8 +134,20 @@ public final class AgentRegistryStore {
     private let kv: KeyValueStore
     private let storageKey = "agents.records.v1"
 
-    public init(kv: KeyValueStore) {
+    public var keyStore: BrainKeyStore?
+    public var brainConfigStore: BrainConfigStore?
+    public var modelConfigStore: ModelConfigStore?
+
+    public init(
+        kv: KeyValueStore,
+        keyStore: BrainKeyStore? = nil,
+        brainConfigStore: BrainConfigStore? = nil,
+        modelConfigStore: ModelConfigStore? = nil
+    ) {
         self.kv = kv
+        self.keyStore = keyStore
+        self.brainConfigStore = brainConfigStore
+        self.modelConfigStore = modelConfigStore
     }
 
     public func listAgents() throws -> [AgentRecord] {
@@ -190,9 +202,21 @@ public final class AgentRegistryStore {
     }
 
     public func deleteAgent(agentId: String) throws {
+        let target = try? getAgent(agentId: agentId)
         var agents = try listAgents()
         agents.removeAll { $0.agentId == agentId }
         try kv.setJSON(storageKey, agents)
+
+        if let authRef = target?.authRef, let keyStore = self.keyStore {
+            // 密钥引用计数：仅当剩余 Agent 记录、brainStore、modelStore 三处均不再引用该 authRef 时，才清理 Keychain 密钥；任一处仍引用则保留
+            let otherAgentRefs = agents.contains { $0.authRef == authRef }
+            let brainRefs = brainConfigStore?.listConfigs().contains { $0.authRef == authRef } ?? false
+            let modelRefs = modelConfigStore?.listConfigs().contains { $0.authRef == authRef } ?? false
+
+            if !otherAgentRefs && !brainRefs && !modelRefs {
+                keyStore.deleteSecret(authRef: authRef)
+            }
+        }
     }
 
     /// 安全删除指定设备并写入墓碑（保证重启与局域网探测绝不复活）；

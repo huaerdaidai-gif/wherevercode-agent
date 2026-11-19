@@ -101,6 +101,11 @@ public final class AppState: ObservableObject {
         )
         self.modelSettingsModel = mModel
 
+        // 注入 AgentRegistryStore 引用计数依赖（保证删 Agent 时三处对称释放密钥）
+        data.agents.keyStore = keyStore
+        data.agents.brainConfigStore = configStore
+        data.agents.modelConfigStore = modelStore
+
         // 启动迁移：按 ID 幂等补齐 + 一次性状态迁移
         ModelMigrationManager.runStartupMigration(
             kv: data.kv,

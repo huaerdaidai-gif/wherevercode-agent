@@ -238,6 +238,15 @@ class TestIosB3Regression(unittest.TestCase):
 
         self.assertNotIn(shared_auth_ref, keychain, "三处均无引用时，Keychain 凭据安全释放")
 
+        # 源码契约：AgentRegistryStore.deleteAgent 必须对称实现三处引用计数释放密钥
+        agent_store_path = os.path.join(APP_DIR, "Data", "AgentRegistryStore.swift")
+        with open(agent_store_path, encoding="utf-8") as f:
+            agent_src = f.read()
+        self.assertIn("keyStore.deleteSecret(authRef: authRef)", agent_src)
+        self.assertIn("let otherAgentRefs = agents.contains", agent_src)
+        self.assertIn("let brainRefs = brainConfigStore?.listConfigs()", agent_src)
+        self.assertIn("let modelRefs = modelConfigStore?.listConfigs()", agent_src)
+
     # MARK: - 4. B3 收尾追加项断言 (收尾 1 & 收尾 2)
 
     def test_10_tail_01_routing_and_custom_providers_decoupled_keys(self):

@@ -424,6 +424,59 @@ final class ModelDecoupleTests: XCTestCase {
         XCTAssertNil(keyStore.getSecret(authRef: soloAuthRef), "三处均无引用时，Keychain 凭据必须安全释放")
     }
 
+    func testKeyStoreReferenceCountingOnAgentDelete() throws {
+        let data = try LocalData.inMemory()
+        let brainStore = KeyValueBrainConfigStore(kv: data.kv)
+        let modelStore = KeyValueModelConfigStore(kv: data.kv)
+        let keyStore = BrainKeyStore()
+        let model = ModelSettingsModel(
+            configStore: modelStore,
+            keyStore: keyStore,
+            brainConfigStore: brainStore,
+            agentRegistryStore: data.agents
+        )
+        data.agents.keyStore = keyStore
+        data.agents.brainConfigStore = brainStore
+        data.agents.modelConfigStore = modelStore
+
+        let sharedAuthRef = "agent-model-shared:test"
+        try keyStore.putSecret(authRef: sharedAuthRef, value: "agent-secret-key")
+        XCTAssertNotNil(keyStore.getSecret(authRef: sharedAuthRef))
+
+        // 1. 同时创建 ModelConfig 和 AgentRecord，共用 sharedAuthRef
+        let modelEntry = ModelConfig(
+            modelId: "model-sharing-with-agent",
+            kind: .modelApi,
+            adapterId: GenericOpenAiBrainAdapter.adapterId,
+            label: "Model Sharing",
+            baseUrl: "https://api.example.com",
+            model: "m-agent",
+            authRef: sharedAuthRef
+        )
+        modelStore.saveConfig(modelEntry)
+
+        var agentRecord = AgentRecord(
+            agentId: "agent-sharing-key",
+            displayName: "Agent Sharing",
+            kind: .cloud,
+            access: .app,
+            brainKind: "API_KEY",
+            adapterId: GenericOpenAiBrainAdapter.adapterId
+        )
+        agentRecord.authRef = sharedAuthRef
+        try data.agents.saveAgent(agentRecord)
+
+        // 2. 先删模型：Agent 仍在使用，Keychain 凭据必须保留
+        model.deleteConfig(modelId: "model-sharing-with-agent")
+        XCTAssertNil(modelStore.getConfig(modelId: "model-sharing-with-agent"))
+        XCTAssertNotNil(keyStore.getSecret(authRef: sharedAuthRef), "Agent 仍在使用该 authRef，Keychain 凭据必须保留")
+
+        // 3. 再删最后一个引用该 authRef 的 Agent：三处均无引用，Keychain 凭据必须删除
+        try data.agents.deleteAgent(agentId: "agent-sharing-key")
+        XCTAssertNil(try data.agents.getAgent(agentId: "agent-sharing-key"))
+        XCTAssertNil(keyStore.getSecret(authRef: sharedAuthRef), "最后一个引用的 Agent 删除后，三处均无引用，Keychain 凭据必须安全释放")
+    }
+
     // MARK: - 7. B3 收尾追加：独立路由与自定义服务商存储隔离测试
 
     func testIndependentRoutingAndCustomProviderStores() throws {
