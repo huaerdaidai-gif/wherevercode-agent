@@ -385,11 +385,11 @@ final class HandClientTests: XCTestCase {
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
         XCTAssertNil(HandIdentityManager.getPeerPublicKey(deviceId: devId))
 
-        // 核心原则：删除设备不得连带删除 Agent，Agent 依然保留且解除设备关联
+        // 核心原则：删除设备不得连带删除 Agent，Agent 依然保留且字段字节级不变
         let preservedAgent = try LocalData.shared.agents.getAgent(agentId: "\(devId):codex")
         XCTAssertNotNil(preservedAgent)
-        XCTAssertNil(preservedAgent?.deviceId)
-        XCTAssertEqual(preservedAgent?.memberConnectionState, "NOT_CONNECTED")
+        XCTAssertEqual(preservedAgent?.deviceId, devId)
+        XCTAssertEqual(preservedAgent?.memberConnectionState, childAgent.memberConnectionState)
 
         // 验证云端 Agent 毫发无损
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: cloudAgentId))

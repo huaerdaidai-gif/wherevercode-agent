@@ -761,25 +761,6 @@ public struct ProjectsHomeView: View {
                             }
                             .font(.caption)
                         }
-                        HStack {
-                            Text("wherevercode-agent · Android / Kotlin").font(.caption)
-                            Spacer()
-                            Button("打开") {
-                                if let first = projects.first { activeWorkspaceProject = first }
-                            }.buttonStyle(.bordered).controlSize(.mini)
-                        }
-                        HStack {
-                            Text("wherevercode · 旧平台 / 只读参考").font(.caption)
-                            Spacer()
-                            Button("打开") {
-                                if let first = projects.first { activeWorkspaceProject = first }
-                            }.buttonStyle(.bordered).controlSize(.mini)
-                        }
-                        HStack {
-                            Text("新建本地项目").font(.caption)
-                            Spacer()
-                            Button("创建") { onNavigateRoute("onboarding") }.buttonStyle(.bordered).controlSize(.mini)
-                        }
                     }
                     .padding(14)
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
@@ -834,23 +815,7 @@ public struct ProjectsHomeView: View {
     }
 
     private func loadProjects() {
-        var list = (try? LocalData.shared.projects.listProjects()) ?? []
-        if list.isEmpty {
-            let defaultProj = Project(
-                name: "WhereverCode Agent",
-                repoUrl: "https://github.com/huaerdaidai-gif/wherevercode-agent.git",
-                defaultBranch: "main",
-                origin: "LOCAL_SANDBOX"
-            )
-            try? LocalData.shared.projects.saveProject(defaultProj)
-            let loc = ProjectLocation(
-                projectId: defaultProj.projectId,
-                hostId: "iphone-local",
-                workspacePath: "Documents/wherevercode-agent"
-            )
-            _ = try? LocalData.shared.projects.addLocation(loc)
-            list = (try? LocalData.shared.projects.listProjects()) ?? []
-        }
+        let list = (try? LocalData.shared.projects.listProjects()) ?? []
         projects = list
     }
 

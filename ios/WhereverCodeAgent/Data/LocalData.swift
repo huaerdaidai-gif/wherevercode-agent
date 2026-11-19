@@ -345,7 +345,7 @@ public final class LocalChatModel: ObservableObject {
         if let cid = conversationID {
             try? data.conversations.updateConversationBrain(
                 id: cid,
-                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : (selectedAgent?.displayName ?? selectedAgent?.agentId)
+                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : nil
             )
         }
     }
@@ -652,7 +652,7 @@ public final class LocalChatModel: ObservableObject {
             do {
                 if conversationID == nil {
                     let conversation = try data.conversations.createConversation(
-                        brainId: agent.displayName,
+                        brainId: nil,
                         title: String(text.prefix(48))
                     )
                     try? data.kv.set(draftKey, nil)
