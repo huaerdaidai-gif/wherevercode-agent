@@ -1251,7 +1251,7 @@ class ChatViewModel : ViewModel() {
         }
         publish(true)
 
-        scope.launch {
+        val turnJob = scope.launch {
             var cancelled = false
             var terminalStatus: TurnStatus? = null
             var terminalError: String? = null
@@ -1417,6 +1417,18 @@ class ChatViewModel : ViewModel() {
                 active.set(false)
                 publish(true)
                 onTurnFinished?.invoke()
+            }
+        }
+        // If the parent scope is already cancelled, the coroutine body (and its
+        // finally block) may never start. Reclaim only this turn's registration.
+        turnJob.invokeOnCompletion {
+            if (synthBrainConfig != null && sessionLease != null &&
+                AgentBrainSessionGate.isOwner(sessionLease)
+            ) {
+                if (BrainAdapterRegistry.configFor(synthBrainConfig.brainId) === synthBrainConfig) {
+                    BrainAdapterRegistry.unregisterConfig(synthBrainConfig.brainId)
+                }
+                AgentBrainSessionGate.release(sessionLease)
             }
         }
         return SendResult(true)
