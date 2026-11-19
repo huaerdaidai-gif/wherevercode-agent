@@ -2974,8 +2974,10 @@ class MainActivity : AppCompatActivity() {
                 emptySet()
             }
             val found = mutableListOf<Pair<RemoteDevice, RemoteAgentInfo>>()
-            // 已属另一台现存设备的 Agent 不进勾选单，但计数明示，不静默吞。
+            // 已属另一台现存设备 / 已手工添加的 Agent 不进勾选单，但计数明示，
+            // 不静默吞（Bug① 守卫：手工记录绝不当作改绑候选）。
             val conflictIds = mutableSetOf<String>()
+            val manualIds = mutableSetOf<String>()
             var scanned = 0
             for (device in devices) {
                 try {
@@ -3010,10 +3012,17 @@ class MainActivity : AppCompatActivity() {
                                 info.agentId !in existingById -> found += device to info
                                 // 已绑在本台设备上 → 已在，不重复列。
                                 boundDeviceId == device.deviceId -> Unit
-                                // 没绑设备、或绑的设备已删 → 改绑候选，进
-                                // 勾选单（确认时由 DeviceAgentDiscovery 改绑）。
-                                boundDeviceId == null || boundDeviceId !in knownDeviceIds ->
-                                    found += device to info
+                                // 没绑设备、或绑的设备已删 → 只有带自动发现标记的
+                                // 记录才是改绑候选，进勾选单（确认时由
+                                // DeviceAgentDiscovery 改绑）；手工添加的绝不
+                                // 改绑（Bug① 守卫），不进勾选单、只计数明示。
+                                boundDeviceId == null || boundDeviceId !in knownDeviceIds -> {
+                                    if (existingById[info.agentId]?.addHint == DeviceAgentDiscovery.AUTO_DISCOVERED_HINT) {
+                                        found += device to info
+                                    } else {
+                                        manualIds += info.agentId
+                                    }
+                                }
                                 // 绑在另一台现存设备上 → 冲突，不列，明示。
                                 else -> conflictIds += info.agentId
                             }
@@ -3025,14 +3034,19 @@ class MainActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
+                // 未列出的两类都明示，不静默吞：已属别台设备 / 已手工添加。
+                val notListed = buildList {
+                    if (conflictIds.isNotEmpty()) add("${conflictIds.size} 个 Agent 已属于其他设备")
+                    if (manualIds.isNotEmpty()) add("${manualIds.size} 个 Agent 已手工添加")
+                }
                 when {
                     scanned == 0 -> toast("没有连上任何一台设备。")
-                    found.isEmpty() && conflictIds.isNotEmpty() ->
-                        toast("扫描完成：没有可添加的 Agent；另有 ${conflictIds.size} 个 Agent 已属于其他设备，未列出。")
+                    found.isEmpty() && notListed.isNotEmpty() ->
+                        toast("扫描完成：没有可添加的 Agent；另有 ${notListed.joinToString("；")}，未列出。")
                     found.isEmpty() -> toast("扫描完成：没有可添加的 Agent。")
                     else -> {
-                        if (conflictIds.isNotEmpty()) {
-                            toast("另有 ${conflictIds.size} 个 Agent 已属于其他设备，未列出。")
+                        if (notListed.isNotEmpty()) {
+                            toast("另有 ${notListed.joinToString("；")}，未列出。")
                         }
                         showDiscoveredAgentsPicker(found)
                     }

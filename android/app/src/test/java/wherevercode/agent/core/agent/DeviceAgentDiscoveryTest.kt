@@ -13,7 +13,9 @@ import wherevercode.agent.core.transport.RemoteAgentInfo
  * 已加的按 deviceId + agentId 去重、保留不动；不可用/无文件夹的跳过；
  * 同 agentId 属别台现存设备时不覆盖（AgentStore 全局按 agentId 存）；
  * 旧记录没绑设备或绑的设备已删时改绑到本次扫描的设备（2026-11-19
- * 绑定生命周期缺口修复），而不是永远重名跳过、承载数永远少计。
+ * 绑定生命周期缺口修复），而不是永远重名跳过、承载数永远少计；
+ * Bug① 守卫（2026-11-19 定版）：只改绑带自动发现标记的记录，手工
+ * 添加的云端 Agent 绝不改绑（计入 skippedManual，原记录一字不动）。
  */
 class DeviceAgentDiscoveryTest {
 
@@ -35,6 +37,7 @@ class DeviceAgentDiscoveryTest {
         agentId: String,
         deviceId: String?,
         folder: String = "/workspace/x",
+        addHint: String? = null,
     ) = AgentRecord(
         agentId = agentId,
         displayName = "$agentId（手工）",
@@ -45,6 +48,7 @@ class DeviceAgentDiscoveryTest {
         binary = agentId,
         deviceId = deviceId,
         deviceFolder = folder,
+        addHint = addHint,
         lastTestSummary = "远端可用",
         loginState = AgentLoginState.LOGGED_IN,
     )
@@ -154,7 +158,8 @@ class DeviceAgentDiscoveryTest {
         // 设备删过又重加（或 Agent 先被已删设备发现占用）：旧记录绑的
         // deviceId 已不在设备列表里——改绑到本次扫描的设备，承载数
         // 从此数得上；除绑定与文件夹外，手工字段原样保留。
-        val existing = manual("codex", "gone-device", "/workspace/old-codex")
+        // 旧记录是早前自动发现的（带 AUTO_DISCOVERED_HINT），才允许改绑。
+        val existing = manual("codex", "gone-device", "/workspace/old-codex", addHint = DeviceAgentDiscovery.AUTO_DISCOVERED_HINT)
         val (toSave, result) = DeviceAgentDiscovery.discover(
             "xiaomi12",
             listOf(hello("codex", "Codex", "/data/codex")),
@@ -182,7 +187,8 @@ class DeviceAgentDiscoveryTest {
     fun `agent with no device binding is rebound to the scanned device`() {
         // 手工加的记录没绑设备（deviceId 为 null）：在设备上被发现时
         // 改绑到该设备，而不是当成重名冲突永远跳过。
-        val existing = manual("codex", null, "/workspace/codex")
+        // 同上：没绑设备但带自动发现标记，才允许改绑。
+        val existing = manual("codex", null, "/workspace/codex", addHint = DeviceAgentDiscovery.AUTO_DISCOVERED_HINT)
         val (toSave, result) = DeviceAgentDiscovery.discover(
             "xiaomi12",
             listOf(hello("codex", "Codex", "/data/codex")),
@@ -194,6 +200,43 @@ class DeviceAgentDiscoveryTest {
         assertEquals(1, toSave.size)
         assertEquals("xiaomi12", toSave[0].deviceId)
         assertEquals("/data/codex", toSave[0].deviceFolder)
+    }
+
+    @Test
+    fun `manually added agent without discovery hint is never rebound`() {
+        // Bug① 守卫：手工添加的云端 Agent 没有自动发现标记，哪怕没绑设备
+        // 或绑的设备已删，也绝不改绑——原记录一字不动，也不新建第二条；
+        // 计入 skippedManual，不静默吞。
+        val existing = manual("codex", null, "/workspace/codex")
+        val (toSave, result) = DeviceAgentDiscovery.discover(
+            "xiaomi12",
+            listOf(hello("codex", "Codex", "/data/codex")),
+            listOf(existing),
+            setOf("xiaomi12"),
+        )
+        assertTrue(result.created.isEmpty())
+        assertTrue(result.rebound.isEmpty())
+        assertTrue(result.skippedCollision.isEmpty())
+        assertEquals(listOf("codex"), result.skippedManual)
+        assertTrue(toSave.isEmpty())
+        val store = InMemoryAgentStore()
+        store.saveAgent(existing)
+        assertEquals(null, store.getAgent("codex")?.deviceId)
+    }
+
+    @Test
+    fun `manually added agent bound to a deleted device is never rebound`() {
+        val existing = manual("codex", "gone-device", "/workspace/old-codex")
+        val (toSave, result) = DeviceAgentDiscovery.discover(
+            "xiaomi12",
+            listOf(hello("codex", "Codex", "/data/codex")),
+            listOf(existing),
+            setOf("xiaomi12"),
+        )
+        assertTrue(result.created.isEmpty())
+        assertTrue(result.rebound.isEmpty())
+        assertEquals(listOf("codex"), result.skippedManual)
+        assertTrue(toSave.isEmpty())
     }
 
     @Test

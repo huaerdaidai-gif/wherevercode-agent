@@ -19,11 +19,13 @@ import wherevercode.agent.core.transport.RemoteAgentInfo
  * - 已有同 (deviceId, agentId) 的记录 → 已在，保留不动（手工填的
  *   测试结果、登录态、备注一律不覆盖）；
  * - 同 agentId 的旧记录没绑设备（deviceId 为 null）、或绑的设备已
- *   不在当前设备列表里（设备删过）→ 改绑到本次扫描的设备：只换
- *   deviceId 与 deviceFolder（文件夹以本设备 hello 报的为准），其余
- *   字段原样保留。旧口径对这种情况一律「重名跳过」，绑定冻死在已删
- *   设备上：这台设备永远扫不进它、承载数永远少计，且无任何修复
- *   路径（2026-11-19 审计定性为绑定生命周期缺口，本次修复）；
+ *   不在当前设备列表里（设备删过）→ 仅当记录带自动发现标记
+ *   （AUTO_DISCOVERED_HINT）时改绑到本次扫描的设备：只换 deviceId
+ *   与 deviceFolder（文件夹以本设备 hello 报的为准），其余字段原样
+ *   保留；手工添加的记录（无标记）绝不改绑，计入 skippedManual。
+ *   旧口径对这种情况一律「重名跳过」，绑定冻死在已删设备上：这台
+ *   设备永远扫不进它、承载数永远少计，且无任何修复路径（2026-11-19
+ *   审计定性为绑定生命周期缺口，本次修复）；
  * - 同 agentId 已属另一台现存设备 → 冲突，跳过不建：AgentStore
  *   全局按 agentId 存，一台设备一个 agentId 只能有一条记录，覆盖
  *   会毁掉另一台设备的 Agent（见结果里的 skippedCollision，汇总文
@@ -42,6 +44,8 @@ data class DeviceAgentDiscoveryResult(
     val skippedCollision: List<String>,
     /** 旧记录没绑设备或绑的设备已删，本次改绑到扫描设备的 agentId。 */
     val rebound: List<String> = emptyList(),
+    /** 同名旧记录是手工添加的（无自动发现标记），本次不改绑、不新建。 */
+    val skippedManual: List<String> = emptyList(),
 )
 
 object DeviceAgentDiscovery {
@@ -71,6 +75,7 @@ object DeviceAgentDiscovery {
         val skippedUnavailable = mutableListOf<String>()
         val skippedCollision = mutableListOf<String>()
         val rebound = mutableListOf<String>()
+        val skippedManual = mutableListOf<String>()
         val byId = existing.associateBy { it.agentId }
         for (info in helloAgents) {
             if (!info.available || info.folder.isBlank()) {
@@ -82,12 +87,19 @@ object DeviceAgentDiscovery {
                 val boundDeviceId = old.deviceId
                 when {
                     boundDeviceId == deviceId -> alreadyPresent += info.agentId
-                    // 没绑设备、或绑的设备已删：改绑到本次扫描的设备。
-                    // 只换绑定与文件夹，其余字段（手工填的测试结果、
-                    // 登录态、备注）原样保留。
+                    // 没绑设备、或绑的设备已删：只有带自动发现标记的记录才
+                    // 改绑到本次扫描的设备（Bug① 守卫，2026-11-19 定版）；
+                    // 手工添加的云端 Agent 严禁改绑——计入 skippedManual，
+                    // 原记录一字不动，也不新建第二条。改绑只换 deviceId
+                    // 与 deviceFolder，其余字段（手工填的测试结果、登录态、
+                    // 备注、密钥引用）原样保留。
                     boundDeviceId == null || boundDeviceId !in knownDeviceIds -> {
-                        toSave += old.copy(deviceId = deviceId, deviceFolder = info.folder)
-                        rebound += info.agentId
+                        if (old.addHint == AUTO_DISCOVERED_HINT) {
+                            toSave += old.copy(deviceId = deviceId, deviceFolder = info.folder)
+                            rebound += info.agentId
+                        } else {
+                            skippedManual += info.agentId
+                        }
                     }
                     // 绑在另一台现存设备上：真冲突，跳过并明示。
                     else -> skippedCollision += info.agentId
@@ -116,6 +128,7 @@ object DeviceAgentDiscovery {
             skippedUnavailable = skippedUnavailable,
             skippedCollision = skippedCollision,
             rebound = rebound,
+            skippedManual = skippedManual,
         )
     }
 
@@ -127,6 +140,7 @@ object DeviceAgentDiscovery {
         if (result.alreadyPresent.isNotEmpty()) parts += "${result.alreadyPresent.size} 个已在"
         if (result.skippedUnavailable.isNotEmpty()) parts += "${result.skippedUnavailable.size} 个不可用已跳过"
         if (result.skippedCollision.isNotEmpty()) parts += "${result.skippedCollision.size} 个与别台设备重名已跳过"
+        if (result.skippedManual.isNotEmpty()) parts += "${result.skippedManual.size} 个手工添加已跳过"
         if (parts.isEmpty()) return "没有发现可用 Agent"
         return parts.joinToString("，")
     }
