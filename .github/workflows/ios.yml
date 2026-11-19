@@ -153,11 +153,12 @@ jobs:
             -derivedDataPath .build/derived \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"
           # Boot wedge detection (2026-11-19, run #201 evidence): a wedged
-          # CoreSimulator boot prints NOTHING (9.4 min of total silence),
-          # while a healthy bootstatus streams status lines continuously.
-          # So the criterion is idle output, not total time: 120s without a
-          # single new line = wedged -> kill, dump simulator state, fail
-          # fast. Total caps stay as a backstop (boot 120s, bootstatus 300s).
+          # CoreSimulator boot prints NOTHING (9.4 min of total silence)
+          # and the device never reaches (Booted). But silence alone is
+          # not proof: run #210 (2026-11-20) showed a healthy boot whose
+          # bootstatus printed nothing for 139s while the device did
+          # reach (Booted). So idle output only triggers a state check;
+          # the actual device state is the ground truth that decides.
           run_with_idle_cap() {
             local idle_cap="$1" total_cap="$2"; shift 2
             local logf shown=0 waited=0 last_output=0 size rc
@@ -202,9 +203,14 @@ jobs:
           }
           run_with_idle_cap 120 120 xcrun simctl boot "$UDID" || true
           if ! run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; then
-            echo "simulator boot did not complete; simulator state:"
+            echo "bootstatus monitor ended early; verifying actual device state:"
             xcrun simctl list devices available | grep "$UDID" || true
-            exit 1
+            if ! xcrun simctl list devices available | grep "$UDID" | grep -q "(Booted)"; then
+              echo "simulator boot did not complete; simulator state:"
+              xcrun simctl list devices available | grep "$UDID" || true
+              exit 1
+            fi
+            echo "device is Booted; continuing despite bootstatus silence"
           fi
           mkdir -p .build/live-launch
           xcrun simctl list devices available > .build/live-launch/devices.txt
