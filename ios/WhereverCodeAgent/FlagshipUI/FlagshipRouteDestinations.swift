@@ -2626,22 +2626,9 @@ public struct ChannelsHomeView: View {
         VStack(spacing: 0) {
             topNavBar
             partitionPicker
-            searchField
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button("团队空间") { onNavigateRoute("team") }.buttonStyle(.bordered)
-                    Button("Agent 列表") { onNavigateRoute("agents") }.buttonStyle(.bordered)
-                    Button("协作编排") { onNavigateRoute("delegate") }.buttonStyle(.bordered)
-                    Button("可视化编排") { onNavigateRoute("orchestrator") }.buttonStyle(.bordered)
-                    Button("跨设备接力") { onNavigateRoute("handoff") }.buttonStyle(.bordered)
-                }
-                .font(.caption)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
-            }
 
             if selectedPartition == .channels {
+                searchField
                 if !appState.hasToken {
                     unconfiguredTokenView
                 } else {
@@ -2711,7 +2698,7 @@ public struct ChannelsHomeView: View {
             .accessibilityIdentifier("navigation.menu")
             .accessibilityLabel("打开导航抽屉")
 
-            Text("频道与协作")
+            Text("频道")
                 .font(.system(size: 20, weight: .semibold, design: .serif))
                 .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
 
@@ -2756,7 +2743,7 @@ public struct ChannelsHomeView: View {
     private var partitionPicker: some View {
         Picker("分区", selection: $selectedPartition) {
             ForEach(ChannelPartition.allCases) { part in
-                Text(part.rawValue).tag(part)
+                Text(part == .directMessages ? "私聊 · 待开发" : part.rawValue).tag(part)
             }
         }
         .pickerStyle(.segmented)
@@ -2770,7 +2757,7 @@ public struct ChannelsHomeView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .font(.system(size: 14))
-            TextField(selectedPartition == .channels ? "搜索频道名称、简介或消息…" : "搜索私聊成员、Agent 或对话…", text: $searchQuery)
+            TextField("搜索频道名称、简介或消息…", text: $searchQuery)
                 .font(.system(size: 14))
                 .textInputAutocapitalization(.never)
             if !searchQuery.isEmpty {
@@ -4848,6 +4835,11 @@ public struct ControlHomeView: View {
     @ObservedObject public var appState: AppState
     public var onOpenDrawer: () -> Void
     public var onNavigateRoute: (String) -> Void
+    @State private var tasks: [LocalTask] = []
+    @State private var allAgents: [AgentRecord] = []
+    @State private var modelsCount = 0
+    @State private var pendingApprovals = 0
+    @State private var showWebhookNotice = false
 
     public init(
         appState: AppState,
@@ -4860,15 +4852,11 @@ public struct ControlHomeView: View {
     }
 
     public var body: some View {
-        let tasks = (try? LocalData.shared.tasks.listTasks()) ?? []
         let workingCount = tasks.filter { $0.state == "working" }.count
         let queuedCount = tasks.filter { $0.state == "queued" || $0.state == "assigned" }.count
         let attentionCount = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" }.count
-        let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
         let agentsCount = allAgents.filter { !$0.isDeviceHost && $0.kind != .localModel }.count
         let devicesCount = allAgents.filter { $0.isDeviceHost }.count
-        let modelsCount = appState.modelConfigStore.listConfigs().count
-        let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
 
         VStack(spacing: 0) {
             topNavBar
@@ -4892,11 +4880,32 @@ public struct ControlHomeView: View {
                     )
 
                     dashboardQuickRowsCard
+
+                    Button(action: reloadLocalRecords) {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("control.refresh")
+
+                    Text("数据全部来自本机真实记录；没有数据就明说暂无，不编数字。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(16)
             }
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
+        .onAppear(perform: reloadLocalRecords)
+        .alert("【待开发】Webhook 尚未开发", isPresented: $showWebhookNotice) {
+            Button("我知道了", role: .cancel) {}
+        }
+    }
+
+    private func reloadLocalRecords() {
+        tasks = (try? LocalData.shared.tasks.listTasks()) ?? []
+        allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
+        modelsCount = appState.modelConfigStore.listConfigs().count
+        pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
     }
 
     @ViewBuilder
@@ -5019,9 +5028,9 @@ public struct ControlHomeView: View {
                 title: "Webhook",
                 subtitle: "配置 Webhook、定时巡检、触发器与自主执行护栏",
                 icon: "bolt.badge.clock",
-                badge: "触发与唤醒",
+                badge: "待开发",
                 routeId: "automation"
-            )
+            ) { showWebhookNotice = true }
 
             controlCard(
                 title: "任务",
@@ -5047,27 +5056,12 @@ public struct ControlHomeView: View {
                 routeId: "usage"
             )
 
-            controlCard(
-                title: "安全权限与操作审计",
-                subtitle: "查看目录授权范围、高危操作审批记录与安全边界",
-                icon: "shield.lefthalf.filled",
-                badge: "审计",
-                routeId: "audit"
-            )
-
-            controlCard(
-                title: "检查点、恢复与扩展中心",
-                subtitle: "任务检查点回滚、插件权限管理与运行时适配",
-                icon: "puzzlepiece.extension",
-                badge: "扩展",
-                routeId: "extensions"
-            )
         }
     }
 
     @ViewBuilder
     private var dashboardQuickRowsCard: some View {
-        let activeTasks = ((try? LocalData.shared.tasks.listTasks()) ?? []).filter { $0.state == "working" || $0.state == "queued" }
+        let activeTasks = tasks.filter { $0.state == "working" || $0.state == "queued" }
         VStack(alignment: .leading, spacing: 8) {
             Text("运行脉络")
                 .font(.caption.weight(.semibold))
@@ -5105,9 +5099,9 @@ public struct ControlHomeView: View {
     }
 
     @ViewBuilder
-    private func controlCard(title: String, subtitle: String, icon: String, badge: String, routeId: String) -> some View {
+    private func controlCard(title: String, subtitle: String, icon: String, badge: String, routeId: String, onTap: (() -> Void)? = nil) -> some View {
         Button {
-            onNavigateRoute(routeId)
+            if let onTap { onTap() } else { onNavigateRoute(routeId) }
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)

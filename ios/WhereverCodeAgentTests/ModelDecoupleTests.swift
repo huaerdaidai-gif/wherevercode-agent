@@ -14,6 +14,23 @@ import XCTest
 @MainActor
 final class ModelDecoupleTests: XCTestCase {
 
+    func testCustomModelBadgeUsesProviderPrefixOrManualOrigin() {
+        let builtIn = ModelConfig(modelId: "seed", label: "内置", model: "example")
+        XCTAssertFalse(builtIn.isCustomModel)
+
+        var custom = builtIn
+        custom.modelId = "custom-example"
+        XCTAssertTrue(custom.isCustomModel)
+
+        custom = builtIn
+        custom.extra[FreeProviderPresets.extraPreset] = "custom-example"
+        XCTAssertTrue(custom.isCustomModel)
+
+        custom = builtIn
+        custom.extra["model_origin"] = "manual"
+        XCTAssertTrue(custom.isCustomModel)
+    }
+
     // MARK: - 1. 独立存储键隔离测试（model.configs_json vs brain.configs_json）
 
     func testStorageKeysAreCompletelyIsolated() throws {

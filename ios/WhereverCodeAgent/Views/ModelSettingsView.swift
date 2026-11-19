@@ -65,7 +65,8 @@ public struct ModelSettingsView: View {
                         label: name,
                         baseUrl: "https://api.openai.com/v1",
                         model: "",
-                        authRef: "model-api:\(modelId)"
+                        authRef: "model-api:\(modelId)",
+                        extra: ["model_origin": "manual"]
                     )
                     model.saveConfig(config)
                     editing = config
@@ -172,34 +173,42 @@ public struct ModelSettingsView: View {
 
     @ViewBuilder
     private var addedModelsSection: some View {
-        Section("已添加的模型") {
-            if model.configs.isEmpty {
-                Text("尚未添加模型。在上方选择预设添加官方核验免费 Token 服务商，或添加自定义通用模型 API。")
+        addedModelGroup(model.modelApis, kind: .modelApi, title: "模型 API")
+        addedModelGroup(model.cliBrains, kind: .agentRuntime, title: "CLI 会员")
+        addedModelGroup(model.subscriptions, kind: .subscription, title: "订阅授权")
+    }
+
+    private func addedModelGroup(_ configs: [ModelConfig], kind: BrainKind, title: String) -> some View {
+        let deleted = model.configStore.deletedModelIds()
+        let restorable = BrainBootstrap.seededConfigs.filter { seed in
+            seed.kind == kind && deleted.contains(seed.brainId) && model.configStore.getConfig(modelId: seed.brainId) == nil
+        }
+
+        return Section(title) {
+            if configs.isEmpty {
+                Text("暂无已添加的\(title)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            if !model.modelApis.isEmpty {
-                ForEach(model.modelApis, id: \.modelId) { config in
-                    modelRow(config: config, groupTitle: "模型 API")
-                }
+            ForEach(configs) { config in
+                modelRow(config: config)
             }
-
-            if !model.cliBrains.isEmpty {
-                ForEach(model.cliBrains, id: \.modelId) { config in
-                    modelRow(config: config, groupTitle: "CLI 会员")
-                }
-            }
-
-            if !model.subscriptions.isEmpty {
-                ForEach(model.subscriptions, id: \.modelId) { config in
-                    modelRow(config: config, groupTitle: "订阅授权")
+            ForEach(restorable, id: \.brainId) { seed in
+                Button("＋ 重新添加 \(seed.label)") {
+                    let config = ModelConfig.fromBrainConfig(seed)
+                    model.saveConfig(config)
+                    if model.configStore.getConfig(modelId: config.modelId) != nil {
+                        model.configStore.clearModelDeleted(modelId: config.modelId)
+                        model.reload()
+                        editing = config
+                    }
                 }
             }
         }
     }
 
-    private func modelRow(config: ModelConfig, groupTitle: String) -> some View {
+    private func modelRow(config: ModelConfig) -> some View {
         Button {
             editing = config
         } label: {
@@ -208,12 +217,13 @@ public struct ModelSettingsView: View {
                     HStack(spacing: 6) {
                         Text(config.label)
                             .font(.headline)
-                        Text(groupTitle)
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.12))
-                            .clipShape(Capsule())
+                        if config.isCustomModel {
+                            Text("自定义")
+                                .font(.caption2)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.12), in: Capsule())
+                        }
                         if config.extra[FreeProviderPresets.extraTier] == FreeProviderPresets.tierFree {
                             Text("免费")
                                 .font(.caption2)
@@ -246,6 +256,14 @@ public struct ModelSettingsView: View {
     }
 }
 
+extension ModelConfig {
+    var isCustomModel: Bool {
+        modelId.hasPrefix("custom-") ||
+        extra[FreeProviderPresets.extraPreset]?.hasPrefix("custom-") == true ||
+        extra["model_origin"] == "manual"
+    }
+}
+
 // MARK: - 模型编辑 Sheet
 
 private struct ModelEditorView: View {
@@ -258,6 +276,8 @@ private struct ModelEditorView: View {
     @State private var modelName: String
     @State private var apiKey: String = ""
     @State private var showDeleteConfirm = false
+    @State private var isTestingConnection = false
+    @State private var connectionTestMessage: String?
 
     init(model: ModelSettingsModel, config: ModelConfig) {
         self.model = model
@@ -288,6 +308,20 @@ private struct ModelEditorView: View {
                 }
 
                 Section {
+                    Button(isTestingConnection ? "正在测试连接…" : "测试连接") {
+                        Task { await testSavedConnection() }
+                    }
+                    .disabled(isTestingConnection || hasUnsavedConnectionChanges)
+                    if let connectionTestMessage, !hasUnsavedConnectionChanges {
+                        Text(connectionTestMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("仅测试这一条已保存的连接。修改地址、模型或 Key 后，请保存并重新打开编辑页。")
+                }
+
+                Section {
                     Button("删除模型", role: .destructive) {
                         showDeleteConfirm = true
                     }
@@ -310,8 +344,54 @@ private struct ModelEditorView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("删除「\(config.label)」后不会影响大脑配置与设备连接。")
+                Text("确定删除「\(config.label)」吗？只删这一条模型配置，不删 Agent、不删设备。")
             }
+        }
+    }
+
+    private var hasUnsavedConnectionChanges: Bool {
+        baseUrl.trimmingCharacters(in: .whitespacesAndNewlines) != (config.baseUrl ?? "") ||
+        modelName.trimmingCharacters(in: .whitespacesAndNewlines) != config.model ||
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @MainActor
+    private func testSavedConnection() async {
+        isTestingConnection = true
+        connectionTestMessage = nil
+        defer { isTestingConnection = false }
+
+        let result: Result<Void, Error>
+        switch config.adapterId {
+        case GenericOpenAiBrainAdapter.adapterId, "generic":
+            guard let address = config.baseUrl,
+                  let url = URLComponents(string: address), url.host?.isEmpty == false,
+                  url.user == nil, url.password == nil,
+                  url.scheme?.lowercased() == "https" || BrainConfigValidator.isLocalModelUrl(address) else {
+                connectionTestMessage = "尚未配置有效的模型服务地址。"
+                return
+            }
+            let key = config.authRef.flatMap { model.keyStore.getSecret(authRef: $0) } ?? ""
+            switch await GenericOpenAiApiClient().listModels(apiKey: key, baseUrl: address) {
+            case .success: result = .success(())
+            case .failure(let error): result = .failure(error)
+            }
+        default:
+            // 内置适配器绑定内置 ID 和凭据，不能借它测试别的模型行。
+            guard let seed = BrainBootstrap.seedConfigFor(brainId: config.modelId),
+                  seed.adapterId == config.adapterId, seed.authRef == config.authRef,
+                  let adapter = model.registryProvider().get(config.adapterId) else {
+                connectionTestMessage = "iOS 暂不支持测试这条连接。"
+                return
+            }
+            result = await adapter.validateCredentials()
+        }
+
+        switch result {
+        case .success:
+            connectionTestMessage = "连接验证通过。"
+        case .failure(let error):
+            connectionTestMessage = "连接验证失败：\(SecretRedactor.redact(error.localizedDescription))"
         }
     }
 

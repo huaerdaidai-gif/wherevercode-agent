@@ -1192,6 +1192,16 @@ public struct LocalChatHomeView: View {
             .padding(.top, 10)
             .padding(.bottom, 8)
 
+            Text(connectionSummaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16)
+                .accessibilityIdentifier("chat.connectionSummary")
+
             // 主体消息流或 Claude 风格极简留白问候区
             ScrollViewReader { proxy in
                 ScrollView {
@@ -1949,33 +1959,58 @@ private struct ProjectSourceTargetList: View {
 /// 对话方选择器（严格遵循定版规范：仅列出可选 Agent，整节移除已配置模型，单选规则仅提 Agent）
 public struct ModelAndAgentSheet: View {
     @ObservedObject var model: LocalChatModel
-    var onManage: () -> Void
-    var onManageAgents: (() -> Void)? = nil
+    var onManageAgents: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     private var availableAgents: [AgentRecord] {
-        let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
+        let allAgents = (try? model.data.agents.listAgents()) ?? []
         return allAgents.filter { $0.enabled && !$0.isDeviceHost && $0.kind != .localModel }
     }
 
+    private func suggestedAgent(from agents: [AgentRecord]) -> (agent: AgentRecord, reason: String)? {
+        let candidates = agents.filter { $0.kind != .device || $0.memberConnectionState == "CONNECTED" }
+        if let target = model.projectSource.targetId,
+           let match = candidates.first(where: { $0.kind == .device && $0.deviceId == target && $0.dispatchable }) {
+            return (match, "与当前项目使用同一台已连接设备")
+        }
+        if let match = candidates.first(where: { $0.agentId == model.defaultAgentId }) {
+            return (match, "你设置的默认 Agent")
+        }
+        if candidates.count == 1, let match = candidates.first {
+            return (match, "当前唯一符合建议条件的 Agent")
+        }
+        return nil
+    }
+
     public var body: some View {
+        let agents = availableAgents
         NavigationStack {
             List {
-                Section {
-                    if availableAgents.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("暂无已启用的 Agent：可在「Agent 与团队」中添加，或在设备配对后连接。")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Button("前往 Agent 与团队管理") {
-                                dismiss()
-                                onManageAgents?()
+                Section("智能建议") {
+                    if let suggestion = suggestedAgent(from: agents) {
+                        Button {
+                            model.selectAgentInCurrentSession(suggestion.agent)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label(suggestion.agent.displayName, systemImage: "sparkles")
+                                Text(suggestion.reason)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.caption)
                         }
-                        .padding(.vertical, 2)
                     } else {
-                        ForEach(availableAgents) { ag in
+                        Text("暂无明确建议，请手动选择 Agent。")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    if agents.isEmpty {
+                        Text("暂无已启用的 Agent：可在「Agent 与团队」中添加，或在设备配对后连接。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(agents) { ag in
                             let isSelected = (model.selectedAgent?.agentId == ag.agentId)
                             HStack {
                                 Button {
@@ -2012,7 +2047,7 @@ public struct ModelAndAgentSheet: View {
                 }
 
                 Section {
-                    Button("管理模型与连接") { dismiss(); onManage() }
+                    Button("管理 Agent") { dismiss(); onManageAgents() }
                 } footer: {
                     Text("单选规则：对话框仅保留一个勾选的 Agent，由用户自选对话方。")
                 }
@@ -2038,7 +2073,7 @@ public struct ChatComposerBar: View {
             return ag.displayName + (ag.dispatchable ? "" : "（仅对话）")
         }
         let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
-        guard let cfg else { return "选择模型 / Agent" }
+        guard let cfg else { return "选择对话方" }
         return cfg.model.isEmpty ? cfg.label : cfg.model
     }
 
@@ -2140,7 +2175,6 @@ public struct ChatComposerBar: View {
         .sheet(isPresented: $showModelSheet) {
             ModelAndAgentSheet(
                 model: model,
-                onManage: { onSelectRoute("models") },
                 onManageAgents: { onSelectRoute("agents") }
             )
             .presentationDetents([.medium, .large])

@@ -696,7 +696,8 @@ final class HandClientTests: XCTestCase {
 
         // 验证三者独立在库
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: devId))
-        XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: agentId))
+        // saveAgent 会补齐时间戳；比较删除动作前后的持久化记录。
+        let savedAgent = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: agentId))
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "cloud-reviewer"))
 
         // 4. 用户删除设备 devId
@@ -709,7 +710,7 @@ final class HandClientTests: XCTestCase {
         let preservedAgent = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: agentId))
         XCTAssertEqual(preservedAgent.agentId, agentId)
         XCTAssertEqual(preservedAgent.deviceId, devId)
-        XCTAssertEqual(preservedAgent, agent)
+        XCTAssertEqual(preservedAgent, savedAgent)
 
         // 核心断言 3：云端 Agent 毫发无损
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "cloud-reviewer"))
