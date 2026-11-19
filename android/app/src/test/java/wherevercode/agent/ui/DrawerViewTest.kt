@@ -97,12 +97,12 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `active row is highlighted and loses chevron`() {
+    fun `active row is highlighted and parent rows have no chevron`() {
         val drawerView = view(activeTarget = DrawerController.ID_PROJECTS)
         assertTrue(drawerView.renderedRowIsActive("nav_projects"))
         assertNull(drawerView.renderedRowTrailing("nav_projects"))
         assertFalse(drawerView.renderedRowIsActive("nav_chat"))
-        assertEquals("›", drawerView.renderedRowTrailing("nav_chat"))
+        assertNull(drawerView.renderedRowTrailing("nav_chat"))
     }
 
     @Test

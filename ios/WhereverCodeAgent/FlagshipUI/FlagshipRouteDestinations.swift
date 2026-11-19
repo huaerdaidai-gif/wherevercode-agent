@@ -5089,12 +5089,12 @@ public struct ControlHomeView: View {
     @ViewBuilder
     private func statusStatItem(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .serif))
-                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .serif))
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
         }
     }
 
