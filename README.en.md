@@ -47,6 +47,9 @@ This is a **product target**, not a claim of full parity on the current `main`. 
 
 Use evidence stages: **Planned → UI entry → Source implementation → Automated test → Simulator verification → Real-device verification → End-to-end acceptance**. Missing evidence means *not verified*.
 
+Verification update (2026-11-20): Android build 203 from main commit 42798529 has been installed in place on a Xiaomi 12 and double-checked via versionCode and APK SHA-256; the iOS build 203 unsigned IPA has been produced by CI, but real-device sideload acceptance is not yet complete. The dual-platform screen-by-screen re-walk is still pending and is not claimed here as accepted.
+
+
 See the [P0 audit and implementation gates](docs/p0/README.md), which include historical branch context and must not be treated as a current-main acceptance report.
 
 ## Build and install
