@@ -267,7 +267,7 @@ public struct DevicesView: View {
     private func reload() {
         do {
             try? LocalData.shared.agents.migrateLegacyDeviceRecords()
-            devices = try LocalData.shared.agents.listAgents().filter { $0.kind == .device && $0.access == .app }
+            devices = try LocalData.shared.agents.listAgents().filter { $0.isDeviceHost }
             loadError = nil
         } catch {
             loadError = error.localizedDescription

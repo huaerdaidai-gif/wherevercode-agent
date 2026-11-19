@@ -70,6 +70,10 @@ public struct AgentRecord: Equatable, Codable, Identifiable, Sendable {
     public var createdAtEpochSeconds: Int64 = 0
     public var updatedAtEpochSeconds: Int64 = 0
 
+    public var isDeviceHost: Bool {
+        kind == .device && access == .app && agentId == deviceId
+    }
+
     public init(
         agentId: String,
         displayName: String,
@@ -130,8 +134,20 @@ public final class AgentRegistryStore {
     private let kv: KeyValueStore
     private let storageKey = "agents.records.v1"
 
-    public init(kv: KeyValueStore) {
+    public var keyStore: BrainKeyStore?
+    public var brainConfigStore: BrainConfigStore?
+    public var modelConfigStore: ModelConfigStore?
+
+    public init(
+        kv: KeyValueStore,
+        keyStore: BrainKeyStore? = nil,
+        brainConfigStore: BrainConfigStore? = nil,
+        modelConfigStore: ModelConfigStore? = nil
+    ) {
         self.kv = kv
+        self.keyStore = keyStore
+        self.brainConfigStore = brainConfigStore
+        self.modelConfigStore = modelConfigStore
     }
 
     public func listAgents() throws -> [AgentRecord] {
@@ -186,31 +202,31 @@ public final class AgentRegistryStore {
     }
 
     public func deleteAgent(agentId: String) throws {
+        let target = try? getAgent(agentId: agentId)
         var agents = try listAgents()
         agents.removeAll { $0.agentId == agentId }
         try kv.setJSON(storageKey, agents)
+
+        if let authRef = target?.authRef, let keyStore = self.keyStore {
+            // 密钥引用计数：仅当剩余 Agent 记录、brainStore、modelStore 三处均不再引用该 authRef 时，才清理 Keychain 密钥；任一处仍引用则保留
+            let otherAgentRefs = agents.contains { $0.authRef == authRef }
+            let brainRefs = brainConfigStore?.listConfigs().contains { $0.authRef == authRef } ?? false
+            let modelRefs = modelConfigStore?.listConfigs().contains { $0.authRef == authRef } ?? false
+
+            if !otherAgentRefs && !brainRefs && !modelRefs {
+                keyStore.deleteSecret(authRef: authRef)
+            }
+        }
     }
 
     /// 安全删除指定设备并写入墓碑（保证重启与局域网探测绝不复活）；
     /// 严格遵循核心原则：删除设备绝不连带删除任何云端/自定义 Agent 或模型！
-    /// 仅清理该设备本身记录，并对关联的子 Agent 安全解绑（保留其配置与生命周期）。
+    /// 仅清理该设备宿主记录并清理配对公钥，名下 AgentRecord 一字不改（展示态派生不落盘）。
     public func deleteDeviceCascade(deviceId: String) throws {
         try markDeviceDeleted(deviceId: deviceId)
+        HandIdentityManager.deleteDeviceCredentials(deviceId: deviceId)
         var agents = try listAgents()
-        for i in 0..<agents.count {
-            // 对绑定该设备的 Agent 安全解绑，绝不误删 Agent 实体！
-            if agents[i].deviceId == deviceId && agents[i].agentId != deviceId {
-                agents[i].deviceId = nil
-                agents[i].memberConnectionState = "NOT_CONNECTED"
-                agents[i].lastTestSummary = "宿主设备已移除（未连接）"
-                agents[i].baseUrl = nil
-            }
-        }
-        // 清理设备自身的宿主记录
-        agents.removeAll { ag in
-            guard ag.kind == .device else { return false }
-            return ag.agentId == deviceId || (ag.access == .app && ag.deviceId == deviceId)
-        }
+        agents.removeAll { $0.agentId == deviceId }
         try kv.setJSON(storageKey, agents)
     }
 
@@ -224,14 +240,14 @@ public final class AgentRegistryStore {
         var agents = try listAgents()
         if !deleted.isEmpty {
             agents.removeAll { ag in
-                guard ag.kind == .device && (ag.access == .app || ag.agentId == ag.deviceId) else { return false }
-                return deleted.contains(ag.agentId) || (ag.deviceId != nil && deleted.contains(ag.deviceId!))
+                guard ag.isDeviceHost else { return false }
+                return deleted.contains(ag.agentId)
             }
         }
         // 概念分离硬规则：agy 是 Agent，不得登记为一台设备
         let beforeCount = agents.count
         agents.removeAll { ag in
-            ag.kind == .device && (ag.access == .app || ag.agentId == ag.deviceId) &&
+            ag.isDeviceHost &&
             (ag.agentId.lowercased() == "agy" || ag.displayName.lowercased() == "agy")
         }
         var modified = agents.count != beforeCount

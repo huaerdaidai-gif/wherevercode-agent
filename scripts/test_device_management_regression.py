@@ -189,23 +189,24 @@ class TestDeviceManagementRegression(unittest.TestCase):
         self.assertEqual(refetched[1]["baseUrl"], "192.168.1.205:18743")
 
     def test_03_delete_cascade_and_restart_recovery_isolation(self):
-        """回归 3：设备删除级联、凭据撤销、重启不复活，且绝不误删非设备实体"""
+        """回归 3：设备删除级联、凭据撤销、重启不复活，且名下 Agent 字节级保留"""
         dev_id = "test-mac-delete"
+        child_record = {"agentId": f"{dev_id}:codex", "displayName": "Codex", "kind": "DEVICE", "access": "CLI", "deviceId": dev_id}
         records = [
             {"agentId": "claude-sonnet", "displayName": "Claude 3.5", "kind": "CLOUD", "access": "API"},
             {"agentId": "local-qwen", "displayName": "Qwen 2.5", "kind": "LOCAL_MODEL", "access": "API"},
             {"agentId": dev_id, "displayName": "Delete Mac", "kind": "DEVICE", "access": "APP", "deviceId": dev_id},
-            {"agentId": f"{dev_id}:codex", "displayName": "Codex", "kind": "DEVICE", "access": "CLI", "deviceId": dev_id}
+            child_record
         ]
         self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('agents.records.v1', ?)",
                           (json.dumps(records),))
         self.conn.commit()
 
-        # 执行 AgentRegistryStore.deleteDeviceCascade
+        # 执行 AgentRegistryStore.deleteDeviceCascade（删除条件严格写为 agentId == deviceId）
         cur = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
         filtered = [
             a for a in cur
-            if not (a.get("kind") == "DEVICE" and (a.get("agentId") == dev_id or a.get("deviceId") == dev_id or str(a.get("agentId", "")).startswith(f"{dev_id}:")))
+            if not (a.get("agentId") == dev_id)
         ]
         self.conn.execute("UPDATE kv_store SET value=? WHERE key='agents.records.v1'", (json.dumps(filtered),))
         self.conn.commit()
@@ -217,7 +218,10 @@ class TestDeviceManagementRegression(unittest.TestCase):
 
         agent_ids = [a["agentId"] for a in after_restart]
         self.assertNotIn(dev_id, agent_ids)
-        self.assertNotIn(f"{dev_id}:codex", agent_ids)
+        # 严格验证：名下 Agent 绝不被删除，字段字节级不变！
+        self.assertIn(f"{dev_id}:codex", agent_ids)
+        saved_child = next(a for a in after_restart if a["agentId"] == f"{dev_id}:codex")
+        self.assertEqual(saved_child, child_record)
         # 严格验证：云端 Agent 和本地模型绝无误删！
         self.assertIn("claude-sonnet", agent_ids)
         self.assertIn("local-qwen", agent_ids)
@@ -514,40 +518,61 @@ class TestDeviceManagementRegression(unittest.TestCase):
         ], capture_output=True, text=True)
 
     def test_10_resource_separation_device_agent_model_independence(self):
-        """回归 10：核心三权分立（设备≠Agent≠模型），删除设备绝不连带删除绑定的 Agent 或模型"""
+        """回归 10：核心三权分立（设备≠Agent≠模型），删除设备绝不连带删除绑定的 Agent 或篡改其字段"""
         dev_id = "test-android-sep"
-        agent_id = "agy-worker"
+        agent_id1 = "agy-worker-1"
+        agent_id2 = "agy-worker-2"
+        child1 = {
+            "agentId": agent_id1,
+            "displayName": "agy 1",
+            "kind": "DEVICE",
+            "access": "CLI",
+            "deviceId": dev_id,
+            "deviceFolder": "/data/data/com.termux/files/home"
+        }
+        child2 = {
+            "agentId": agent_id2,
+            "displayName": "agy 2",
+            "kind": "DEVICE",
+            "access": "CLI",
+            "deviceId": dev_id,
+            "deviceFolder": "/data/data/com.termux/files/home"
+        }
         records = [
             {"agentId": dev_id, "displayName": "Xiaomi 12", "kind": "DEVICE", "access": "APP", "deviceId": dev_id},
-            {"agentId": agent_id, "displayName": "agy", "kind": "DEVICE", "access": "CLI", "deviceId": dev_id, "deviceFolder": "/data/data/com.termux/files/home"},
+            child1,
+            child2,
             {"agentId": "cloud-claude", "displayName": "Claude 3.5", "kind": "CLOUD", "access": "API"}
         ]
         self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('agents.records.v1', ?)", (json.dumps(records),))
         self.conn.commit()
 
-        # 模拟执行更新后的 deleteDeviceCascade：设备记录移除，但绑定的 Agent 解绑保留
+        # 模拟执行更新后的 deleteDeviceCascade：仅删除设备自身记录 (agentId == dev_id)，彻底删除遍历修改子 Agent 字段的循环
         cur = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
-        updated = []
-        for a in cur:
-            if a["agentId"] == dev_id or (a.get("access") == "APP" and a.get("deviceId") == dev_id):
-                continue
-            if a.get("deviceId") == dev_id:
-                a["deviceId"] = None
-                a["memberConnectionState"] = "NOT_CONNECTED"
-                a["baseUrl"] = None
-            updated.append(a)
+        updated = [a for a in cur if a["agentId"] != dev_id]
         self.conn.execute("UPDATE kv_store SET value=? WHERE key='agents.records.v1'", (json.dumps(updated),))
         # 写入墓碑
         self.conn.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('devices.deleted.v1', ?)",
                           (json.dumps([dev_id]),))
         self.conn.commit()
 
-        # 验证结果
+        # 验证结果：删掉带 2 个 Agent 的设备后，Agent 仍保留 2 条且字段字节级不变
         after = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='agents.records.v1'").fetchone()[0])
         ids = [a["agentId"] for a in after]
         self.assertNotIn(dev_id, ids, "设备记录已被干净移除")
-        self.assertIn(agent_id, ids, "承载的 Agent 绝不被连带删除！依然独立存在")
+        self.assertIn(agent_id1, ids, "承载的 Agent 1 绝不被连带删除！")
+        self.assertIn(agent_id2, ids, "承载的 Agent 2 绝不被连带删除！")
         self.assertIn("cloud-claude", ids, "云端 Agent 毫发无损")
+
+        # 字段字节级不变验证
+        saved_child1 = next(a for a in after if a["agentId"] == agent_id1)
+        saved_child2 = next(a for a in after if a["agentId"] == agent_id2)
+        self.assertEqual(saved_child1, child1, "子 Agent 1 字段字节级不变")
+        self.assertEqual(saved_child2, child2, "子 Agent 2 字段字节级不变")
+
+        # 重新配对该设备后承载数自动恢复为 2
+        hosted_count_after_del = len([a for a in after if a.get("deviceId") == dev_id and a.get("agentId") != dev_id])
+        self.assertEqual(hosted_count_after_del, 2, "重新配对该设备后承载数自动恢复为 2")
 
         # 验证墓碑隔离
         tombstones = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='devices.deleted.v1'").fetchone()[0])

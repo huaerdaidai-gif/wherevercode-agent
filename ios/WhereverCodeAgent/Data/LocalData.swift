@@ -262,7 +262,9 @@ public final class LocalChatModel: ObservableObject {
         get { (try? data.kv.get("chat.defaultBrainId")) ?? nil ?? "" }
         set {
             try? data.kv.set("chat.defaultBrainId", newValue.isEmpty ? nil : newValue)
-            appState.brainConfigStore.setCurrentBrainId(newValue.isEmpty ? nil : newValue)
+            appState.modelSettingsModel.configStore.setCurrentModelId(newValue.isEmpty ? nil : newValue)
+            appState.modelSettingsModel.reload()
+            appState.modelSettingsModel.onChange()
         }
     }
 
@@ -345,7 +347,7 @@ public final class LocalChatModel: ObservableObject {
         if let cid = conversationID {
             try? data.conversations.updateConversationBrain(
                 id: cid,
-                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : (selectedAgent?.displayName ?? selectedAgent?.agentId)
+                brainId: selectedAgent == nil ? (selectedBrain.isEmpty ? nil : selectedBrain) : nil
             )
         }
     }
@@ -380,8 +382,10 @@ public final class LocalChatModel: ObservableObject {
 
     /// Brains that can actually serve a chat right now.
     public var usableBrains: [BrainConfig] {
-        appState.brainSettingsModel.configs.filter {
-            appState.brainSettingsModel.unusableReason(for: $0) == nil
+        let configs = appState.compositeBrainConfigStore.listConfigs()
+        return configs.filter { cfg in
+            let modelCfg = ModelConfig.fromBrainConfig(cfg)
+            return appState.modelSettingsModel.unusableReason(for: modelCfg) == nil
         }
     }
 
@@ -395,18 +399,18 @@ public final class LocalChatModel: ObservableObject {
         }
         if let cfg = appState.brainRegistry.configFor(selectedBrain),
            appState.brainRegistry.get(cfg.adapterId) != nil {
-            if cfg.authRef == nil || appState.brainSettingsModel.hasKey(for: cfg) {
+            if cfg.authRef == nil || appState.modelSettingsModel.hasKey(for: ModelConfig.fromBrainConfig(cfg)) {
                 return (selectedBrain, nil)
             }
         }
         let usable = usableBrains
-        if let current = appState.brainConfigStore.currentBrainId(),
+        if let current = appState.modelSettingsModel.currentModelId,
            usable.contains(where: { $0.brainId == current }) {
             return (current, nil)
         }
         if let first = usable.first { return (first.brainId, nil) }
-        if let cfg = appState.brainSettingsModel.configs.first(where: { $0.brainId == selectedBrain }),
-           let reason = appState.brainSettingsModel.unusableReason(for: cfg) {
+        if let cfg = appState.compositeBrainConfigStore.getConfig(brainId: selectedBrain),
+           let reason = appState.modelSettingsModel.unusableReason(for: ModelConfig.fromBrainConfig(cfg)) {
             return (nil, "「\(cfg.label)」不可用：\(reason)。请到 设置 › 模型 连接一个可用的模型。")
         }
         if let cfg = appState.brainRegistry.configFor(selectedBrain),
@@ -652,7 +656,7 @@ public final class LocalChatModel: ObservableObject {
             do {
                 if conversationID == nil {
                     let conversation = try data.conversations.createConversation(
-                        brainId: agent.displayName,
+                        brainId: nil,
                         title: String(text.prefix(48))
                     )
                     try? data.kv.set(draftKey, nil)
@@ -1405,7 +1409,7 @@ public struct LocalChatHomeView: View {
         if message.source == "codex_control" { return "系统" }
         if message.source.hasPrefix("brain:") {
             let bid = String(message.source.dropFirst(6))
-            if let cfg = model.appState.brainSettingsModel.configs.first(where: { $0.brainId == bid }) {
+            if let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: bid) {
                 return cfg.label
             }
             return bid
@@ -1416,7 +1420,7 @@ public struct LocalChatHomeView: View {
         if let ag = model.selectedAgent {
             return ag.displayName
         }
-        if let cfg = model.appState.brainSettingsModel.configs.first(where: { $0.brainId == model.selectedBrain }) {
+        if let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain) {
             return cfg.label
         }
         return "Assistant"
@@ -1951,14 +1955,7 @@ public struct ModelAndAgentSheet: View {
 
     private var availableAgents: [AgentRecord] {
         let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
-        let childDeviceIds = Set(allAgents.filter { $0.kind == .device && $0.access == .cli }.compactMap { $0.deviceId })
-        return allAgents.filter { ag in
-            guard ag.enabled else { return false }
-            if ag.kind == .device && ag.access == .app && ag.agentId == ag.deviceId && childDeviceIds.contains(ag.agentId) {
-                return false
-            }
-            return true
-        }
+        return allAgents.filter { $0.enabled && !$0.isDeviceHost && $0.kind != .localModel }
     }
 
     public var body: some View {
@@ -2040,7 +2037,7 @@ public struct ChatComposerBar: View {
         if let ag = model.selectedAgent {
             return ag.displayName + (ag.dispatchable ? "" : "（仅对话）")
         }
-        let cfg = model.appState.brainSettingsModel.configs.first { $0.brainId == model.selectedBrain }
+        let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
         guard let cfg else { return "选择模型 / Agent" }
         return cfg.model.isEmpty ? cfg.label : cfg.model
     }
