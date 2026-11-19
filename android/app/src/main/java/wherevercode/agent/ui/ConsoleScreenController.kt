@@ -273,7 +273,13 @@ class ConsoleScreenController(
         })
         topRow.addView(titleGroup)
 
-        val btnManage = UiKit.text(context, "管理连接", 11f, R.color.accent, bold = true).apply {
+        // 差异 6（2026-11-19）：概览卡按钮随 MCP Token 真实状态切换——已配 Token
+        // 是“管理连接”，未配是“配置 Token”。快照为空（加载中）时沿用“管理连接”。
+        val btnManage = UiKit.text(
+            context,
+            if (snapshot != null && !snapshot.mcpTokenConfigured) "配置 Token" else "管理连接",
+            11f, R.color.accent, bold = true,
+        ).apply {
             setBackgroundResource(R.drawable.bg_chip_accent)
             setPadding(dp(10), dp(5), dp(10), dp(5))
             setOnClickListener { onOpenConnections() }
@@ -399,12 +405,19 @@ class ConsoleScreenController(
             isTodo = false,
             onClick = { onOpenModels() },
         ))
+        // 差异 6（2026-11-19）：MCP 角标不再写死“已配置”，读快照里的真实凭证状态。
+        // 快照为空（加载中/读库失败）时只写中性词，不谎报。
+        val mcpBadge = when {
+            snapshot == null -> "MCP"
+            snapshot.mcpTokenConfigured -> "已配置 Token"
+            else -> "未配 Token"
+        }
         container.addView(controlCard(
             title = "MCP",
             subtitle = "保存或签发平台 Token、探测远端工具清单",
             iconRes = R.drawable.ic_puzzle,
-            badge = "已配置",
-            isTodo = false,
+            badge = mcpBadge,
+            isTodo = snapshot != null && !snapshot.mcpTokenConfigured,
             onClick = { onOpenMcp() },
         ))
         container.addView(controlCard(

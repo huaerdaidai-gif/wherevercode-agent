@@ -73,7 +73,7 @@ class ConsoleScreenControllerTest {
         lastTestSummary = "远端可用",
     )
 
-    private fun snapshot(): Snapshot = ConsoleSnapshot.build(
+    private fun snapshot(mcpTokenConfigured: Boolean = false): Snapshot = ConsoleSnapshot.build(
         tasks = listOf(
             task("t1", "做计算器", "working", updatedAt = 300, leaseOwner = "local-brain"),
             task("t2", "修空响应", "queued", updatedAt = 200, assignedAgentId = "example-agent"),
@@ -91,6 +91,7 @@ class ConsoleScreenControllerTest {
         pairedDeviceIds = setOf("remote-device"),
         agents = listOf(agent("example-agent", "Example Agent")),
         generatedAtEpochSeconds = 300,
+        mcpTokenConfigured = mcpTokenConfigured,
     )
 
     /** 递归收集全部 TextView 的文字。 */
@@ -225,6 +226,27 @@ class ConsoleScreenControllerTest {
         assertContains(texts, "模型")
         assertContains(texts, "3 个模型")
         assertContains(texts, "模型 3 个")
+    }
+
+    @Test
+    fun `mcp card badge and overview button follow the real token state`() {
+        // 差异 6（2026-11-19）：MCP 角标不再写死“已配置”——快照带真实凭证状态；
+        // 概览卡按钮随之切换。精确匹配整串文案（子串断言会被“已配置 Token”误触）。
+        val c = controller()
+        c.setLevel(3)
+        // 未配 Token：角标“未配 Token”，概览卡按钮“配置 Token”。
+        c.render(snapshot())
+        val unconfigured = allTexts(c.root)
+        assertTrue(unconfigured.contains("未配 Token"))
+        assertTrue(unconfigured.contains("配置 Token"))
+        assertFalse(unconfigured.contains("已配置 Token"))
+        // 已配 Token：角标“已配置 Token”，概览卡按钮“管理连接”。
+        c.render(snapshot(mcpTokenConfigured = true))
+        val configured = allTexts(c.root)
+        assertTrue(configured.contains("已配置 Token"))
+        assertTrue(configured.contains("管理连接"))
+        assertFalse(configured.contains("未配 Token"))
+        assertFalse(configured.contains("配置 Token"))
     }
 
     @Test

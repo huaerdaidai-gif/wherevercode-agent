@@ -213,6 +213,12 @@ object ConsoleSnapshot {
          * 段都展示：上面是动态、下面是审计。
          */
         val taskEvents: List<TaskEvent> = emptyList(),
+        /**
+         * MCP 平台 Token 是否已配置（差异 6，2026-11-19）：MainActivity 组装快照时
+         * 读平台凭证库（PlatformAgentCredentialStore.loadPlatformToken）实测，
+         * 不是写死的“已配置”。控制台 MCP 卡角标与概览卡按钮都以此为准。
+         */
+        val mcpTokenConfigured: Boolean = false,
     ) {
         /** 进行中（assigned/working/blocked/review）：在手的工作。 */
         val activeTasks: List<TaskRecord>
@@ -278,6 +284,10 @@ object ConsoleSnapshot {
          * 旧调用方行为不变（只数远程设备）。
          */
         pairings: List<PairingRecord> = emptyList(),
+        /**
+         * MCP 平台 Token 是否已配置（差异 6）：调用方（MainActivity）读真实凭证状态传入。
+         */
+        mcpTokenConfigured: Boolean = false,
     ): Snapshot {
         val sortedTasks = tasks.sortedByDescending { it.updatedAt }
         val selfTasks = sortedTasks.filter { executorOf(it) is TaskExecutor.Self }
@@ -351,6 +361,7 @@ object ConsoleSnapshot {
             results = ResultsAggregation.aggregate(sortedTasks, stepsByTask),
             generatedAtEpochSeconds = generatedAtEpochSeconds,
             taskEvents = taskEvents,
+            mcpTokenConfigured = mcpTokenConfigured,
         )
     }
 }
