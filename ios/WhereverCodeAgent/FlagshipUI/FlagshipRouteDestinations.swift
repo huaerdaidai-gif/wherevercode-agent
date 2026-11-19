@@ -2572,6 +2572,7 @@ public struct ChannelsHomeView: View {
 
     @State private var selectedPartition: ChannelPartition = .channels
     @State private var searchQuery = ""
+    @State private var showSwitchPanel = false
     @State private var showCreateChannelSheet = false
     @State private var showCreateDMSheet = false
     @State private var showPolicyAlert = false
@@ -2629,17 +2630,31 @@ public struct ChannelsHomeView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topNavBar
-            partitionPicker
 
-            if selectedPartition == .channels {
-                searchField
-                if !appState.hasToken {
-                    unconfiguredTokenView
-                } else {
-                    channelsListView
-                }
+            // 对话框直达（批D）：打开即当前频道的对话框（消息流+状态+
+            // 发送区）；搜索/分段/频道列表收进切换面板（点频道名开）。
+            if !appState.hasToken {
+                unconfiguredTokenView
+            } else if let dm = activeWorkspaceDM {
+                ChannelDetailWorkspaceView(
+                    appState: appState,
+                    channelItem: nil,
+                    dmItem: dm,
+                    onNavigateRoute: onNavigateRoute,
+                    embedded: true,
+                    onOpenSwitchPanel: { showSwitchPanel = true }
+                )
+            } else if let ch = activeWorkspaceChannel {
+                ChannelDetailWorkspaceView(
+                    appState: appState,
+                    channelItem: ch,
+                    dmItem: nil,
+                    onNavigateRoute: onNavigateRoute,
+                    embedded: true,
+                    onOpenSwitchPanel: { showSwitchPanel = true }
+                )
             } else {
-                directMessagesListView
+                noChannelSelectedView
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
@@ -2647,20 +2662,29 @@ public struct ChannelsHomeView: View {
         .task {
             await refreshChannels()
         }
+        .sheet(isPresented: $showSwitchPanel) {
+            switchPanel
+        }
         .sheet(isPresented: $showCreateChannelSheet) {
             CreateChannelSheet(appState: appState) { newChannel in
                 channels.insert(newChannel, at: 0)
+                activeWorkspaceChannel = newChannel
+                activeWorkspaceDM = nil
             }
         }
         .sheet(isPresented: $showCreateDMSheet) {
             CreateDirectMessageSheet(appState: appState) { newDM in
                 directMessages.insert(newDM, at: 0)
+                activeWorkspaceDM = newDM
             }
         }
         .alert("删除频道", isPresented: $showDeleteConfirmation, presenting: channelToDelete) { ch in
             Button("取消", role: .cancel) {}
             Button("删除", role: .destructive) {
                 channels.removeAll { $0.id == ch.id }
+                if activeWorkspaceChannel?.id == ch.id {
+                    activeWorkspaceChannel = channels.first
+                }
             }
         } message: { ch in
             Text("确定要删除「#\(ch.name)」吗？删除后该频道的消息记录将对所有成员不可见，此操作需要平台授权。")
@@ -2670,21 +2694,51 @@ public struct ChannelsHomeView: View {
         } message: {
             Text(policyAlertMessage)
         }
-        .navigationDestination(item: $activeWorkspaceChannel) { ch in
-            ChannelDetailWorkspaceView(
-                appState: appState,
-                channelItem: ch,
-                dmItem: nil,
-                onNavigateRoute: onNavigateRoute
-            )
+    }
+
+    /// 暂无可选频道时的空态（与列表空态同文案）。
+    private var noChannelSelectedView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "number.circle")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary.opacity(0.6))
+            Text("暂无频道")
+                .font(.headline)
+                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+            Text("点击右上角「＋」可创建团队讨论频道")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .navigationDestination(item: $activeWorkspaceDM) { dm in
-            ChannelDetailWorkspaceView(
-                appState: appState,
-                channelItem: nil,
-                dmItem: dm,
-                onNavigateRoute: onNavigateRoute
-            )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    /// 频道切换面板（批D）：搜索框 + [频道 | 私聊·待开发] 分段 +
+    /// 频道列表；点选即切换并关面板，不先落列表页。
+    private var switchPanel: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                partitionPicker
+
+                if selectedPartition == .channels {
+                    searchField
+                    if !appState.hasToken {
+                        unconfiguredTokenView
+                    } else {
+                        channelsListView
+                    }
+                } else {
+                    directMessagesListView
+                }
+            }
+            .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
+            .navigationTitle("切换频道")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { showSwitchPanel = false }
+                }
+            }
         }
     }
 
@@ -2845,6 +2899,8 @@ public struct ChannelsHomeView: View {
                     ForEach(filteredChannels) { ch in
                         Button {
                             activeWorkspaceChannel = ch
+                            activeWorkspaceDM = nil
+                            showSwitchPanel = false
                         } label: {
                             channelRow(ch)
                         }
@@ -2969,6 +3025,7 @@ public struct ChannelsHomeView: View {
                     ForEach(filteredDMs) { dm in
                         Button {
                             activeWorkspaceDM = dm
+                            showSwitchPanel = false
                         } label: {
                             directMessageRow(dm)
                         }
@@ -3127,6 +3184,14 @@ public struct ChannelsHomeView: View {
 
         // 诚实空态：私聊服务未开发，严禁注入虚假种子私聊会话
         directMessages = []
+
+        // 对话框直达（批D）：默认选中第一个频道；选中项已不在列表
+        // 时回落到第一个。
+        if let active = activeWorkspaceChannel, channels.contains(where: { $0.id == active.id }) {
+            // 保持当前选中
+        } else {
+            activeWorkspaceChannel = channels.first
+        }
     }
 }
 
@@ -3136,9 +3201,17 @@ public struct ChannelDetailWorkspaceView: View {
     public var channelItem: V5ChannelItem?
     public var dmItem: V5DirectMessageItem?
     public var onNavigateRoute: (String) -> Void
+    /// 嵌入模式（批D 对话框直达）：频道页本体直接承载本视图时为 true，
+    /// 不显示返回钮，频道名可点开切换面板。
+    public var embedded: Bool = false
+    public var onOpenSwitchPanel: () -> Void = {}
 
     @State private var selectedTab: WorkspaceTab = .messages
     @State private var composerText = ""
+    @State private var sendAsTask = false
+    @State private var showCreateTaskForm = false
+    @State private var pendingTaskText = ""
+    @State private var taskTitle = ""
     @State private var isSending = false
     @State private var messages: [V5ChannelMessage] = []
     @State private var files: [V5ChannelFile] = []
@@ -3179,12 +3252,16 @@ public struct ChannelDetailWorkspaceView: View {
         appState: AppState,
         channelItem: V5ChannelItem? = nil,
         dmItem: V5DirectMessageItem? = nil,
-        onNavigateRoute: @escaping (String) -> Void = { _ in }
+        onNavigateRoute: @escaping (String) -> Void = { _ in },
+        embedded: Bool = false,
+        onOpenSwitchPanel: @escaping () -> Void = {}
     ) {
         self.appState = appState
         self.channelItem = channelItem
         self.dmItem = dmItem
         self.onNavigateRoute = onNavigateRoute
+        self.embedded = embedded
+        self.onOpenSwitchPanel = onOpenSwitchPanel
     }
 
     private var displayName: String {
@@ -3225,18 +3302,20 @@ public struct ChannelDetailWorkspaceView: View {
         .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("返回")
+            if !embedded {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("返回")
+                        }
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                     }
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .accessibilityIdentifier("channel.backButton")
                 }
-                .accessibilityIdentifier("channel.backButton")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -3278,6 +3357,49 @@ public struct ChannelDetailWorkspaceView: View {
         } message: {
             Text(sendErrorMessage)
         }
+        .sheet(isPresented: $showCreateTaskForm) {
+            NavigationStack {
+                Form {
+                    Section("任务标题") {
+                        TextField("任务标题", text: $taskTitle)
+                    }
+                    Section("任务说明") {
+                        Text(pendingTaskText)
+                            .font(.subheadline)
+                    }
+                    Section {
+                        Text("确认后进入任务列表（状态：排队）。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .navigationTitle("创建任务")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showCreateTaskForm = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("创建") { createTaskFromComposer() }
+                            .disabled(taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 「作为任务发送」确认表单的落点：建一条本地任务（排队），与
+    /// 消息行「转为正式任务」同一落点；频道消息本身不冒充已派任务。
+    private func createTaskFromComposer() {
+        let task = LocalTask(
+            title: taskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: pendingTaskText,
+            state: "queued"
+        )
+        _ = try? LocalData.shared.tasks.createTask(task)
+        composerText = ""
+        replyingTo = nil
+        showCreateTaskForm = false
     }
 
     private var isCertificateFailure: Bool {
@@ -3318,9 +3440,26 @@ public struct ChannelDetailWorkspaceView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(displayName)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    if embedded {
+                        Button {
+                            onOpenSwitchPanel()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(displayName)
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("channel.switchButton")
+                    } else {
+                        Text(displayName)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    }
                     if let ch = channelItem, ch.isPrivate {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 11))
@@ -3538,6 +3677,15 @@ public struct ChannelDetailWorkspaceView: View {
     // MARK: - 输入框区域（仅一个「＋」展开四项）
     private var composerSection: some View {
         VStack(spacing: 4) {
+            // 发送方式（批D，与安卓频道发送区同构）：仅讨论 / 作为任务发送。
+            Picker("发送方式", selection: $sendAsTask) {
+                Text("仅讨论").tag(false)
+                Text("作为任务发送").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+
             if let reply = replyingTo {
                 HStack {
                     Text("回复 \(reply.senderName): \(reply.text)")
@@ -3621,7 +3769,7 @@ public struct ChannelDetailWorkspaceView: View {
                 }
                 .accessibilityIdentifier("channel.composer.plus")
 
-                TextField("发消息，长按头像 @ Agent…", text: $composerText)
+                TextField("给频道发一条短消息（≤500 字），@名字 叫一位 Agent…", text: $composerText)
                     .font(.system(size: 14))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -3636,18 +3784,41 @@ public struct ChannelDetailWorkspaceView: View {
                         .font(.system(size: 32))
                         .foregroundStyle((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil) ? Color.secondary.opacity(0.3) : Color(red: 0.82, green: 0.49, blue: 0.35))
                 }
-                .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil)
+                .disabled((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil) || composerText.count > 500)
                 .accessibilityIdentifier("channel.composer.send")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(Color(red: 0.95, green: 0.94, blue: 0.92))
+
+            if composerText.count > 500 {
+                Text("已超出 500 字上限（当前 \(composerText.count) 字）")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+            }
+            // 边界文案（与安卓逐字一致）：讨论不是派任务。
+            Text("仅讨论会发送频道消息；作为任务发送会打开创建表单，确认后进入任务列表。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 4)
         }
     }
 
     private func sendMessage() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || selectedAttachment != nil else { return }
+
+        // 「作为任务发送」：打开创建表单确认，不直接发频道消息。
+        if sendAsTask && !text.isEmpty {
+            pendingTaskText = text
+            taskTitle = String(text.prefix(40))
+            showCreateTaskForm = true
+            return
+        }
 
         guard feed != nil && (connectionState == .live || connectionState == .polling) else {
             sendErrorMessage = "频道尚未连接；消息未发送。"

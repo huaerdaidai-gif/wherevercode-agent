@@ -1637,6 +1637,8 @@ class MainActivity : AppCompatActivity() {
                 startTeamChannelFeed()
                 refreshTeamChannel()
             },
+            onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
+            onCreateNew = { showChannelCreateMenu() },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -5947,6 +5949,26 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * 频道页「＋ 新建」菜单（双端对齐批D，与 iOS 同位同序同两项）：
+     * 本端的频道由平台配置、App 内没有新建频道的真实通道，两项都
+     * 给诚实「待开发」提示，不造假频道。
+     */
+    private fun showChannelCreateMenu() {
+        ListDialog.show(
+            this,
+            "新建",
+            null,
+            listOf("新建频道", "发起私聊"),
+        ) { which ->
+            if (which == 0) {
+                toast("【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。")
+            } else {
+                toast("【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）")
+            }
+        }
+    }
+
     private fun refreshTeamChannel() {
         if (!::teamChannelController.isInitialized) return
         if (teamChannelRefreshRunning) return
@@ -5986,7 +6008,9 @@ class MainActivity : AppCompatActivity() {
         teamChannelController.render(
             TeamChannelSnapshot(
                 configured = endpoint != null,
-                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent。",
+                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
+                    "并在表单的平台凭证栏填入 App 的平台凭证" +
+                    "（由你的平台管理员签发）。",
                 channelId = endpoint?.second.orEmpty(),
                 connectionState = teamChannelFeed?.connectionState
                     ?: ChannelConnectionState.STOPPED,
