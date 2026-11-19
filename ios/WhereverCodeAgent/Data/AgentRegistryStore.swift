@@ -223,8 +223,11 @@ public final class AgentRegistryStore {
         // 概念分离硬规则：agy 是 Agent，不得登记为一台设备
         let beforeCount = agents.count
         agents.removeAll { ag in
-            ag.isDeviceHost &&
-            (ag.agentId.lowercased() == "agy" || ag.displayName.lowercased() == "agy")
+            // 历史宿主可能还没回填 deviceId；不能把带明确宿主的子 Agent 删掉。
+            let isLegacyDeviceHost = ag.kind == .device && ag.access == .app &&
+                (ag.deviceId == nil || ag.deviceId == "")
+            return (ag.isDeviceHost || isLegacyDeviceHost) &&
+                (ag.agentId.lowercased() == "agy" || ag.displayName.lowercased() == "agy")
         }
         var modified = agents.count != beforeCount
         for i in 0..<agents.count {
