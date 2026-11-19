@@ -364,11 +364,14 @@ class DrawerView(
     private fun buildSearchBox(): LinearLayout {
         val searchBox = UiKit.horizontal(context).apply {
             background = UiKit.rounded(context, R.color.bg_card, 10, R.color.divider, 1)
-            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setPadding(dp(10), dp(6), dp(10), dp(6))
             gravity = Gravity.CENTER_VERTICAL
+            // 高度不写死：原先写死 38dp、上下内边距各 4dp，输入框可用高度只剩
+            // 30dp 硬顶；字段自身又零内边距（见下），真机上字形下半被裁（200 实证）。
+            // 改为随内容定高，框高由内边距 + 字段高度决定，外观高度基本不变。
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(38),
+                LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
                 bottomMargin = dp(8)
             }
@@ -382,6 +385,9 @@ class DrawerView(
             setTextColor(UiKit.color(context, R.color.text_primary))
             setHintTextColor(UiKit.color(context, R.color.text_tertiary))
             background = null
+            // 背景置空后，系统 EditText 默认背景附带的纵向内边距一并消失，
+            // 字段零留白时字形上下界贴着字段内界、绘制时下半被裁；补回纵向内边距。
+            setPadding(0, dp(3), 0, dp(3))
             isSingleLine = true
             // 软件绘制：避开抽屉滑动时硬件层缓存造成的文字双重绘制（重影）。
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)

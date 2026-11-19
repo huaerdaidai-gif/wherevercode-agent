@@ -258,13 +258,13 @@
                     android:gravity="center"
                     android:paddingStart="10dp"
                     android:paddingEnd="10dp"
-                    android:text="选择模型 / Agent ⌄"
+                    android:text="选择对话方 ⌄"
                     android:textColor="@color/home_text"
                     android:textSize="12sp"
                     android:maxWidth="200dp"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:contentDescription="选择模型或 Agent" />
+                    android:contentDescription="选择对话方" />
 
                 <TextView
                     android:id="@+id/brainCapsule"

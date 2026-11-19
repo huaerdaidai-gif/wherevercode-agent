@@ -2319,7 +2319,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (agents.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle("选择模型 / Agent")
+                .setTitle("选择对话方")
                 .setMessage(
                     if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选。"
                     else "暂无已添加 Agent",
@@ -2342,7 +2342,7 @@ class MainActivity : AppCompatActivity() {
             }
         }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("选择模型 / Agent")
+            .setTitle("选择对话方")
             .setItems(labels) { _, which ->
                 when (val row = rows[which]) {
                     is AgentPickerRow.Suggested -> {
@@ -5357,6 +5357,7 @@ class MainActivity : AppCompatActivity() {
                     // 控制台设备数与设备页同一份合并清单（同 deviceId
                     // 只算一次，只有配对记录的也算一台）。
                     pairings = pairingRecords,
+                    mcpTokenConfigured = platformCredentialStore.loadPlatformToken() != null,
                 )
             }
             runOnUiThread {
@@ -5706,6 +5707,7 @@ class MainActivity : AppCompatActivity() {
             append("|history:").append(snapshot.approvalHistory.size)
             append("|devices:").append(snapshot.devices.size)
             append("|agents:").append(snapshot.agents.size)
+            append("|mcpToken:").append(snapshot.mcpTokenConfigured)
         }
     }
 
@@ -9549,7 +9551,7 @@ class MainActivity : AppCompatActivity() {
         chatRouteBanner.visibility = View.VISIBLE
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
-                "选择模型 / Agent ⌄"
+                "选择对话方 ⌄"
             } else {
                 "${agent.displayName} ⌄"
             }
