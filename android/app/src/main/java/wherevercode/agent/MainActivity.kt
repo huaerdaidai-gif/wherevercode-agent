@@ -5043,6 +5043,11 @@ class MainActivity : AppCompatActivity() {
             projectList = screenProjects.findViewById(R.id.projectList),
             projectListEmpty = screenProjects.findViewById(R.id.projectListEmpty),
             buttonAddProject = screenProjects.findViewById(R.id.buttonAddProject),
+            filterRow = screenProjects.findViewById(R.id.projectFilterRow),
+            buttonImportLocal = screenProjects.findViewById(R.id.buttonImportLocal),
+            buttonImportGit = screenProjects.findViewById(R.id.buttonImportGit),
+            buttonImportDevice = screenProjects.findViewById(R.id.buttonImportDevice),
+            onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
             projectStore = projectStore,
             deviceDisplayName = { deviceId -> deviceDisplayName(deviceId) },
             // “打开文件夹”是唯一入口（2026-11-12，maintainer：项目来源收成一个）：
