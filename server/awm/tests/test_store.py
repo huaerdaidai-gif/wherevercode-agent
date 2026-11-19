@@ -121,6 +121,52 @@ class TestClaimRules(StoreTestBase):
             self.assertFalse(s.revalidate_claim("ek1", "actor-1", now=2000.0))
 
 
+class TestMultiProcessClaim(StoreTestBase):
+    """T1 regression (independent test failure, 2026-11-19): with a
+    deferred transaction, 8 processes could all read consumed = 0 and
+    all win an executor claim. The claim path now runs under
+    BEGIN IMMEDIATE, so exactly one process may win."""
+
+    def test_multiprocess_claims_single_winner(self):
+        import multiprocessing as mp
+
+        with self.open_store() as s:
+            s.register_effect("ek1", "cmd-1", "dev-a", state="transported")
+
+        n = 8
+        barrier = mp.Barrier(n)
+        results: mp.Queue = mp.Queue()
+
+        def worker(i):
+            store = ArbitrationStore(self.path)
+            try:
+                barrier.wait(timeout=30)
+                try:
+                    store.claim("ek1", f"proc-{i}")
+                    results.put("win")
+                except ClaimDenied:
+                    results.put("denied")
+                except Exception as exc:  # noqa: BLE001 - report anything
+                    results.put(f"error:{type(exc).__name__}")
+            finally:
+                store.close()
+
+        procs = [mp.Process(target=worker, args=(i,)) for i in range(n)]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=60)
+        outcomes = [results.get(timeout=10) for _ in range(n)]
+        self.assertEqual(outcomes.count("win"), 1, outcomes)
+        self.assertEqual(outcomes.count("denied"), n - 1, outcomes)
+        # And the store agrees: exactly one executor claim row exists.
+        with self.open_store() as s:
+            rows = s._conn.execute(
+                "SELECT COUNT(*) AS n FROM claims WHERE role = 'executor'"
+            ).fetchone()
+            self.assertEqual(rows["n"], 1)
+
+
 class TestTermGuard(StoreTestBase):
     def test_restored_old_term_refuses_claims(self):
         with self.open_store() as s:

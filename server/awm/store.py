@@ -106,7 +106,10 @@ class ArbitrationStore:
         self._lock = threading.RLock()
         self._closed = False
         try:
-            self._conn = sqlite3.connect(path, check_same_thread=False)
+            # timeout: contending writers wait on the SQLite write lock
+            # instead of failing fast (multi-process claim atomicity).
+            self._conn = sqlite3.connect(path, check_same_thread=False,
+                                         timeout=30.0)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=FULL")
@@ -163,6 +166,22 @@ class ArbitrationStore:
             self._conn.rollback()
             raise StoreUnavailable(f"commit failed: {exc}") from exc
         self._fsync_files()
+
+    def _begin_write_txn(self) -> None:
+        """Open a write transaction that holds the database write lock
+        from the very first read (BEGIN IMMEDIATE).
+
+        Without this, the claim path is check-then-act across separate
+        deferred transactions: two *processes* can both read
+        consumed = 0 before either commits, and both walk away with an
+        executor claim (T1 multi-process failure, found by independent
+        testing 2026-11-19). BEGIN IMMEDIATE serialises the whole
+        read-check-write sequence across processes; the in-process
+        RLock only ever covered threads.
+        """
+        if self._conn.in_transaction:
+            self._conn.commit()
+        self._conn.execute("BEGIN IMMEDIATE")
 
     def _check_open(self) -> None:
         if self._closed:
@@ -311,39 +330,47 @@ class ArbitrationStore:
             self._check_open()
             self._assert_fresh()
             ts = time.time() if now is None else now
-            row = self._conn.execute(
-                "SELECT * FROM effects WHERE effect_key = ?", (effect_key,)
-            ).fetchone()
-            if row is None:
-                raise UnknownEffect(effect_key)
-            if role == ROLE_EXECUTOR:
-                if row["consumed"]:
-                    raise ClaimDenied(
-                        f"effect_key {effect_key} already consumed; "
-                        "executor claim can never be re-granted"
+            # The whole check-and-consume sequence runs inside one
+            # BEGIN IMMEDIATE transaction: this commit is the
+            # linearization point, atomic across threads AND processes.
+            self._begin_write_txn()
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM effects WHERE effect_key = ?", (effect_key,)
+                ).fetchone()
+                if row is None:
+                    raise UnknownEffect(effect_key)
+                if role == ROLE_EXECUTOR:
+                    if row["consumed"]:
+                        raise ClaimDenied(
+                            f"effect_key {effect_key} already consumed; "
+                            "executor claim can never be re-granted"
+                        )
+                    # One transaction: claim row + consumed mark + state.
+                    self._conn.execute(
+                        "INSERT INTO claims(effect_key, actor, role, granted_at,"
+                        " lease_expires_at, active) VALUES(?, ?, ?, ?, ?, 1)",
+                        (effect_key, actor, role, ts, ts + lease_seconds),
                     )
-                # One transaction: claim row + consumed mark + state.
-                self._conn.execute(
-                    "INSERT INTO claims(effect_key, actor, role, granted_at,"
-                    " lease_expires_at, active) VALUES(?, ?, ?, ?, ?, 1)",
-                    (effect_key, actor, role, ts, ts + lease_seconds),
-                )
-                self._conn.execute(
-                    "UPDATE effects SET consumed = 1, state = 'claimed',"
-                    " updated_at = ? WHERE effect_key = ?",
-                    (ts, effect_key),
-                )
-                self._commit_durable()
+                    self._conn.execute(
+                        "UPDATE effects SET consumed = 1, state = 'claimed',"
+                        " updated_at = ? WHERE effect_key = ?",
+                        (ts, effect_key),
+                    )
+                elif role == ROLE_NOTIFIER:
+                    self._conn.execute(
+                        "INSERT INTO claims(effect_key, actor, role, granted_at,"
+                        " lease_expires_at, active) VALUES(?, ?, ?, ?, ?, 1)",
+                        (effect_key, actor, role, ts, ts + lease_seconds),
+                    )
+                else:
+                    raise StoreError(f"unknown claim role: {role!r}")
+            except Exception:
+                self._conn.rollback()
+                raise
+            self._commit_durable()
+            if role == ROLE_EXECUTOR:
                 self._consumed.add(effect_key)
-            elif role == ROLE_NOTIFIER:
-                self._conn.execute(
-                    "INSERT INTO claims(effect_key, actor, role, granted_at,"
-                    " lease_expires_at, active) VALUES(?, ?, ?, ?, ?, 1)",
-                    (effect_key, actor, role, ts, ts + lease_seconds),
-                )
-                self._commit_durable()
-            else:
-                raise StoreError(f"unknown claim role: {role!r}")
             return Claim(
                 effect_key=effect_key,
                 actor=actor,
