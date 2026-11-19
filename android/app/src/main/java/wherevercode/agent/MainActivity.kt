@@ -111,6 +111,7 @@ import wherevercode.agent.core.agent.enabledAgents
 import wherevercode.agent.core.agent.setAgentEnabled
 import wherevercode.agent.core.agent.AgentSecretEdit
 import wherevercode.agent.core.agent.AgentStore
+import wherevercode.agent.core.agent.AgentSecretReferencePolicy
 import wherevercode.agent.core.autonomy.AutonomyMode
 import wherevercode.agent.core.autonomy.AutonomyPolicy
 import wherevercode.agent.core.autonomy.AutonomyStore
@@ -259,6 +260,8 @@ import wherevercode.agent.core.task.SharedPreferencesEvalLogStore
 import wherevercode.agent.core.task.SharedPreferencesRouterSettings
 import wherevercode.agent.core.task.SharedPreferencesRoutingDecisionLog
 import wherevercode.agent.core.task.TaskDatabase
+import wherevercode.agent.core.task.TaskDatabaseProvider
+import wherevercode.agent.core.team.RoomTeamMemberStore
 import wherevercode.agent.core.task.TaskLibraryGrouping
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.core.task.TaskRetry
@@ -8564,8 +8567,14 @@ class MainActivity : AppCompatActivity() {
                         val stillUsed = try {
                             val runtimeConfigStore = brainComponents?.runtimeConfigStore
                             runtimeConfigStore == null ||
-                                agentStore.listAgents().any { it.authRef == ref } ||
-                                runtimeConfigStore.listConfigs().any { it.authRef == ref }
+                                AgentSecretReferencePolicy.isReferenced(
+                                    authRef = ref,
+                                    agentAuthRefs = agentStore.listAgents().map { it.authRef },
+                                    brainConfigAuthRefs = runtimeConfigStore.listConfigs().map { it.authRef },
+                                    teamMemberAuthRefs = RoomTeamMemberStore(
+                                        TaskDatabaseProvider.get(applicationContext),
+                                    ).listMembers().map { it.authRef },
+                                )
                         } catch (_: Exception) {
                             true
                         }
