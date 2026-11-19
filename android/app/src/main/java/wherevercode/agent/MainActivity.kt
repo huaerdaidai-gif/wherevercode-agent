@@ -1872,14 +1872,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configureAgentScreenForDevices(devicesOnly: Boolean) {
-        val agentOnlyIds = listOf(
-            R.id.agentHeader,
-            R.id.buttonAddAgent,
-        )
-        agentOnlyIds.forEach { id ->
-            screenAgents.findViewById<View>(id).visibility =
-                if (devicesOnly) View.GONE else View.VISIBLE
-        }
+        screenAgents.findViewById<View>(R.id.buttonAddAgent).visibility =
+            if (devicesOnly) View.GONE else View.VISIBLE
+        // 设备页与 Agent 页共用头部行：设备模式下页内标题改「设备」
+        // （入口与页标题前后一致，Funk 2026-11-18 定版）；刷新钮是
+        // Agent 列表专用，设备模式隐藏。
+        screenAgents.findViewById<TextView>(R.id.agentScreenTitle).text =
+            if (devicesOnly) "设备" else "Agent"
+        screenAgents.findViewById<View>(R.id.buttonAgentRefresh).visibility =
+            if (devicesOnly) View.GONE else View.VISIBLE
         screenAgents.findViewById<View>(R.id.deviceSectionHeader).visibility = View.GONE
         deviceInfo.visibility = View.GONE
         if (devicesOnly) {

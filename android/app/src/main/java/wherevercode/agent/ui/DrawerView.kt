@@ -241,17 +241,6 @@ class DrawerView(
         titleRow.addView(
             UiKit.text(context, "WhereverCode Agent", 18f, R.color.text_primary, bold = true)
         )
-        val versionName = try {
-            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            "v${pInfo.versionName}"
-        } catch (_: Exception) {
-            "v5.0"
-        }
-        titleRow.addView(
-            UiKit.text(context, " $versionName", 12f, R.color.text_secondary).apply {
-                setPadding(dp(6), 0, 0, dp(2))
-            }
-        )
         brandColumn.addView(titleRow)
         row.addView(brandColumn)
         // 关闭抽屉按钮
@@ -281,7 +270,7 @@ class DrawerView(
                 (menu.id == "nav_channels" && activeTarget == DrawerController.ID_TEAM_CHANNEL) ||
                 (menu.id == "nav_projects" && activeTarget == DrawerController.ID_PROJECTS))
             val badge = badges.badgeFor(menu.id)
-            val trailing = if (isActive) null else "›"
+            val trailing: String? = null
             rows += RenderedRow(
                 id = menu.id,
                 label = menu.label,
@@ -456,7 +445,7 @@ class DrawerView(
             emptyNotice.addView(
                 UiKit.text(
                     context,
-                    "点击下方「＋ 新对话」开始",
+                    "点「新对话」开始",
                     11f,
                     R.color.text_tertiary,
                 ).apply { setPadding(0, dp(4), 0, 0) },
@@ -566,7 +555,7 @@ class DrawerView(
 
     private fun addFeatureCenterEntry(rows: MutableList<RenderedRow>) {
         val totalCount = EntryRegistry.ENTRIES.size
-        val label = "全部功能（${totalCount} 项）"
+        val label = "全部功能（${totalCount} 项全表）"
         rows += RenderedRow(
             id = "nav_feature_center",
             label = label,
