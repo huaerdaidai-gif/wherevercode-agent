@@ -780,7 +780,7 @@ public struct FeatureCenterSheet: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 } else {
-                    Text("双端对齐入口注册表：已实现 \(EntryRegistry.ENTRIES.filter { $0.status == .implemented }.count) 项，待开发 \(EntryRegistry.ENTRIES.filter { $0.status == .todo }.count) 项。点按已实现项直接跳转，待开发项展示诚实说明。")
+                    Text("双端功能注册表：已实现 \(EntryRegistry.ENTRIES.filter { $0.status == .implemented }.count) 项，待开发 \(EntryRegistry.ENTRIES.filter { $0.status == .todo }.count) 项。点按已实现项直接跳转，待开发项展示诚实说明。")
                 }
             }
 

@@ -1692,6 +1692,14 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, 0, 0, dp(12))
             }
         )
+        // 注册表口径行（与 iOS 全部功能页同文案同计数口径，双端统一为「双端功能注册表」）。
+        val implementedCount = EntryRegistry.ENTRIES.count { it.status == EntryRegistry.Status.IMPLEMENTED }
+        val todoCount = EntryRegistry.ENTRIES.size - implementedCount
+        root.addView(
+            UiKit.text(this, "双端功能注册表：已实现 ${implementedCount} 项，待开发 ${todoCount} 项。点按已实现项直接跳转，待开发项展示诚实说明。", 11f, R.color.text_tertiary).apply {
+                setPadding(0, 0, 0, dp(4))
+            }
+        )
 
         var dialog: AlertDialog? = null
 
