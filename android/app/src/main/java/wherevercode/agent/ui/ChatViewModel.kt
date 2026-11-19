@@ -22,12 +22,16 @@ import wherevercode.agent.AndroidApprovalGate
 import wherevercode.agent.brain.AgentChatRoute
 import wherevercode.agent.brain.AgentChatRouter
 import wherevercode.agent.brain.BrainAdapterRegistry
+import wherevercode.agent.brain.BrainConfig
+import wherevercode.agent.brain.generic.GenericOpenAiBrainAdapter
 import wherevercode.agent.brain.BrainEvent
 import wherevercode.agent.brain.Message
 import wherevercode.agent.brain.SettledTaskEvidence
 import wherevercode.agent.brain.SkillRefiner
 import wherevercode.agent.brain.siwc.BrainBootstrap
+import wherevercode.agent.core.agent.AgentBrainWiring
 import wherevercode.agent.core.agent.AgentRecord
+import wherevercode.agent.core.agent.SessionBrainConfigStore
 import wherevercode.agent.core.project.DispatchFolderSource
 import wherevercode.agent.core.project.GitRepoRef
 import wherevercode.agent.core.project.folderFallbackReason
@@ -949,14 +953,29 @@ class ChatViewModel : ViewModel() {
         if (agent != null) {
             // 阶段 A：选中 Agent 的消息按 Agent 路由，不再无条件走全局大脑。
             // NotRoutable 时诚实报错、不发出、不回落（尤其不回落 ChatGPT）。
-            return when (val route = AgentChatRouter.resolve(
+            // 差异 18 方案 A（B2）：「云端模型 API」Agent 不再落盘大脑
+            // 配置，发送时按记录现场合成一份内存配置——先注册进引擎
+            // 注册表（纯内存），路由的配置列表也带上它；路由没选它
+            // （落盘配置已能服务该 Agent，或本轮根本不走大脑）时立即
+            // 注销，选中时由 startBrainTurn 在轮次终态注销。
+            val storedConfigs = comps.configStore.listConfigs()
+            val synthBrain = AgentBrainWiring.sessionConfigFor(agent, storedConfigs)
+            if (synthBrain != null) BrainAdapterRegistry.registerConfig(synthBrain)
+            val route = AgentChatRouter.resolve(
                 agent,
-                comps.configStore.listConfigs(),
+                if (synthBrain != null) storedConfigs + synthBrain else storedConfigs,
                 comps::isBrainConfigured,
                 isRemoteAgent = remoteAgentCheck ?: { false },
                 isManusConfigured = manusConfiguredCheck ?: { false },
                 isPlatformAgentConfigured = platformConfiguredCheck ?: { false },
-            )) {
+            )
+            val turnSynth = (route as? AgentChatRoute.UseBrain)?.let { useBrain ->
+                synthBrain?.takeIf { it.brainId == useBrain.brainId }
+            }
+            if (synthBrain != null && turnSynth == null) {
+                BrainAdapterRegistry.unregisterConfig(synthBrain.brainId)
+            }
+            return when (route) {
                 is AgentChatRoute.UseBrain -> {
                     // 大脑/Agent 边界（maintainer 2026-11-12，一个对话、一个说话者）：
                     // 远端设备 Agent 对话里大脑绝不能以说话者身份开口。
@@ -987,6 +1006,7 @@ class ChatViewModel : ViewModel() {
                         attachments = attachments,
                         imageDataUrls = imageDataUrls,
                         webSearchEnabled = webSearchEnabled,
+                        synthBrainConfig = turnSynth,
                     )
                 }
                 // 阶段 B：远程设备 Agent 走 Hand 直连，不走任何大脑。
@@ -1137,8 +1157,21 @@ class ChatViewModel : ViewModel() {
         imageDataUrls: List<String> = emptyList(),
         /** 网页搜索开关；默认关。 */
         webSearchEnabled: Boolean = false,
+        /**
+         * 差异 18 方案 A（B2）：本轮的大脑是 Agent 的内存合成配置
+         * （未落盘）时传入（由 send() 的路由决定）。轮次内把通用
+         * 适配器临时换成绑定该配置的实例——注册实例按全局当前
+         * 大脑取配置，合成配置不在落盘存储里、当前大脑也可能正
+         * 指向别的大脑；轮次终态恢复注册实例并注销合成配置。
+         */
+        synthBrainConfig: BrainConfig? = null,
     ): SendResult {
         if (!active.compareAndSet(false, true)) {
+            // 轮次没起：合成配置的注册由本函数负责收尾，这里先
+            // 注销，不留内存残留。
+            if (synthBrainConfig != null) {
+                BrainAdapterRegistry.unregisterConfig(synthBrainConfig.brainId)
+            }
             return SendResult(false, "上一轮还在执行。")
         }
         comps.turnController.begin()
@@ -1154,7 +1187,10 @@ class ChatViewModel : ViewModel() {
         // （脑后 Agent：CLI/模型 API 构成的 Agent 本身就是大脑在说话，
         // 抬头写大脑名是实话；远端设备 Agent 走 UseRemoteAgent，不到这里。）
         val effectiveBrainId = brainIdOverride ?: comps.configStore.currentBrainId()
-        val displayLabel = brainLabel(effectiveBrainId)
+        // 合成配置不在落盘存储里，brainLabel 查不到它的名字——它自带
+        // 的 label 就是该 Agent 的显示名，如实用它。
+        val displayLabel = synthBrainConfig?.label?.takeIf { it.isNotBlank() }
+            ?: brainLabel(effectiveBrainId)
         val turnId = timeline.beginUserTurn(prompt, displayLabel, true)
         if (introNote != null) timeline.appendStatusNote(turnId, introNote)
         attachToTurn(turnId, attachments, null)
@@ -1176,6 +1212,17 @@ class ChatViewModel : ViewModel() {
             // 阶段 1（U3）：轮次开任务。失败返回 null 时本轮只走聊天。
             // 记实际执行的大脑（Agent 会话是 override 的大脑，不是全局选择）。
             val taskId = turnRecorder?.beginTurn(prompt, convId, effectiveBrainId, currentProjectId())
+            // 差异 18 方案 A（B2）：本轮走 Agent 的内存合成配置时，把
+            // 通用适配器临时换成绑定该配置的实例（存储视图 + 显式
+            // brainId）；恢复在 finally 里，与注销合成配置配对。
+            if (synthBrainConfig != null) {
+                BrainAdapterRegistry.registerAdapter(
+                    GenericOpenAiBrainAdapter(
+                        SessionBrainConfigStore(comps.configStore, synthBrainConfig),
+                        comps.genericCredentialStore,
+                    ) { synthBrainConfig.brainId },
+                )
+            }
             try {
                 comps.engine.chat(
                     convId,
@@ -1244,6 +1291,13 @@ class ChatViewModel : ViewModel() {
                 terminalStatus = TurnStatus.ERROR
                 terminalError = "调用${displayLabel}失败：${e.message ?: "未知错误"}"
             } finally {
+                // 差异 18 方案 A（B2）：恢复通用适配器的注册实例并
+                // 注销本轮的内存合成配置——合成配置只活一轮，不落盘、
+                // 不残留（与 send() 里的 registerConfig 配对）。
+                if (synthBrainConfig != null) {
+                    BrainAdapterRegistry.registerAdapter(comps.genericAdapter)
+                    BrainAdapterRegistry.unregisterConfig(synthBrainConfig.brainId)
+                }
                 timeline.cancelRunningTools(turnId)
                 val snapshot = timeline.snapshot()
                 val turn = snapshot.turns.lastOrNull { it.id == turnId }

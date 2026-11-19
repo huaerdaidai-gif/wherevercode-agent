@@ -1,6 +1,7 @@
 package wherevercode.agent.core.agent
 
 import wherevercode.agent.brain.BrainConfig
+import wherevercode.agent.brain.BrainConfigStore
 import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.brain.generic.GenericOpenAiBrainAdapter
 
@@ -74,6 +75,41 @@ object AgentBrainWiring {
         record.copy(adapterId = config.adapterId, authRef = config.authRef)
 
     /**
+     * 差异 18 方案 A（B2）：本轮发送用的内存合成配置；不需要合成
+     * 时返回 null（调用方照旧走落盘配置）。
+     *
+     * 添加「云端模型 API」Agent 不再落盘 BrainConfig（旧做法的病灶：
+     * 删 Agent 后模型条目残留）；发送时用记录自带的 baseUrl / model /
+     * authRef 现场组装一份只活在本轮的配置，由调用方注册进引擎
+     * 注册表（纯内存），轮次结束即注销。
+     *
+     * 已有落盘配置能服务该 Agent 时返回 null：[brainConfigFor] 的
+     * 复用规则算出的 brainId 与一条落盘配置同 id 且端点一致，说明
+     * 该 Agent 本来就有落盘配置（修复前建的 Agent，或用户在设置里
+     * 建了同名同端点的大脑）——发送路径照旧用它，行为不变。
+     *
+     * 密钥引用以记录自带的为准：Key 是保存 Agent 时按记录的
+     * authRef 写进 Keystore 的；发送时按名字重算 brainId 可能因
+     * 后来新增的同名大脑多出后缀，与存 Key 时的引用名对不上，
+     * 故合成配置的 authRef 优先用记录自带的（带 [AUTH_REF_PREFIX]
+     * 前缀时；通用大脑的 Keystore 只认此前缀）。
+     */
+    fun sessionConfigFor(record: AgentRecord, existingConfigs: List<BrainConfig>): BrainConfig? {
+        if (record.deviceId != null) return null
+        val minted = brainConfigFor(record, existingConfigs) ?: return null
+        val stored = existingConfigs.firstOrNull { it.brainId == minted.brainId }
+        if (stored != null && sameEndpoint(stored, minted.baseUrl ?: "", minted.model)) {
+            return null
+        }
+        val recordAuthRef = record.authRef?.takeIf { it.startsWith(AUTH_REF_PREFIX) }
+        return if (recordAuthRef != null && recordAuthRef != minted.authRef) {
+            minted.copy(authRef = recordAuthRef)
+        } else {
+            minted
+        }
+    }
+
+    /**
      * 通用大脑 id：名字 slug 化（"model-api-<slug>"），与
      * BrainLoginRows.genericBrainId 同算法——两边必须保持一致，
      * 否则设置页与添加 Agent 页会给同一个名字算出不同的大脑 id。
@@ -125,4 +161,41 @@ object AgentBrainWiring {
     private fun sameEndpoint(config: BrainConfig, baseUrl: String, model: String): Boolean =
         config.baseUrl?.trim()?.trimEnd('/') == baseUrl.trim().trimEnd('/') &&
             config.model.trim() == model.trim()
+}
+
+/**
+ * 差异 18 方案 A（B2）：合成配置的存储视图——合成配置那个 brainId
+ * 的读取返回内存合成配置，其余读写全部委托真实存储。
+ *
+ * 通用适配器的注册实例在装配时绑定真实存储、按全局当前大脑取
+ * 配置；Agent 轮次里把注册实例临时换成绑定本视图 + 显式 brainId
+ * 的适配器，适配器才读得到该 Agent 的合成配置（全局当前大脑正
+ * 指向别的大脑时也不受影响——B0 核出的 latent 场景）。这就是
+ * B0 推荐的「发送路径设内存覆盖」：覆盖只活一轮，轮次结束恢复
+ * 注册实例。B3 的 CompositeBrainConfigStore 落地后可由它承接
+ * 同一职责。
+ */
+class SessionBrainConfigStore(
+    private val base: BrainConfigStore,
+    private val synthesized: BrainConfig,
+) : BrainConfigStore {
+    override fun listConfigs(): List<BrainConfig> =
+        base.listConfigs().filter { it.brainId != synthesized.brainId } + synthesized
+
+    override fun getConfig(brainId: String): BrainConfig? =
+        if (brainId == synthesized.brainId) synthesized else base.getConfig(brainId)
+
+    override fun saveConfig(config: BrainConfig) = base.saveConfig(config)
+
+    override fun deleteConfig(brainId: String) = base.deleteConfig(brainId)
+
+    override fun currentBrainId(): String? = base.currentBrainId()
+
+    override fun setCurrentBrainId(brainId: String?) = base.setCurrentBrainId(brainId)
+
+    override fun deletedBrainIds(): Set<String> = base.deletedBrainIds()
+
+    override fun markBrainDeleted(brainId: String) = base.markBrainDeleted(brainId)
+
+    override fun clearBrainDeleted(brainId: String) = base.clearBrainDeleted(brainId)
 }
