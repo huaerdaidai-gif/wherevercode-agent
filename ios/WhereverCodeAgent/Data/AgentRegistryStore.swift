@@ -234,31 +234,50 @@ public final class AgentRegistryStore {
     /// 1. 墓碑拦截：已删除设备绝对不复活；
     /// 2. 稳定身份规范化：补全缺失的 deviceId 字段；
     /// 3. 识别历史演示模板设备并清晰标注，绝不盲目按设备名称猜测合并；
-    /// 4. 严格保护云端 Agent、本地模型不受任何影响。
+    /// 4. 严格保护云端 Agent、本地模型、设备上的子 Agent 不受任何影响。
+    ///
+    /// 本迁移只处理「设备宿主记录」（kind == .device 且 access == .app，
+    /// 且不是 `<deviceId>:<agentId>` 形式的子 Agent），绝不回填或改写
+    /// access == .cli 的设备子 Agent。
     public func migrateLegacyDeviceRecords() throws {
         let deleted = deletedDeviceIds()
         var agents = try listAgents()
-        if !deleted.isEmpty {
-            agents.removeAll { ag in
-                guard ag.isDeviceHost else { return false }
-                return deleted.contains(ag.agentId)
-            }
+
+        // 宿主形状：配对产生的设备记录（.app 接入），排除设备上的子 Agent（.cli）。
+        func isHostShape(_ ag: AgentRecord) -> Bool {
+            ag.kind == .device && ag.access == .app && !ag.agentId.contains(":")
         }
-        // 概念分离硬规则：agy 是 Agent，不得登记为一台设备
-        let beforeCount = agents.count
-        agents.removeAll { ag in
-            ag.isDeviceHost &&
-            (ag.agentId.lowercased() == "agy" || ag.displayName.lowercased() == "agy")
-        }
-        var modified = agents.count != beforeCount
-        for i in 0..<agents.count {
-            guard agents[i].kind == .device else { continue }
-            // 稳定身份回填
+
+        var modified = false
+
+        // 1. 稳定身份回填：先规范宿主形状的 deviceId，供后续墓碑判定使用。
+        for i in agents.indices where isHostShape(agents[i]) {
             if agents[i].deviceId == nil || agents[i].deviceId?.isEmpty == true {
                 agents[i].deviceId = agents[i].agentId
                 modified = true
             }
-            // 历史模板设备诚实状态标注
+        }
+
+        // 2. 墓碑拦截：只删已删除设备的宿主记录。
+        if !deleted.isEmpty {
+            let before = agents.count
+            agents.removeAll { ag in
+                guard ag.isDeviceHost else { return false }
+                return deleted.contains(ag.agentId)
+            }
+            if agents.count != before { modified = true }
+        }
+
+        // 3. 概念分离硬规则：agy 是 Agent，不得登记为一台设备。
+        let beforeAgy = agents.count
+        agents.removeAll { ag in
+            ag.isDeviceHost &&
+            (ag.agentId.lowercased() == "agy" || ag.displayName.lowercased() == "agy")
+        }
+        if agents.count != beforeAgy { modified = true }
+
+        // 4. 历史模板设备诚实状态标注：只标注宿主记录。
+        for i in agents.indices where agents[i].isDeviceHost {
             let aid = agents[i].agentId
             let isPrototype = aid == "device-mac-workstation" || aid == "device-redmi-k70" || aid == "device-xiaomi-12" || aid == "device-iphone-local"
             if isPrototype && agents[i].authRef == nil && agents[i].memberConnectionState == "NOT_CONNECTED" {
@@ -268,7 +287,7 @@ public final class AgentRegistryStore {
                 }
             }
         }
-        if modified || !deleted.isEmpty {
+        if modified {
             try kv.setJSON(storageKey, agents)
         }
     }

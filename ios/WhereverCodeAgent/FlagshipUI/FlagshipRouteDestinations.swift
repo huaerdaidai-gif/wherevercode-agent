@@ -3305,6 +3305,8 @@ public struct ChannelDetailWorkspaceView: View {
             var text = "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）"
             if isCertificateFailure {
                 text += " · 证书验证失败，安全连接未建立"
+            } else if let error = connectionError, !error.isEmpty {
+                text += "：\(error)"
             }
             return text
         case .stopped:
