@@ -8198,9 +8198,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 // 添加 Agent → 大脑接线（V5 紧急开发，2026-11-11）：表单以前
                 // 只存 AgentRecord，不建 BrainConfig，聊天路由找不到配置，
-                // Agent 永远“未接入”。MODEL_API（非 Manus）在此顺带配好
-                // 通用大脑，保存后就能直接对话；编辑时已接好的线不动
-                // （已能走通的既有大脑不拆），只修不通的。
+                // Agent 永远“未接入”。当时在此顺带落盘一条通用大脑配置；
+                // 差异 18 方案 A（B2）起不再落盘：这里只算出通用配置的
+                // id 与密钥引用给记录和 Keystore 用，配置本体由发送路径
+                // 按记录现场合成（内存，见 AgentBrainWiring.sessionConfigFor）；
+                // 编辑时已能走落盘配置的既有 Agent 不动（下面的 resolve
+                // 命中 UseBrain 就不重算），只修不通的。
                 val components = brainComponents
                 val configs = components?.configStore?.listConfigs().orEmpty()
                 val isNewAgent = existing == null
@@ -8287,16 +8290,16 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     subNote = "订阅 Agent 需先在设置里完成 ChatGPT 登录才能对话"
                 }
-                // 先存大脑与 Key，再存记录：大脑存失败时记录也不存，
-                // 不留“记录在、大脑不在”的半截状态。
+                // 差异 18 方案 A（B2）：先存 Key，再存记录——大脑配置
+                // 不再落盘，记录自带地址/模型/密钥引用，发送时现场
+                // 合成内存配置；删 Agent 后模型页与设置页大脑列表都
+                // 不留残留条目。Key 存失败时记录也不存，不留半截状态。
                 try {
                     if (genericBrain != null) {
                         val key = keyToStore
                         if (key != null) {
                             genericBrain.authRef?.let { brainKeyStore.putSecret(it, key) }
                         }
-                        components?.configStore?.saveConfig(genericBrain)
-                        BrainAdapterRegistry.registerConfig(genericBrain)
                     } else if (AgentSecretEdit.shouldWriteSecret(secret) && authRef != null) {
                         brainKeyStore.putSecret(authRef, secret)
                     }
@@ -8331,7 +8334,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 dialog.dismiss()
                 val note = when {
-                    genericBrain != null -> "（已配好通用大脑，可直接对话）"
+                    genericBrain != null -> "（可直接对话）"
                     dedicatedKeyNote != null -> "（$dedicatedKeyNote）"
                     cliNote != null -> "（$cliNote）"
                     subNote != null -> "（$subNote）"
@@ -8404,14 +8407,7 @@ class MainActivity : AppCompatActivity() {
                         if (isNew) {
                             // 阶段 A：提示必须与实际路由一致。未接入的目标如实
                             // 写“未接入”，不写“消息走大脑”。
-                            val route = AgentChatRouter.resolve(
-                                agent,
-                                components.configStore.listConfigs(),
-                                components::isBrainConfigured,
-                                isRemoteAgent = ::isRemoteAgent,
-                                isManusConfigured = ::isManusConfigured,
-                                isPlatformAgentConfigured = ::isPlatformAgentConfigured,
-                            )
+                            val route = resolveAgentRouteForDisplay(agent, components)
                             // 阶段 B：远端 Agent 的任务由远端泵发到设备上执行，
                             // 不再是“等它认领（跨设备执行待 P2）”。
                             // 阶段 C：Manus 的任务型指令直接在聊天里创建
@@ -8600,6 +8596,34 @@ class MainActivity : AppCompatActivity() {
         return DeviceProbeResult.Available(device.displayName, info.displayName, info.folder)
     }
 
+    /**
+     * 差异 18 方案 A（B2）：显示用路由判定（打开会话的路由说明、
+     * 顶部横幅的「未接入」标注）——必须与发送路径同口径：临时把
+     * Agent 的内存合成配置挂进引擎注册表再判定，判完即卸，不落盘、
+     * 不残留。落盘配置能服务的 Agent（sessionConfigFor 返回 null）
+     * 走原判定，不受影响。
+     */
+    private fun resolveAgentRouteForDisplay(
+        agent: AgentRecord,
+        components: BrainBootstrap.BrainComponents,
+    ): AgentChatRoute {
+        val configs = components.configStore.listConfigs()
+        val synth = AgentBrainWiring.sessionConfigFor(agent, configs)
+        if (synth != null) BrainAdapterRegistry.registerConfig(synth)
+        try {
+            return AgentChatRouter.resolve(
+                agent,
+                if (synth != null) configs + synth else configs,
+                components::isBrainConfigured,
+                isRemoteAgent = ::isRemoteAgent,
+                isManusConfigured = ::isManusConfigured,
+                isPlatformAgentConfigured = ::isPlatformAgentConfigured,
+            )
+        } finally {
+            if (synth != null) BrainAdapterRegistry.unregisterConfig(synth.brainId)
+        }
+    }
+
     private fun removeAgent(agent: AgentRecord) {
         AlertDialog.Builder(this)
             .setTitle("移除 Agent")
@@ -8608,6 +8632,15 @@ class MainActivity : AppCompatActivity() {
                 Thread {
                     val ref = agent.authRef
                     agentStore.deleteAgent(agent.agentId)
+                    // 差异 18 方案 A（B2）：内存合成配置的注册残留兜底
+                    // 清理（正常在轮次结束时已注销，这里防删除与轮次
+                    // 交错）。落盘配置能服务的 Agent（sessionConfigFor
+                    // 返回 null）一概不碰——删 Agent 只删 Agent 记录
+                    // 与无主密钥，不动任何大脑/模型条目。
+                    AgentBrainWiring.sessionConfigFor(
+                        agent,
+                        brainComponents?.configStore?.listConfigs().orEmpty(),
+                    )?.let { BrainAdapterRegistry.unregisterConfig(it.brainId) }
                     // 密钥清理：没有其他 Agent 记录与大脑配置再用该引用时才删 Keystore 值。
                     if (ref != null) {
                         val stillUsed = agentStore.listAgents().any { it.authRef == ref } ||
@@ -9565,16 +9598,7 @@ class MainActivity : AppCompatActivity() {
         val text = if (agent == null) {
             "当前设备：本机 · 对话方：${brainDisplayName()}$projectSuffix"
         } else {
-            val route = brainComponents?.let {
-                AgentChatRouter.resolve(
-                    agent,
-                    it.configStore.listConfigs(),
-                    it::isBrainConfigured,
-                    isRemoteAgent = ::isRemoteAgent,
-                    isManusConfigured = ::isManusConfigured,
-                    isPlatformAgentConfigured = ::isPlatformAgentConfigured,
-                )
-            }
+            val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
             val suffix = if (route is AgentChatRoute.NotRoutable) "（未接入）" else ""
             "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix$projectSuffix$directSuffix"
         }
@@ -11330,6 +11354,12 @@ class MainActivity : AppCompatActivity() {
      * 设为当前大脑（同设置页口径）。校验文案经 [ModelListRows.formErrors]
      * 在本页侧换口径：名称为空报「请填写模型名称」，不借大脑文案
      * （红线：不改 BrainLoginRows 的原字符串与行为）。
+     *
+     * 新建条目的来源标记由 [ModelListRows.newFormEntryExtra] 按服务
+     * 地址反查内置名单决定（Bug②，B2）：名单外手打条目写
+     * model_origin=manual 显示「自定义」，预设预填（地址命中名单）
+     * 写 preset 不误标；编辑已有条目走 copy 保留原 extra，不覆盖
+     * 其来源标记，无标记的旧条目不回填。
      */
     private fun saveModel() {
         val components = brainComponents ?: run {
@@ -11367,6 +11397,7 @@ class MainActivity : AppCompatActivity() {
                     baseUrl = baseUrl,
                     model = model,
                     authRef = authRef,
+                    extra = ModelListRows.newFormEntryExtra(baseUrl),
                     fallbackBrainIds = emptyList(),
                 )
             val saved = current.copy(
@@ -11996,6 +12027,7 @@ class MainActivity : AppCompatActivity() {
                     extra = mapOf(
                         FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
                         FreeProviderPresets.EXTRA_PRESET to preset.id,
+                        ModelListRows.EXTRA_MODEL_ORIGIN to ModelListRows.ORIGIN_PRESET,
                     ),
                     fallbackBrainIds = emptyList(),
                 )
@@ -12248,6 +12280,7 @@ class MainActivity : AppCompatActivity() {
                     extra = mapOf(
                         FreeProviderPresets.EXTRA_TIER to FreeProviderPresets.TIER_FREE,
                         "discovery" to "device",
+                        ModelListRows.EXTRA_MODEL_ORIGIN to ModelListRows.ORIGIN_DEVICE_DISCOVERED,
                     ),
                     fallbackBrainIds = emptyList(),
                 )

@@ -608,7 +608,13 @@ object BrainBootstrap {
                 // 通用大脑的 id 一律不算已配置。本机模型例外：地址是
                 // 127.0.0.1/localhost 时可无 Key（与连接测试探针同口径，
                 // 见 AgentConnectionTester.testModelApi）。
+                // 差异 18 方案 A（B2，定版允许的唯一改动点，仅此一处）：
+                // Agent 发送时临时注册进引擎注册表的内存合成配置不在
+                // configStore 里，从注册表兜底取——注册表与 configStore
+                // 本是同一批配置的两个视图（build() 播种时逐条
+                // registerConfig）；落盘配置的判定结果不变。
                 val config = configStore.getConfig(brainId)
+                    ?: BrainAdapterRegistry.configFor(brainId)
                 config != null &&
                     config.adapterId == GenericOpenAiBrainAdapter.ADAPTER_ID &&
                     (config.authRef?.let { genericCredentialStore.loadApiKey(it) } != null ||
