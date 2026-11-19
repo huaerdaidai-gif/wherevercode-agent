@@ -1,0 +1,89 @@
+zero-diff-gate.sh — self-test log
+date: 2026-11-19
+repo: huaerdaidai-gif/wherevercode-agent, base main bafe277c
+script: tools/zero-diff-gate/zero-diff-gate.sh
+
+Note: test 5 was run against this branch before this log file was added.
+The only later change is this log itself (tools/zero-diff-gate/), which is
+outside every protected path; the gate was re-run against the pushed head
+after delivery and passed (see delivery report).
+
+===== test 1: candidate = main (must PASS, exit 0) =====
+== zero-diff gate ==
+candidate : main (bafe277)
+base      : main (bafe277)
+merge-base: bafe277
+
+-- check A: zero diff in brain/** + BrainConfig + BrainLoginRows + BrainBootstrap
+PASS: no changes in protected paths.
+
+-- check B: no imports of the models package inside brain/**
+PASS: no models-package imports inside brain/**.
+
+GATE RESULT: PASS
+exit=0
+
+===== test 2: scratch ref edits brain/BrainConfig.kt (must FAIL check A, exit 1) =====
+== zero-diff gate ==
+candidate : zdg-selftest-violation (83a5f0e)
+base      : main (bafe277)
+merge-base: bafe277
+
+-- check A: zero diff in brain/** + BrainConfig + BrainLoginRows + BrainBootstrap
+FAIL: protected brain-core paths changed between merge-base and candidate:
+  M	android/app/src/main/java/wherevercode/agent/brain/BrainConfig.kt
+
+-- check B: no imports of the models package inside brain/**
+PASS: no models-package imports inside brain/**.
+
+GATE RESULT: FAIL
+exit=1
+
+===== test 3: scratch ref also adds 'import wherevercode.agent.models.ModelConfigStore' to brain/BrainEngine.kt (must FAIL checks A+B, exit 1) =====
+== zero-diff gate ==
+candidate : zdg-selftest-violation (0756a67)
+base      : main (bafe277)
+merge-base: bafe277
+
+-- check A: zero diff in brain/** + BrainConfig + BrainLoginRows + BrainBootstrap
+FAIL: protected brain-core paths changed between merge-base and candidate:
+  M	android/app/src/main/java/wherevercode/agent/brain/BrainConfig.kt
+  M	android/app/src/main/java/wherevercode/agent/brain/BrainEngine.kt
+
+-- check B: no imports of the models package inside brain/**
+FAIL: models-package imports found inside brain/**:
+  android/app/src/main/java/wherevercode/agent/brain/BrainEngine.kt:4:import wherevercode.agent.models.ModelConfigStore
+
+GATE RESULT: FAIL
+exit=1
+
+===== test 4: scratch ref edits only ui/BrainLoginRows.kt, outside brain/ (must FAIL check A via named-file rule, exit 1) =====
+== zero-diff gate ==
+candidate : zdg-selftest-loginrows (70f2a9d)
+base      : main (bafe277)
+merge-base: bafe277
+
+-- check A: zero diff in brain/** + BrainConfig + BrainLoginRows + BrainBootstrap
+FAIL: protected brain-core paths changed between merge-base and candidate:
+  M	android/app/src/main/java/wherevercode/agent/ui/BrainLoginRows.kt
+
+-- check B: no imports of the models package inside brain/**
+PASS: no models-package imports inside brain/**.
+
+GATE RESULT: FAIL
+exit=1
+
+===== test 5: candidate = tools/zero-diff-gate-20261119 (must PASS, exit 0) =====
+== zero-diff gate ==
+candidate : tools/zero-diff-gate-20261119 (19af363)
+base      : main (bafe277)
+merge-base: bafe277
+
+-- check A: zero diff in brain/** + BrainConfig + BrainLoginRows + BrainBootstrap
+PASS: no changes in protected paths.
+
+-- check B: no imports of the models package inside brain/**
+PASS: no models-package imports inside brain/**.
+
+GATE RESULT: PASS
+exit=0
