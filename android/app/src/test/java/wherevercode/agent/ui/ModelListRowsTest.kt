@@ -106,9 +106,9 @@ class ModelListRowsTest {
             configured = setOf("deepseek"),
         )
         val byId = result.associateBy { it.brainId }
-        assertEquals("已配置", byId.getValue("deepseek").statusText)
+        assertEquals("已填 Key", byId.getValue("deepseek").statusText)
         assertEquals("deepseek-flash", byId.getValue("deepseek").detailText)
-        assertEquals("未配置", byId.getValue("my-ollama").statusText)
+        assertEquals("未填 Key", byId.getValue("my-ollama").statusText)
     }
 
     @Test

@@ -24,6 +24,7 @@ import wherevercode.agent.core.team.MemberConnectionState
 import wherevercode.agent.core.transport.RemoteDevice
 import wherevercode.agent.ui.ConsoleSnapshot.ConsoleModule
 import wherevercode.agent.ui.ConsoleSnapshot.Snapshot
+import wherevercode.agent.ui.EntryRegistry
 
 /**
  * 控制台控制器渲染测试（V5 控制台，2026-11-11；Robolectric）。
@@ -234,5 +235,61 @@ class ConsoleScreenControllerTest {
         val texts = allTexts(c.root)
         assertContains(texts, "大脑加载中，控制台暂不可读。")
         assertNotContains(texts, "进行中 0")
+    }
+
+    @Test
+    fun `overview shows a normalized root and the token action`() {
+        assertEquals(
+            "https://v5.cococolo.xyz",
+            ConsoleScreenController.normalizedPlatformRoot("https://v5.cococolo.xyz/api/open/v1/mcp/"),
+        )
+        assertEquals(
+            "https://example.invalid:8443",
+            ConsoleScreenController.normalizedPlatformRoot("example.invalid:8443/api/open/v1/mcp"),
+        )
+        assertEquals("https://v5.cococolo.xyz", ConsoleScreenController.normalizedPlatformRoot("  "))
+        assertEquals("配置 Token", ConsoleScreenController.connectionActionLabel(false))
+        assertEquals("管理连接", ConsoleScreenController.connectionActionLabel(true))
+
+        val withToken = ConsoleScreenController(
+            RuntimeEnvironment.getApplication(),
+            onOpenTask = {},
+            onOpenFile = {},
+            onOpenChat = {},
+            onOpenDevices = {},
+            onOpenAgents = {},
+            onRefresh = {},
+            platformRoot = {
+                ConsoleScreenController.normalizedPlatformRoot("https://v5.cococolo.xyz/api/open/v1/mcp")
+            },
+            hasPlatformToken = { true },
+        )
+        withToken.renderLoading()
+        val texts = allTexts(withToken.root)
+        assertContains(texts, "https://v5.cococolo.xyz")
+        assertNotContains(texts, "/api/open/v1/mcp")
+        assertContains(texts, "管理连接")
+        assertNotContains(texts, "配置 Token")
+
+        val without = controller()
+        without.renderLoading()
+        val plain = allTexts(without.root)
+        assertContains(plain, "配置 Token")
+        assertNotContains(plain, "管理连接")
+    }
+
+    @Test
+    fun `webhook card reads the registry todo instead of a hardcoded claim`() {
+        val entry = EntryRegistry.find("feature_unified_access")
+        assertTrue(entry != null && entry.status == EntryRegistry.Status.TODO)
+        assertTrue(entry!!.todoMessage!!.contains("待开发"))
+        assertTrue(entry.todoMessage!!.contains("Webhook"))
+        val shown = ConsoleScreenController.webhookEntryPresentation()
+        assertTrue(shown.todo)
+        assertEquals(entry.status.label, shown.badge)
+        assertEquals(entry.todoMessage, shown.message)
+        val c = controller()
+        c.renderLoading()
+        assertContains(allTexts(c.root), shown.badge)
     }
 }

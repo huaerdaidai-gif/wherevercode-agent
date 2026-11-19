@@ -23,7 +23,7 @@ import wherevercode.agent.R
  * 4. 最近会话区与会话搜索
  * 5. 分割线
  * 6. 底部固定账号（设置）与「＋ 新对话」
- * 7. 最底部「全部功能（89 项全表）」入口
+ * 7. 最底部「全部功能（N 项）」入口
  *
  * 旧入口（设备/Agent/任务队列与审批/Webhook/事件/用量）进「控制」页入口列表；
  * 其余进全部功能注册表（保证每个旧入口在 控制 或 全部功能 里有可见入口，功能只规范呈现、不砍）。
@@ -221,7 +221,7 @@ class DrawerView(
         // 4. 底部固定账号（设置）与新对话
         addBottomAccountSection(rows)
 
-        // 5. 抽屉最底部：全部功能（89 项全表）集中入口
+        // 5. 抽屉最底部：全部功能（N 项）集中入口
         addFeatureCenterEntry(rows)
 
         renderedRowList = rows
@@ -560,7 +560,7 @@ class DrawerView(
 
     private fun addFeatureCenterEntry(rows: MutableList<RenderedRow>) {
         val totalCount = EntryRegistry.ENTRIES.size
-        val label = "全部功能（${totalCount} 项全表）"
+        val label = "全部功能（${totalCount} 项）"
         rows += RenderedRow(
             id = "nav_feature_center",
             label = label,

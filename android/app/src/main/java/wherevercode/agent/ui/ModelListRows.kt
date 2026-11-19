@@ -214,7 +214,7 @@ object ModelListRows {
                     groupTitle = group,
                     title = config.label,
                     detailText = config.model.takeIf { it.isNotBlank() },
-                    statusText = if (isConfigured(config.brainId)) "已配置" else "未配置",
+                    statusText = if (isConfigured(config.brainId)) "已填 Key" else "未填 Key",
                     isCurrent = config.brainId == currentBrainId,
                 )
             }

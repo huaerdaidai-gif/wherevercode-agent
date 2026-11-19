@@ -1593,6 +1593,8 @@ class MainActivity : AppCompatActivity() {
             onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
             onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
             onToast = { msg -> toast(msg) },
+            platformRoot = { normalizedConsolePlatformRoot() },
+            hasPlatformToken = { hasSavedPlatformToken() },
         )
         screenConsole = consoleController.root
         container.addView(screenConsole)
@@ -1657,7 +1659,7 @@ class MainActivity : AppCompatActivity() {
         val sections = listOf(
             "聊天" to "在首页输入框发一句话，${brainDisplayName()}会推理并调用工具。写文件与命令执行前会弹审批，通过才执行；拒绝或界面销毁后授权立即作废。",
             "暂停 / 停止 / 改目标" to "运行中的轮次可在聊天页控制行点“暂停/停止”，或在任务页点“暂停/停止/改目标”。停止会二次确认；停止后本轮不会自动续跑。",
-            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（89 项全表）」。",
+            "抽屉" to "点左上角 ☰ 打开抽屉：对话、项目、频道、控制四大父级入口，下方包含最近会话列表与搜索，底部包含账号设置与「＋ 新对话」操作，并可展开「全部功能（${EntryRegistry.ENTRIES.size} 项）」。",
             "项目" to "项目页可浏览工作区文件、查看与编辑代码（保存前二次确认，可撤销/保留）、问 Agent。终端页未实现，不在项目页里伪装。",
             "Agent 与团队" to "Agent 页可添加云端模型 API、订阅授权 Agent、本机 CLI Agent、设备上的 Agent、平台 Agent（webhook 唤醒）或云端 Agent（MCP 连接器），可对话、指派、测试、编辑、移除。设备管理在独立的设备页；未配对设备标“不可用”。",
             "教我使用" to "交互式导师尚未实现。先按上面几节用；遇到问题回首页直接问${brainDisplayName()}。",
@@ -1680,7 +1682,7 @@ class MainActivity : AppCompatActivity() {
         val root = UiKit.vertical(this)
         dialogView.addView(root)
         root.addView(
-            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项全表）", 18f, R.color.text_primary, bold = true).apply {
+            UiKit.text(this, "全部功能（${EntryRegistry.ENTRIES.size} 项）", 18f, R.color.text_primary, bold = true).apply {
                 setPadding(0, 0, 0, dp(12))
             }
         )
@@ -1732,7 +1734,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                     textCol.addView(titleRow)
-                    val subtitle = entry.note ?: entry.todoMessage ?: entry.target
+                    val subtitle = EntryRegistry.listSubtitle(entry)
                     if (subtitle.isNotEmpty()) {
                         textCol.addView(
                             UiKit.text(this, subtitle, 11f, R.color.text_secondary)
@@ -1874,11 +1876,8 @@ class MainActivity : AppCompatActivity() {
             screenAgents.findViewById<View>(id).visibility =
                 if (devicesOnly) View.GONE else View.VISIBLE
         }
-        screenAgents.findViewById<View>(R.id.deviceSectionHeader).visibility =
-            if (devicesOnly) View.VISIBLE else View.GONE
-        deviceInfo.visibility = if (devicesOnly) View.VISIBLE else View.GONE
-        screenAgents.findViewById<TextView>(R.id.deviceSectionTitle).text =
-            if (devicesOnly) "设备" else "本机设备"
+        screenAgents.findViewById<View>(R.id.deviceSectionHeader).visibility = View.GONE
+        deviceInfo.visibility = View.GONE
         if (devicesOnly) {
             screenAgents.post { (screenAgents as ScrollView).scrollTo(0, 0) }
         }
@@ -7280,12 +7279,10 @@ class MainActivity : AppCompatActivity() {
         screenAgents.findViewById<View>(R.id.buttonAgentRefresh).setOnClickListener { refreshAgents() }
         screenAgents.findViewById<View>(R.id.buttonDeviceRefresh).setOnClickListener { refreshAgents() }
         screenAgents.findViewById<View>(R.id.buttonAddAgent).setOnClickListener { showAgentForm(null) }
-        agentController.renderDevice(deviceLines())
     }
 
     private fun refreshAgents() {
         val devicesOnly = currentEntry == DrawerController.ID_DEVICES
-        agentController.renderDevice(deviceLines())
         // V5 设备点按刷新修复（2026-11-11）：此前设备页先调
         // showDevicesLoading() 清空整个列表，再等 5 秒 mDNS 发现才重
         // 画——点完设备列表先空白 5 秒，看着像卡住；清空又把
@@ -7375,7 +7372,6 @@ class MainActivity : AppCompatActivity() {
         val scrollView = screenAgents as ScrollView
         val savedY = scrollView.scrollY
         agentController.clearAgents()
-        agentController.renderDevice(deviceLines())
         agentController.renderDevices(
             discovered,
             pairings,
@@ -8579,6 +8575,52 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * 控制台总览的平台根地址。优先已添加平台 Agent 的主机，否则用构建配置；
+     * 都没有时由 [ConsoleScreenController.normalizedPlatformRoot] 回落到公开根。
+     * 控制器初始化早于 [agentStore]，未就绪时只走默认。
+     */
+    private fun normalizedConsolePlatformRoot(): String {
+        val configured = if (::agentStore.isInitialized) {
+            try {
+                agentStore.listAgents()
+                    .firstOrNull { PlatformAgent.isPlatformAgentRecord(it) && !it.platformHost.isNullOrBlank() }
+                    ?.platformHost
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        return ConsoleScreenController.normalizedPlatformRoot(
+            configured?.takeIf { it.isNotBlank() } ?: PlatformAgent.DEFAULT_PLATFORM_HOST,
+        )
+    }
+
+    /** 本机 Keystore 里是否已有平台 Token。读失败按未配置，按钮显示「配置 Token」。 */
+    private fun hasSavedPlatformToken(): Boolean = try {
+        !platformCredentialStore.loadPlatformToken().isNullOrBlank()
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * 本机信息原在设备页（型号 / 系统 / ABI / 包 / 电池优化 / 前台服务）。
+     * 设备页只留添加与已添加两块；这段原样挪到设置页「开发者诊断」。
+     */
+    private fun bindLocalDeviceDiagnostics() {
+        val box = screenSettings.findViewById<LinearLayout>(R.id.settingsLocalDeviceInfo) ?: return
+        box.removeAllViews()
+        deviceLines().forEachIndexed { index, line ->
+            box.addView(
+                UiKit.text(this, line, 11f, R.color.text_secondary).apply {
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                    if (index > 0) setPadding(0, dp(5), 0, 0)
+                },
+            )
+        }
+    }
+
     private fun deviceLines(): List<String> {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         val ignored = pm.isIgnoringBatteryOptimizations(packageName)
@@ -8777,6 +8819,7 @@ class MainActivity : AppCompatActivity() {
         // Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接设备的 Hand）。
         bindHandSyncSettings()
         bindSettingsNavigation()
+        bindLocalDeviceDiagnostics()
     }
 
     private fun bindSettingsNavigation() {

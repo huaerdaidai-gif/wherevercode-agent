@@ -1,6 +1,7 @@
 package wherevercode.agent.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import wherevercode.agent.ui.EntryRegistry.Group
@@ -46,6 +47,23 @@ class EntryRegistryTest {
         assertEquals(Status.IMPLEMENTED, theme.status)
         assertEquals(EntryRegistry.TargetKind.ACTION, theme.targetKind)
         assertEquals("cycle_theme", theme.target)
+    }
+
+    @Test
+    fun `feature list subtitle replaces english route ids with the chinese group name`() {
+        val editor = EntryRegistry.find("feature_code_editor")!!
+        assertEquals("code_editor", editor.target)
+        assertEquals(Group.FEATURE.label, EntryRegistry.listSubtitle(editor))
+        val suggestion = EntryRegistry.find("home_dev_app")!!
+        assertEquals("开发一个 App：", EntryRegistry.listSubtitle(suggestion))
+        val usage = EntryRegistry.find("feature_usage_cost")!!
+        assertTrue(EntryRegistry.listSubtitle(usage).contains("待开发"))
+        EntryRegistry.ENTRIES.forEach { entry ->
+            assertFalse(
+                "副标题不应再是英文 route id：${entry.id} -> ${EntryRegistry.listSubtitle(entry)}",
+                EntryRegistry.isEnglishRouteId(EntryRegistry.listSubtitle(entry)),
+            )
+        }
     }
 
     @Test
