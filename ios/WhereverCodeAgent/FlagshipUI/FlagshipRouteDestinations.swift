@@ -350,7 +350,7 @@ private struct ComposeTaskScreen: View {
                         state: "queued",
                         assignedAgentId: assignedAgentId.isEmpty ? nil : assignedAgentId,
                         priority: priority,
-                        brainId: appState.brainSettingsModel.currentBrainId
+                        brainId: appState.compositeBrainConfigStore.currentBrainId()
                     )
                     do {
                         _ = try LocalData.shared.tasks.createTask(task)
@@ -6559,7 +6559,7 @@ public struct PrototypeRouteSections: View {
                 feedbackBanner = "已停止当前生成轮次。"
             }
         } else if label.contains("创建演示任务") {
-            let t = LocalTask(title: "V5 演示任务 · 代码工作流", description: "由新建任务页一键创建", state: "queued", priority: 1, brainId: appState.brainSettingsModel.currentBrainId)
+            let t = LocalTask(title: "V5 演示任务 · 代码工作流", description: "由新建任务页一键创建", state: "queued", priority: 1, brainId: appState.compositeBrainConfigStore.currentBrainId())
             _ = try? LocalData.shared.tasks.createTask(t)
             feedbackBanner = "已写入本机 SQLite 任务队列。"
             onNavigateRoute("taskdetail")

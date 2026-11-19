@@ -185,12 +185,6 @@ public struct ModelSettingsView: View {
                 }
             }
 
-            if !model.localModels.isEmpty {
-                ForEach(model.localModels, id: \.modelId) { config in
-                    modelRow(config: config, groupTitle: "本地模型")
-                }
-            }
-
             if !model.cliBrains.isEmpty {
                 ForEach(model.cliBrains, id: \.modelId) { config in
                     modelRow(config: config, groupTitle: "CLI 会员")

@@ -1,10 +1,10 @@
 // ModelRegistry.swift
 // WhereverCode Agent — 独立模型注册表与配置存储
-// 依据 Funk 2026-11-19 指示与 ~/agy-ios-model-decouple-brief.md：
+// 依据 Funk 2026-11-19 指示与 ~/awm-work/agy-ios-b3-brief.md：
 // - 与大脑（BrainConfigStore / brain.configs_json）彻底脱钩，建立模型独立存储；
-// - 独立存储键：model.configs_json（配置列表）与 model.current_model_id（当前模型）；
-// - 绝不读取、绝不写入 brain.configs_json；
-// - 结构对齐独立模型配置管理，已添加模型列表增删改查全走本存储。
+// - 独立存储键：model.configs_json（配置列表）、model.current_model_id（当前模型）、model.deleted_builtin_ids_json（墓碑）；
+// - 结构对齐独立模型配置管理，已添加模型列表增删改查全走本存储；
+// - 运行时通过 CompositeBrainConfigStore 提供只读合并视图注入 App 引擎。
 
 import Foundation
 import SwiftUI
@@ -31,7 +31,7 @@ public struct ModelConfig: Equatable, Codable, Identifiable, Sendable {
     public init(
         modelId: String,
         kind: BrainKind = .modelApi,
-        adapterId: String = "generic",
+        adapterId: String = GenericOpenAiBrainAdapter.adapterId,
         label: String,
         baseUrl: String? = nil,
         model: String,
@@ -57,6 +57,42 @@ public struct ModelConfig: Equatable, Codable, Identifiable, Sendable {
         self.lastTestSummary = lastTestSummary
         self.cliBinary = cliBinary
     }
+
+    public func toBrainConfig() -> BrainConfig {
+        BrainConfig(
+            brainId: modelId,
+            kind: kind,
+            adapterId: adapterId,
+            label: label,
+            baseUrl: baseUrl,
+            model: model,
+            authRef: authRef,
+            extra: extra,
+            fallbackBrainIds: fallbackModelIds,
+            loginState: loginState,
+            lastTestedAtEpochSeconds: lastTestedAtEpochSeconds,
+            lastTestSummary: lastTestSummary,
+            cliBinary: cliBinary
+        )
+    }
+
+    public static func fromBrainConfig(_ brain: BrainConfig) -> ModelConfig {
+        ModelConfig(
+            modelId: brain.brainId,
+            kind: brain.kind,
+            adapterId: brain.adapterId,
+            label: brain.label,
+            baseUrl: brain.baseUrl,
+            model: brain.model,
+            authRef: brain.authRef,
+            extra: brain.extra,
+            fallbackModelIds: brain.fallbackBrainIds,
+            loginState: brain.loginState,
+            lastTestedAtEpochSeconds: brain.lastTestedAtEpochSeconds,
+            lastTestSummary: brain.lastTestSummary,
+            cliBinary: brain.cliBinary
+        )
+    }
 }
 
 // MARK: - 2. 模型配置 Store 协议
@@ -68,6 +104,15 @@ public protocol ModelConfigStore: AnyObject {
     func deleteConfig(modelId: String)
     func currentModelId() -> String?
     func setCurrentModelId(_ modelId: String?)
+    func deletedModelIds() -> Set<String>
+    func markModelDeleted(modelId: String)
+    func clearModelDeleted(modelId: String)
+}
+
+extension ModelConfigStore {
+    public func deletedModelIds() -> Set<String> { [] }
+    public func markModelDeleted(modelId: String) {}
+    public func clearModelDeleted(modelId: String) {}
 }
 
 // MARK: - 3. 基于 KeyValueStore 的模型存储实现 (Key: model.configs_json)
@@ -75,6 +120,7 @@ public protocol ModelConfigStore: AnyObject {
 public final class KeyValueModelConfigStore: ModelConfigStore, @unchecked Sendable {
     public static let keyConfigs = "model.configs_json"
     public static let keyCurrent = "model.current_model_id"
+    public static let keyDeleted = "model.deleted_builtin_ids_json"
 
     private let kv: KeyValueStore
     private let lock = NSLock()
@@ -119,6 +165,25 @@ public final class KeyValueModelConfigStore: ModelConfigStore, @unchecked Sendab
         unlockedSetCurrent(modelId)
     }
 
+    public func deletedModelIds() -> Set<String> {
+        lock.lock(); defer { lock.unlock() }
+        return unlockedDeletedModelIds()
+    }
+
+    public func markModelDeleted(modelId: String) {
+        lock.lock(); defer { lock.unlock() }
+        var ids = unlockedDeletedModelIds()
+        ids.insert(modelId)
+        unlockedSaveDeletedModelIds(ids)
+    }
+
+    public func clearModelDeleted(modelId: String) {
+        lock.lock(); defer { lock.unlock() }
+        var ids = unlockedDeletedModelIds()
+        ids.remove(modelId)
+        unlockedSaveDeletedModelIds(ids)
+    }
+
     private func unlockedList() -> [ModelConfig] {
         guard let json = try? kv.get(Self.keyConfigs),
               let data = json.data(using: .utf8),
@@ -134,6 +199,21 @@ public final class KeyValueModelConfigStore: ModelConfigStore, @unchecked Sendab
     private func unlockedSetCurrent(_ modelId: String?) {
         let value = modelId?.trimmingCharacters(in: .whitespaces)
         try? kv.set(Self.keyCurrent, (value?.isEmpty ?? true) ? nil : value)
+    }
+
+    private func unlockedDeletedModelIds() -> Set<String> {
+        guard let json = try? kv.get(Self.keyDeleted),
+              let data = json.data(using: .utf8),
+              let list = (try? JSONSerialization.jsonObject(with: data)) as? [String]
+        else { return [] }
+        return Set(list)
+    }
+
+    private func unlockedSaveDeletedModelIds(_ ids: Set<String>) {
+        if let data = try? JSONSerialization.data(withJSONObject: Array(ids), options: []),
+           let str = String(data: data, encoding: .utf8) {
+            try? kv.set(Self.keyDeleted, str)
+        }
     }
 
     private func persist(_ configs: [ModelConfig]) {
@@ -218,6 +298,9 @@ public final class ModelSettingsModel: ObservableObject {
     public let keyStore: BrainKeyStore
     public let routingStore: ModelRoutingStore
     public let customProviderStore: CustomFreeProviderStore
+    public var brainConfigStore: BrainConfigStore? = nil
+    public var agentRegistryStore: AgentRegistryStore? = nil
+    public var registryProvider: () -> BrainAdapterRegistry = { BrainAdapterRegistry() }
 
     public var onChange: () -> Void = {}
 
@@ -225,12 +308,16 @@ public final class ModelSettingsModel: ObservableObject {
         configStore: ModelConfigStore,
         keyStore: BrainKeyStore,
         routingStore: ModelRoutingStore = UserDefaultsModelRoutingStore(),
-        customProviderStore: CustomFreeProviderStore = KeyValueCustomFreeProviderStore()
+        customProviderStore: CustomFreeProviderStore = KeyValueCustomFreeProviderStore(),
+        brainConfigStore: BrainConfigStore? = nil,
+        agentRegistryStore: AgentRegistryStore? = nil
     ) {
         self.configStore = configStore
         self.keyStore = keyStore
         self.routingStore = routingStore
         self.customProviderStore = customProviderStore
+        self.brainConfigStore = brainConfigStore
+        self.agentRegistryStore = agentRegistryStore
         reload()
     }
 
@@ -263,14 +350,14 @@ public final class ModelSettingsModel: ObservableObject {
         extra: [String: String] = [:]
     ) {
         let modelId = UUID().uuidString
-        let authRef = "model:\(modelId):key"
+        let authRef = "model-api:\(modelId)"
         if !apiKey.isEmpty {
             try? keyStore.putSecret(authRef: authRef, value: apiKey)
         }
         let config = ModelConfig(
             modelId: modelId,
             kind: .modelApi,
-            adapterId: "generic",
+            adapterId: GenericOpenAiBrainAdapter.adapterId,
             label: label,
             baseUrl: baseUrl,
             model: model,
@@ -290,21 +377,51 @@ public final class ModelSettingsModel: ObservableObject {
 
     public func deleteConfig(modelId: String) {
         if let config = configStore.getConfig(modelId: modelId), let authRef = config.authRef {
-            keyStore.deleteSecret(authRef: authRef)
+            // 密钥引用计数：仅当 brainStore、modelStore、AgentStore 三处均不再引用该 authRef 时，才清理 Keychain 密钥；任一处仍引用则保留
+            let otherModelRefs = configStore.listConfigs().contains { $0.modelId != modelId && $0.authRef == authRef }
+            let brainRefs = brainConfigStore?.listConfigs().contains { $0.authRef == authRef } ?? false
+            let agentRefs = (try? agentRegistryStore?.listAgents())?.contains { $0.authRef == authRef } ?? false
+
+            if !otherModelRefs && !brainRefs && !agentRefs {
+                keyStore.deleteSecret(authRef: authRef)
+            }
         }
         configStore.deleteConfig(modelId: modelId)
+        configStore.markModelDeleted(modelId: modelId)
         reload()
         onChange()
     }
 
-    // MARK: - 模型分组（对齐原 addedModelsSection 分组口径）
+    public func setCurrent(modelId: String?) {
+        if let modelId, let config = configStore.getConfig(modelId: modelId),
+           unusableReason(for: config) != nil {
+            return
+        }
+        configStore.setCurrentModelId(modelId)
+        reload()
+        onChange()
+    }
+
+    public func unusableReason(for config: ModelConfig) -> String? {
+        if registryProvider().get(config.adapterId) == nil {
+            return config.kind == .subscription
+                ? "会员登录在 iOS 上尚未接入，不能作为当前模型"
+                : "此模型的接入模块未加载"
+        }
+        if config.kind != .subscription && !hasKey(for: config) {
+            return "尚未填写 API Key"
+        }
+        return nil
+    }
+
+    // MARK: - 模型分组（对齐三分组：模型 API / CLI 会员 / 订阅授权，本地模型并入模型 API）
 
     public var modelApis: [ModelConfig] {
-        configs.filter { $0.kind == .modelApi && !isLocalUrl($0.baseUrl) }
+        configs.filter { $0.kind == .modelApi }
     }
 
     public var localModels: [ModelConfig] {
-        configs.filter { $0.kind == .modelApi && isLocalUrl($0.baseUrl) }
+        configs.filter { $0.kind == .modelApi && BrainConfigValidator.isLocalModelUrl($0.baseUrl ?? "") }
     }
 
     public var cliBrains: [ModelConfig] {
@@ -314,9 +431,123 @@ public final class ModelSettingsModel: ObservableObject {
     public var subscriptions: [ModelConfig] {
         configs.filter { $0.kind == .subscription }
     }
+}
 
-    private func isLocalUrl(_ urlStr: String?) -> Bool {
-        guard let urlStr = urlStr?.lowercased() else { return false }
-        return urlStr.contains("localhost") || urlStr.contains("127.0.0.1") || urlStr.contains("192.168.") || urlStr.contains("10.") || urlStr.contains(".local")
+// MARK: - 5. 运行时只读合并视图 CompositeBrainConfigStore
+
+public final class CompositeBrainConfigStore: BrainConfigStore, @unchecked Sendable {
+    public let modelStore: ModelConfigStore
+    public let brainStore: BrainConfigStore
+
+    public init(modelStore: ModelConfigStore, brainStore: BrainConfigStore) {
+        self.modelStore = modelStore
+        self.brainStore = brainStore
+    }
+
+    public func listConfigs() -> [BrainConfig] {
+        let models = modelStore.listConfigs().map { $0.toBrainConfig() }
+        let modelIds = Set(models.map(\.brainId))
+        let brains = brainStore.listConfigs().filter { !modelIds.contains($0.brainId) }
+        return models + brains
+    }
+
+    public func getConfig(brainId: String) -> BrainConfig? {
+        if let m = modelStore.getConfig(modelId: brainId) {
+            return m.toBrainConfig()
+        }
+        return brainStore.getConfig(brainId: brainId)
+    }
+
+    public func currentBrainId() -> String? {
+        modelStore.currentModelId() ?? brainStore.currentBrainId()
+    }
+
+    // 所有写操作与墓碑方法一律透传 brainStore
+    public func saveConfig(_ config: BrainConfig) {
+        brainStore.saveConfig(config)
+    }
+
+    public func deleteConfig(brainId: String) {
+        brainStore.deleteConfig(brainId: brainId)
+    }
+
+    public func setCurrentBrainId(_ brainId: String?) {
+        brainStore.setCurrentBrainId(brainId)
+    }
+
+    public func deletedBrainIds() -> Set<String> {
+        brainStore.deletedBrainIds()
+    }
+
+    public func markBrainDeleted(brainId: String) {
+        brainStore.markBrainDeleted(brainId: brainId)
+    }
+
+    public func clearBrainDeleted(brainId: String) {
+        brainStore.clearBrainDeleted(brainId: brainId)
+    }
+}
+
+// MARK: - 6. 模型迁移管理器 ModelMigrationManager
+
+public final class ModelMigrationManager {
+    public static let keyMigrationV1Done = "model.migration_v1_done"
+
+    public static func runStartupMigration(
+        kv: KeyValueStore,
+        brainStore: BrainConfigStore,
+        modelStore: ModelConfigStore
+    ) {
+        let isDone = (try? kv.get(keyMigrationV1Done)) == "true"
+        let brainConfigs = brainStore.listConfigs()
+
+        // 属于模型页三分组：MODEL_API, AGENT_RUNTIME, SUBSCRIPTION
+        let targetGroupBrains = brainConfigs.filter { cfg in
+            cfg.kind == .modelApi || cfg.kind == .agentRuntime || cfg.kind == .subscription
+        }
+        let targetIds = Set(targetGroupBrains.map(\.brainId))
+
+        if !isDone {
+            // 一次性状态迁移（受 model.migration_v1_done 保护，仅 false 时执行）
+
+            // 1. 同步已删除内置模型墓碑
+            let brainDeleted = brainStore.deletedBrainIds()
+            for deletedId in brainDeleted {
+                modelStore.markModelDeleted(modelId: deletedId)
+            }
+
+            // 2. 复制配置进 modelStore，同时 fallbackModelIds 过滤到被迁集合内
+            let existingModelIds = Set(modelStore.listConfigs().map(\.modelId))
+            let deletedTombstones = modelStore.deletedModelIds()
+
+            for brain in targetGroupBrains {
+                if !existingModelIds.contains(brain.brainId) && !deletedTombstones.contains(brain.brainId) {
+                    var m = ModelConfig.fromBrainConfig(brain)
+                    m.fallbackModelIds = m.fallbackModelIds.filter { targetIds.contains($0) }
+                    modelStore.saveConfig(m)
+                }
+            }
+
+            // 3. 同步当前选中项（仅当它在被迁集合内）
+            if let curBrain = brainStore.currentBrainId(), targetIds.contains(curBrain) {
+                if modelStore.currentModelId() == nil {
+                    modelStore.setCurrentModelId(curBrain)
+                }
+            }
+
+            // 4. 崩溃安全顺序：先落盘配置数据与当前项，最后才写 model.migration_v1_done = true
+            try? kv.set(keyMigrationV1Done, "true")
+        } else {
+            // 每次启动幂等按 ID 补齐：不受一次性标记锁死
+            let existingModelIds = Set(modelStore.listConfigs().map(\.modelId))
+            let deletedTombstones = modelStore.deletedModelIds()
+
+            for brain in targetGroupBrains {
+                if !existingModelIds.contains(brain.brainId) && !deletedTombstones.contains(brain.brainId) {
+                    let m = ModelConfig.fromBrainConfig(brain)
+                    modelStore.saveConfig(m)
+                }
+            }
+        }
     }
 }
