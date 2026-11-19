@@ -81,27 +81,37 @@ class ModelPageLayoutTest {
     }
 
     /**
-     * 197 缺陷 #2 的布局面锁死：旧页把预设要填的表单藏在
-     * visibility=gone 的折叠容器里，点选填了个寂寞。新页表单必须
-     * 从字段到根整条祖先链全可见——谁再把表单包进折叠区，此测试
-     * 先红。
+     * 批B B7 行进入式（与 iOS 同形态）后的新规口径，兼防 197 缺陷 #2
+     * 回归：手工表单收进可折叠容器（默认 gone），入口是「添加通用模型
+     * API（OpenAI 兼容）」行；字段必须都在这个容器里（点行即展开）。
+     * 197 缺陷的根源是「预设预填后表单仍藏着」——现由 MainActivity 在
+     * 预设预填与编辑已有模型时自动展开容器（expandModelManualForm）
+     * 防住，不再靠表单常显。
      */
     @Test
-    fun `model form fields are not hidden inside a collapsed container`() {
+    fun `model form fields live in the collapsible container behind the entry row`() {
         val root = LayoutInflater.from(themed()).inflate(R.layout.screen_models, null)
+        val entry = root.findViewById<TextView>(R.id.buttonModelManualForm)
+        assertNotNull("手工添加入口行必须存在", entry)
+        assertTrue(entry.text.toString().contains("添加通用模型 API"))
+        val container = root.findViewById<View>(R.id.modelManualFormContainer)
+        assertNotNull("手工表单容器必须存在", container)
+        assertTrue(
+            "容器默认收起（行进入式）",
+            container.visibility == View.GONE,
+        )
         for (id in listOf(
             R.id.modelFormLabel, R.id.modelFormBaseUrl, R.id.modelFormModel,
             R.id.modelFormApiKey, R.id.buttonSaveModel,
         )) {
             var v: View? = root.findViewById(id)
             assertNotNull(v)
+            var insideContainer = false
             while (v != null) {
-                assertTrue(
-                    "模型表单字段及其祖先必须可见（id=$id）",
-                    v.visibility == View.VISIBLE,
-                )
+                if (v === container) { insideContainer = true; break }
                 v = v.parent as? View
             }
+            assertTrue("表单字段必须在可折叠容器内（id=$id）", insideContainer)
         }
     }
 
