@@ -286,6 +286,94 @@ public final class KeyValueModelConfigStore: ModelConfigStore, @unchecked Sendab
     }
 }
 
+// MARK: - 3.5. 独立模型路由与自定义服务商存储 (Key: model.routing, model.custom_free_providers)
+
+public final class IndependentModelRoutingStore: ModelRoutingStore, @unchecked Sendable {
+    public static let keyStorage = "model.routing"
+    public static let keyLegacy = "wherevercode_model_routing"
+
+    private let userDefaults: UserDefaults
+    private let lock = NSLock()
+
+    public init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        copyLegacyIfNeeded()
+    }
+
+    private func copyLegacyIfNeeded() {
+        lock.lock(); defer { lock.unlock() }
+        if userDefaults.data(forKey: Self.keyStorage) == nil,
+           let legacyData = userDefaults.data(forKey: Self.keyLegacy) {
+            userDefaults.set(legacyData, forKey: Self.keyStorage)
+        }
+    }
+
+    public func load() -> ModelRoutingSettings {
+        lock.lock(); defer { lock.unlock() }
+        guard let data = userDefaults.data(forKey: Self.keyStorage),
+              let settings = try? JSONDecoder().decode(ModelRoutingSettings.self, from: data) else {
+            return ModelRoutingSettings()
+        }
+        return settings
+    }
+
+    public func save(_ settings: ModelRoutingSettings) {
+        lock.lock(); defer { lock.unlock() }
+        if let data = try? JSONEncoder().encode(settings) {
+            userDefaults.set(data, forKey: Self.keyStorage)
+        }
+    }
+}
+
+public final class IndependentCustomFreeProviderStore: CustomFreeProviderStore, @unchecked Sendable {
+    public static let keyStorage = "model.custom_free_providers"
+    public static let keyLegacy = "wherevercode_custom_free_providers"
+
+    private let userDefaults: UserDefaults
+    private let lock = NSLock()
+
+    public init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        copyLegacyIfNeeded()
+    }
+
+    private func copyLegacyIfNeeded() {
+        lock.lock(); defer { lock.unlock() }
+        if userDefaults.data(forKey: Self.keyStorage) == nil,
+           let legacyData = userDefaults.data(forKey: Self.keyLegacy) {
+            userDefaults.set(legacyData, forKey: Self.keyStorage)
+        }
+    }
+
+    public func list() -> [FreeProviderPreset] {
+        lock.lock(); defer { lock.unlock() }
+        guard let data = userDefaults.data(forKey: Self.keyStorage) else { return [] }
+        return (try? JSONDecoder().decode([FreeProviderPreset].self, from: data)) ?? []
+    }
+
+    public func add(_ preset: FreeProviderPreset) {
+        lock.lock(); defer { lock.unlock() }
+        var current = unlockedList().filter { $0.id != preset.id }
+        current.append(preset)
+        if let data = try? JSONEncoder().encode(current) {
+            userDefaults.set(data, forKey: Self.keyStorage)
+        }
+    }
+
+    public func remove(id: String) {
+        lock.lock(); defer { lock.unlock() }
+        let current = unlockedList().filter { $0.id != id }
+        if let data = try? JSONEncoder().encode(current) {
+            userDefaults.set(data, forKey: Self.keyStorage)
+        }
+    }
+
+    private func unlockedList() -> [FreeProviderPreset] {
+        guard let data = userDefaults.data(forKey: Self.keyStorage) else { return [] }
+        return (try? JSONDecoder().decode([FreeProviderPreset].self, from: data)) ?? []
+    }
+}
+
 // MARK: - 4. 模型页 ViewModel
 
 @MainActor
@@ -307,8 +395,8 @@ public final class ModelSettingsModel: ObservableObject {
     public init(
         configStore: ModelConfigStore,
         keyStore: BrainKeyStore,
-        routingStore: ModelRoutingStore = UserDefaultsModelRoutingStore(),
-        customProviderStore: CustomFreeProviderStore = KeyValueCustomFreeProviderStore(),
+        routingStore: ModelRoutingStore = IndependentModelRoutingStore(),
+        customProviderStore: CustomFreeProviderStore = IndependentCustomFreeProviderStore(),
         brainConfigStore: BrainConfigStore? = nil,
         agentRegistryStore: AgentRegistryStore? = nil
     ) {

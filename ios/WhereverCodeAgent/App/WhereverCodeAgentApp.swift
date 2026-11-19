@@ -94,6 +94,8 @@ public final class AppState: ObservableObject {
         let mModel = ModelSettingsModel(
             configStore: modelStore,
             keyStore: keyStore,
+            routingStore: IndependentModelRoutingStore(),
+            customProviderStore: IndependentCustomFreeProviderStore(),
             brainConfigStore: configStore,
             agentRegistryStore: data.agents
         )

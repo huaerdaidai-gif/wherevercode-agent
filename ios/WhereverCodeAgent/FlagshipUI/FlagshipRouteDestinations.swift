@@ -3154,6 +3154,8 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var activeTasks: [LocalTask] = []
     @State private var members: [V5ChannelMember] = []
     @State private var connectionState: ChannelConnectionState = .stopped
+    @State private var connectionError: String? = nil
+    @State private var showConnectionDiagnostics = false
     @State private var feed: ChannelFeed? = nil
     @State private var realOnlineAgentCount: Int? = nil
 
@@ -3287,6 +3289,12 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    private var isCertificateFailure: Bool {
+        guard let err = connectionError?.lowercased() else { return false }
+        let keywords = ["certificate", "certpath", "trust anchor", "sslhandshake", "证书", "证书链"]
+        return keywords.contains { err.contains($0) }
+    }
+
     private var connectionStateText: String {
         switch connectionState {
         case .live:
@@ -3294,7 +3302,11 @@ public struct ChannelDetailWorkspaceView: View {
         case .connecting:
             return "○ 正在连接频道…"
         case .polling:
-            return "○ 轮询兜底"
+            var text = "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）"
+            if isCertificateFailure {
+                text += " · 证书验证失败，安全连接未建立"
+            }
+            return text
         case .stopped:
             return "○ 频道未连接"
         }
@@ -3325,6 +3337,30 @@ public struct ChannelDetailWorkspaceView: View {
                 Text(headerSubtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let err = connectionError, !err.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Button {
+                            showConnectionDiagnostics.toggle()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: showConnectionDiagnostics ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 8))
+                                Text("查看连接诊断")
+                                    .font(.caption2.weight(.medium))
+                            }
+                            .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                        if showConnectionDiagnostics {
+                            Text(err)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.red.opacity(0.85))
+                                .textSelection(.enabled)
+                                .padding(4)
+                                .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                }
             }
             Spacer()
         }
@@ -4256,9 +4292,10 @@ public struct ChannelDetailWorkspaceView: View {
             webSocketURL: wsURL,
             tokenProvider: appState.tokenProvider
         )
-        newFeed.onStateChange = { state, _ in
+        newFeed.onStateChange = { state, err in
             Task { @MainActor in
                 self.connectionState = state
+                self.connectionError = err
             }
         }
         self.feed = newFeed
@@ -4270,6 +4307,7 @@ public struct ChannelDetailWorkspaceView: View {
         feed?.stop()
         feed = nil
         connectionState = .stopped
+        connectionError = nil
     }
 
     private func loadWorkspaceData() {

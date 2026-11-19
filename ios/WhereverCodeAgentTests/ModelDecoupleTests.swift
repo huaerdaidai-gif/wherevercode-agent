@@ -423,4 +423,80 @@ final class ModelDecoupleTests: XCTestCase {
         XCTAssertNil(modelStore.getConfig(modelId: "solo-model"))
         XCTAssertNil(keyStore.getSecret(authRef: soloAuthRef), "三处均无引用时，Keychain 凭据必须安全释放")
     }
+
+    // MARK: - 7. B3 收尾追加：独立路由与自定义服务商存储隔离测试
+
+    func testIndependentRoutingAndCustomProviderStores() throws {
+        let suiteName = "test-independent-stores-\(UUID().uuidString)"
+        let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        // 1. 验证路由存储物理隔离与首次单向幂等复制
+        let legacyRoutingKey = IndependentModelRoutingStore.keyLegacy
+        let newRoutingKey = IndependentModelRoutingStore.keyStorage
+        let legacyRoutingData = try JSONEncoder().encode(ModelRoutingSettings(enabled: true, allowPaid: false, orderedBrainIds: ["brain-1"]))
+        userDefaults.set(legacyRoutingData, forKey: legacyRoutingKey)
+
+        let routingStore = IndependentModelRoutingStore(userDefaults: userDefaults)
+        let loaded = routingStore.load()
+        XCTAssertTrue(loaded.enabled, "首次从旧键复制成功")
+        XCTAssertEqual(loaded.orderedBrainIds, ["brain-1"])
+
+        // 修改新存储
+        routingStore.save(ModelRoutingSettings(enabled: false, allowPaid: true, orderedBrainIds: ["brain-2"]))
+        XCTAssertFalse(routingStore.load().enabled)
+        // 旧键保持不变
+        let legacyAfter = userDefaults.data(forKey: legacyRoutingKey)
+        XCTAssertEqual(legacyAfter, legacyRoutingData, "新键写操作绝不得污染旧键 wherevercode_model_routing")
+
+        // 2. 验证自定义服务商存储物理隔离与首次单向幂等复制
+        let legacyProviderKey = IndependentCustomFreeProviderStore.keyLegacy
+        let newProviderKey = IndependentCustomFreeProviderStore.keyStorage
+        let legacyPreset = FreeProviderPreset(
+            id: "custom-legacy",
+            name: "Legacy Custom",
+            defaultBaseUrl: "https://legacy.example.com",
+            defaultModel: "legacy-v1",
+            apiKeyPlaceholder: "key",
+            keyHelpUrl: "",
+            signupGuideUrl: "",
+            verifyUrl: "",
+            catalogUrl: "",
+            modelsUrl: "",
+            recommendedModelHint: "",
+            catalogHint: "",
+            docUrl: "",
+            catalogParserType: "static"
+        )
+        let legacyProviderData = try JSONEncoder().encode([legacyPreset])
+        userDefaults.set(legacyProviderData, forKey: legacyProviderKey)
+
+        let providerStore = IndependentCustomFreeProviderStore(userDefaults: userDefaults)
+        let initialList = providerStore.list()
+        XCTAssertEqual(initialList.count, 1)
+        XCTAssertEqual(initialList.first?.id, "custom-legacy")
+
+        // 新增新服务商
+        let newPreset = FreeProviderPreset(
+            id: "custom-new",
+            name: "New Provider",
+            defaultBaseUrl: "https://new.example.com",
+            defaultModel: "new-v1",
+            apiKeyPlaceholder: "key",
+            keyHelpUrl: "",
+            signupGuideUrl: "",
+            verifyUrl: "",
+            catalogUrl: "",
+            modelsUrl: "",
+            recommendedModelHint: "",
+            catalogHint: "",
+            docUrl: "",
+            catalogParserType: "static"
+        )
+        providerStore.add(newPreset)
+        XCTAssertEqual(providerStore.list().count, 2)
+        // 旧键保持不变
+        let legacyProviderAfter = userDefaults.data(forKey: legacyProviderKey)
+        XCTAssertEqual(legacyProviderAfter, legacyProviderData, "新键增删绝不得污染旧键 wherevercode_custom_free_providers")
+    }
 }

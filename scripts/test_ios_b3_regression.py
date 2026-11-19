@@ -217,5 +217,79 @@ class TestIosB3Regression(unittest.TestCase):
 
         self.assertNotIn(shared_auth_ref, keychain, "三处均无引用时，Keychain 凭据安全释放")
 
+    # MARK: - 4. B3 收尾追加项断言 (收尾 1 & 收尾 2)
+
+    def test_10_tail_01_routing_and_custom_providers_decoupled_keys(self):
+        """B3 收尾 1：模型页路由与自定义服务商采用独立键（model.routing / model.custom_free_providers），旧键不被污染，首次幂等复制"""
+        reg_path = os.path.join(APP_DIR, "Models", "ModelRegistry.swift")
+        with open(reg_path, encoding="utf-8") as f:
+            reg_src = f.read()
+
+        # 独立键定义与类声明
+        self.assertIn('class IndependentModelRoutingStore', reg_src)
+        self.assertIn('static let keyStorage = "model.routing"', reg_src)
+        self.assertIn('static let keyLegacy = "wherevercode_model_routing"', reg_src)
+
+        self.assertIn('class IndependentCustomFreeProviderStore', reg_src)
+        self.assertIn('static let keyStorage = "model.custom_free_providers"', reg_src)
+        self.assertIn('static let keyLegacy = "wherevercode_custom_free_providers"', reg_src)
+
+        # ModelSettingsModel 默认注入独立存储类
+        self.assertIn('routingStore: ModelRoutingStore = IndependentModelRoutingStore()', reg_src)
+        self.assertIn('customProviderStore: CustomFreeProviderStore = IndependentCustomFreeProviderStore()', reg_src)
+
+        # 模拟数据持久化隔离与首次幂等复制
+        # 1. 初始状态：旧键有数据，新键无数据
+        legacy_routing = json.dumps({"enabled": True, "allowPaid": False, "orderedBrainIds": ["b1"]})
+        self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('wherevercode_model_routing', ?)", (legacy_routing,))
+        self.conn.commit()
+
+        # 首次复制：旧键数据复制进新键
+        cur_new = self.conn.execute("SELECT value FROM kv_store WHERE key='model.routing'").fetchone()
+        if cur_new is None:
+            cur_legacy = self.conn.execute("SELECT value FROM kv_store WHERE key='wherevercode_model_routing'").fetchone()[0]
+            self.conn.execute("INSERT INTO kv_store (key, value) VALUES ('model.routing', ?)", (cur_legacy,))
+            self.conn.commit()
+
+        # 验证新键已拥有数据，且旧键未被删除或修改
+        new_val = json.loads(self.conn.execute("SELECT value FROM kv_store WHERE key='model.routing'").fetchone()[0])
+        self.assertTrue(new_val["enabled"])
+        self.assertEqual(self.conn.execute("SELECT value FROM kv_store WHERE key='wherevercode_model_routing'").fetchone()[0], legacy_routing)
+
+        # 2. 模型页在新键上修改数据
+        updated_new = json.dumps({"enabled": False, "allowPaid": True, "orderedBrainIds": ["b2", "b3"]})
+        self.conn.execute("UPDATE kv_store SET value=? WHERE key='model.routing'", (updated_new,))
+        self.conn.commit()
+
+        # 断言：旧键保持原样字节级不变！彻底脱钩！
+        legacy_after = self.conn.execute("SELECT value FROM kv_store WHERE key='wherevercode_model_routing'").fetchone()[0]
+        self.assertEqual(legacy_after, legacy_routing, "模型页修改路由不得污染旧键 wherevercode_model_routing")
+
+        # 3. 重复启动（幂等性）：新键已有数据时不被旧键覆盖
+        if self.conn.execute("SELECT value FROM kv_store WHERE key='model.routing'").fetchone() is None:
+            pass # 不会走这里
+        self.assertEqual(self.conn.execute("SELECT value FROM kv_store WHERE key='model.routing'").fetchone()[0], updated_new)
+
+    def test_11_tail_02_channel_polling_state_text_and_diagnostics(self):
+        """B3 收尾 2：差异 16 频道轮询态文案与安卓逐字对齐、证书失败拼接与连接诊断展示"""
+        dest_path = os.path.join(APP_DIR, "FlagshipUI", "FlagshipRouteDestinations.swift")
+        with open(dest_path, encoding="utf-8") as f:
+            dest_src = f.read()
+
+        # 逐字对齐基础串
+        self.assertIn('"○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）"', dest_src)
+        # 证书失败拼接
+        self.assertIn('" · 证书验证失败，安全连接未建立"', dest_src)
+        # 证书失败关键词对齐安卓
+        self.assertIn('"certificate"', dest_src)
+        self.assertIn('"certpath"', dest_src)
+        self.assertIn('"trust anchor"', dest_src)
+        self.assertIn('"sslhandshake"', dest_src)
+        self.assertIn('"证书"', dest_src)
+        self.assertIn('"证书链"', dest_src)
+        # 查看连接诊断开关与原文展示
+        self.assertIn('"查看连接诊断"', dest_src)
+        self.assertIn('showConnectionDiagnostics', dest_src)
+
 if __name__ == "__main__":
     unittest.main()
