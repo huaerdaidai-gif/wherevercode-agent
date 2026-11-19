@@ -195,7 +195,8 @@ final class TriadFeaturesTests: XCTestCase {
 
     func testDeviceDeletionDoesNotCascadeToAgentsOrTasks() throws {
         let devId = "triad-test-dev-01"
-        let childAgentId = "\(devId):worker-agent"
+        let child1Id = "\(devId):worker-1"
+        let child2Id = "\(devId):worker-2"
 
         let dev = AgentRecord(
             agentId: devId,
@@ -205,30 +206,66 @@ final class TriadFeaturesTests: XCTestCase {
             baseUrl: "192.168.1.88:18743",
             deviceId: devId
         )
-        let childAgent = AgentRecord(
-            agentId: childAgentId,
-            displayName: "Worker Agent (Triad Dev)",
+        let childAgent1 = AgentRecord(
+            agentId: child1Id,
+            displayName: "Worker 1 (Triad Dev)",
             kind: .device,
             access: .cli,
             baseUrl: "192.168.1.88:18743",
-            deviceId: devId
+            deviceId: devId,
+            deviceFolder: "/tmp/project1"
+        )
+        let childAgent2 = AgentRecord(
+            agentId: child2Id,
+            displayName: "Worker 2 (Triad Dev)",
+            kind: .device,
+            access: .cli,
+            baseUrl: "192.168.1.88:18743",
+            deviceId: devId,
+            deviceFolder: "/tmp/project2"
         )
 
         try LocalData.shared.agents.saveAgent(dev)
-        try LocalData.shared.agents.saveAgent(childAgent)
+        try LocalData.shared.agents.saveAgent(childAgent1)
+        try LocalData.shared.agents.saveAgent(childAgent2)
+
+        // 验证初始承载数
+        let initialHosted = (try? LocalData.shared.agents.listAgents())?.filter { $0.deviceId == devId && $0.agentId != devId }.count ?? 0
+        XCTAssertEqual(initialHosted, 2)
 
         // 删设备只删设备
         try LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
 
-        // 验证设备已删
+        // 验证设备宿主记录已删
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
-        // 验证子 Agent 独立保留未被删除
-        let preserved = try LocalData.shared.agents.getAgent(agentId: childAgentId)
-        XCTAssertNotNil(preserved)
-        XCTAssertEqual(preserved?.memberConnectionState, "NOT_CONNECTED")
+
+        // 验收：删掉带 2 个 Agent 的设备后，名下 Agent 仍保留 2 条且字段字节级不变
+        let preserved1 = try LocalData.shared.agents.getAgent(agentId: child1Id)
+        let preserved2 = try LocalData.shared.agents.getAgent(agentId: child2Id)
+        XCTAssertNotNil(preserved1)
+        XCTAssertNotNil(preserved2)
+        XCTAssertEqual(preserved1?.agentId, childAgent1.agentId)
+        XCTAssertEqual(preserved1?.deviceId, devId)
+        XCTAssertEqual(preserved1?.memberConnectionState, childAgent1.memberConnectionState)
+        XCTAssertEqual(preserved1?.lastTestSummary, childAgent1.lastTestSummary)
+        XCTAssertEqual(preserved1?.baseUrl, childAgent1.baseUrl)
+
+        XCTAssertEqual(preserved2?.agentId, childAgent2.agentId)
+        XCTAssertEqual(preserved2?.deviceId, devId)
+        XCTAssertEqual(preserved2?.memberConnectionState, childAgent2.memberConnectionState)
+        XCTAssertEqual(preserved2?.lastTestSummary, childAgent2.lastTestSummary)
+        XCTAssertEqual(preserved2?.baseUrl, childAgent2.baseUrl)
+
+        // 验收：重新配对该设备后承载数自动恢复为 2
+        try LocalData.shared.agents.saveAgent(dev)
+        let recoveredHosted = (try? LocalData.shared.agents.listAgents())?.filter { $0.deviceId == devId && $0.agentId != devId }.count ?? 0
+        XCTAssertEqual(recoveredHosted, 2)
 
         // 清理
-        try? LocalData.shared.agents.deleteAgent(agentId: childAgentId)
+        try? LocalData.shared.agents.deleteDeviceCascade(deviceId: devId)
+        try? LocalData.shared.agents.deleteAgent(agentId: child1Id)
+        try? LocalData.shared.agents.deleteAgent(agentId: child2Id)
+        try? LocalData.shared.agents.unmarkDeviceDeleted(deviceId: devId)
     }
 
     // MARK: - 6. 控制台三件套卡片并列测试 (设备 / Agent / 模型)

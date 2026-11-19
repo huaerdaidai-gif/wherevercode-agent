@@ -1441,9 +1441,21 @@ private struct CollaborationAndAgentsScreen: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(agents) { ag in
+                        let devId = ag.deviceId ?? ""
+                        let allRecords = (try? LocalData.shared.agents.listAgents()) ?? []
+                        let hostRecord = allRecords.first(where: { $0.isDeviceHost && $0.agentId == devId })
+                        let isHostOnline = !devId.isEmpty && hostRecord != nil && hostRecord?.memberConnectionState == "CONNECTED"
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text(ag.displayName).font(.subheadline.weight(.semibold))
+                                if !devId.isEmpty && !isHostOnline {
+                                    Text("设备未连接")
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(.orange)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Color.orange.opacity(0.12), in: Capsule())
+                                }
                                 Spacer()
                                 Toggle("启用", isOn: Binding(
                                     get: { ag.enabled },
@@ -1457,10 +1469,16 @@ private struct CollaborationAndAgentsScreen: View {
                             Text("ID: \(ag.agentId) · 类型: \(ag.kind.rawValue) · 接入: \(ag.access.rawValue)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            if let devId = ag.deviceId, !devId.isEmpty {
-                                Text("运行在设备：\(devId)\(ag.deviceFolder.map { " · 目录：\($0)" } ?? "")")
-                                    .font(.caption2)
-                                    .foregroundStyle(.blue)
+                            if !devId.isEmpty {
+                                if isHostOnline {
+                                    Text("运行在设备：\(devId)\(ag.deviceFolder.map { " · 目录：\($0)" } ?? "")")
+                                        .font(.caption2)
+                                        .foregroundStyle(.blue)
+                                } else {
+                                    Text("运行在设备：\(devId)（设备未连接）\(ag.deviceFolder.map { " · 目录：\($0)" } ?? "")")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             HStack(spacing: 8) {
                                 if ag.kind == .device, let host = ag.baseUrl {
@@ -1566,7 +1584,7 @@ private struct CollaborationAndAgentsScreen: View {
     private func reload() {
         let all = (try? LocalData.shared.agents.listAgents()) ?? []
         // 过滤掉纯设备记录与模型记录，确保 Agent 列表中只有纯正智能体，不与设备和模型混淆
-        agents = all.filter { !($0.kind == .device && $0.access == .app && $0.agentId == $0.deviceId) && $0.kind != .localModel }
+        agents = all.filter { !$0.isDeviceHost && $0.kind != .localModel }
     }
 }
 
@@ -2659,13 +2677,20 @@ public struct ChannelsHomeView: View {
             }
 
             if selectedPartition == .channels {
-                channelsListView
+                if !appState.hasToken {
+                    unconfiguredTokenView
+                } else {
+                    channelsListView
+                }
             } else {
                 directMessagesListView
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
         .onAppear(perform: loadData)
+        .task {
+            await refreshChannels()
+        }
         .sheet(isPresented: $showCreateChannelSheet) {
             CreateChannelSheet(appState: appState) { newChannel in
                 channels.insert(newChannel, at: 0)
@@ -2801,6 +2826,47 @@ public struct ChannelsHomeView: View {
         .padding(.bottom, 8)
     }
 
+    // MARK: - 未配 Token 引导视图
+    private var unconfiguredTokenView: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(systemName: "cable.connector.horizontal")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary.opacity(0.6))
+                    .padding(.top, 40)
+                Text("频道还没法连：先去 Agent 页加一个平台 Agent，并在表单的平台凭证栏填入 App 的平台凭证（由你的平台管理员签发）。")
+                    .font(.subheadline)
+                    .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button {
+                    onNavigateRoute("agents")
+                } label: {
+                    Text("前往 Agent 管理")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color(red: 0.16, green: 0.15, blue: 0.14), in: Capsule())
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+        }
+        .refreshable {
+            await refreshChannels()
+        }
+    }
+
+    private func refreshChannels() async {
+        if appState.hasToken {
+            await appState.loadChannels()
+        }
+        await MainActor.run {
+            loadData()
+        }
+    }
+
     // MARK: - 频道列表
     private var channelsListView: some View {
         ScrollView {
@@ -2857,6 +2923,9 @@ public struct ChannelsHomeView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
+        }
+        .refreshable {
+            await refreshChannels()
         }
     }
 
@@ -3065,7 +3134,25 @@ public struct ChannelsHomeView: View {
     }
 
     private func loadData() {
-        if channels.isEmpty {
+        if !appState.hasToken {
+            channels = []
+            directMessages = []
+            return
+        }
+
+        if !appState.availableChannels.isEmpty {
+            channels = appState.availableChannels.map { c in
+                V5ChannelItem(
+                    id: c.id,
+                    name: c.displayName,
+                    topic: "团队频道",
+                    isPrivate: false,
+                    memberCount: c.participants.count,
+                    lastMessageText: c.lastMessageText ?? "",
+                    unreadCount: 0
+                )
+            }
+        } else {
             let cached = ChannelListCache().load()
             if !cached.isEmpty {
                 channels = cached.map { c in
@@ -3075,6 +3162,7 @@ public struct ChannelsHomeView: View {
                         topic: "团队频道",
                         isPrivate: false,
                         memberCount: c.participants.count,
+                        lastMessageText: c.lastMessageText ?? "",
                         unreadCount: 0
                     )
                 }
@@ -3100,6 +3188,9 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var files: [V5ChannelFile] = []
     @State private var activeTasks: [LocalTask] = []
     @State private var members: [V5ChannelMember] = []
+    @State private var connectionState: ChannelConnectionState = .stopped
+    @State private var feed: ChannelFeed? = nil
+    @State private var realOnlineAgentCount: Int? = nil
 
     // 交互状态
     @State private var replyingTo: V5ChannelMessage? = nil
@@ -3200,6 +3291,7 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .onAppear(perform: loadWorkspaceData)
+        .onDisappear(perform: stopFeed)
         .sheet(item: $selectedAgentProfile) { msg in
             AgentProfileSheet(message: msg)
         }
@@ -3230,6 +3322,27 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    private var connectionStateText: String {
+        switch connectionState {
+        case .live:
+            return "● 直播推送（WS 已连）"
+        case .connecting:
+            return "○ 正在连接频道…"
+        case .polling:
+            return "○ 轮询兜底"
+        case .stopped:
+            return "○ 频道未连接"
+        }
+    }
+
+    private var headerSubtitle: String {
+        var text = connectionStateText
+        if let realOnline = realOnlineAgentCount {
+            text += " · \(realOnline) 位 Agent 在线"
+        }
+        return text
+    }
+
     // MARK: - 工作台顶部
     private var topWorkspaceHeader: some View {
         HStack {
@@ -3244,14 +3357,9 @@ public struct ChannelDetailWorkspaceView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 7, height: 7)
-                    Text("实时连接 · WebSocket live · \(members.filter { $0.isAgent }.count) 位 Agent 在线 · \(activeTasks.count) 个协同任务")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text(headerSubtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -3546,6 +3654,12 @@ public struct ChannelDetailWorkspaceView: View {
     private func sendMessage() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || selectedAttachment != nil else { return }
+
+        guard feed != nil && (connectionState == .live || connectionState == .polling) else {
+            sendErrorMessage = "频道尚未连接；消息未发送。"
+            showSendErrorAlert = true
+            return
+        }
 
         let now = Date()
         let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
@@ -4163,9 +4277,40 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    private func startFeed() {
+        guard feed == nil,
+              appState.hasToken,
+              let transport = appState.makeChannelTransport(),
+              let wsURL = appState.settings.channelWebSocketURL(channelID: currentChannelId) else {
+            connectionState = .stopped
+            return
+        }
+        let newFeed = ChannelFeed(
+            channelID: currentChannelId,
+            transport: transport,
+            webSocketURL: wsURL,
+            tokenProvider: appState.tokenProvider
+        )
+        newFeed.onStateChange = { state, _ in
+            Task { @MainActor in
+                self.connectionState = state
+            }
+        }
+        self.feed = newFeed
+        newFeed.start()
+        self.connectionState = newFeed.connectionState
+    }
+
+    private func stopFeed() {
+        feed?.stop()
+        feed = nil
+        connectionState = .stopped
+    }
+
     private func loadWorkspaceData() {
         members = ChannelMemberManager.loadMembers(channelId: currentChannelId)
         reloadWorkspaceTasks()
+        startFeed()
     }
 }
 
@@ -4715,8 +4860,8 @@ public struct ControlHomeView: View {
         let queuedCount = tasks.filter { $0.state == "queued" || $0.state == "assigned" }.count
         let attentionCount = tasks.filter { $0.needsAttention || $0.state == "blocked" || $0.state == "review" }.count
         let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
-        let agentsCount = allAgents.count
-        let devicesCount = allAgents.filter { $0.kind == .device }.count
+        let agentsCount = allAgents.filter { !$0.isDeviceHost && $0.kind != .localModel }.count
+        let devicesCount = allAgents.filter { $0.isDeviceHost }.count
         let modelsCount = appState.modelConfigStore.listConfigs().count
         let pendingApprovals = LocalData.shared.approvalStore.items.filter { $0.decision == nil }.count
 

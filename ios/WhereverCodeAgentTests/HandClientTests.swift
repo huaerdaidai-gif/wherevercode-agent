@@ -226,11 +226,11 @@ final class HandClientTests: XCTestCase {
 
         // 验证设备本身已删除
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: testDevId))
-        // 核心原则：删除设备不得连带删除 Agent，Agent 独立保留并安全解绑
+        // 核心原则：删除设备不得连带删除 Agent，Agent 独立保留且字段不被篡改
         let survivingAgent = try LocalData.shared.agents.getAgent(agentId: "\(testDevId):codex")
         XCTAssertNotNil(survivingAgent)
-        XCTAssertNil(survivingAgent?.deviceId)
-        XCTAssertEqual(survivingAgent?.memberConnectionState, "NOT_CONNECTED")
+        XCTAssertEqual(survivingAgent?.deviceId, testDevId)
+        XCTAssertEqual(survivingAgent?.memberConnectionState, childAgent.memberConnectionState)
 
         // 清理测试 Agent
         try? LocalData.shared.agents.deleteAgent(agentId: "\(testDevId):codex")
@@ -705,11 +705,11 @@ final class HandClientTests: XCTestCase {
         // 核心断言 1：设备本身已从数据库彻底移除
         XCTAssertNil(try LocalData.shared.agents.getAgent(agentId: devId))
 
-        // 核心断言 2：绑定的 Agent 绝不被连带删除！依然独立存在，仅安全解绑连接状态
+        // 核心断言 2：绑定的 Agent 绝不被连带删除！依然独立存在，字段不被篡改
         let preservedAgent = try XCTUnwrap(LocalData.shared.agents.getAgent(agentId: agentId))
         XCTAssertEqual(preservedAgent.agentId, agentId)
-        XCTAssertEqual(preservedAgent.memberConnectionState, "NOT_CONNECTED")
-        XCTAssertNil(preservedAgent.baseUrl)
+        XCTAssertEqual(preservedAgent.deviceId, devId)
+        XCTAssertEqual(preservedAgent, agent)
 
         // 核心断言 3：云端 Agent 毫发无损
         XCTAssertNotNil(try LocalData.shared.agents.getAgent(agentId: "cloud-reviewer"))

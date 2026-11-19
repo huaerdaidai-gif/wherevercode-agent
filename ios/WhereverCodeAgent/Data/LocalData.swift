@@ -1951,14 +1951,7 @@ public struct ModelAndAgentSheet: View {
 
     private var availableAgents: [AgentRecord] {
         let allAgents = (try? LocalData.shared.agents.listAgents()) ?? []
-        let childDeviceIds = Set(allAgents.filter { $0.kind == .device && $0.access == .cli }.compactMap { $0.deviceId })
-        return allAgents.filter { ag in
-            guard ag.enabled else { return false }
-            if ag.kind == .device && ag.access == .app && ag.agentId == ag.deviceId && childDeviceIds.contains(ag.agentId) {
-                return false
-            }
-            return true
-        }
+        return allAgents.filter { $0.enabled && !$0.isDeviceHost && $0.kind != .localModel }
     }
 
     public var body: some View {
