@@ -21,9 +21,10 @@
 // API) is the next backend batch; until then a ChatGPT brain row
 // exists in the list and honestly reports not-connected rather
 // than faking a chat path. Membership seeds (Qwen / Kimi / Grok
-// membership / Gemini login-only) wait for the device-code /
-// login-only batch and are deliberately NOT seeded yet — a row
-// the user cannot complete would be a shell.
+// membership / Gemini login-only) are seeded with the device-code
+// / login-only batch: the three device-code adapters register
+// with their managers, and Gemini registers its login-only
+// adapter (signing in never makes it a brain).
 
 import Foundation
 
@@ -41,10 +42,16 @@ public enum BrainBootstrap {
     public static let grokAuthRef = "grok:api-key"
     public static let claudeBrainId = "claude"
     public static let claudeAuthRef = "claude:api-key"
+    public static let qwenBrainId = DeviceCodeConfigs.qwen.brainId
+    public static let qwenAuthRef = DeviceCodeConfigs.qwen.authRef
+    public static let kimiBrainId = DeviceCodeConfigs.kimi.brainId
+    public static let kimiAuthRef = DeviceCodeConfigs.kimi.authRef
+    public static let grokMembershipBrainId = DeviceCodeConfigs.grok.brainId
+    public static let grokMembershipAuthRef = DeviceCodeConfigs.grok.authRef
+    public static let geminiBrainId = "gemini"
 
-    /// Brain ids this build seeds on first run (the subset of
-    /// Android's SEEDABLE_BRAIN_IDS whose login/key flow exists on
-    /// iOS today — see the header note).
+    /// Brain ids this build seeds on first run — the same ten as
+    /// Android's SEEDABLE_BRAIN_IDS, in the same order.
     public static let seedableBrainIds: [String] = [
         siwcBrainId,
         cloudflareBrainId,
@@ -52,6 +59,10 @@ public enum BrainBootstrap {
         museBrainId,
         grokBrainId,
         claudeBrainId,
+        qwenBrainId,
+        kimiBrainId,
+        grokMembershipBrainId,
+        geminiBrainId,
     ]
 
     public static var seededConfigs: [BrainConfig] {
@@ -99,9 +110,61 @@ public enum BrainBootstrap {
                 label: "Claude API", baseUrl: ClaudeBrainAdapter.defaultBaseUrl,
                 model: ClaudeBrainAdapter.suggestedModel,
                 authRef: claudeAuthRef, extra: [:], fallbackBrainIds: [])
+        case qwenBrainId:
+            return BrainConfig(
+                brainId: qwenBrainId, kind: .subscription,
+                adapterId: DeviceCodeConfigs.qwen.adapterId,
+                label: DeviceCodeConfigs.qwen.displayName,
+                baseUrl: DeviceCodeConfigs.qwen.inferenceBaseUrl,
+                model: "", authRef: qwenAuthRef, extra: [:], fallbackBrainIds: [])
+        case kimiBrainId:
+            return BrainConfig(
+                brainId: kimiBrainId, kind: .subscription,
+                adapterId: DeviceCodeConfigs.kimi.adapterId,
+                label: DeviceCodeConfigs.kimi.displayName,
+                baseUrl: DeviceCodeConfigs.kimi.inferenceBaseUrl,
+                model: "", authRef: kimiAuthRef, extra: [:], fallbackBrainIds: [])
+        case grokMembershipBrainId:
+            return BrainConfig(
+                brainId: grokMembershipBrainId, kind: .subscription,
+                adapterId: DeviceCodeConfigs.grok.adapterId,
+                label: DeviceCodeConfigs.grok.displayName,
+                baseUrl: DeviceCodeConfigs.grok.inferenceBaseUrl,
+                model: "", authRef: grokMembershipAuthRef, extra: [:],
+                fallbackBrainIds: [])
+        case geminiBrainId:
+            return BrainConfig(
+                brainId: geminiBrainId, kind: .subscription,
+                adapterId: LoginOnlyBrainAdapter.adapterId,
+                label: "Gemini（仅登录）", baseUrl: nil, model: "",
+                authRef: nil, extra: [loginOnlyExtraKey: "true"],
+                fallbackBrainIds: [])
         default:
             return nil
         }
+    }
+
+    /// One device-code manager per vendor, keyed by brain id —
+    /// the single construction the registry's adapters and the
+    /// settings UI's login actions share. Token state lives in
+    /// the Keychain-backed store, so separate manager instances
+    /// over the same store always agree.
+    public static func makeDeviceCodeManagers(
+        keyStore: BrainKeyStore = BrainKeyStore(),
+        http: OAuthHttpTransport = URLSessionOAuthHttpTransport()
+    ) -> [String: DeviceCodeManager] {
+        var managers: [String: DeviceCodeManager] = [:]
+        for config in DeviceCodeConfigs.all {
+            managers[config.brainId] = DeviceCodeManager(
+                config: config,
+                tokenStore: DeviceCodeTokenStore(
+                    keyStore: keyStore, authRef: config.authRef),
+                http: http,
+                deviceHeaders: {
+                    config.needsDeviceHeaders ? KimiDeviceHeaders.make() : [:]
+                })
+        }
+        return managers
     }
 
     /// The config to register for a first-line brain: the stored
@@ -164,6 +227,8 @@ public enum BrainBootstrap {
             registeredAdapterIds.insert(adapterId)
             registry.registerAdapter(make())
         }
+
+        let deviceCodeManagers = makeDeviceCodeManagers(keyStore: keyStore)
 
         for config in registry.allConfigs() {
             switch config.adapterId {
@@ -249,6 +314,21 @@ public enum BrainBootstrap {
                     registerOnce(config.adapterId) {
                         SiwcM2BrainAdapter(provider: siwcProvider)
                     }
+                }
+            case DeviceCodeConfigs.qwen.adapterId,
+                 DeviceCodeConfigs.kimi.adapterId,
+                 DeviceCodeConfigs.grok.adapterId:
+                registerOnce(config.adapterId) {
+                    let deviceConfig = DeviceCodeConfigs.all
+                        .first { $0.adapterId == config.adapterId }!
+                    return DeviceCodeBrainAdapter(
+                        config: deviceConfig,
+                        manager: deviceCodeManagers[deviceConfig.brainId]!,
+                        configStore: configStore)
+                }
+            case LoginOnlyBrainAdapter.adapterId:
+                registerOnce(config.adapterId) {
+                    LoginOnlyBrainAdapter(config: VendorOAuthConfigs.gemini)
                 }
             default:
                 break

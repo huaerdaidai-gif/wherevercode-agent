@@ -77,6 +77,7 @@
 			DA000000000000000000D301,
 			DA000000000000000000E501,
 			DA000000000000000000F301,
+			DA000000000000000000F50F,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
 		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
@@ -219,6 +220,13 @@
 			DA000000000000000000E402,
 			DA000000000000000000F102,
 			DA000000000000000000F202,
+			DA000000000000000000F502,
+			DA000000000000000000F504,
+			DA000000000000000000F506,
+			DA000000000000000000F508,
+			DA000000000000000000F50A,
+			DA000000000000000000F50C,
+			DA000000000000000000F50E,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		6D2652F5D197BA7CCF479CE7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatView.swift; sourceTree = "<group>"; };
 		6E49E94E4D6DA0B155C63BBD = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
@@ -291,6 +299,7 @@
 			DA000000000000000000D302,
 			DA000000000000000000E502,
 			DA000000000000000000F302,
+			DA000000000000000000F510,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
@@ -326,6 +335,7 @@
 			F61BE8AE8EDB3888F3137986,
 			DA000000000000000000006F,
 			DA000000000000000000F201,
+			DA000000000000000000F50D,
 		); name = Views; path = Views; sourceTree = "<group>"; };
 		DA0000000000000000000077 = {isa = PBXGroup; children = (
 			DA0000000000000000000073,
@@ -537,6 +547,12 @@
 			DA000000000000000000E201,
 			DA000000000000000000E301,
 			DA000000000000000000E401,
+			DA000000000000000000F501,
+			DA000000000000000000F503,
+			DA000000000000000000F505,
+			DA000000000000000000F507,
+			DA000000000000000000F509,
+			DA000000000000000000F50B,
 		); name = Brain; path = Brain; sourceTree = "<group>"; };
 		DA000000000000000000003D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekStreamParser.swift; sourceTree = "<group>"; };
 		DA000000000000000000003E = {isa = PBXBuildFile; fileRef = DA000000000000000000003D; };
@@ -588,6 +604,22 @@
 		DA000000000000000000006C = {isa = PBXBuildFile; fileRef = DA000000000000000000006B; };
 		DA000000000000000000006D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainBootstrap.swift; sourceTree = "<group>"; };
 		DA000000000000000000006E = {isa = PBXBuildFile; fileRef = DA000000000000000000006D; };
+		DA000000000000000000F501 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCodeConfig.swift; sourceTree = "<group>"; };
+		DA000000000000000000F502 = {isa = PBXBuildFile; fileRef = DA000000000000000000F501; };
+		DA000000000000000000F503 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthPkce.swift; sourceTree = "<group>"; };
+		DA000000000000000000F504 = {isa = PBXBuildFile; fileRef = DA000000000000000000F503; };
+		DA000000000000000000F505 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCodeEngine.swift; sourceTree = "<group>"; };
+		DA000000000000000000F506 = {isa = PBXBuildFile; fileRef = DA000000000000000000F505; };
+		DA000000000000000000F507 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCodeManager.swift; sourceTree = "<group>"; };
+		DA000000000000000000F508 = {isa = PBXBuildFile; fileRef = DA000000000000000000F507; };
+		DA000000000000000000F509 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCodeBrainAdapter.swift; sourceTree = "<group>"; };
+		DA000000000000000000F50A = {isa = PBXBuildFile; fileRef = DA000000000000000000F509; };
+		DA000000000000000000F50B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginOnlyBrainAdapter.swift; sourceTree = "<group>"; };
+		DA000000000000000000F50C = {isa = PBXBuildFile; fileRef = DA000000000000000000F50B; };
+		DA000000000000000000F50D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCodeLoginView.swift; sourceTree = "<group>"; };
+		DA000000000000000000F50E = {isa = PBXBuildFile; fileRef = DA000000000000000000F50D; };
+		DA000000000000000000F50F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCodeLoginTests.swift; sourceTree = "<group>"; };
+		DA000000000000000000F510 = {isa = PBXBuildFile; fileRef = DA000000000000000000F50F; };
 		DA000000000000000000006F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainSettingsView.swift; sourceTree = "<group>"; };
 		DA0000000000000000000070 = {isa = PBXBuildFile; fileRef = DA000000000000000000006F; };
 		DA0000000000000000000071 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainBootstrapTests.swift; sourceTree = "<group>"; };
