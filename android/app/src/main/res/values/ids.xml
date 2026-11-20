@@ -1,17 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 对话组件收敛（2026-11-20）：单聊输入区的控件已改由
-         ChatComposerView 与 MainActivity 代码创建（原先声明在
-         screen_chat.xml 的 inputBox 块里，随 A4 接入组件时移除）。
-         下列 id 均为既有契约标识——MainActivity 的接线与
-         MainLayoutTest / ChatComposerViewTest 都按 R.id 查找——
-         在此集中声明，保证 R 类生成、findViewById 口径不变。 -->
-    <item name="contextPill" type="id" />
+    <!-- 对话组件收敛（2026-11-20）：下列 id 属于代码创建的视图
+         （ChatComposerView 内建的输入框 / 下层行 / 发送钮），不在
+         任何布局里声明；它们是既有契约标识——MainActivity 的
+         接线与 MainLayoutTest / ChatComposerViewTest 都按 R.id
+         查找——在此集中声明，保证 R 类生成、findViewById 口径
+         不变。页面外壳控件（contextPill、buttonPlus、
+         buttonAgentSelect、brainCapsule、buttonTaskMark）的 id
+         仍在 screen_chat.xml 里声明，不在此列。 -->
     <item name="inputPrompt" type="id" />
     <item name="inputLowerRow" type="id" />
-    <item name="buttonPlus" type="id" />
-    <item name="buttonAgentSelect" type="id" />
-    <item name="brainCapsule" type="id" />
-    <item name="buttonTaskMark" type="id" />
     <item name="buttonSend" type="id" />
 </resources>
