@@ -302,6 +302,7 @@ import wherevercode.agent.ui.ChatAttachment
 import wherevercode.agent.ui.ChatAttachmentKind
 import wherevercode.agent.ui.ChatAttachments
 import wherevercode.agent.ui.ConsoleScreenController
+import wherevercode.agent.ui.ChatComposerView
 import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.TeamChannelController
 import wherevercode.agent.ui.TeamChannelSnapshot
@@ -451,6 +452,8 @@ class MainActivity : AppCompatActivity() {
 
     /** 对话组件收敛：消息列表宿主（与频道页共用 MessageListView）。 */
     private lateinit var chatListHost: MessageListView
+    /** 对话组件收敛：输入区（与频道页共用 ChatComposerView，STACKED）。 */
+    private lateinit var chatComposer: ChatComposerView
     private lateinit var chatScroll: ScrollView
     private lateinit var messageList: LinearLayout
     private lateinit var inputPrompt: EditText
@@ -2182,6 +2185,81 @@ class MainActivity : AppCompatActivity() {
     // Chat
     // ------------------------------------------------------------------
 
+    /**
+     * 对话组件收敛：单聊输入区的页面外壳控件——按原 screen_chat.xml
+     * 的属性逐项建出（id、文案、尺寸、底色不变），注入
+     * [ChatComposerView] 的上层插槽与下层行；bindChat 后续的
+     * findViewById 接线与布局测试都照旧。
+     * + 号开上下文菜单；麦克风不做（V5-UI.md §二原文“可选麦克风”），
+     * 不留假按钮（沿用原 XML 注释口径）。
+     */
+    private fun buildChatComposerShell() {
+        val pill = TextView(this).apply {
+            id = R.id.contextPill
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(32),
+            ).apply {
+                marginStart = dp(4)
+                topMargin = dp(2)
+                bottomMargin = dp(4)
+            }
+            setBackgroundResource(R.drawable.bg_chip_home)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPaddingRelative(dp(10), 0, dp(10), 0)
+            text = "本机 · App 沙盒 ⌄"
+            setTextColor(UiKit.color(this@MainActivity, R.color.home_text))
+            textSize = 12f
+            contentDescription = "当前项目上下文"
+        }
+        chatComposer.topSlot?.addView(pill)
+        val plus = TextView(this).apply {
+            id = R.id.buttonPlus
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+            gravity = android.view.Gravity.CENTER
+            text = "＋"
+            setTextColor(UiKit.color(this@MainActivity, R.color.home_text_secondary))
+            textSize = 18f
+            setBackgroundResource(R.drawable.bg_chip_home)
+            contentDescription = "更多操作"
+        }
+        chatComposer.addLeadingControl(plus)
+        val agentSelect = TextView(this).apply {
+            id = R.id.buttonAgentSelect
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(36),
+            ).apply { marginStart = dp(6) }
+            setBackgroundResource(R.drawable.bg_chip_home)
+            gravity = android.view.Gravity.CENTER
+            setPaddingRelative(dp(10), 0, dp(10), 0)
+            text = "选择对话方 ⌄"
+            setTextColor(UiKit.color(this@MainActivity, R.color.home_text))
+            textSize = 12f
+            maxWidth = dp(200)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            contentDescription = "选择对话方"
+        }
+        chatComposer.addLeadingControl(agentSelect)
+        val brain = TextView(this).apply {
+            id = R.id.brainCapsule
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(36),
+            )
+            text = "未连接"
+            visibility = View.GONE
+        }
+        chatComposer.addLeadingControl(brain)
+        val taskMark = TextView(this).apply {
+            id = R.id.buttonTaskMark
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(36),
+            )
+            text = "任务"
+            visibility = View.GONE
+        }
+        chatComposer.addLeadingControl(taskMark)
+    }
+
     private fun bindChat() {
         chatListHost = screenChat.findViewById(R.id.messageListHost)
         // 内层视图改走宿主真实存在的公开属性：R.id.chatScroll /
@@ -2196,6 +2274,10 @@ class MainActivity : AppCompatActivity() {
         chatScroll.isVerticalScrollBarEnabled = false
         chatScroll.isHorizontalScrollBarEnabled = false
         messageList.setPadding(dp(14), dp(4), dp(14), dp(16))
+        // 对话组件收敛：输入区骨架由 ChatComposerView 承载，外壳控件
+        // 在这里建出并注入插槽（须在下面 findViewById 接线之前）。
+        chatComposer = screenChat.findViewById(R.id.inputBox)
+        buildChatComposerShell()
         inputPrompt = screenChat.findViewById(R.id.inputPrompt)
         approvalBanner = screenChat.findViewById(R.id.approvalBanner)
         chatRouteBanner = screenChat.findViewById(R.id.chatRouteBanner)
@@ -2303,8 +2385,8 @@ class MainActivity : AppCompatActivity() {
         if (!::buttonSend.isInitialized) return
         // V5 按主流改：有待发附件时即使输入框为空也可以发送（只发一张图也行）。
         val canSend = homeScreenController.canSend(allowEmptyText = pendingAttachments.isNotEmpty())
-        buttonSend.isEnabled = canSend
-        buttonSend.alpha = if (canSend) 1f else 0.4f
+        // 对话组件收敛：发送状态呈现走共用输入区组件（enabled + alpha）。
+        chatComposer.setSendEnabled(canSend)
     }
 
     /** V5-UI：+ 号菜单是底部抽屉“添加到对话”（Claude 参照），只放真实可用的操作。 */
