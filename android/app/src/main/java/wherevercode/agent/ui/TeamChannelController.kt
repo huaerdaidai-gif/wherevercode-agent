@@ -108,6 +108,16 @@ class TeamChannelController(
     private val connectionLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val noticeLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
+    /** 发送方式说明行（对话框铬的一部分）：未配时随整套铬一起藏掉。 */
+    private val explanationLine: TextView = UiKit.text(
+        context,
+        "仅讨论会发送频道消息；作为任务发送会打开创建表单，确认后进入任务列表。",
+        11f,
+        R.color.text_tertiary,
+    ).apply { setPadding(dp(16), 0, dp(16), dp(6)) }
+    /** 重连/刷新行与底部输入栏（对话框铬）：未配时藏掉，配好后回来。 */
+    private lateinit var connectionActions: LinearLayout
+    private lateinit var inputBar: LinearLayout
     private val diagnosticToggle: TextView = UiKit.text(context, "查看连接诊断", 10f, R.color.accent).apply {
         visibility = View.GONE
         setPadding(dp(16), 0, dp(16), dp(3))
@@ -161,17 +171,10 @@ class TeamChannelController(
             },
         )
         root.addView(titleRow)
-        root.addView(
-            UiKit.text(
-                context,
-                "仅讨论会发送频道消息；作为任务发送会打开创建表单，确认后进入任务列表。",
-                11f,
-                R.color.text_tertiary,
-            ).apply { setPadding(dp(16), 0, dp(16), dp(6)) },
-        )
+        root.addView(explanationLine)
         connectionLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(connectionLine)
-        val connectionActions = UiKit.horizontal(context).apply {
+        connectionActions = UiKit.horizontal(context).apply {
             setPadding(dp(16), 0, dp(16), dp(2))
         }
         connectionActions.addView(
@@ -202,7 +205,27 @@ class TeamChannelController(
         scrollView.addView(content)
         content.addView(bodyContainer)
         root.addView(scrollView)
-        root.addView(buildInputBar())
+        inputBar = buildInputBar()
+        root.addView(inputBar)
+    }
+
+    /**
+     * 对话框铬（照片走查批 D）：发送方式说明、连接状态行、重连/刷新、
+     * 诊断、轮次、提示、底部输入栏。未配时整套藏掉，只留页头与引导
+     * （与 iOS 未配 Token 视图同构）；配好后整套回来。诊断行平时藏
+     * 着，点「查看连接诊断」才展开（与原有行为一致）。
+     */
+    private fun setDialogChromeVisible(visible: Boolean, hasDiagnostic: Boolean) {
+        val v = if (visible) View.VISIBLE else View.GONE
+        explanationLine.visibility = v
+        connectionLine.visibility = v
+        connectionActions.visibility = v
+        diagnosticToggle.visibility =
+            if (!visible) View.GONE else if (hasDiagnostic) View.VISIBLE else View.GONE
+        diagnosticLine.visibility = View.GONE
+        roundLine.visibility = v
+        noticeLine.visibility = v
+        inputBar.visibility = v
     }
 
     private fun buildInputBar(): LinearLayout {
@@ -324,8 +347,6 @@ class TeamChannelController(
                     if (certificateFailure) " · 证书验证失败，安全连接未建立" else ""
             ChannelConnectionState.STOPPED -> "○ 频道未连接"
         }
-        diagnosticToggle.visibility = if (diagnostic == null) View.GONE else View.VISIBLE
-        diagnosticLine.visibility = View.GONE
         diagnosticLine.text = diagnostic.orEmpty()
         diagnosticToggle.text = "查看连接诊断"
         roundLine.text = if (snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS) {
@@ -336,11 +357,15 @@ class TeamChannelController(
         noticeLine.text = snapshot.notice.orEmpty()
         bodyContainer.removeAllViews()
         if (!snapshot.configured) {
+            // 照片走查批 D：未配时只留页头与引导，对话框铬整套藏掉
+            // （与 iOS 未配 Token 视图同构）；引导文案与 iOS 同文。
+            setDialogChromeVisible(false, diagnostic != null)
             bodyContainer.addView(note(snapshot.setupHint))
             bodyContainer.addView(
-                UiKit.text(context, "前往 Agent 管理", 12f, R.color.accent, bold = true).apply {
-                    setBackgroundResource(R.drawable.bg_chip_accent)
-                    setPadding(dp(14), dp(8), dp(14), dp(8))
+                // 黑胶囊钮，对 iOS 黑色「前往 Agent 管理」钮（原为浅色 chip）。
+                UiKit.text(context, "前往 Agent 管理", 12f, R.color.on_accent, bold = true).apply {
+                    setBackgroundResource(R.drawable.bg_pill_dark)
+                    setPadding(dp(16), dp(8), dp(16), dp(8))
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -371,6 +396,8 @@ class TeamChannelController(
         }
         bodyContainer.addView(newRoundRow())
         bodyContainer.addView(fanoutSection(snapshot))
+        // 配好后对话框铬整套回来（含诊断钮按有无诊断显隐）。
+        setDialogChromeVisible(true, diagnostic != null)
     }
 
     private fun membersRow(snapshot: TeamChannelSnapshot): LinearLayout {
