@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -178,116 +179,21 @@
         android:paddingTop="4dp"
         android:paddingBottom="6dp">
 
-        <LinearLayout
+        <!-- 对话组件收敛（2026-11-20）：输入区骨架与频道页共用
+             ChatComposerView（STACKED 排布：输入框 + 下层控制行 +
+             发送钮由组件内建，沿用 inputPrompt / inputLowerRow /
+             buttonSend id）；页面外壳控件（contextPill / buttonPlus /
+             buttonAgentSelect / brainCapsule / buttonTaskMark）改由
+             MainActivity.buildChatComposerShell 按原 XML 属性建出后
+             注入组件插槽，id、文案、尺寸不变。 -->
+        <wherevercode.agent.ui.ChatComposerView
             android:id="@+id/inputBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:background="@drawable/bg_input_home"
-            android:padding="4dp">
-
-            <TextView
-                android:id="@+id/contextPill"
-                android:layout_width="wrap_content"
-                android:layout_height="32dp"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/bg_chip_home"
-                android:gravity="center_vertical"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:text="本机 · App 沙盒 ⌄"
-                android:textColor="@color/home_text"
-                android:textSize="12sp"
-                android:contentDescription="当前项目上下文" />
-
-            <EditText
-                android:id="@+id/inputPrompt"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@null"
-                android:hint="向 Agent 提问或分派任务"
-                android:imeOptions="actionSend"
-                android:inputType="textMultiLine|textCapSentences"
-                android:maxLines="5"
-                android:minHeight="36dp"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp"
-                android:paddingTop="7dp"
-                android:paddingBottom="7dp"
-                android:textColor="@color/home_text"
-                android:textColorHint="@color/home_text_secondary"
-                android:textSize="14sp" />
-
-            <LinearLayout
-                android:id="@+id/inputLowerRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingTop="4dp">
-
-                <!-- V5 Phase B C2 (batch 2): + 号开上下文菜单；麦克风不做
-                     （V5-UI.md §二原文“可选麦克风”），不留假按钮。 -->
-                <TextView
-                    android:id="@+id/buttonPlus"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    android:gravity="center"
-                    android:text="＋"
-                    android:textColor="@color/home_text_secondary"
-                    android:textSize="18sp"
-                    android:background="@drawable/bg_chip_home"
-                    android:contentDescription="更多操作" />
-
-                <TextView
-                    android:id="@+id/buttonAgentSelect"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_chip_home"
-                    android:gravity="center"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
-                    android:text="选择对话方 ⌄"
-                    android:textColor="@color/home_text"
-                    android:textSize="12sp"
-                    android:maxWidth="200dp"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:contentDescription="选择对话方" />
-
-                <TextView
-                    android:id="@+id/brainCapsule"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="未连接"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/buttonTaskMark"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="任务"
-                    android:visibility="gone" />
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <ImageView
-                    android:id="@+id/buttonSend"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_send_home"
-                    android:padding="8dp"
-                    android:src="@drawable/ic_send"
-                    android:contentDescription="发送" />
-            </LinearLayout>
-        </LinearLayout>
+            android:padding="4dp"
+            app:composerArrangement="stacked" />
 
         <!-- V5 聊天清理 20261111：底部常驻小字已删（“同一时刻只跑一轮 ·
              写文件/命令执行前会弹审批”）——审批提示只在真正要审批时弹，
