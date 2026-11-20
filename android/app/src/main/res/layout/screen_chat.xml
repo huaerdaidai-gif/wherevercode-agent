@@ -133,8 +133,9 @@
         android:layout_weight="1">
 
         <!-- 对话组件收敛（2026-11-20）：消息列表宿主与频道页共用
-             MessageListView；内层 ScrollView / LinearLayout 沿用
-             chatScroll / messageList id（组件从 XML 充气时设置），
+             MessageListView；内层 ScrollView / LinearLayout 不再挂
+             chatScroll / messageList id（布局里无此声明），
+             MainActivity 改走宿主的 scrollView / content 属性；
              原 XML 呈现（无滚动条、clipToPadding=false、内容
              padding 14/4/14/16）改由 MainActivity.bindChat 配置。 -->
         <wherevercode.agent.ui.MessageListView

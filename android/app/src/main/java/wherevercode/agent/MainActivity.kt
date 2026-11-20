@@ -2252,8 +2252,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindChat() {
         chatListHost = screenChat.findViewById(R.id.messageListHost)
-        chatScroll = screenChat.findViewById(R.id.chatScroll)
-        messageList = screenChat.findViewById(R.id.messageList)
+        // 内层视图改走宿主真实存在的公开属性：R.id.chatScroll /
+        // R.id.messageList 在布局里已无声明，findViewById 查不到
+        // （A3 曾在此引用导致编译失败，见 run 记录）。
+        chatScroll = chatListHost.scrollView
+        messageList = chatListHost.content
         // 对话组件收敛：列表呈现从 screen_chat.xml 挪到这里配置，
         // 与原 XML 逐项一致（无滚动条、clipToPadding=false、内容
         // padding 14/4/14/16）。
