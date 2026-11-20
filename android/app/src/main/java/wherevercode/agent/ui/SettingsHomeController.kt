@@ -125,7 +125,11 @@ class SettingsHomeController(
             group.rows.forEach { row -> cardRows.addView(rowView(row)) }
             root.addView(cardRows)
         }
-        render()
+        // 注意：这里不调 render()。platformStatus() 会读 Keystore 凭证，
+        // 而 MainActivity 启动期（inflateScreens）Robolectric 下 AndroidKeyStore
+        // 尚不可用——构造时现取会让 10 个与设置无关的启动测试在 create() 里
+        // 同错 KeyStoreException。状态只在进设置首页时由 showSettingsHome()
+        // 经 render() 现取，首页根布局初始即 GONE，用户看不到空文案。
     }
 
     /** 每次进首页时刷新平台状态文案（现取，不缓存）。 */

@@ -66,6 +66,7 @@ class SettingsHomeControllerTest {
     @Test
     fun `home renders the three sections and the platform status`() {
         val c = controller(Recorder(), status = "平台已配置（凭证已存本机）")
+        c.render() // 生产里由 showSettingsHome() 在进设置时调；构造时不再现取状态
         val texts = allTexts(c.root)
         assertTrue(texts.any { it == "设置" })
         assertTrue(texts.any { it == "平台账户" })
