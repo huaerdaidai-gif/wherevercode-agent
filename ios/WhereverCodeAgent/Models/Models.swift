@@ -516,6 +516,30 @@ public enum ChannelExtras {
     public static func dueScheduled(_ items: [ScheduledChannelPost], nowSeconds: Double) -> [ScheduledChannelPost] {
         items.filter { $0.dueAtSeconds <= nowSeconds }.sorted { $0.dueAtSeconds < $1.dueAtSeconds }
     }
+
+    /// Effective unread count considering per-channel notification mode (phase-3 orphan).
+    public static func effectiveUnreadCount(
+        unreadCount: Int,
+        unreadMentionCount: Int,
+        notifyMode: String
+    ) -> Int {
+        switch notifyMode {
+        case "静音", "免打扰":
+            return 0
+        case "仅@我":
+            return unreadMentionCount
+        default:
+            return unreadCount
+        }
+    }
+
+    /// Safe markdown rendering with foolproof plain-text fallback (phase-3 orphan).
+    public static func safeMarkdownAttributedString(_ text: String) -> AttributedString {
+        if let attr = try? AttributedString(markdown: text, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            return attr
+        }
+        return AttributedString(text)
+    }
 }
 
 /// Message-center aggregate (phase-3).
@@ -552,5 +576,129 @@ public struct ScheduledChannelPost: Identifiable, Equatable, Codable, Sendable {
         self.effectKey = effectKey
         self.attachmentRef = attachmentRef
         self.replyToId = replyToId
+    }
+}
+
+/// Channel notification level (phase-3 orphan align).
+public enum ChannelNotifyMode: String, CaseIterable, Sendable {
+    case all = "全部消息"
+    case mentionsOnly = "仅@我"
+    case muted = "静音"
+
+    public var prompt: String {
+        switch self {
+        case .all: return "接收所有新消息通知与未读计数"
+        case .mentionsOnly: return "仅接收提及我的消息通知与未读提醒"
+        case .muted: return "不接收通知，不计入未读提醒"
+        }
+    }
+}
+
+/// Team thread model (phase-3 orphan align, dual-client unified).
+public struct TeamThread: Identifiable, Equatable, Hashable, Sendable {
+    public var id: String { rootMessageId ?? taskId ?? "general" }
+    public let taskId: String?
+    public let taskTitle: String?
+    public let rootMessageId: String?
+    public let topicTitle: String?
+    public let messages: [ChannelMessage]
+
+    public init(
+        taskId: String? = nil,
+        taskTitle: String? = nil,
+        rootMessageId: String? = nil,
+        topicTitle: String? = nil,
+        messages: [ChannelMessage] = []
+    ) {
+        self.taskId = taskId
+        self.taskTitle = taskTitle
+        self.rootMessageId = rootMessageId
+        self.topicTitle = topicTitle
+        self.messages = messages
+    }
+
+    public var isTopicThread: Bool {
+        rootMessageId != nil
+    }
+}
+
+public func groupTopicThreads(messages: [ChannelMessage]) -> [TeamThread] {
+    if messages.isEmpty { return [] }
+    let msgMap = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+    var rootIds: [String] = []
+    for m in messages {
+        guard let replyId = m.replyTo, !replyId.isEmpty, msgMap[replyId] != nil else { continue }
+        var curr: String? = replyId
+        var depth = 0
+        while let c = curr, depth < 20 {
+            if let parent = msgMap[c], let pReply = parent.replyTo, !pReply.isEmpty, msgMap[pReply] != nil, pReply != c {
+                curr = pReply
+                depth += 1
+            } else {
+                break
+            }
+        }
+        if let root = curr, !rootIds.contains(root) {
+            rootIds.append(root)
+        }
+    }
+
+    var threads: [TeamThread] = []
+    for rootId in rootIds {
+        guard let rootMsg = msgMap[rootId] else { continue }
+        var threadMsgs: [ChannelMessage] = [rootMsg]
+        for m in messages {
+            if m.id == rootId { continue }
+            var p = m.replyTo
+            var depth = 0
+            while let currentP = p, currentP != rootId, depth < 20 {
+                p = msgMap[currentP]?.replyTo
+                depth += 1
+            }
+            if p == rootId {
+                threadMsgs.append(m)
+            }
+        }
+        let sorted = threadMsgs.sorted { $0.createdAtSeconds < $1.createdAtSeconds }
+        let title = String(rootMsg.text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(30))
+            .replacingOccurrences(of: "\n", with: " ")
+        threads.append(
+            TeamThread(
+                taskId = nil,
+                taskTitle = nil,
+                rootMessageId = rootId,
+                topicTitle: title.isEmpty ? "话题讨论" : title,
+                messages: sorted
+            )
+        )
+    }
+    return threads.sorted { ($0.messages.last?.createdAtSeconds ?? 0) > ($1.messages.last?.createdAtSeconds ?? 0) }
+}
+
+public func teamThreadTitle(thread: TeamThread) -> String {
+    if let topic = thread.topicTitle, !topic.isEmpty {
+        return "话题 · \(topic)"
+    }
+    if let taskId = thread.taskId, !taskId.isEmpty {
+        if let title = thread.taskTitle, !title.isEmpty {
+            return "任务 \(String(taskId.prefix(8))) · \(title)"
+        }
+        return "任务 \(String(taskId.prefix(8)))"
+    }
+    return "综合讨论"
+}
+
+/// Typing signaling event frame (zero token, no model call).
+public struct ChannelTypingEvent: Equatable, Sendable {
+    public let channelId: String
+    public let senderId: String
+    public let senderName: String
+    public let isTyping: Bool
+
+    public init(channelId: String, senderId: String, senderName: String, isTyping: Bool = true) {
+        self.channelId = channelId
+        self.senderId = senderId
+        self.senderName = senderName
+        self.isTyping = isTyping
     }
 }

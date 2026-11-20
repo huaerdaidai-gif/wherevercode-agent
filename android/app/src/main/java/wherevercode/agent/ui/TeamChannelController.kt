@@ -70,6 +70,10 @@ data class TeamChannelSnapshot(
     /** 频道内搜索词（非空且 searchResults 非 null 时列表显示搜索结果）。 */
     val searchQuery: String = "",
     val searchResults: List<PlatformChannelMessage>? = null,
+    /** 输入中信令提示：正在输入成员名称（零 token，频道孤儿项补全）。 */
+    val typingSenderName: String? = null,
+    /** 当前激活的自由话题根消息 id（非空时仅聚焦该话题串，频道孤儿项补全）。 */
+    val activeTopicThreadRootId: String? = null,
 )
 
 /**
@@ -130,6 +134,7 @@ class TeamChannelController(
     private val onClearSearch: () -> Unit = {},
     private val onOpenAttachmentRef: (String) -> Unit = {},
     private val onRequestAttachmentRef: () -> Unit = {},
+    private val onSelectTopicThread: (rootMessageId: String?) -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -208,6 +213,11 @@ class TeamChannelController(
         setOnClickListener { clearReply() }
     }
 
+    private val typingBanner: TextView = UiKit.text(context, "", 11f, R.color.text_secondary).apply {
+        visibility = View.GONE
+        setPadding(dp(16), 0, dp(16), dp(2))
+    }
+
     private val searchInput: EditText = EditText(context).apply {
         hint = "搜本频道消息…"
         inputType = InputType.TYPE_CLASS_TEXT
@@ -219,6 +229,9 @@ class TeamChannelController(
     private fun clearReply() {
         replyingTo = null
         replyBanner.visibility = View.GONE
+        if (snapshot?.activeTopicThreadRootId != null) {
+            onSelectTopicThread(null)
+        }
     }
 
     /** 调用方（附件引用输入框）回填待发附件引用。 */
@@ -289,6 +302,7 @@ class TeamChannelController(
         root.addView(noticeLine)
         root.addView(replyBanner)
         root.addView(messageListView)
+        root.addView(typingBanner)
         inputBar = buildInputBar()
         root.addView(inputBar)
     }
@@ -478,6 +492,12 @@ class TeamChannelController(
             "第 ${snapshot.roundsUsed + 1}/${TeamChatLimits.MAX_ROUNDS} 轮"
         }
         noticeLine.text = snapshot.notice.orEmpty()
+        if (snapshot.typingSenderName != null) {
+            typingBanner.text = "${snapshot.typingSenderName} 正在输入…"
+            typingBanner.visibility = View.VISIBLE
+        } else {
+            typingBanner.visibility = View.GONE
+        }
         bodyContainer.removeAllViews()
         if (!snapshot.configured) {
             // 照片走查批 D：未配时只留页头与引导，对话框铬整套藏掉
@@ -539,6 +559,32 @@ class TeamChannelController(
             }
         } else if (snapshot.messages.isEmpty()) {
             bodyContainer.addView(note("频道里暂无消息。发一条“在吗”，看看谁回。"))
+        } else if (snapshot.activeTopicThreadRootId != null) {
+            val allViews = snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) }
+            val activeRootId = snapshot.activeTopicThreadRootId
+            val topicThreads = groupTopicThreads(allViews)
+            val activeThread = topicThreads.firstOrNull { it.rootMessageId == activeRootId }
+            val bannerTitle = activeThread?.let { teamThreadTitle(it) } ?: "话题讨论"
+            val threadHeader = UiKit.horizontal(context).apply {
+                setPadding(dp(16), dp(8), dp(16), dp(8))
+                addView(
+                    UiKit.text(context, "当前话题：$bannerTitle（点此返回全部）", 12f, R.color.accent, bold = true).apply {
+                        setOnClickListener { onSelectTopicThread(null) }
+                    },
+                )
+            }
+            bodyContainer.addView(threadHeader)
+            val msgs = activeThread?.messages ?: allViews.filter { it.messageId == activeRootId || it.replyToId == activeRootId }
+            msgs.forEach { view ->
+                val raw = snapshot.messages.firstOrNull { it.id == view.messageId }
+                bodyContainer.addView(
+                    messageRow(
+                        view,
+                        raw?.let { ChannelExtras.replyQuote(snapshot.messages, it) },
+                        isOwn = view.senderId in snapshot.selfAgentIds,
+                    ),
+                )
+            }
         } else {
             // 2026-11-12 团队对话分串：消息按任务成组/成串，一个任务
             // 的讨论不混进另一个任务里；每条带发送者 + 任务归属。
@@ -749,6 +795,20 @@ class TeamChannelController(
                 setOnClickListener { onSearch(searchInput.text.toString().trim()) }
             },
         )
+        val topicCount = groupTopicThreads(
+            snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) }
+        ).size
+        row.addView(
+            UiKit.text(context, if (topicCount > 0) "话题($topicCount)" else "话题", 12f, R.color.accent, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip_accent)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { leftMargin = dp(6) }
+                setOnClickListener { showTopicThreadsDialog(snapshot) }
+            },
+        )
         if (snapshot.searchResults != null) {
             row.addView(
                 UiKit.text(context, "清除", 12f, R.color.text_secondary).apply {
@@ -761,6 +821,30 @@ class TeamChannelController(
             )
         }
         return row
+    }
+
+    private fun showTopicThreadsDialog(snapshot: TeamChannelSnapshot) {
+        val allViews = snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) }
+        val topicThreads = groupTopicThreads(allViews)
+        if (topicThreads.isEmpty()) {
+            noticeLine.text = "当前频道暂无自由话题。点击任意消息下的「话题」即可发起。"
+            return
+        }
+        val titles = topicThreads.map { thread ->
+            val title = thread.topicTitle ?: "话题讨论"
+            val count = thread.messages.size
+            "话题 · $title ($count 条)"
+        }
+        ListDialog.show(context, "频道自由话题列表", "选择话题进入串内讨论：", titles) { which ->
+            val chosen = topicThreads.getOrNull(which) ?: return@show
+            onSelectTopicThread(chosen.rootMessageId)
+            val root = chosen.messages.firstOrNull()
+            if (root != null) {
+                replyingTo = root
+                replyBanner.text = "正在话题回复 ${root.senderName}：${root.text.take(30)}（点此退出话题）"
+                replyBanner.visibility = View.VISIBLE
+            }
+        }
     }
 
     /** 消息中心（聚合 @我 与未读；点条目不跳转，只呈现，频道补全三期）。 */
@@ -869,7 +953,14 @@ class TeamChannelController(
         message.forwardOf?.takeIf { it.isNotBlank() }?.let {
             col.addView(UiKit.text(context, "转发自 $it", 10f, R.color.text_tertiary))
         }
-        col.addView(UiKit.text(context, message.text, 13f, R.color.text_primary))
+        val rendered = ChannelMarkdownRenderer.render(message.text)
+        val msgTv = UiKit.text(context, "", 13f, R.color.text_primary).apply {
+            text = rendered
+            if (message.text.contains("http://") || message.text.contains("https://")) {
+                movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            }
+        }
+        col.addView(msgTv)
         message.attachmentRef?.takeIf { it.isNotBlank() }?.let { ref ->
             col.addView(
                 UiKit.text(context, "附件：$ref", 11f, R.color.accent).apply {
@@ -907,6 +998,12 @@ class TeamChannelController(
             actions.addView(actionChip("回复") {
                 replyingTo = message
                 replyBanner.text = "正在回复 ${message.senderName}：${message.text.take(30)}（点此取消）"
+                replyBanner.visibility = View.VISIBLE
+            })
+            actions.addView(actionChip("话题") {
+                onSelectTopicThread(message.messageId)
+                replyingTo = message
+                replyBanner.text = "正在话题回复 ${message.senderName}：${message.text.take(30)}（点此退出话题）"
                 replyBanner.visibility = View.VISIBLE
             })
             actions.addView(actionChip(if (message.pinned) "取消置顶" else "置顶") {

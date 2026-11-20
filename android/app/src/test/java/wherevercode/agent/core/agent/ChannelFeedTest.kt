@@ -263,6 +263,23 @@ class ChannelFeedTest {
         assertEquals(listOf("hello"), transport.posted)
         assertEquals("m-posted-1", transport.messages.single().id)
     }
+
+    @Test
+    fun `parseChannelTypingWsEvent parses typing signals and ignores other types`() {
+        val valid = """{"type":"typing","channel_id":"ch-test","sender_id":"agent-codex","sender_name":"Codex","is_typing":true}"""
+        val event = parseChannelTypingWsEvent(valid)
+        org.junit.Assert.assertNotNull(event)
+        assertEquals("ch-test", event?.channelId)
+        assertEquals("agent-codex", event?.senderId)
+        assertEquals("Codex", event?.senderName)
+        assertTrue(event?.isTyping == true)
+
+        val nonTyping = """{"type":"message","message":{"id":"m1"}}"""
+        org.junit.Assert.assertNull(parseChannelTypingWsEvent(nonTyping))
+
+        val invalidJson = "not json"
+        org.junit.Assert.assertNull(parseChannelTypingWsEvent(invalidJson))
+    }
 }
 
 /** 测试里用的频道消息构造器（FakeTransport 与测试方法共用，顶层函数）。 */

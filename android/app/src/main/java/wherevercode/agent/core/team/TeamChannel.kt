@@ -264,12 +264,17 @@ data class TeamThreadMessage(
     val forwardOf: String? = null,
 )
 
-/** 一个任务的讨论串：同一任务的消息成组，串内按时间排。 */
+/** 一个任务或自由话题的讨论串：同一任务或话题的消息成组，串内按时间排。 */
 data class TeamThread(
-    val taskId: String?,
-    val taskTitle: String?,
-    val messages: List<TeamThreadMessage>,
-)
+    val taskId: String? = null,
+    val taskTitle: String? = null,
+    val rootMessageId: String? = null,
+    val topicTitle: String? = null,
+    val messages: List<TeamThreadMessage> = emptyList(),
+) {
+    val isTopicThread: Boolean
+        get() = rootMessageId != null
+}
 
 /** 归属头解析结果：发送者 + 任务（短 id）+ 标题；无头返回 null。 */
 data class TeamAttribution(
@@ -354,12 +359,74 @@ fun groupTeamMessages(messages: List<TeamThreadMessage>): List<TeamThread> {
     return threads.sortedBy { it.messages.firstOrNull()?.createdAtSeconds ?: 0.0 }
 }
 
-/** 串头标题：有任务写“任务 <短id> · <标题>”（无标题只写编号），无任务写“综合讨论”。 */
+/** 串头标题：自由话题写“话题 · <标题>”；有任务写“任务 <短id> · <标题>”（无标题只写编号），无任务写“综合讨论”。 */
 fun teamThreadTitle(thread: TeamThread): String {
+    if (thread.rootMessageId != null) {
+        val topic = thread.topicTitle?.trim()?.takeIf { it.isNotBlank() } ?: "话题讨论"
+        return "话题 · $topic"
+    }
     val taskId = thread.taskId
     if (taskId.isNullOrBlank()) return "综合讨论"
     val title = thread.taskTitle?.trim()?.takeIf { it.isNotBlank() }
     return if (title != null) "任务 ${taskId.take(8)} · $title" else "任务 ${taskId.take(8)}"
+}
+
+/**
+ * 自由话题成串（频道孤儿项补全三期）：从任意消息可发起自由话题。
+ * 根消息与其回复链（replyToId 溯源到根消息）聚合成一个自由话题线程。
+ * 返回该频道内的全部自由话题列表，按话题最新回复时间倒序排。
+ */
+fun groupTopicThreads(messages: List<TeamThreadMessage>): List<TeamThread> {
+    if (messages.isEmpty()) return emptyList()
+    val msgMap = messages.associateBy { it.messageId }
+    val rootIds = LinkedHashSet<String>()
+    for (m in messages) {
+        val replyId = m.replyToId
+        if (!replyId.isNullOrBlank() && msgMap.containsKey(replyId)) {
+            var curr: String? = replyId
+            var depth = 0
+            while (curr != null && depth < 20) {
+                val parent = msgMap[curr]
+                if (parent?.replyToId.isNullOrBlank() || parent?.replyToId == curr || !msgMap.containsKey(parent?.replyToId)) {
+                    break
+                }
+                curr = parent.replyToId
+                depth++
+            }
+            if (curr != null) rootIds.add(curr)
+        }
+    }
+
+    val threads = mutableListOf<TeamThread>()
+    for (rootId in rootIds) {
+        val rootMsg = msgMap[rootId] ?: continue
+        val threadMsgs = mutableListOf<TeamThreadMessage>()
+        threadMsgs.add(rootMsg)
+        for (m in messages) {
+            if (m.messageId == rootId) continue
+            var p = m.replyToId
+            var depth = 0
+            while (p != null && p != rootId && depth < 20) {
+                p = msgMap[p]?.replyToId
+                depth++
+            }
+            if (p == rootId) {
+                threadMsgs.add(m)
+            }
+        }
+        val sorted = threadMsgs.distinctBy { it.messageId }.sortedBy { it.createdAtSeconds }
+        val title = rootMsg.text.trim().take(30).replace("\n", " ").ifBlank { "话题讨论" }
+        threads.add(
+            TeamThread(
+                taskId = rootMsg.taskId,
+                taskTitle = rootMsg.taskTitle,
+                rootMessageId = rootId,
+                topicTitle = title,
+                messages = sorted,
+            )
+        )
+    }
+    return threads.sortedByDescending { it.messages.lastOrNull()?.createdAtSeconds ?: 0.0 }
 }
 
 /**

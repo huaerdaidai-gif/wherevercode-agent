@@ -28,6 +28,38 @@ fun parseChannelWsEvent(text: String): PlatformChannelMessage? {
     return parsePlatformChannelMessage(msg)
 }
 
+/** 频道输入中信令事件（零 token，不调模型）。 */
+data class ChannelTypingEvent(
+    val channelId: String,
+    val senderId: String,
+    val senderName: String,
+    val isTyping: Boolean = true,
+)
+
+/**
+ * 解析端点 WS 正在输入信令 JSON。`{"type":"typing", "sender_id":..., "sender_name":...}`
+ * 或带 agent_id/agent_name 的信令帧。其他类型返回 null。
+ */
+fun parseChannelTypingWsEvent(text: String): ChannelTypingEvent? {
+    val obj = try {
+        JSONObject(text)
+    } catch (_: Exception) {
+        return null
+    }
+    if (obj.optString("type") != "typing") return null
+    val senderId = obj.optString("sender_id").ifBlank { obj.optString("agent_id") }
+    if (senderId.isBlank()) return null
+    val senderName = obj.optString("sender_name").ifBlank { obj.optString("agent_name", senderId) }
+    val channelId = obj.optString("channel_id")
+    val isTyping = if (obj.has("is_typing")) obj.optBoolean("is_typing", true) else true
+    return ChannelTypingEvent(
+        channelId = channelId,
+        senderId = senderId,
+        senderName = senderName,
+        isTyping = isTyping,
+    )
+}
+
 /**
  * feed 订阅重绑决策（推送主模式整改，2026-11-20）：WS 订阅绑「当前
  * 打开的频道/私聊」——已订阅频道与正在看的频道不一致（或还没订）
@@ -60,6 +92,7 @@ class ChannelFeed(
     private val onConnectionChange: (ChannelConnectionState, String?) -> Unit = { _, _ -> },
     private val pollIntervalMs: Long = POLL_INTERVAL_MS,
     private val reconnectAfterMs: Long = RECONNECT_AFTER_MS,
+    private val onTyping: (ChannelTypingEvent) -> Unit = {},
 ) {
     @Volatile
     var connectionState: ChannelConnectionState = ChannelConnectionState.STOPPED
@@ -153,6 +186,11 @@ class ChannelFeed(
     private fun onWsText(text: String) {
         if (connectionState != ChannelConnectionState.LIVE) {
             setState(ChannelConnectionState.LIVE, null)
+        }
+        val typing = parseChannelTypingWsEvent(text)
+        if (typing != null) {
+            onTyping(typing)
+            return
         }
         val message = parseChannelWsEvent(text) ?: return
         deliver(listOf(message))
