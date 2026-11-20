@@ -6,7 +6,6 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import wherevercode.agent.R
 
 /**
  * 对话消息列表宿主（对话组件收敛，2026-11-20）：单 Agent 对话页与
@@ -42,12 +41,10 @@ class MessageListView @JvmOverloads constructor(
     }
 
     init {
-        if (attrs != null) {
-            // 从 XML 充气（单聊页 screen_chat.xml）：内层视图沿用既有
-            // id，MainActivity 的 findViewById 接线与布局测试不变。
-            scrollView.id = R.id.chatScroll
-            content.id = R.id.messageList
-        }
+        // 内层视图不再挂 R.id.chatScroll / R.id.messageList：
+        // screen_chat.xml 里已无这两个 id 声明，R 类不会生成它们
+        // （A3 曾在此赋值导致编译失败，见 run 记录）。
+        // 调用方改走本组件真实存在的公开属性 scrollView / content。
         scrollView.addView(content)
         addView(scrollView)
     }
