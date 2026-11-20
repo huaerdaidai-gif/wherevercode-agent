@@ -12,7 +12,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -174,9 +173,9 @@ class ProjectScreenControllerTest {
     fun `projects layout has no big open-folder button and the full iOS import row`() {
         val h = Harness()
         val root = LayoutInflater.from(h.context).inflate(R.layout.screen_projects, null) as ViewGroup
-        // 照片走查批 C：底部大「打开文件夹」按钮与右上角刷新钮都已删掉。
-        assertNull(root.findViewById<View>(R.id.buttonAddProject))
-        assertNull(root.findViewById<View>(R.id.buttonProjectRefresh))
+        // 照片走查批 C：底部大「打开文件夹」按钮已删掉（id 随视图删掉，
+        // 用文案查整树确认无残留）；右上角刷新钮同在布局里删掉。
+        assertFalse(collectText(root).contains("打开文件夹"))
         val importRow = root.findViewById<LinearLayout>(R.id.projectImportRow)
         val labels = (0 until importRow.childCount).map {
             (importRow.getChildAt(it) as TextView).text.toString()
