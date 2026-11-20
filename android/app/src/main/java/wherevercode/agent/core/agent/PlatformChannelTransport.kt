@@ -30,8 +30,10 @@ data class PlatformChannelMessage(
 
 /**
  * 平台频道调用口（App → WhereverCode 平台 MCP 端点）。
- * 只做两件事：往频道发一条消息、轮询读回消息。不建频道、不派
- * 任务、不碰项目——那是平台后台的事。实现绝不能记令牌日志。
+ * 本接口只做两件事：往频道发一条消息、轮询读回消息。不派任务、
+ * 不碰项目。频道管理（建/改名/归档/删/成员增删）是频道补全一期在
+ * [PlatformChannelMcpTransport] 上另加的方法组，不进本接口——
+ * 平台服务端尚未提供对应工具，见那里的说明。实现绝不能记令牌日志。
  */
 interface PlatformChannelTransport {
     /** 往 [channelId] 发 [text]，返回发出的消息 id（平台不给时返回 ""）。 */
@@ -270,6 +272,60 @@ class PlatformChannelMcpTransport(
         }
         return out
     }
+
+    // ---- 频道管理（频道补全一期）----
+    // 工具名按既有 agent_channel_* 命名惯例。注意：当前平台服务端尚未
+    // 提供这些工具（平台服务端不在本仓），调用会原样抛回平台的真实
+    // 错误（IOException），调用方必须如实呈现，绝不能假装成功；
+    // 服务端补齐这些工具后，本层无需改动即可用。
+
+    /** 新建频道，返回平台给出的频道 JSON（形状由平台决定，含 id 时可读）。 */
+    fun createChannel(name: String): JSONObject = toolsCall(
+        "agent_channel_create",
+        JSONObject().apply { put("name", name) },
+    )
+
+    /** 频道改名。 */
+    fun renameChannel(channelId: String, name: String): JSONObject = toolsCall(
+        "agent_channel_rename",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("name", name)
+        },
+    )
+
+    /** 归档 / 移出归档。 */
+    fun setChannelArchived(channelId: String, archived: Boolean): JSONObject = toolsCall(
+        "agent_channel_set_archived",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("archived", archived)
+        },
+    )
+
+    /** 删除频道（破坏性动作：调用方必须先经用户确认）。 */
+    fun deleteChannel(channelId: String): JSONObject = toolsCall(
+        "agent_channel_delete",
+        JSONObject().apply { put("channel_id", channelId) },
+    )
+
+    /** 邀请一位 Agent 加入频道。 */
+    fun addChannelMember(channelId: String, agentId: String): JSONObject = toolsCall(
+        "agent_channel_add_member",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("agent_id", agentId)
+        },
+    )
+
+    /** 把一位 Agent 移出频道。 */
+    fun removeChannelMember(channelId: String, agentId: String): JSONObject = toolsCall(
+        "agent_channel_remove_member",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("agent_id", agentId)
+        },
+    )
 
     /**
      * 一次通用的 MCP `tools/call`（供平台令牌签发等不走频道消息的

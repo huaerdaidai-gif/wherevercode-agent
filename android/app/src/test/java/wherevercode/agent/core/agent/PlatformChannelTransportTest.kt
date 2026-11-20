@@ -95,6 +95,70 @@ class PlatformChannelTransportTest {
         )
 
     @Test
+    fun `create channel sends the management tool name and name argument`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_create" to envelope("""{"ok":true,"id":"chan-9"}""")),
+        )
+        val result = transport(http).createChannel("项目讨论")
+        assertEquals("chan-9", result.optString("id"))
+        val body = JSONObject(http.calls.single().bodyJson)
+        assertEquals(
+            "agent_channel_create",
+            body.optJSONObject("params")?.optString("name"),
+        )
+        assertEquals(
+            "项目讨论",
+            body.optJSONObject("params")?.optJSONObject("arguments")?.optString("name"),
+        )
+    }
+
+    @Test
+    fun `member add and remove send channel and agent ids`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_add_member" to envelope("""{"ok":true}"""),
+                "agent_channel_remove_member" to envelope("""{"ok":true}"""),
+            ),
+        )
+        val t = transport(http)
+        t.addChannelMember("chan-1", "agent-7")
+        t.removeChannelMember("chan-1", "agent-7")
+        val names = http.calls.map {
+            JSONObject(it.bodyJson).optJSONObject("params")?.optString("name")
+        }
+        assertEquals(listOf("agent_channel_add_member", "agent_channel_remove_member"), names)
+        val args = JSONObject(http.calls[0].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("chan-1", args?.optString("channel_id"))
+        assertEquals("agent-7", args?.optString("agent_id"))
+    }
+
+    @Test
+    fun `rename archive and delete send their tool names`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_rename" to envelope("""{"ok":true}"""),
+                "agent_channel_set_archived" to envelope("""{"ok":true}"""),
+                "agent_channel_delete" to envelope("""{"ok":true}"""),
+            ),
+        )
+        val t = transport(http)
+        t.renameChannel("chan-1", "新名字")
+        t.setChannelArchived("chan-1", true)
+        t.deleteChannel("chan-1")
+        val names = http.calls.map {
+            JSONObject(it.bodyJson).optJSONObject("params")?.optString("name")
+        }
+        assertEquals(
+            listOf("agent_channel_rename", "agent_channel_set_archived", "agent_channel_delete"),
+            names,
+        )
+        val archiveArgs = JSONObject(http.calls[1].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(true, archiveArgs?.optBoolean("archived"))
+    }
+
+    @Test
     fun `post sends channel id and text and returns the posted id`() = runBlocking {
         val http = ScriptedHttp(
             mapOf("agent_channel_post" to envelope("""{"ok":true,"id":"m123"}""")),
