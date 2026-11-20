@@ -1,5 +1,8 @@
 import XCTest
 import CryptoKit
+#if canImport(Darwin)
+import Darwin
+#endif
 @testable import WhereverCodeAgent
 
 final class HandClientTests: XCTestCase {
@@ -742,5 +745,204 @@ final class HandClientTests: XCTestCase {
         let folderFallback = testDev.contains("Android") ? "/data/data/com.termux/files/home" : "/Users/test/v5-codex-work"
         XCTAssertFalse(folderFallback.isEmpty)
         XCTAssertTrue(folderFallback.hasPrefix("/"))
+    }
+
+    // MARK: - V6 P0-1：Hand 超时分离与错误分类
+
+    /// 在 127.0.0.1 随机端口起一次性 TCP 服务端：accept 后执行
+    /// script，script 返回后关闭连接。返回监听端口。
+    private func startLoopbackServer(_ script: @escaping (Int32) -> Void) throws -> Int {
+        let listenFd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard listenFd >= 0 else { throw HandClientError.connectionFailed("测试服务端创建 socket 失败") }
+        var yes: Int32 = 1
+        setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(0)
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let bindRes = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                Darwin.bind(listenFd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindRes == 0, Darwin.listen(listenFd, 1) == 0 else {
+            Darwin.close(listenFd)
+            throw HandClientError.connectionFailed("测试服务端 bind/listen 失败")
+        }
+        var bound = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &bound) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                getsockname(listenFd, sa, &len)
+            }
+        }
+        let port = Int(UInt16(bigEndian: bound.sin_port))
+        DispatchQueue.global(qos: .userInitiated).async {
+            let conn = Darwin.accept(listenFd, nil, nil)
+            if conn >= 0 {
+                script(conn)
+                Darwin.close(conn)
+            }
+            Darwin.close(listenFd)
+        }
+        return port
+    }
+
+    private func sendRawFrame(on fd: Int32, payload: Data) {
+        var lengthBig = UInt32(payload.count).bigEndian
+        var frame = Data(bytes: &lengthBig, count: 4)
+        frame.append(payload)
+        frame.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            var sent = 0
+            while sent < frame.count {
+                let n = Darwin.send(fd, base + sent, frame.count - sent, 0)
+                if n <= 0 { return }
+                sent += n
+            }
+        }
+    }
+
+    // P0-1 场景 1：服务端静默 12 秒后才返回——握手用的 1 秒接收
+    // 超时不得误杀执行等待；延长接收超时后应完整收到结果帧。
+    // 这正是 11108b9a 要修的原始故障（模型思考超过 10 秒被误报断线）。
+    func testReadFrameSucceedsAfterTwelveSecondSilence() throws {
+        let payload = Data("late-agent-result".utf8)
+        let port = try startLoopbackServer { conn in
+            Thread.sleep(forTimeInterval: 12)
+            self.sendRawFrame(on: conn, payload: payload)
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        let sock = PosixTcpSocket()
+        try sock.connect(host: "127.0.0.1", port: port, timeoutSeconds: 1.0)
+        defer { sock.close() }
+        try sock.setReceiveTimeout(seconds: 20)
+        let started = Date()
+        let frame = try sock.readFrame()
+        XCTAssertEqual(frame, payload)
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 11.0)
+    }
+
+    // P0-1 场景 2：服务端保持沉默——接收超时分类为 .timeout
+    //（供上层按阶段再分类），不是连接失败，更不是假成功。
+    func testReadFrameThrowsTimeoutWhenPeerStaysSilent() throws {
+        let port = try startLoopbackServer { _ in
+            Thread.sleep(forTimeInterval: 5)
+        }
+        let sock = PosixTcpSocket()
+        try sock.connect(host: "127.0.0.1", port: port, timeoutSeconds: 5.0)
+        defer { sock.close() }
+        try sock.setReceiveTimeout(seconds: 1.0)
+        let started = Date()
+        XCTAssertThrowsError(try sock.readFrame()) { err in
+            XCTAssertEqual(err as? HandClientError, .timeout)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 4.0)
+    }
+
+    // P0-1 场景 3：服务端主动断线——必须报连接中断，不得伪装
+    // 成超时或成功。
+    func testReadFrameThrowsDisconnectWhenPeerCloses() throws {
+        let port = try startLoopbackServer { _ in
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        let sock = PosixTcpSocket()
+        try sock.connect(host: "127.0.0.1", port: port, timeoutSeconds: 5.0)
+        defer { sock.close() }
+        try sock.setReceiveTimeout(seconds: 10.0)
+        XCTAssertThrowsError(try sock.readFrame()) { err in
+            guard let herr = err as? HandClientError, case .connectionFailed = herr else {
+                XCTFail("断线应分类为 connectionFailed，实际：\(err)")
+                return
+            }
+        }
+    }
+
+    // P0-1 场景 4：非法帧（长度头超过 4MB 上限）——必须拒绝并
+    // 分类为 frameTooLarge，不得当作正常数据。
+    func testReadFrameRejectsIllegalOversizedFrame() throws {
+        let port = try startLoopbackServer { conn in
+            var bogus = UInt32(0x7FFFFFFF).bigEndian
+            let header = Data(bytes: &bogus, count: 4)
+            header.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                _ = Darwin.send(conn, base, header.count, 0)
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        let sock = PosixTcpSocket()
+        try sock.connect(host: "127.0.0.1", port: port, timeoutSeconds: 5.0)
+        defer { sock.close() }
+        XCTAssertThrowsError(try sock.readFrame()) { err in
+            XCTAssertEqual(err as? HandClientError, .frameTooLarge(0x7FFFFFFF))
+        }
+    }
+
+    // P0-1 场景 5：错误分类纯函数——五类错误（握手超时/响应超时/
+    // Agent 超时/连接中断/权限拒绝）文案互不相同且都非空（不冒充
+    // 成功）；服务端 code 映射与 hand_server.py 的 ERR_* 对应。
+    func testHandErrorClassificationMapping() {
+        XCTAssertEqual(HandClientError.resultError(code: "agent_timeout", message: "x"), .agentTimeout)
+        XCTAssertEqual(
+            HandClientError.resultError(code: "cross_device_not_authorized", message: "x"),
+            .permissionDenied(code: "cross_device_not_authorized", message: "x"))
+        XCTAssertEqual(
+            HandClientError.resultError(code: "command_not_allowed", message: "x"),
+            .permissionDenied(code: "command_not_allowed", message: "x"))
+        XCTAssertEqual(
+            HandClientError.resultError(code: "something_else", message: "x"),
+            .serverRejected(code: "something_else", message: "x"))
+        XCTAssertEqual(HandClientError.readTimeout(action: "run"), .agentTimeout)
+        XCTAssertEqual(HandClientError.readTimeout(action: "list"), .responseTimeout)
+
+        let samples: [HandClientError] = [
+            .handshakeTimeout, .responseTimeout, .agentTimeout,
+            .connectionFailed("x"), .permissionDenied(code: "c", message: "x"),
+        ]
+        let descriptions = samples.map { $0.errorDescription ?? "" }
+        XCTAssertEqual(Set(descriptions).count, samples.count)
+        for d in descriptions { XCTAssertFalse(d.isEmpty) }
+    }
+
+    // MARK: - V6 P0-2：聊天/任务分离
+
+    // 三类意图语义与 Android TaskIntentClassifier 一致：
+    // 问候与纯问句是闲聊；明确干活是任务；含动作词的纯问句、
+    // 有请求没活是不明（安全默认按闲聊处理，但要标明）。
+    func testChatIntentClassifierSemantics() {
+        XCTAssertEqual(ChatIntentClassifier.classify("你好"), .chat)
+        XCTAssertEqual(ChatIntentClassifier.classify("在吗"), .chat)
+        XCTAssertEqual(ChatIntentClassifier.classify("你好吗"), .chat)
+        XCTAssertEqual(ChatIntentClassifier.classify("这个项目是做什么的？"), .chat)
+        XCTAssertEqual(ChatIntentClassifier.classify("检查项目"), .task)
+        XCTAssertEqual(ChatIntentClassifier.classify("帮我修复登录页的崩溃"), .task)
+        XCTAssertEqual(ChatIntentClassifier.classify("能不能帮我新建一个文件？"), .task)
+        XCTAssertEqual(ChatIntentClassifier.classify("这个文件是干嘛的？"), .uncertain)
+        XCTAssertEqual(ChatIntentClassifier.classify("帮我看一下"), .uncertain)
+        XCTAssertEqual(ChatIntentClassifier.classify(""), .chat)
+    }
+
+    // 登记决策：「你好」在直连模式下绝不登记任务；任务意图才
+    // 登记；显式标任务永远登记；关直连＝旧行为一律登记（回滚）。
+    func testChatTaskRegistrationDecision() {
+        XCTAssertFalse(ChatIntentClassifier.shouldRegisterTask(intent: .chat, forceTask: false, directMode: true))
+        XCTAssertFalse(ChatIntentClassifier.shouldRegisterTask(intent: .uncertain, forceTask: false, directMode: true))
+        XCTAssertTrue(ChatIntentClassifier.shouldRegisterTask(intent: .task, forceTask: false, directMode: true))
+        XCTAssertTrue(ChatIntentClassifier.shouldRegisterTask(intent: .chat, forceTask: true, directMode: true))
+        XCTAssertTrue(ChatIntentClassifier.shouldRegisterTask(intent: .chat, forceTask: true, directMode: false))
+        XCTAssertTrue(ChatIntentClassifier.shouldRegisterTask(intent: .chat, forceTask: false, directMode: false))
+        XCTAssertTrue(ChatIntentClassifier.shouldRegisterTask(intent: .uncertain, forceTask: false, directMode: false))
+    }
+
+    // chat_direct_mode 开关可持久化读写（默认开由缺省值保证，
+    // 这里验证显式关/开能落盘并读回）。
+    func testChatDirectModePrefPersists() {
+        let prefs = LocalData.shared.chatPrefs
+        let original = prefs.chatDirectMode
+        defer { prefs.chatDirectMode = original }
+        prefs.chatDirectMode = false
+        XCTAssertFalse(LocalData.shared.chatPrefs.chatDirectMode)
+        prefs.chatDirectMode = true
+        XCTAssertTrue(LocalData.shared.chatPrefs.chatDirectMode)
     }
 }
