@@ -24,7 +24,7 @@ private struct RecordedPoll: Equatable {
 /// 桩传输：逐调用记录 pollMessages 参数，锁定已读语义。
 private final class StubTransport: MessageCenterTransport {
     let pages: [String: [Bool: [ChannelMessage]]]
-    private(set) var polls: [RecordedPoll] = []
+    private(set) var recordedPolls: [RecordedPoll] = []
 
     init(pages: [String: [Bool: [ChannelMessage]]]) {
         self.pages = pages
@@ -37,7 +37,7 @@ private final class StubTransport: MessageCenterTransport {
         onlyUnread: Bool,
         markRead: Bool,
     ) async throws -> [ChannelMessage] {
-        polls.append(RecordedPoll(
+        recordedPolls.append(RecordedPoll(
             channelId: channelID,
             afterId: afterID,
             limit: limit,
