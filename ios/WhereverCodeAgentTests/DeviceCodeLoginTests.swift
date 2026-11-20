@@ -315,7 +315,7 @@ final class DeviceCodeLoginTests: XCTestCase {
 
     // MARK: - Login-only adapter
 
-    func testLoginOnlyAdapterRefusesInference() async {
+    func testLoginOnlyAdapterRefusesInference() async throws {
         let adapter = LoginOnlyBrainAdapter(config: VendorOAuthConfigs.gemini)
         XCTAssertEqual(adapter.adapterId, "oauth-gemini")
         XCTAssertFalse(adapter.capabilities().streaming)
