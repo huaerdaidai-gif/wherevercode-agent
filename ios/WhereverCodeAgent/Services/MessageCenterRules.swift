@@ -1,5 +1,10 @@
 import Foundation
 
+// P3-MSG 消息中心聚合规则（iOS 端）。与 Android 端
+// core/message/MessageCenterRules.kt 同口径；读语义（only_unread /
+// markRead=false，绝不推进服务端已读标记）由 MessageCenterTests.swift
+// 的 StubTransport 逐调用锁定，判定规则详见下方法注释。
+
 /// 消息中心三个聚合区。
 public enum MessageCenterSection: String, CaseIterable, Sendable {
     /// @我：正文里以 @<Name> 提及本机身份（平台寻址惯例就是正文前缀）。
