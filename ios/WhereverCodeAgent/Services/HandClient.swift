@@ -121,6 +121,10 @@ public struct DiscoveredPeer: Equatable, Identifiable, Sendable {
 public enum HandClientError: LocalizedError, Equatable {
     case connectionFailed(String)
     case timeout
+    case handshakeTimeout
+    case responseTimeout
+    case agentTimeout
+    case permissionDenied(code: String, message: String)
     case frameTooLarge(Int)
     case invalidHandshake(String)
     case invalidSealedBlob
@@ -132,6 +136,10 @@ public enum HandClientError: LocalizedError, Equatable {
         switch self {
         case .connectionFailed(let msg): return "连接失败：\(msg)"
         case .timeout: return "网络连接或响应超时"
+        case .handshakeTimeout: return "握手超时：未在限定时间内收到 Hand 的批准回应"
+        case .responseTimeout: return "响应超时：等待远端结果时长时间无数据"
+        case .agentTimeout: return "Agent 执行超时：未在执行预算内返回结果"
+        case .permissionDenied(let code, let msg): return "权限被拒绝（\(code)）：\(msg)"
         case .frameTooLarge(let sz): return "网络帧超过 4MB 上限（\(sz) 字节）"
         case .invalidHandshake(let msg): return "Hand 握手失败：\(msg)"
         case .invalidSealedBlob: return "密封信封格式损坏或验签失败"
@@ -139,6 +147,36 @@ public enum HandClientError: LocalizedError, Equatable {
         case .serverRejected(let code, let msg): return "远端拒绝（\(code)）：\(msg)"
         case .credentialError(let msg): return "任务凭证错误：\(msg)"
         }
+    }
+
+    /// 服务端权限类错误码，与 server/hand_server.py 的 ERR_* 常量对应：
+    /// 未授权、凭证无效/过期/被撤销、命令或路径不被允许、本机未获批准。
+    public static let permissionDeniedCodes: Set<String> = [
+        "cross_device_not_authorized",
+        "invalid_credential",
+        "expired_credential",
+        "revoked_credential",
+        "command_not_allowed",
+        "path_not_allowed",
+        "not_approved",
+    ]
+
+    /// 服务端 cross_device_error 的 code → 客户端错误分类（纯函数，可单测）。
+    /// agent_timeout 与权限类单独成类，其余维持 serverRejected 原样透传；
+    /// 任何错误都不会被映射成成功。
+    public static func resultError(code: String, message: String) -> HandClientError {
+        if code == "agent_timeout" { return .agentTimeout }
+        if permissionDeniedCodes.contains(code) {
+            return .permissionDenied(code: code, message: message)
+        }
+        return .serverRejected(code: code, message: message)
+    }
+
+    /// 等待结果阶段套接字读超时的分类（纯函数，可单测）：run 的等待
+    /// 预算就是 Agent 执行预算（另加宽限），耗尽意味着 Agent 未在预算
+    /// 内返回结果；其余动作的等待耗尽只是读响应超时。
+    public static func readTimeout(action: String) -> HandClientError {
+        action == "run" ? .agentTimeout : .responseTimeout
     }
 }
 
@@ -453,7 +491,12 @@ public final class PosixTcpSocket {
             while totalHeader < 4 {
                 let n = Darwin.recv(fd, ptr + totalHeader, 4 - totalHeader, 0)
                 if n == 0 { throw HandClientError.connectionFailed("远端过早关闭连接") }
-                if n < 0 { throw HandClientError.timeout }
+                if n < 0 {
+                    // 只有 EAGAIN/EWOULDBLOCK 才是 SO_RCVTIMEO 到期（读超时）；
+                    // 其余 errno（如连接被重置）是连接中断，不得误报为超时。
+                    if errno == EAGAIN || errno == EWOULDBLOCK { throw HandClientError.timeout }
+                    throw HandClientError.connectionFailed("接收中断：errno \(errno)")
+                }
                 totalHeader += n
             }
         }
@@ -469,7 +512,10 @@ public final class PosixTcpSocket {
             while totalPayload < payloadLen {
                 let n = Darwin.recv(fd, ptr + totalPayload, payloadLen - totalPayload, 0)
                 if n == 0 { throw HandClientError.connectionFailed("数据未读完对端已关闭") }
-                if n < 0 { throw HandClientError.timeout }
+                if n < 0 {
+                    if errno == EAGAIN || errno == EWOULDBLOCK { throw HandClientError.timeout }
+                    throw HandClientError.connectionFailed("接收中断：errno \(errno)")
+                }
                 totalPayload += n
             }
         }
@@ -762,10 +808,16 @@ public actor HandClient {
                 "public_key_b64": ownPriv.publicKey.rawRepresentation.base64EncodedString()
             ]
             try sock.writeFrame(try JSONSerialization.data(withJSONObject: helloObj))
-            let hData = try sock.readFrame()
+            // 握手阶段的等待与执行阶段严格分开计类：这里的读超时是握手超时。
+            let hData: Data
+            do {
+                hData = try sock.readFrame()
+            } catch let e as HandClientError where e == .timeout {
+                throw HandClientError.handshakeTimeout
+            }
             guard let hJson = try? JSONSerialization.jsonObject(with: hData) as? [String: Any],
                   let status = hJson["client_status"] as? String, status == "APPROVED" else {
-                throw HandClientError.serverRejected(code: "not_approved", message: "本设备尚未在目标机上被批准配对。")
+                throw HandClientError.permissionDenied(code: "not_approved", message: "本设备尚未在目标机上被批准配对。")
             }
 
             // 2. 派生密钥
@@ -812,7 +864,15 @@ public actor HandClient {
 
             // 4. 读取回包循环
             while true {
-                let rSealed = try sock.readFrame()
+                // 等待结果阶段的读超时按动作分类（run → Agent 执行超时，
+                // 其余 → 响应超时）；连接中断由 readFrame 直接抛
+                // connectionFailed，与超时严格区分。
+                let rSealed: Data
+                do {
+                    rSealed = try sock.readFrame()
+                } catch let e as HandClientError where e == .timeout {
+                    throw HandClientError.readTimeout(action: action)
+                }
                 let rPlain = try HandCrypto.open(sessionKey: sessionKey, sealedData: rSealed)
                 guard let resJson = try? JSONSerialization.jsonObject(with: rPlain) as? [String: Any] else {
                     throw HandClientError.invalidSealedBlob
@@ -830,7 +890,7 @@ public actor HandClient {
                     let errArgs = resJson["args"] as? [String: Any]
                     let code = errArgs?["code"] as? String ?? "unknown"
                     let msg = errArgs?["message"] as? String ?? "操作被远端拒绝"
-                    throw HandClientError.serverRejected(code: code, message: msg)
+                    throw HandClientError.resultError(code: code, message: msg)
                 } else {
                     throw HandClientError.serverRejected(code: "bad_type", message: "未知响应帧：\(type)")
                 }
