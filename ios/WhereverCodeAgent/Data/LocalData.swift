@@ -1212,9 +1212,16 @@ public struct LocalChatHomeView: View {
                 .accessibilityIdentifier("chat.connectionSummary")
 
             // 主体消息流或 Claude 风格极简留白问候区
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 16) {
+            // 对话组件收敛：列表脚手架与频道页共用 DialogMessageListView
+            // （消息数变化滚到最后一条、点内容区收键盘，口径不变）。
+            DialogMessageListView(
+                spacing: 16,
+                horizontalPadding: 20,
+                bottomPadding: 16,
+                scrollTrigger: model.visibleMessages.count,
+                scrollTargetID: model.visibleMessages.last?.id,
+                onTapContent: { inputFocused = false }
+            ) {
                         if model.visibleMessages.isEmpty && !model.isSending && !greetingDismissed {
                             Spacer(minLength: 88)
                             VStack(spacing: 14) {
@@ -1277,41 +1284,31 @@ public struct LocalChatHomeView: View {
                             }
                         }
 
-                        if model.isSending {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text(model.streaming.isEmpty ? "正在等待模型回复…" : model.streaming)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 8)
-                        }
-
-                        if let err = model.error {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
-                                Text(err)
-                                    .font(.footnote)
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                            }
-                            .padding(12)
-                            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                        }
+            } trailing: {
+                if model.isSending {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text(model.streaming.isEmpty ? "正在等待模型回复…" : model.streaming)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
-                    .contentShape(Rectangle())
-                    .onTapGesture { inputFocused = false }
+                    .padding(.vertical, 8)
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: model.visibleMessages.count) { _, _ in
-                    if let lastId = model.visibleMessages.last?.id {
-                        withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
+
+                if let err = model.error {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(err)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                        Spacer()
                     }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
 
             // Codex 参考输入框：来源选择器在上，输入框随键盘上移
             ChatComposerBar(model: model, focused: $inputFocused, onSelectRoute: onSelectRoute)
@@ -2086,7 +2083,27 @@ public struct ChatComposerBar: View {
         VStack(alignment: .leading, spacing: 8) {
             ProjectSourceChip(model: model)
 
-            VStack(alignment: .leading, spacing: 6) {
+            // 对话组件收敛：卡片内部与频道页共用 DialogComposerView
+            // （stacked 排布）：附件条走 above、「＋」菜单与对话方选择
+            // 走 leading、麦克风走 accessory；发送状态钮三态（停止/
+            // 语音/发送）由组件状态机承接，回调与标识逐字不变。
+            DialogComposerView(
+                text: $model.draft,
+                placeholder: "向 Agent 提问或分派任务",
+                layout: .stacked,
+                sendButtonStyle: .blackCircle,
+                isSending: model.isSending,
+                focused: focused,
+                onTextChange: { model.persistDraft() },
+                onSend: { model.startSending() },
+                onStop: { model.stopSending() },
+                onEmptyAction: { onSelectRoute("voice") },
+                emptyActionIcon: "waveform",
+                emptyActionLabel: "语音会话",
+                inputAccessibilityID: "chat.input",
+                sendAccessibilityID: "chat.send",
+                stopAccessibilityID: "chat.stop"
+            ) {
                 if !model.attachedFiles.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -2105,69 +2122,36 @@ public struct ChatComposerBar: View {
                         }
                     }
                 }
-
-                TextField("向 Agent 提问或分派任务", text: $model.draft, axis: .vertical)
-                    .lineLimit(1...8)
-                    .font(.system(size: 16))
-                    .focused(focused)
-                    .accessibilityIdentifier("chat.input")
-                    .onChange(of: model.draft) { _, _ in model.persistDraft() }
-
-                HStack(spacing: 10) {
-                    Menu {
-                        Button { showCamera = true } label: { Label("相机", systemImage: "camera") }
-                        Button { showPhotoPicker = true } label: { Label("照片", systemImage: "photo") }
-                        Button { showFileImporter = true } label: { Label("文件", systemImage: "doc") }
-                        Button { onSelectRoute("mcp") } label: { Label("插件", systemImage: "puzzlepiece.extension") }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .medium))
-                            .frame(width: 32, height: 32)
-                    }
-                    .accessibilityIdentifier("home.plusMenu")
-
-                    Button { showModelSheet = true } label: {
-                        HStack(spacing: 3) {
-                            Text(partnerLabel).lineLimit(1)
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                        }
-                        .font(.system(size: 13, weight: .medium))
-                    }
-                    .accessibilityIdentifier("home.agentSelectorButton")
-
-                    Spacer()
-
-                    Button {
-                        focused.wrappedValue = true
-                    } label: {
-                        Image(systemName: "mic").font(.system(size: 16, weight: .medium))
-                    }
-                    .accessibilityLabel("语音输入（使用键盘听写）")
-
-                    if model.isSending {
-                        Button { model.stopSending() } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                                .frame(width: 32, height: 32).background(Color.black, in: Circle())
-                        }
-                        .accessibilityIdentifier("chat.stop")
-                    } else if model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Button { onSelectRoute("voice") } label: {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                .frame(width: 32, height: 32).background(Color.black, in: Circle())
-                        }
-                        .accessibilityLabel("语音会话")
-                    } else {
-                        Button { model.startSending() } label: {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                .frame(width: 32, height: 32).background(Color.black, in: Circle())
-                        }
-                        .accessibilityIdentifier("chat.send")
-                    }
+            } leading: {
+                Menu {
+                    Button { showCamera = true } label: { Label("相机", systemImage: "camera") }
+                    Button { showPhotoPicker = true } label: { Label("照片", systemImage: "photo") }
+                    Button { showFileImporter = true } label: { Label("文件", systemImage: "doc") }
+                    Button { onSelectRoute("mcp") } label: { Label("插件", systemImage: "puzzlepiece.extension") }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 32, height: 32)
                 }
-                .foregroundStyle(Color(red: 0.35, green: 0.34, blue: 0.32))
+                .accessibilityIdentifier("home.plusMenu")
+
+                Button { showModelSheet = true } label: {
+                    HStack(spacing: 3) {
+                        Text(partnerLabel).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                }
+                .accessibilityIdentifier("home.agentSelectorButton")
+            } accessory: {
+                Button {
+                    focused.wrappedValue = true
+                } label: {
+                    Image(systemName: "mic").font(.system(size: 16, weight: .medium))
+                }
+                .accessibilityLabel("语音输入（使用键盘听写）")
+            } below: {
+                EmptyView()
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
