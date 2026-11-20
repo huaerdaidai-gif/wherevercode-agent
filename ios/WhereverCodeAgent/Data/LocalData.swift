@@ -201,6 +201,63 @@ struct ChatUnavailableTools: ToolRegistry {
     func isReadOnlyExtensionTool(_ name: String) -> Bool { false }
 }
 
+// MARK: - V6 P0-2 聊天/任务意图分类（与 Android ui/TaskIntent.kt 同语义）
+
+/// 一句话的意图：闲聊 / 任务 / 不明。三类语义与 Android
+/// TaskIntentClassifier 保持一致（2026-11-12 maintainer 口径，双端
+/// 统一，本文件为 iOS 侧自主实现）：问候与纯问句是闲聊；含动作词
+/// 且非纯问句、或请求词＋动作词是任务；含动作词的纯问句、或有
+/// 请求词却没说什么活，判不明。
+///
+/// 分类只决定两件事：界面标注，以及直连对话里是否登记本地任务。
+/// 它**不决定工具授权**——消息照常发给所选 Agent，Agent 能用哪些
+/// 工具一律走既有凭证与授权链，与分类结果无关。安全默认：拿不准
+/// 按闲聊处理（不乱建任务），但必须标明「意图不明」，用户可用
+/// 「标为任务发送」显式纠正（forceTask 永远优先于分类）。
+public enum ChatIntent: String {
+    case chat
+    case task
+    case uncertain
+}
+
+public enum ChatIntentClassifier {
+    private static let greetings = ["在吗", "在么", "在不在", "你好", "您好", "嗨", "哈喽", "hello", "hi"]
+    private static let questionStarters = ["什么", "怎么", "为什么", "为啥", "是不是", "能不能", "可以", "会不会", "哪里", "哪个", "哪些", "谁", "何时", "多久", "是否"]
+    private static let requestWords = ["帮我", "请帮", "麻烦", "请你", "帮一下"]
+    // 动作词表与 Android looksActionOriented 的中文表对齐（含
+    // 文件/目录/代码/命令/日志等对象名词——“这个文件是干嘛的？”
+    // 因此判不明而非闲聊，两端同一个结果）。
+    private static let actionWords = ["读", "写", "改", "删", "创建", "新建", "列出", "运行", "执行", "派", "打开", "下载", "上传", "部署", "测试", "编译", "构建", "检查", "复制", "移动", "安装", "提交", "搜索", "查找", "查看", "文件", "文件夹", "目录", "代码", "命令", "日志", "任务", "实现", "编写", "修复", "开发", "生成", "修改", "配置", "删除"]
+
+    public static func classify(_ text: String) -> ChatIntent {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return .chat }
+        let lower = t.lowercased()
+        // 问候：短句问候一定是闲聊（“在吗”再短也是问候，不是任务）。
+        for g in greetings where lower == g || (lower.hasPrefix(g) && lower.count <= g.count + 3) {
+            return .chat
+        }
+        let hasAction = actionWords.contains { t.contains($0) }
+        let isQuestion = t.hasSuffix("？") || t.hasSuffix("?")
+            || questionStarters.contains { t.hasPrefix($0) }
+        let hasRequest = requestWords.contains { t.contains($0) }
+        if hasAction && hasRequest { return .task }
+        if hasAction && !isQuestion { return .task }
+        if hasAction && isQuestion { return .uncertain }
+        if hasRequest { return .uncertain }
+        return .chat
+    }
+
+    /// 是否登记本地任务（纯函数，可单测）：显式标任务永远登记；
+    /// 直连模式关＝旧行为，一律登记（回滚口径）；直连模式开＝
+    /// 只有任务意图才登记，闲聊与不明只留在会话里。
+    public static func shouldRegisterTask(intent: ChatIntent, forceTask: Bool, directMode: Bool) -> Bool {
+        if forceTask { return true }
+        if !directMode { return true }
+        return intent == .task
+    }
+}
+
 @MainActor
 public final class LocalChatModel: ObservableObject {
     @Published public var draft: String = ""
@@ -526,10 +583,10 @@ public final class LocalChatModel: ObservableObject {
         }
     }
 
-    public func startSending() {
+    public func startSending(forceTask: Bool = false) {
         guard currentTurn == nil, !isSending else { return }
         currentTurn = Task {
-            await send()
+            await send(forceTask: forceTask)
             currentTurn = nil
         }
     }
@@ -577,7 +634,7 @@ public final class LocalChatModel: ObservableObject {
         } catch {}
     }
 
-    public func send() async {
+    public func send(forceTask: Bool = false) async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
 
@@ -670,18 +727,35 @@ public final class LocalChatModel: ObservableObject {
                 let outgoing = text + attachmentContext()
                 attachedFiles = []
 
-                let taskTitle = String(text.prefix(32))
-                if let task = try? data.tasks.createTask(
-                    LocalTask(
-                        title: taskTitle,
-                        description: text,
-                        priority: 0,
-                        brainId: agent.displayName
-                    )
-                ) {
-                    activeTaskId = task.taskId
-                    _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "分派给 \(agent.displayName)")
-                    eventLog.append(conversationId: id, kind: "TASK_DISPATCH", detail: "已在本机 SQLite 登记任务 \(task.taskId)")
+                // V6 P0-2：聊天≠任务。此前这里无条件登记任务，
+                // 「你好」也会生成任务卡。现在先分类（只用于标注与
+                // 登记，绝不影响工具授权），仅在显式标任务、任务
+                // 意图或直连模式关闭（旧行为）时才登记本地任务；
+                // 闲聊消息只持久化在会话里，照常发给 Agent 回复。
+                let intent = ChatIntentClassifier.classify(text)
+                let registerTask = ChatIntentClassifier.shouldRegisterTask(
+                    intent: intent,
+                    forceTask: forceTask,
+                    directMode: data.chatPrefs.chatDirectMode
+                )
+                var pendingIntentNote: String? = nil
+                if registerTask {
+                    let taskTitle = String(text.prefix(32))
+                    if let task = try? data.tasks.createTask(
+                        LocalTask(
+                            title: taskTitle,
+                            description: text,
+                            priority: 0,
+                            brainId: agent.displayName
+                        )
+                    ) {
+                        activeTaskId = task.taskId
+                        _ = try? data.tasks.transition(taskId: task.taskId, to: "working", note: "分派给 \(agent.displayName)")
+                        eventLog.append(conversationId: id, kind: "TASK_DISPATCH", detail: "已在本机 SQLite 登记任务 \(task.taskId)")
+                    }
+                } else if intent == .uncertain {
+                    pendingIntentNote = "意图不明，已按闲聊处理，未登记任务；如需登记为任务，请用「＋」菜单的「标为任务发送」重发。"
+                    eventLog.append(conversationId: id, kind: "CHAT_INTENT", detail: "意图不明，已按闲聊处理（未登记任务）")
                 }
 
                 guard agent.kind == .device else {
@@ -757,6 +831,9 @@ public final class LocalChatModel: ObservableObject {
 
                 let userMsg = ConversationMessage(conversationId: id, role: "user", content: finalPrompt, source: "user", taskId: activeTaskId)
                 try? data.conversations.appendMessage(userMsg)
+                if let note = pendingIntentNote {
+                    appendSystemNotice(note)
+                }
                 reload()
 
                 let output = try await HandClient.shared.runAgent(
@@ -952,9 +1029,9 @@ public final class LocalChatModel: ObservableObject {
         }
     }
 
-    public func send(userText: String) async {
+    public func send(userText: String, forceTask: Bool = false) async {
         draft = userText
-        await send()
+        await send(forceTask: forceTask)
     }
 
     /// 提取本轮所有图片附件为 Data URL 供大脑多模态使用
@@ -2118,6 +2195,13 @@ public struct ChatComposerBar: View {
                         Button { showCamera = true } label: { Label("相机", systemImage: "camera") }
                         Button { showPhotoPicker = true } label: { Label("照片", systemImage: "photo") }
                         Button { showFileImporter = true } label: { Label("文件", systemImage: "doc") }
+                        // V6 P0-2 手动强制任务入口：显式标为任务发送，
+                        // 绕过意图分类直接登记任务（与安卓 forceTask 对齐）。
+                        Button {
+                            if !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                model.startSending(forceTask: true)
+                            }
+                        } label: { Label("标为任务发送", systemImage: "checklist") }
                         Button { onSelectRoute("mcp") } label: { Label("插件", systemImage: "puzzlepiece.extension") }
                     } label: {
                         Image(systemName: "plus")

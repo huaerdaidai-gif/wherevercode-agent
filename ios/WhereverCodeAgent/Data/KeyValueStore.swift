@@ -76,6 +76,15 @@ public final class ChatHistoryPrefs {
         set { try? kv.set("chat.currentSessionId", newValue) }
     }
 
+    /// V6 P0-2 开关 chat_direct_mode（默认开，缺省即开）：开时选中
+    /// Agent 的对话只在会话内留痕，本地任务改为显式标任务或任务
+    /// 意图才登记；关时恢复旧行为（每条消息都登记任务），供回滚。
+    /// 该开关只影响任务登记，绝不改变工具授权与凭证校验。
+    public var chatDirectMode: Bool {
+        get { ((try? kv.get("chat.directMode")) ?? nil) != "0" }
+        set { try? kv.set("chat.directMode", newValue ? "1" : "0") }
+    }
+
     public func sessionProjects() throws -> [String: String] {
         try kv.getJSON("chat.sessionProjects", as: [String: String].self) ?? [:]
     }
