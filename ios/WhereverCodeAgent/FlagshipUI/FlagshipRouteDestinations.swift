@@ -4027,8 +4027,11 @@ public struct ChannelDetailWorkspaceView: View {
         channelParticipants.contains { $0.id == senderID && $0.canMentionAll }
     }
 
-    private var localCanMentionAll: Bool {
-        channelParticipants.contains { $0.canMentionAll && isOwnSender($0.id) }
+    private func localCanMentionAll(in channelID: String) -> Bool {
+        guard let channel = otherChannels.first(where: { $0.id == channelID }) else { return false }
+        return channel.participantDetails.contains {
+            $0.canMentionAll && ($0.isSelf || $0.id == appState.channelSenderID)
+        }
     }
 
     private func recordChannelPost(_ id: String) {
@@ -4161,7 +4164,7 @@ public struct ChannelDetailWorkspaceView: View {
             attachmentRef: pendingAttachmentRef,
             replyToId: replyingTo?.id
         )
-        guard !ChannelExtras.mentionsAllText(text) || localCanMentionAll else {
+        guard !ChannelExtras.mentionsAllText(text) || localCanMentionAll(in: currentChannelId) else {
             actionError = "只有频道 owner/协调者可以定时发送 @所有人。"
             return
         }
@@ -4182,12 +4185,12 @@ public struct ChannelDetailWorkspaceView: View {
     private func flushScheduled() async {
         guard let transport = appState.makeChannelTransport() else { return }
         let due = ChannelExtras.dueScheduled(
-            scheduledForChannel, nowSeconds: Date().timeIntervalSince1970)
+            scheduledPosts, nowSeconds: Date().timeIntervalSince1970)
         for item in due {
             guard !Task.isCancelled else { return }
             loadScheduled()
             guard scheduledPosts.contains(where: { $0.id == item.id }),
-                  !ChannelExtras.mentionsAllText(item.text) || localCanMentionAll else { continue }
+                  !ChannelExtras.mentionsAllText(item.text) || localCanMentionAll(in: item.channelId) else { continue }
             do {
                 let id = try await transport.postMessageEx(
                     channelID: item.channelId, text: item.text, replyTo: item.replyToId,
@@ -4212,7 +4215,7 @@ public struct ChannelDetailWorkspaceView: View {
             return
         }
 
-        if ChannelExtras.mentionsAllText(text) && !localCanMentionAll {
+        if ChannelExtras.mentionsAllText(text) && !localCanMentionAll(in: currentChannelId) {
             sendErrorMessage = "只有频道 owner/协调者可以 @所有人，消息未发送。"
             showSendErrorAlert = true
             return
