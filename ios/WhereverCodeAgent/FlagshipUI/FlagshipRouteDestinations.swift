@@ -4614,6 +4614,7 @@ public struct ChannelSettingsSheet: View {
     @State private var isWorking = false
     @State private var showDeleteConfirmation = false
     @State private var memberPendingRemoval: V5ChannelMember?
+    @State private var showMemberRemovalConfirmation = false
     @State private var showCreatorRemovalAlert = false
     @State private var isMuted = false
     @State private var ignoresUnread = false
@@ -4685,7 +4686,10 @@ public struct ChannelSettingsSheet: View {
             Spacer()
             if isProtectedMember(member) { Text("创建者/Owner · 不可移除").font(.caption).foregroundStyle(.secondary) }
             else if member.isAgent, member.agentRecordId != nil {
-                Button("移除", role: .destructive) { memberPendingRemoval = member }.disabled(isWorking)
+                Button("移除", role: .destructive) {
+                    memberPendingRemoval = member
+                    showMemberRemovalConfirmation = true
+                }.disabled(isWorking)
             }
         }
     }
@@ -4697,14 +4701,16 @@ public struct ChannelSettingsSheet: View {
             } message: {
                 Text("删除无法撤销。仅频道 owner 有权限，服务端将验证权限。")
             }
-            .confirmationDialog("移除频道成员？", item: $memberPendingRemoval, titleVisibility: .visible) { member in
-                Button("移除 \(member.name)", role: .destructive) {
+            .confirmationDialog("移除频道成员？", isPresented: $showMemberRemovalConfirmation, titleVisibility: .visible) {
+                Button("移除", role: .destructive) {
+                    guard let member = memberPendingRemoval else { return }
                     if isProtectedMember(member) { showCreatorRemovalAlert = true }
                     else if let agentID = member.agentRecordId { Task { await remove(agentID: agentID) } }
+                    memberPendingRemoval = nil
                 }
-                Button("取消", role: .cancel) {}
-            } message: { member in
-                Text("确定将 \(member.name) 移出此频道？")
+                Button("取消", role: .cancel) { memberPendingRemoval = nil }
+            } message: {
+                Text("确定将 \(memberPendingRemoval?.name ?? "该成员")移出此频道？")
             }
             .alert("无法移除创建者", isPresented: $showCreatorRemovalAlert) {
                 Button("好的", role: .cancel) {}
