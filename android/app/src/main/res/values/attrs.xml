@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 对话输入区组件（ChatComposerView）的排布：stacked = 单聊首页
+         双层（输入框上层、控制行下层）；inline = 频道单行（输入框与
+         发送钮同行、上方一行说明）。 -->
+    <declare-styleable name="ChatComposerView">
+        <attr name="composerArrangement" format="enum">
+            <enum name="stacked" value="0" />
+            <enum name="inline" value="1" />
+        </attr>
+    </declare-styleable>
+</resources>
