@@ -200,6 +200,33 @@ class ChatComposerView private constructor(
     }
 
     /**
+     * XML 充气收编（仅 STACKED）：screen_chat.xml 里声明在本组件
+     * 标签下的页面外壳控件（contextPill、buttonPlus、
+     * buttonAgentSelect、brainCapsule、buttonTaskMark）会被充气器
+     * 先追加为本组件的直接子视图；充气结束时按 id 分发——
+     * contextPill 进上层插槽，其余进下层行（顺序与 XML 一致），
+     * 使充气结果的父子结构与组件化之前的 XML 完全相同
+     * （MainLayoutTest 按此结构校验）。代码构造（频道 INLINE）
+     * 不走充气，此回调不触发。
+     */
+    override fun onFinishInflate() {
+        super.onFinishInflate()
+        if (arrangement != Arrangement.STACKED) return
+        val top = topSlot ?: return
+        val adopted = (0 until childCount)
+            .map { getChildAt(it) }
+            .filter { it !== topSlot && it !== input && it !== lowerRow }
+        adopted.forEach { child ->
+            removeView(child)
+            if (child.id == R.id.contextPill) {
+                top.addView(child)
+            } else {
+                addLeadingControl(child)
+            }
+        }
+    }
+
+    /**
      * STACKED 排布：把页面前置控件（+ 号、选对话方等）加进下层行，
      * 插在弹性空白与发送钮之前（保持 XML 时代的左→右顺序）。
      * INLINE 排布无下层行，调用无效果。
