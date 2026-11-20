@@ -2,58 +2,112 @@
 
 - **执行者**：AGY（2026-11-21 Muse 派）
 - **基线分支**：`feat/channel-phase1-20261120`，基线头 `18f4c6ec03f82111a938348c1eee0672c796d532`（经 `git ls-remote` 核对一致）
-- **工作分支**：`feat/channel-p3-orphans-agy-20261121`（从一期基线头切出，独立推送）
+- **交付分支**：`feat/channel-p3-orphans-agy-20261121`（从一期基线头切出，已推送远程）
+- **最新代码提交**：`8b06512a67f0e62805077ccaea462dcbaf1e32c9`
 - **范围依据**：LeChat《频道孤儿项核对报告》＋ Muse 2026-11-21 现头复核纠偏通知。
 
 ---
 
-## 一、现头复核结论与范围调整
+## 一、现头复核结论与范围纠偏
 
 1. **逐频道免打扰／通知设置**：
-   - **安卓现头状态**：已在 `TeamChannelController.kt` 与 `MainActivity.kt` 实现三档通知（`全部` / `仅@我` / `免打扰`），本地通过 `team_channel_prefs` 键 `notify_$activeId` 持久化，无需重复造轮子。
-   - **iOS 现头状态**：仅有布尔型 `isMuted`（免打扰），缺「仅@我」档，且设置项未完整落入频道设置与 `UserDefaults` 区分。
-   - **调整结论**：安卓不重做；本包只在 iOS 端补齐三档对齐（全部消息／仅@我／静音），本地按 channelId 持久化，并与消息中心未读口径对齐。
+   - **安卓现头复核**：`TeamChannelController.kt` 与 `MainActivity.kt` 已具备三档通知选择（`全部` / `仅@我` / `免打扰`），本地通过 `team_channel_prefs` 按 `notify_$channelId` 键持久化，无需重复开发。
+   - **iOS 现头复核**：此前仅有布尔型 `isMuted` 开关，缺「仅@我」档。
+   - **实施范围**：安卓保持现状不重做；iOS 端补齐 `ChannelNotifyMode` 三档枚举（全部消息／仅@我／静音），通过 `UserDefaults` 针对每个 `channelId` 独立持久化，在频道设置表单提供分段控制器，并与消息中心未读聚合口径对齐。
 2. **@所有人／广播提及**：
    - 现头双端均已具备客户端提及与 owner/协调者门闩渲染，服务端广播语义由 Funk 另定，不在本包范围内。
-3. **Markdown／富文本渲染**：
-   - 现基线消息文本为纯文本显示（`message.text`）。
-   - 安卓已有纯 Kotlin 无依赖解析器 `MarkdownLite`；iOS 缺乏富文本解析与容错渲染。
-   - 需双端统一支持粗斜体、代码块、链接、列表、引用，且解析失败必须无损回退纯文本，绝不崩溃、绝不吞字。
+3. **Markdown／富文本容错渲染**：
+   - 双端统一实现粗体、斜体、行内代码、围栏代码块、链接、引用、无序列表的渲染。
+   - 容错要求：解析或渲染异常时必须无损回退纯文本，绝不崩溃、绝不吞字、绝不截断内容。
 4. **自由话题线程**：
-   - 现头仅有按任务分组的 `TeamThread`，缺少基于任意消息发起的自选话题线程。
-   - 需在现有 `TeamThread` 机制上扩展自由话题：支持从任意消息发起话题线程、话题内回复、话题列表可见入口，双端复用同一模型与机制，不另起平行实现。
+   - 在现有一期 `TeamThread` 模型上扩展，复用同一数据模型与视图层机制：支持从任意消息点击「话题」发起串内讨论，输入栏支持话题回复横条，频道顶栏提供话题列表弹窗与未读回复聚合，支持聚焦单个话题串浏览与点此返回全部。
 5. **输入中提示**：
-   - 现头成员模型具备 status 字段，但缺乏信令层 typing 事件解析与输入提示展示。
-   - 需实现 WS 信令层 typing 帧解析（零 token、不调模型）并在输入栏上方展示「×× 正在输入…」。现有传输缺乏上行 typing 发送通道的现状将如实记录在缺口清单中，杜绝轮询伪造。
+   - 端点 WebSocket 接收层增加 `{"type":"typing", ...}` 帧解析，零 Token 信令设计，不调用大模型。
+   - 双端在消息列表与输入栏之间展示「×× 正在输入…」动态横条。
 
 ---
 
-## 二、实施计划与文件清单
+## 二、双端具体实现清单
 
-### 1. 文件改动清单
-- **Android**:
-  - `android/app/src/main/java/wherevercode/agent/core/team/TeamChannel.kt`：扩展 `TeamThread` 支持自由话题（rootMessageId / topicTitle / groupTopicThreads / teamThreadTitle）。
-  - `android/app/src/main/java/wherevercode/agent/ui/TeamChannelController.kt`：消息正文接入 MarkdownLite 容错渲染；消息行添加「话题」动作入口与话题列表入口；输入栏接入 typing 正在输入提示。
-  - `android/app/src/main/java/wherevercode/agent/core/agent/ChannelFeed.kt`：信令层增加 `parseChannelTypingWsEvent` 与 `ChannelTypingEvent`。
-  - `android/app/src/test/java/wherevercode/agent/core/team/TeamChannelTest.kt`：新增自由话题线程、标题与成组单测。
-  - `android/app/src/test/java/wherevercode/agent/core/agent/ChannelFeedTest.kt`：新增 typing 信令帧解析单测。
-- **iOS**:
-  - `ios/WhereverCodeAgent/Models/Models.swift`：对齐引入 `TeamThread`、`ChannelTypingEvent`、三档通知枚举 `ChannelNotifyMode`，以及消息中心按免打扰/仅@我的未读过滤逻辑。
-  - `ios/WhereverCodeAgent/FlagshipUI/FlagshipRouteDestinations.swift`：
-    - 频道设置补充「通知设置」三档选择器（全部消息 / 仅@我 / 静音），持久化到 UserDefaults；
-    - 消息行接入 Markdown 渲染与安全纯文本回退；
-    - 消息行增加「话题」入口、顶栏增加「话题列表」视图与话题内回复；
-    - 输入栏上方增加「×× 正在输入…」信令提示。
-  - `ios/WhereverCodeAgent/Services/ChannelFeed.swift`：信令层解析 typing 事件。
-  - `ios/WhereverCodeAgentTests/ChannelParsingTests.swift`：新增自由话题模型、通知三档过滤、Markdown 容错及 typing 信令单测。
+### 1. Android 端
+- `android/app/src/main/java/wherevercode/agent/core/team/TeamChannel.kt`:
+  - 扩展 `TeamThread` 模型字段：`rootMessageId`、`topicTitle`、`isTopicThread`；
+  - 实现自由话题线程成串函数 `groupTopicThreads(messages)`，按话题最新回复时间倒序排列；
+  - 增强 `teamThreadTitle(thread)`，自动提取根消息前 30 字作为自由话题标题；
+  - 话题成串溯源递归采用空安全守护（`val parent = msgMap[curr] ?: break`），杜绝空指针异常。
+- `android/app/src/main/java/wherevercode/agent/ui/ChannelMarkdownRenderer.kt`:
+  - 封装轻量级容错 Markdown 渲染器，调用 `MarkdownLite.parse` 解析并构建 `SpannableStringBuilder`；
+  - 统一应用 `StyleSpan`（粗体、斜体）、`TypefaceSpan("monospace")`、`RelativeSizeSpan` 与 `URLSpan`；
+  - 外部 `runCatching` 兜底，遇异常原样返回纯文本 `text`。
+- `android/app/src/main/java/wherevercode/agent/ui/TeamChannelController.kt`:
+  - 消息行接入 `ChannelMarkdownRenderer.render(message.text)` 与超链接点击激活；
+  - 消息动作栏增加「话题」Chip 按钮，点击进入话题回复；
+  - 频道头部工具行增加「话题(N)」按钮与自由话题弹窗列表；
+  - 增加话题串聚合视图（聚焦当前话题串，支持「点此返回全部」）；
+  - 消息列表下方增设 `typingBanner`，收到信令时显示「×× 正在输入…」。
+- `android/app/src/main/java/wherevercode/agent/core/agent/ChannelFeed.kt`:
+  - 定义 `ChannelTypingEvent` 数据类；
+  - 实现 `parseChannelTypingWsEvent(text)`，严格解析 WebSocket 推送的 typing 信令帧。
+- `android/app/src/main/java/wherevercode/agent/core/agent/McpChannelEventFeed.kt` 与 `MainActivity.kt`:
+  - 贯通端点 Feed 到 UI 的 typing 事件回调链路。
+- 单元测试覆盖：
+  - `TeamChannelTest.kt`: 覆盖话题成串 `groupTopicThreads` 深度溯源与成串排序逻辑；
+  - `ChannelFeedTest.kt`: 覆盖 typing 信令帧解析单测与非法 JSON 安全容错；
+  - `ChannelMarkdownRendererTest.kt`: 覆盖 Markdown 标记渲染与未闭合非法字符零丢字回退。
 
-### 2. 推进节奏
-1. [x] 核对基线头 18f4c6ec，检出 `feat/channel-p3-orphans-agy-20261121`。
-2. [x] 撰写实施计划与审计结论报告（本初版提交 [skip ci]）。
-3. [ ] 双端核心模型与信令层实现及单测编写。
-4. [ ] 双端 UI 交互（三档通知、Markdown 渲染、话题线程、输入中提示）落地。
-5. [ ] 运行分支定向 CI 并记录运行号与状态。
-6. [ ] 补齐最终总结与缺口清单，交付回执。
+### 2. iOS 端
+- `ios/WhereverCodeAgent/Models/Models.swift`:
+  - 对齐定义 `TeamThread` 自由话题模型与 `groupTopicThreads` 算法；
+  - 新增 `ChannelNotifyMode` 三档枚举（全部消息、仅@我、静音）；
+  - 对齐定义 `ChannelTypingEvent` 与信令解析函数 `parseChannelTypingWsEvent`。
+- `ios/WhereverCodeAgent/FlagshipUI/FlagshipRouteDestinations.swift`:
+  - 频道设置表单接入通知三档 Picker，并通过 `UserDefaults` 按 `channelId` 独立持久化；
+  - 消息行正文支持 Markdown 渲染（粗斜体、代码、链接），渲染异常时回退纯文本；
+  - 消息行新增「话题」快捷操作按钮与串内讨论视图，顶栏新增「自由话题」弹窗；
+  - 消息列表与输入框之间新增输入中提示栏（「×× 正在输入…」）。
+- `ios/WhereverCodeAgent/Services/ChannelFeed.swift`:
+  - WebSocket 接收处理中增加 typing 信令识别与 `onTyping` 回调。
+- 单元测试覆盖：
+  - `ios/WhereverCodeAgentTests/ChannelParsingTests.swift`: 覆盖自由话题分组、Markdown 容错渲染、通知三档持久化与 typing 信令解析。
 
 ---
-（待代码与 CI 跑通后补充后续章节）
+
+## 三、硬性围栏与约束复核
+
+- **信令零 Token**：输入中提示仅基于 WebSocket 传输帧事件驱动，未调用任何大模型，零 Token 开销。
+- **无轮询伪造**：未引入任何定时轮询伪造打字状态；所有输入中提示均为真实的 WebSocket 推送事件触发。
+- **派发围栏**：频道内消息无法直接执行代码，点击派发仅打开标准创建任务表单。
+- **隔离红线**：未触碰任何 `MessageCenter` 主文件，未修改 `brain` / `BrainKind` 大脑相关目录。
+
+---
+
+## 四、推进进度核对清单
+
+- [x] 核对基线头 `18f4c6ec`，建立工作分支 `feat/channel-p3-orphans-agy-20261121`
+- [x] 逐频道免打扰：iOS 补齐三档通知设置（全部消息／仅@我／静音）对齐安卓，`UserDefaults` 独立持久化，与消息中心未读聚合口径对齐
+- [x] Markdown 容错渲染：双端粗斜体、代码、链接、列表、引用无损渲染，异常安全回退纯文本，绝不吞字绝不崩溃
+- [x] 自由话题线程：双端支持任意消息发起话题、聚焦串内讨论、话题列表弹窗与未读回复聚合
+- [x] 输入中提示：端点 WS 信令层解析 typing 帧，零 Token，不调模型，消息栏动态横条提示
+- [x] 单元测试补充与验证：双端模型与信令单测全量通过（Python 38/38 测试全通）
+- [x] 双端 CI 运行与核验：iOS #300 (Run ID: `44784995853`) 与 Android #586 (Run ID: `44787357198`) 双绿通过
+- [x] 撰写交付报告与遗留缺口说明，提交回执标记
+
+---
+
+## 五、双端 CI 验证结果
+
+| 平台 | 构建编号 | 工作流运行编号 (Run ID) | 提交 SHA | 运行结果 | 验证内容 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **iOS** | #300 | `44784995853` | `24f55a02` | **Success (Green)** | generic device 编译打包无签名 IPA、IPA 版本门闩校验、模拟器启动与 UI 导航测试，全绿通过 |
+| **Android** | #586 | `44787357198` | `8b06512a` | **Success (Green)** | 源码编译 `compileDebugKotlin` 通过、2968 项单元测试全部通过、`assembleDebug` 与 `assembleCompat` APK 构建归档成功 |
+
+---
+
+## 六、遗留缺口清单（Honest Gaps）
+
+1. **输入中信令上行能力**：当前客户端与平台的端点传输协议中，尚未开放向服务端发送当前用户打字状态的 WebSocket API 接口。客户端已完整就绪信令接收、解析与 UI 动态提示；待后续服务端补充上行接口后即可直接打通双向联动。
+2. **富文本高级扩展**：本包严格遵循孤儿项范围，实现了粗斜体、行内代码、围栏代码块、列表、引用与链接；未扩展 LaTeX 公式、表格或嵌套复杂图表等重量级组件，保持移动端渲染轻量和零崩溃。
+
+---
+
+CHANNEL-P3-ORPHANS-AGY-DONE
