@@ -1,0 +1,359 @@
+// WhereverCode Agent — iOS
+//
+// 对话组件收敛（2026-11-20）：单 Agent 对话页与频道页共用的对话
+// 核心组件——消息列表脚手架 DialogMessageListView 与输入区
+// DialogComposerView。两页此前各写一套（LocalChatHomeView 的
+// ScrollView 消息流 + ChatComposerBar；ChannelDetailWorkspaceView
+// 的 messagesTab + composerSection），列表脚手架、输入框与发送
+// 状态呈现口径一致，抽出共用，不再各改各的。
+//
+// 经插槽/参数注入的外壳差异：消息内容渲染（单聊气泡 vs 频道
+// 卡片行——消息模型不同）、页面铬（频道 Tab/成员/发送方式选择，
+// 单聊问候区/项目来源 chip/附件条）、发送语义（本地模型 vs 平台
+// transport）。组件只管结构与状态呈现，不碰发送语义。
+
+import SwiftUI
+
+extension View {
+    /// 条件式无障碍标识：nil 时不设置（保持系统默认）。
+    @ViewBuilder
+    func dialogAccessibilityID(_ id: String?) -> some View {
+        if let id {
+            self.accessibilityIdentifier(id)
+        } else {
+            self
+        }
+    }
+
+    /// 条件式无障碍标签：nil 时不设置。
+    @ViewBuilder
+    func dialogAccessibilityLabel(_ label: String?) -> some View {
+        if let label {
+            self.accessibilityLabel(label)
+        } else {
+            self
+        }
+    }
+
+    /// 点内容区回调（单聊用来收键盘）：nil 时不装手势、不改命中区。
+    @ViewBuilder
+    func dialogTapContent(_ action: (() -> Void)?) -> some View {
+        if let action {
+            self.contentShape(Rectangle()).onTapGesture { action() }
+        } else {
+            self
+        }
+    }
+
+    /// 文本变化回调（单聊用来持久化草稿）：nil 时不装观察。
+    @ViewBuilder
+    func dialogOnTextChange(_ text: String, _ action: (() -> Void)?) -> some View {
+        if let action {
+            #if compiler(>=6.0)
+            self.onChange(of: text) { _, _ in action() }
+            #else
+            self.onChange(of: text) { _ in action() }
+            #endif
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - 消息列表脚手架
+
+/// 对话消息列表脚手架：ScrollViewReader + ScrollView +
+/// （Lazy）VStack，统一两页的列表结构与滚底口径。
+/// - 单聊：VStack、消息数变化时滚到最后一条；问候/发送中/错误行
+///   经 content / trailing 插槽进来。
+/// - 频道：LazyVStack、不主动滚底（scrollTargetID 传 nil，与
+///   现状一致——原 ScrollViewReader 的 proxy 本就未用）。
+public struct DialogMessageListView<Content: View, Trailing: View>: View {
+    public var lazy: Bool
+    public var spacing: CGFloat
+    public var horizontalPadding: CGFloat
+    public var topPadding: CGFloat
+    public var bottomPadding: CGFloat
+    /// 变化时触发滚底的计数（通常是消息数）。
+    public var scrollTrigger: Int
+    /// 滚底目标（最后一条消息的 id）；nil = 不滚。
+    public var scrollTargetID: String?
+    /// 点内容区回调（单聊收键盘用）；nil = 不装手势。
+    public var onTapContent: (() -> Void)?
+    public var content: () -> Content
+    public var trailing: () -> Trailing
+
+    public init(
+        lazy: Bool = false,
+        spacing: CGFloat,
+        horizontalPadding: CGFloat,
+        topPadding: CGFloat = 0,
+        bottomPadding: CGFloat = 0,
+        scrollTrigger: Int,
+        scrollTargetID: String? = nil,
+        onTapContent: (() -> Void)? = nil,
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.lazy = lazy
+        self.spacing = spacing
+        self.horizontalPadding = horizontalPadding
+        self.topPadding = topPadding
+        self.bottomPadding = bottomPadding
+        self.scrollTrigger = scrollTrigger
+        self.scrollTargetID = scrollTargetID
+        self.onTapContent = onTapContent
+        self.content = content
+        self.trailing = trailing
+    }
+
+    public var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                stack
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.top, topPadding)
+                    .padding(.bottom, bottomPadding)
+                    .dialogTapContent(onTapContent)
+            }
+            #if compiler(>=6.0)
+            .onChange(of: scrollTrigger) { _, _ in scrollToTarget(proxy) }
+            #else
+            .onChange(of: scrollTrigger) { _ in scrollToTarget(proxy) }
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private var stack: some View {
+        if lazy {
+            LazyVStack(spacing: spacing) {
+                content()
+                trailing()
+            }
+        } else {
+            VStack(spacing: spacing) {
+                content()
+                trailing()
+            }
+        }
+    }
+
+    private func scrollToTarget(_ proxy: ScrollViewProxy) {
+        guard let scrollTargetID else { return }
+        withAnimation { proxy.scrollTo(scrollTargetID, anchor: .bottom) }
+    }
+}
+
+// MARK: - 输入区
+
+/// 对话输入区核心：文本框 + 发送状态钮状态机 + 上/下/前置/尾随
+/// 插槽。两页排布是既有家规，作排布参数保留，不抹平：
+/// - stacked（单聊）：附件条（above 插槽）+ 纵向文本框 + 底行
+///   （前置控件 / 尾随控件 / 状态钮）；白色圆角卡片容器由页面给。
+/// - inline（频道）：above 插槽（发送方式/回复横幅/附件条）+
+///   单行（前置 + 菜单 + 文本框 + 状态钮，行铬沿用频道现状）+
+///   below 插槽（超限提示/边界文案）。
+///
+/// 发送状态钮状态机（两页共用）：发送中且有 onStop → 停止钮；
+/// 草稿为空且无附件且有 onEmptyAction → 空态动作钮（如单聊语音）；
+/// 其余 → 发送钮，禁用条件 =（草稿为空且无附件）或超字数上限。
+/// 按钮外观两套（blackCircle 单聊黑圆 / accentGlyph 频道大字形），
+/// 按页既有样式，不互相迁就。
+public struct DialogComposerView<Above: View, Leading: View, Accessory: View, Below: View>: View {
+    public enum Layout { case stacked, inline }
+    public enum SendButtonStyle { case blackCircle, accentGlyph }
+
+    @Binding public var text: String
+    public var placeholder: String
+    public var layout: Layout
+    public var sendButtonStyle: SendButtonStyle
+    public var isSending: Bool
+    public var hasAttachment: Bool
+    public var maxLength: Int?
+    public var focused: FocusState<Bool>.Binding?
+    public var onTextChange: (() -> Void)?
+    public var onSend: () -> Void
+    public var onStop: (() -> Void)?
+    public var onEmptyAction: (() -> Void)?
+    public var emptyActionIcon: String
+    public var emptyActionLabel: String?
+    public var inputAccessibilityID: String?
+    public var sendAccessibilityID: String?
+    public var stopAccessibilityID: String?
+    public var above: () -> Above
+    public var leading: () -> Leading
+    public var accessory: () -> Accessory
+    public var below: () -> Below
+
+    public init(
+        text: Binding<String>,
+        placeholder: String,
+        layout: Layout,
+        sendButtonStyle: SendButtonStyle,
+        isSending: Bool = false,
+        hasAttachment: Bool = false,
+        maxLength: Int? = nil,
+        focused: FocusState<Bool>.Binding? = nil,
+        onTextChange: (() -> Void)? = nil,
+        onSend: @escaping () -> Void,
+        onStop: (() -> Void)? = nil,
+        onEmptyAction: (() -> Void)? = nil,
+        emptyActionIcon: String = "waveform",
+        emptyActionLabel: String? = nil,
+        inputAccessibilityID: String? = nil,
+        sendAccessibilityID: String? = nil,
+        stopAccessibilityID: String? = nil,
+        @ViewBuilder above: @escaping () -> Above,
+        @ViewBuilder leading: @escaping () -> Leading,
+        @ViewBuilder accessory: @escaping () -> Accessory,
+        @ViewBuilder below: @escaping () -> Below
+    ) {
+        self._text = text
+        self.placeholder = placeholder
+        self.layout = layout
+        self.sendButtonStyle = sendButtonStyle
+        self.isSending = isSending
+        self.hasAttachment = hasAttachment
+        self.maxLength = maxLength
+        self.focused = focused
+        self.onTextChange = onTextChange
+        self.onSend = onSend
+        self.onStop = onStop
+        self.onEmptyAction = onEmptyAction
+        self.emptyActionIcon = emptyActionIcon
+        self.emptyActionLabel = emptyActionLabel
+        self.inputAccessibilityID = inputAccessibilityID
+        self.sendAccessibilityID = sendAccessibilityID
+        self.stopAccessibilityID = stopAccessibilityID
+        self.above = above
+        self.leading = leading
+        self.accessory = accessory
+        self.below = below
+    }
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var overLimit: Bool {
+        guard let maxLength else { return false }
+        return text.count > maxLength
+    }
+
+    private var sendDisabled: Bool {
+        (trimmedText.isEmpty && !hasAttachment) || overLimit
+    }
+
+    public var body: some View {
+        switch layout {
+        case .stacked:
+            VStack(alignment: .leading, spacing: 6) {
+                above()
+                field
+                HStack(spacing: 10) {
+                    leading()
+                    Spacer()
+                    accessory()
+                    stateButton
+                }
+                .foregroundStyle(Color(red: 0.35, green: 0.34, blue: 0.32))
+            }
+        case .inline:
+            VStack(spacing: 4) {
+                above()
+                HStack(spacing: 8) {
+                    leading()
+                    field
+                    stateButton
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.95, green: 0.94, blue: 0.92))
+                below()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var field: some View {
+        switch layout {
+        case .stacked:
+            Group {
+                if let focused {
+                    TextField(placeholder, text: $text, axis: .vertical)
+                        .lineLimit(1...8)
+                        .font(.system(size: 16))
+                        .focused(focused)
+                } else {
+                    TextField(placeholder, text: $text, axis: .vertical)
+                        .lineLimit(1...8)
+                        .font(.system(size: 16))
+                }
+            }
+            .dialogAccessibilityID(inputAccessibilityID)
+            .dialogOnTextChange(text, onTextChange)
+        case .inline:
+            TextField(placeholder, text: $text)
+                .font(.system(size: 14))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1)
+                )
+                .dialogAccessibilityID(inputAccessibilityID)
+                .dialogOnTextChange(text, onTextChange)
+        }
+    }
+
+    @ViewBuilder
+    private var stateButton: some View {
+        if isSending, let onStop {
+            Button { onStop() } label: { stateIcon(systemName: "stop.fill", fontSize: 12) }
+                .dialogAccessibilityID(stopAccessibilityID)
+        } else if trimmedText.isEmpty && !hasAttachment, let onEmptyAction {
+            Button { onEmptyAction() } label: { stateIcon(systemName: emptyActionIcon, fontSize: 13) }
+                .dialogAccessibilityLabel(emptyActionLabel)
+        } else {
+            Button { onSend() } label: { sendIcon }
+                .disabled(sendDisabled)
+                .dialogAccessibilityID(sendAccessibilityID)
+        }
+    }
+
+    @ViewBuilder
+    private var sendIcon: some View {
+        switch sendButtonStyle {
+        case .blackCircle:
+            stateIcon(systemName: "arrow.up", fontSize: 13)
+        case .accentGlyph:
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(
+                    sendDisabled
+                        ? Color.secondary.opacity(0.3)
+                        : Color(red: 0.82, green: 0.49, blue: 0.35)
+                )
+        }
+    }
+
+    /// 状态钮图标：blackCircle = 白字形黑圆（单聊）；accentGlyph =
+    /// 大字形 accent 色（频道，仅发送态在用，停止/空态为预留同族样式）。
+    @ViewBuilder
+    private func stateIcon(systemName: String, fontSize: CGFloat) -> some View {
+        switch sendButtonStyle {
+        case .blackCircle:
+            Image(systemName: systemName)
+                .font(.system(size: fontSize, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(Color.black, in: Circle())
+        case .accentGlyph:
+            Image(systemName: systemName)
+                .font(.system(size: 32))
+                .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+        }
+    }
+}

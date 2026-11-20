@@ -84,6 +84,7 @@
 			91067B38E1192DA78C1A0C00,
 		); name = App; path = App; sourceTree = "<group>"; };
 		29351C8E854D96368B36E5CB = {isa = PBXBuildFile; fileRef = A8FBCDEA5E707EC35BAF1DE6; };
+		DC0D1A100000000000000002 = {isa = PBXBuildFile; fileRef = DC0D1A100000000000000001; };
 		2A3B9E2C913ADDDB16F1CD99 = {isa = PBXBuildFile; fileRef = 892AEB362C95AAE0B8B13531; };
 		2FAFA8646A910CE4490E1BBD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
 		3AB2292BD206EE84BF0DEB19 = {isa = XCConfigurationList; buildConfigurations = (
@@ -151,6 +152,7 @@
 		61F1002C04C602A200A9C2E1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		623D5A4E16C91488EB97E424 = {isa = PBXBuildFile; fileRef = FAE5B2E37F68D6FF5711A9D2; };
 		624CBBBAADC0F2E4F66F1DBB = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			DC0D1A100000000000000002,
 			9CCD70432011961B094C8FCE,
 			DA0000000000000000000074,
 			DA0000000000000000000084,
@@ -269,6 +271,7 @@
 		98E3434F859B0C281501C824 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhereverCodeAgent.entitlements; sourceTree = "<group>"; };
 		9CCD70432011961B094C8FCE = {isa = PBXBuildFile; fileRef = 91067B38E1192DA78C1A0C00; };
 		A8FBCDEA5E707EC35BAF1DE6 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		DC0D1A100000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogComponents.swift; sourceTree = "<group>"; };
 		ABD4D6AD9705B560B2E73A9F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
 			A1B2C3D4E5F6000000000002,
 			A1B2C3D4E5F6000000000042,
@@ -320,6 +323,7 @@
 		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			A8FBCDEA5E707EC35BAF1DE6,
+			DC0D1A100000000000000001,
 			6D2652F5D197BA7CCF479CE7,
 			918CC59A2183C5FAA462994B,
 			0EC43C27AE6A9F51433ABA31,
