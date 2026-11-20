@@ -4877,8 +4877,9 @@ class MainActivity : AppCompatActivity() {
         // （HomeScreenController.greeting），不读已存身份、不显示真人
         // 名字。首页只此一行问候，与 iOS 首页同形（∞ + 问候 + chips），
         // 不再另加“你好”行（旧 R4c“问候固定你好”口径已被 11-16 定版取代）。
+        // 照片走查批 B：问候去粗体、27sp 衬线常规体，对 iOS 27pt serif regular。
         val greetingView =
-            UiKit.text(this, HomeScreenController.greeting(), 28f, R.color.home_text, bold = true).apply {
+            UiKit.text(this, HomeScreenController.greeting(), 27f, R.color.home_text, serif = true).apply {
                 gravity = android.view.Gravity.CENTER
             }
         card.addView(UiKit.text(this, "∞", 34f, R.color.home_gradient_start).apply {
@@ -4886,17 +4887,8 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, dp(20), 0, dp(12))
         })
         card.addView(greetingView)
-        card.addView(UiKit.text(this, "项目 · 选择或切换 ›", 12f, R.color.home_text_secondary).apply {
-            minHeight = dp(48)
-            gravity = android.view.Gravity.CENTER
-            setOnClickListener { showChatProjectPicker() }
-        })
-        card.addView(
-            UiKit.text(this, "", 14f, R.color.home_text_secondary).apply {
-                gravity = android.view.Gravity.CENTER
-                setPadding(0, dp(4), 0, dp(14))
-            },
-        )
+        // 照片走查批 B：「项目 · 选择或切换 ›」行删掉（iOS 首页没有）——
+        // 切换功能不丢：状态行的「· 项目：…」段与作曲区项目 chip 同开 showChatProjectPicker()。
         // V5 C2-3-R1d（v4.3-01）：4 个建议 pill 取自入口注册表
         // （唯一事实来源）；点按把意图填进输入框，等用户补齐细节再
         // 发送（建议只填，不代发）。原型图的 4 个导航入口（建议项目/
@@ -4904,6 +4896,9 @@ class MainActivity : AppCompatActivity() {
         if (homeScreenController.suggestionsVisible()) {
             EntryRegistry.homeSuggestions().chunked(2).forEach { rowSuggestions ->
                 val row = UiKit.horizontal(this).apply {
+                    // 照片走查批 B：建议 pill 改为内容宽、居中排布，对 iOS
+                    // 内容尺寸 chips；不再是两列等宽大卡。
+                    gravity = android.view.Gravity.CENTER
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -4912,25 +4907,18 @@ class MainActivity : AppCompatActivity() {
                 rowSuggestions.forEachIndexed { index, entry ->
                     row.addView(
                         homeSuggestionPill(entry.iconGlyph, entry.title) { applySuggestion(entry.target) },
-                        LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            dp(48),
+                        ).apply {
                             marginEnd = if (index == 0) dp(8) else 0
                         },
                     )
                 }
                 card.addView(row)
             }
-            card.addView(
-                UiKit.text(this, "收起建议", 11f, R.color.home_text_secondary).apply {
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(0, dp(2), 0, 0)
-                    setOnClickListener {
-                        homeScreenController.dismissSuggestions()
-                        welcomeView?.let { messageList.removeView(it) }
-                        welcomeView = null
-                        renderChat(chatViewModel.stateNow())
-                    }
-                },
-            )
+            // 照片走查批 B：「收起建议」行删掉（iOS 首页没有收起入口，
+            // greetingDismissed 在 iOS 全仓无赋值处）；建议常驻显示。
         }
         return card
     }
@@ -9683,6 +9671,21 @@ class MainActivity : AppCompatActivity() {
         buttonTaskMark.visibility = View.GONE
     }
 
+    /** 首页状态行平台段（照片走查批 B）：平台地址按平台 Agent 的
+     * platformHost 计——任一平台 Agent 填了主机名即视为已配置；否则
+     * 如实报「平台未配置（本地优先）」，与 iOS 同文案。安卓首页不做
+     * 实时连通探测，故已配置时只报「平台已配置」，不谎称已连接。 */
+    private fun platformStatusLabel(): String {
+        val configured = try {
+            agentStore.listAgents().any {
+                it.brainKind == BrainKind.PLATFORM_AGENT && !it.platformHost.isNullOrBlank()
+            }
+        } catch (_: Exception) {
+            false
+        }
+        return if (configured) "平台已配置" else "平台未配置（本地优先）"
+    }
+
     private fun updateChatRouteBanner() {
         if (!::chatRouteBanner.isInitialized || !::chatViewModel.isInitialized) return
         val agent = chatViewModel.selectedAgent
@@ -9720,11 +9723,11 @@ class MainActivity : AppCompatActivity() {
             ""
         }
         val text = if (agent == null) {
-            "当前设备：本机 · 对话方：${brainDisplayName()}$projectSuffix"
+            "当前设备：本机 · 对话方：${brainDisplayName()} · ${platformStatusLabel()}$projectSuffix"
         } else {
             val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
             val suffix = if (route is AgentChatRoute.NotRoutable) "（未接入）" else ""
-            "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix$projectSuffix$directSuffix"
+            "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix · ${platformStatusLabel()}$projectSuffix$directSuffix"
         }
         val spannable = SpannableStringBuilder(text)
         val baseEnd = text.length - directSuffix.length

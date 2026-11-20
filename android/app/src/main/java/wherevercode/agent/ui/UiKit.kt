@@ -30,6 +30,7 @@ object UiKit {
         @ColorRes colorRes: Int,
         bold: Boolean = false,
         mono: Boolean = false,
+        serif: Boolean = false,
     ): TextView = TextView(context).apply {
         text = value
         textSize = sizeSp
@@ -40,6 +41,10 @@ object UiKit {
         }
         if (mono) {
             typeface = Typeface.MONOSPACE
+        }
+        // 照片走查批 B：iOS 问候为衬线常规体，安卓以 Typeface.SERIF 对齐。
+        if (serif) {
+            typeface = Typeface.SERIF
         }
     }
 

@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -82,7 +83,9 @@ class MainActivitySmokeTest {
         val texts = collectTexts(activity.window.decorView)
         assertTrue(texts.contains("WhereverCode"))
         assertTrue(texts.contains("今天想做什么？"))
-        assertTrue(texts.contains("项目 · 选择或切换 ›"))
+        // 照片走查批 B：「项目 · 选择或切换 ›」行已删（iOS 首页没有）——
+        // 切换功能在状态行「· 项目：…」段与作曲区项目 chip 里。
+        assertFalse(texts.contains("项目 · 选择或切换 ›"))
         // 收敛后首页建议 chips = 注册表四条（EntryRegistry.homeSuggestions）。
         assertTrue(texts.contains("开发一个 App"))
         assertTrue(texts.contains("导入项目并交付"))

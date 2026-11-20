@@ -1110,6 +1110,15 @@ public struct LocalChatHomeView: View {
         self.onSelectRoute = { _ in }
     }
 
+    // 照片走查批 B：状态行字段与安卓统一为 [当前设备 · 对话方 · 平台状态]——
+    // 删「模式：模型对话」，对话方取与作曲区选择器同一来源（见 partnerLabel）。
+    private var statusPartnerName: String {
+        if let ag = model.selectedAgent { return ag.displayName }
+        let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
+        if let cfg { return cfg.model.isEmpty ? cfg.label : cfg.model }
+        return "WhereverCode"
+    }
+
     private var connectionSummaryText: String {
         let platformLabel: String
         switch appState.connectionStatus {
@@ -1119,7 +1128,7 @@ public struct LocalChatHomeView: View {
         case .failed: platformLabel = "平台未连接（离线/本地模式）"
         case .unknown: platformLabel = "平台未检查"
         }
-        return "模式：模型对话 · 当前设备：本机 · \(platformLabel)"
+        return "当前设备：本机 · 对话方：\(statusPartnerName) · \(platformLabel)"
     }
 
     private var filteredHistory: [Conversation] {
