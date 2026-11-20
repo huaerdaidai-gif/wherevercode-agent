@@ -415,4 +415,121 @@ class PlatformChannelTransportTest {
             body.optJSONObject("params")?.optJSONObject("arguments")?.optString("agent_id"),
         )
     }
+
+    @Test
+    fun `recall delete pin react send their tool names and arguments`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_recall" to envelope("""{"ok":true}"""),
+                "agent_channel_delete_message" to envelope("""{"ok":true}"""),
+                "agent_channel_pin" to envelope("""{"ok":true}"""),
+                "agent_channel_react" to envelope("""{"ok":true}"""),
+            ),
+        )
+        val t = transport(http)
+        t.recallMessage("chan-1", "m1")
+        t.deleteMessage("chan-1", "m2")
+        t.setMessagePinned("chan-1", "m3", true)
+        t.reactMessage("chan-1", "m4", "👍", true)
+        val names = http.calls.map {
+            JSONObject(it.bodyJson).optJSONObject("params")?.optString("name")
+        }
+        assertEquals(
+            listOf(
+                "agent_channel_recall", "agent_channel_delete_message",
+                "agent_channel_pin", "agent_channel_react",
+            ),
+            names,
+        )
+        val pinArgs = JSONObject(http.calls[2].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(true, pinArgs?.optBoolean("pinned"))
+        val reactArgs = JSONObject(http.calls[3].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("👍", reactArgs?.optString("emoji"))
+        assertEquals(true, reactArgs?.optBoolean("on"))
+    }
+
+    @Test
+    fun `post ex sends effect key attachment and forward fields`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_post" to envelope("""{"id":"m9"}""")),
+        )
+        val id = transport(http).postMessageEx(
+            "chan-1", "正文", replyTo = "m1", effectKey = "ck_abc",
+            attachmentRef = "drive://file/1", forwardOf = "频道甲 · 乙",
+        )
+        assertEquals("m9", id)
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("ck_abc", args?.optString("effect_key"))
+        assertEquals("drive://file/1", args?.optString("attachment_ref"))
+        assertEquals("频道甲 · 乙", args?.optString("forward_of"))
+        assertEquals("m1", args?.optString("reply_to"))
+    }
+
+    @Test
+    fun `poll parses phase2 fields`() = runBlocking {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_messages" to envelope(
+                    """{"messages":[{"id":"m1","agent_id":"a1","agent_name":"甲","text":"","created_at":12.5,"reply_to":"m0","recalled":true,"pinned":true,"attachment_ref":"ref-1","forward_of":"频道甲 · 乙","reactions":[{"emoji":"👍","count":2,"mine":true}]}]}""",
+                ),
+            ),
+        )
+        val messages = transport(http).pollMessages("chan-1", null)
+        val m = messages.single()
+        assertEquals(true, m.recalled)
+        assertEquals(true, m.pinned)
+        assertEquals("m0", m.replyTo)
+        assertEquals("ref-1", m.attachmentRef)
+        assertEquals("频道甲 · 乙", m.forwardOf)
+        assertEquals(1, m.reactions.size)
+        assertEquals(2, m.reactions[0].count)
+        assertEquals(true, m.reactions[0].mine)
+    }
+
+    @Test
+    fun `search sends q and readers parse`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_messages" to envelope("""{"messages":[]}"""),
+                "agent_channel_readers" to envelope(
+                    """{"readers":[{"agent_id":"a1","agent_name":"甲","read":true},{"agent_id":"a2","agent_name":"乙","read":false}]}""",
+                ),
+            ),
+        )
+        val t = transport(http)
+        t.searchMessages("chan-1", "关键词")
+        val args = JSONObject(http.calls[0].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("关键词", args?.optString("q"))
+        val readers = t.channelReaders("chan-1", "m1")
+        assertEquals(2, readers.size)
+        assertEquals(true, readers[0].read)
+        assertEquals(false, readers[1].read)
+    }
+
+    @Test
+    fun `list channels parses kind and archived and open dm sends agent id`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_list" to envelope(
+                    """{"channels":[{"id":"c1","name":"大厅","kind":"channel","archived":false,"participants":[{"agent_id":"a1","agent_name":"甲"}]},{"id":"d1","name":"甲","kind":"dm","archived":true,"participants":[]}]}""",
+                ),
+                "agent_channel_open_dm" to envelope("""{"id":"d1","kind":"dm"}"""),
+            ),
+        )
+        val t = transport(http)
+        val channels = t.listChannels()
+        assertEquals(2, channels.size)
+        assertEquals("dm", channels[1].kind)
+        assertEquals(true, channels[1].archived)
+        assertEquals(listOf("a1"), channels[0].participantIds)
+        val dm = t.openDm("a9")
+        assertEquals("d1", dm.optString("id"))
+        val dmArgs = JSONObject(http.calls[1].bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("a9", dmArgs?.optString("agent_id"))
+    }
 }

@@ -102,4 +102,111 @@ final class ChannelParsingTests: XCTestCase {
         XCTAssertEqual(tasks[1].status, "claimed")
         XCTAssertNil(tasks[1].version)
     }
+
+    // MARK: - Phase-2/3 channel completion parsing & pure logic
+
+    func testMessageDecodingReadsPhase2Fields() {
+        let dict: [String: Any] = [
+            "messages": [[
+                "id": "m1", "agent_id": "a1", "agent_name": "甲", "text": "",
+                "reply_to": "m0", "created_at": 42.0,
+                "recalled": true, "pinned": true,
+                "attachment_ref": "ref-1", "forward_of": "大厅 · 乙",
+                "reactions": [["emoji": "👍", "count": 2, "mine": true]],
+            ]],
+        ]
+        let messages = ChannelMessage.list(from: dict)
+        XCTAssertEqual(messages.count, 1)
+        let m = messages[0]
+        XCTAssertTrue(m.recalled)
+        XCTAssertTrue(m.pinned)
+        XCTAssertEqual(m.replyTo, "m0")
+        XCTAssertEqual(m.attachmentRef, "ref-1")
+        XCTAssertEqual(m.forwardOf, "大厅 · 乙")
+        XCTAssertEqual(m.reactions.count, 1)
+        XCTAssertEqual(m.reactions.first?.count, 2)
+        XCTAssertEqual(m.reactions.first?.mine, true)
+        XCTAssertEqual(ChannelExtras.displayText(m), "此消息已撤回")
+    }
+
+    func testChannelListDecodingReadsKind() {
+        let dict: [String: Any] = [
+            "channels": [
+                ["id": "c1", "name": "大厅", "kind": "channel"],
+                ["id": "d1", "name": "甲", "kind": "dm"],
+                ["id": "c2", "name": "旧频道"],
+            ],
+        ]
+        let channels = ChannelInfo.list(from: dict)
+        XCTAssertEqual(channels.count, 3)
+        XCTAssertFalse(channels[0].isDM)
+        XCTAssertTrue(channels[1].isDM)
+        XCTAssertEqual(channels[2].kind, "channel")
+    }
+
+    func testChannelExtrasPureLogic() {
+        let parent = ChannelMessage(id: "p", agentId: "a", agentName: "甲", text: "父消息", createdAtSeconds: 1)
+        let child = ChannelMessage(id: "c", agentId: "b", agentName: "乙", text: "@甲 看下", replyTo: "p", createdAtSeconds: 2)
+        let plain = ChannelMessage(id: "n", agentId: "b", agentName: "乙", text: "普通", createdAtSeconds: 3)
+        XCTAssertEqual(
+            ChannelExtras.replyQuote(in: [parent, child], for: child),
+            "回复 甲：父消息")
+        XCTAssertNil(ChannelExtras.replyQuote(in: [parent, child], for: plain))
+        XCTAssertEqual(
+            ChannelExtras.reactionText([
+                ChannelReaction(emoji: "👍", count: 2, mine: true),
+                ChannelReaction(emoji: "❤️", count: 0),
+            ]),
+            "👍 2")
+        let center = ChannelExtras.buildMessageCenter(
+            messages: [parent, child, plain], myNames: ["甲"], lastReadId: "p")
+        XCTAssertEqual(center.unreadCount, 2)
+        XCTAssertEqual(center.unreadMentionCount, 1)
+        XCTAssertEqual(center.mentionMessages.map(\.id), ["c"])
+        XCTAssertEqual(ChannelExtras.forwardOfLabel(sourceChannelName: "大厅", senderName: "乙"), "大厅 · 乙")
+        XCTAssertEqual(ChannelExtras.buildEffectKey(nonce: "Ab-1_2!!"), "ck_Ab-1_2")
+        let readers = ChannelReader.list(from: ["readers": [
+            ["agent_id": "a1", "agent_name": "甲", "read": true],
+            ["agent_id": "a2", "agent_name": "乙", "read": false],
+        ]])
+        XCTAssertEqual(ChannelExtras.readersText(readers), "已读：甲 · 未读：乙")
+        let due = ChannelExtras.dueScheduled([
+            ScheduledChannelPost(id: "s2", channelId: "c", text: "晚", dueAtSeconds: 200, effectKey: "ck_2"),
+            ScheduledChannelPost(id: "s1", channelId: "c", text: "早", dueAtSeconds: 100, effectKey: "ck_1"),
+        ], nowSeconds: 150)
+        XCTAssertEqual(due.map(\.id), ["s1"])
+    }
+
+    func testLegacyCodablePayloadsStillDecode() throws {
+        // JSON written before phase-2/3 lacks the new keys entirely.
+        let messageJSON = #"{"id":"m1","agentId":"a1","agentName":"甲","text":"hi","createdAtSeconds":7}"#
+        let message = try JSONDecoder().decode(ChannelMessage.self, from: Data(messageJSON.utf8))
+        XCTAssertFalse(message.recalled)
+        XCTAssertFalse(message.pinned)
+        XCTAssertTrue(message.reactions.isEmpty)
+        let channelJSON = #"{"id":"c1","name":"大厅","participants":[],"isArchived":false}"#
+        let channel = try JSONDecoder().decode(ChannelInfo.self, from: Data(channelJSON.utf8))
+        XCTAssertEqual(channel.kind, "channel")
+    }
+
+    func testMentionAllGate() {
+        // @所有人只在 owner/协调者发时生效；其他人写的只当普通文本。
+        let owner = ChannelMessage(id: "m1", agentId: "owner", agentName: "主管",
+                                   text: "@所有人 请看一下", createdAtSeconds: 1)
+        let plain = ChannelMessage(id: "m2", agentId: "a2", agentName: "乙",
+                                   text: "@所有人 请看一下", createdAtSeconds: 2)
+        let recalled = ChannelMessage(id: "m3", agentId: "owner", agentName: "主管",
+                                      text: "@all 已撤回", createdAtSeconds: 3, recalled: true)
+        XCTAssertTrue(ChannelExtras.mentionsAllText("@all hi"))
+        XCTAssertTrue(ChannelExtras.mentionsAllText("@所有人 hi"))
+        XCTAssertFalse(ChannelExtras.mentionsAllText("@甲 hi"))
+        XCTAssertTrue(ChannelExtras.allMentionLive(owner, privilegedSenderIds: ["owner"]))
+        XCTAssertFalse(ChannelExtras.allMentionLive(plain, privilegedSenderIds: ["owner"]))
+        XCTAssertFalse(ChannelExtras.allMentionLive(recalled, privilegedSenderIds: ["owner"]))
+        // 生效的 @所有人计入消息中心的 @我聚合。
+        let center = ChannelExtras.buildMessageCenter(
+            messages: [owner, plain], myNames: [], lastReadId: nil,
+            privilegedSenderIds: ["owner"])
+        XCTAssertEqual(center.mentionMessages.map(\.id), ["m1"])
+    }
 }

@@ -13,6 +13,60 @@ import Foundation
 /// Wire shape (verified against the live MCP server, 2026-11-13):
 /// `{"id": ..., "agent_id": ..., "agent_name": ..., "text": ...,
 ///   "reply_to": ... | null, "created_at": <unix seconds, fractional>}`.
+/// One aggregated emoji reaction on a channel message (phase-2).
+public struct ChannelReaction: Identifiable, Equatable, Hashable, Codable, Sendable {
+    public let emoji: String
+    public let count: Int
+    public let mine: Bool
+
+    public var id: String { emoji }
+
+    public init(emoji: String, count: Int, mine: Bool = false) {
+        self.emoji = emoji
+        self.count = count
+        self.mine = mine
+    }
+
+    public static func list(from value: Any?) -> [ChannelReaction] {
+        guard let raw = value as? [[String: Any]] else { return [] }
+        return raw.compactMap { dict in
+            guard let emoji = stringField(dict, keys: ["emoji"]), !emoji.isEmpty else { return nil }
+            return ChannelReaction(
+                emoji: emoji,
+                count: (dict["count"] as? NSNumber)?.intValue ?? 0,
+                mine: (dict["mine"] as? Bool) ?? false
+            )
+        }
+    }
+}
+
+/// One member's read state for a message (phase-3 read receipts).
+public struct ChannelReader: Identifiable, Equatable, Hashable, Sendable {
+    public let agentId: String
+    public let agentName: String
+    public let read: Bool
+
+    public var id: String { agentId }
+
+    public init(agentId: String, agentName: String, read: Bool) {
+        self.agentId = agentId
+        self.agentName = agentName
+        self.read = read
+    }
+
+    public static func list(from dict: [String: Any]) -> [ChannelReader] {
+        guard let raw = dict["readers"] as? [[String: Any]] else { return [] }
+        return raw.compactMap { entry in
+            guard let agentId = stringField(entry, keys: ["agent_id"]), !agentId.isEmpty else { return nil }
+            return ChannelReader(
+                agentId: agentId,
+                agentName: stringField(entry, keys: ["agent_name"]) ?? "",
+                read: (entry["read"] as? Bool) ?? false
+            )
+        }
+    }
+}
+
 public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendable {
     public let id: String
     public let agentId: String
@@ -21,6 +75,17 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
     public let replyTo: String?
     /// Unix time in seconds, as sent by the server (fractional).
     public let createdAtSeconds: Double
+    /// Recalled by its sender (phase-2): the server blanks the text;
+    /// the UI shows a placeholder instead.
+    public let recalled: Bool
+    /// Pinned in the channel (phase-2).
+    public let pinned: Bool
+    /// Aggregated emoji reactions (phase-2).
+    public let reactions: [ChannelReaction]
+    /// Attachment reference (phase-2, reference system: no binaries).
+    public let attachmentRef: String?
+    /// Forwarding provenance label (phase-2).
+    public let forwardOf: String?
 
     public init(
         id: String,
@@ -28,7 +93,12 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
         agentName: String,
         text: String,
         replyTo: String? = nil,
-        createdAtSeconds: Double = 0
+        createdAtSeconds: Double = 0,
+        recalled: Bool = false,
+        pinned: Bool = false,
+        reactions: [ChannelReaction] = [],
+        attachmentRef: String? = nil,
+        forwardOf: String? = nil
     ) {
         self.id = id
         self.agentId = agentId
@@ -36,6 +106,11 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
         self.text = text
         self.replyTo = replyTo
         self.createdAtSeconds = createdAtSeconds
+        self.recalled = recalled
+        self.pinned = pinned
+        self.reactions = reactions
+        self.attachmentRef = attachmentRef
+        self.forwardOf = forwardOf
     }
 
     public var createdAt: Date {
@@ -45,6 +120,28 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
     /// Short display name: the agent name when present, otherwise the id.
     public var displaySender: String {
         agentName.isEmpty ? (agentId.isEmpty ? "?" : agentId) : agentName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, agentId, agentName, text, replyTo, createdAtSeconds
+        case recalled, pinned, reactions, attachmentRef, forwardOf
+    }
+
+    /// Tolerant decoding: payloads/caches written before phase-2 lack
+    /// the new fields; they decode as false/empty instead of failing.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        agentId = try c.decodeIfPresent(String.self, forKey: .agentId) ?? ""
+        agentName = try c.decodeIfPresent(String.self, forKey: .agentName) ?? ""
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        replyTo = try c.decodeIfPresent(String.self, forKey: .replyTo)
+        createdAtSeconds = try c.decodeIfPresent(Double.self, forKey: .createdAtSeconds) ?? 0
+        recalled = try c.decodeIfPresent(Bool.self, forKey: .recalled) ?? false
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        reactions = try c.decodeIfPresent([ChannelReaction].self, forKey: .reactions) ?? []
+        attachmentRef = try c.decodeIfPresent(String.self, forKey: .attachmentRef)
+        forwardOf = try c.decodeIfPresent(String.self, forKey: .forwardOf)
     }
 
     /// Build from a decoded tool-result dictionary. Returns nil when the
@@ -57,7 +154,12 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
             agentName: stringField(dict, keys: ["agent_name"]) ?? "",
             text: stringField(dict, keys: ["text"]) ?? "",
             replyTo: stringField(dict, keys: ["reply_to"]),
-            createdAtSeconds: numberField(dict, keys: ["created_at"]) ?? 0
+            createdAtSeconds: numberField(dict, keys: ["created_at"]) ?? 0,
+            recalled: (dict["recalled"] as? Bool) ?? false,
+            pinned: (dict["pinned"] as? Bool) ?? false,
+            reactions: ChannelReaction.list(from: dict["reactions"]),
+            attachmentRef: stringField(dict, keys: ["attachment_ref"]),
+            forwardOf: stringField(dict, keys: ["forward_of"])
         )
     }
 
@@ -76,13 +178,34 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
     public let lastMessageText: String?
     /// Archived flag (phase-1 channel management); absent on the wire = false.
     public let isArchived: Bool
+    /// Channel kind (phase-3): "channel" or "dm" (direct message).
+    public let kind: String
 
-    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false) {
+    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel") {
         self.id = id
         self.name = name
         self.participants = participants
         self.lastMessageText = lastMessageText
         self.isArchived = isArchived
+        self.kind = kind
+    }
+
+    /// True for direct-message channels (phase-3 DM, scheme A segment).
+    public var isDM: Bool { kind == "dm" }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, participants, lastMessageText, isArchived, kind
+    }
+
+    /// Tolerant decoding: caches written before phase-3 lack `kind`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        participants = try c.decodeIfPresent([String].self, forKey: .participants) ?? []
+        lastMessageText = try c.decodeIfPresent(String.self, forKey: .lastMessageText)
+        isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "channel"
     }
 
     public var displayName: String { name.isEmpty ? id : name }
@@ -106,7 +229,8 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
             name: stringField(dict, keys: ["name"]) ?? "",
             participants: participants,
             lastMessageText: last,
-            isArchived: (dict["archived"] as? Bool) ?? (dict["is_archived"] as? Bool) ?? false
+            isArchived: (dict["archived"] as? Bool) ?? (dict["is_archived"] as? Bool) ?? false,
+            kind: stringField(dict, keys: ["kind"]) ?? "channel"
         )
     }
 
@@ -248,4 +372,185 @@ public enum ReservedFeature: String, CaseIterable, Identifiable, Sendable {
     }
 
     public var notImplementedReason: String { note }
+}
+
+// MARK: - Channel completion (phases 2-4): pure helpers, mirrored with Android
+
+/// Pure channel-completion logic (no UI, no I/O): reactions, pins,
+/// reply quotes, message center aggregation, read-receipt text,
+/// forwarding labels, post effect keys and the scheduled-send queue.
+/// Mirrors Android's ChannelExtras so both ends behave identically.
+public enum ChannelExtras {
+    public static let reactionChoices = ["👍", "❤️", "🎉", "👀"]
+    public static let recalledPlaceholder = "此消息已撤回"
+
+    public static func reactionText(_ reactions: [ChannelReaction]) -> String {
+        reactions.filter { $0.count > 0 }
+            .map { "\($0.emoji) \($0.count)" }
+            .joined(separator: " · ")
+    }
+
+    public static func myReaction(_ reactions: [ChannelReaction], emoji: String) -> Bool {
+        reactions.contains { $0.emoji == emoji && $0.mine }
+    }
+
+    public static func pinnedMessages(_ messages: [ChannelMessage]) -> [ChannelMessage] {
+        messages.filter { $0.pinned && !$0.recalled }
+    }
+
+    public static func displayText(_ message: ChannelMessage) -> String {
+        message.recalled ? recalledPlaceholder : message.text
+    }
+
+    /// "回复 <sender>：<excerpt>" for a reply whose parent is in the list.
+    public static func replyQuote(in messages: [ChannelMessage], for message: ChannelMessage) -> String? {
+        guard let parentId = message.replyTo,
+              let parent = messages.first(where: { $0.id == parentId }) else { return nil }
+        let excerpt = String(displayText(parent).replacingOccurrences(of: "\n", with: " ").prefix(40))
+        return "回复 \(parent.displaySender)：\(excerpt)"
+    }
+
+    public static func forwardOfLabel(sourceChannelName: String, senderName: String) -> String {
+        let channel = sourceChannelName.trimmingCharacters(in: .whitespaces).isEmpty ? "频道" : sourceChannelName
+        let sender = senderName.trimmingCharacters(in: .whitespaces).isEmpty ? "未知" : senderName
+        return "\(channel) · \(sender)"
+    }
+
+    public static func mentionsAny(_ message: ChannelMessage, names: [String]) -> Bool {
+        if message.recalled { return false }
+        return names.contains { !$0.isEmpty && message.text.contains("@\($0)") }
+    }
+
+    /// 文本里是否写了 @所有人（`@all` / `@所有人`）。
+    public static func mentionsAllText(_ text: String) -> Bool {
+        text.contains("@all") || text.contains("@所有人")
+    }
+
+    /// 文本里是否写了 @所有人。撤回的消息不算提及。
+    public static func mentionsAll(_ message: ChannelMessage) -> Bool {
+        if message.recalled { return false }
+        return mentionsAllText(message.text)
+    }
+
+    /// 这条 @所有人是否生效：只有 owner/协调者发的才算全员提及；
+    /// 其他人写的 @all 只当普通文本（不渲染提及、不计入消息中心）。
+    /// 客户端已知的特权发送者是本机自己；频道 owner 的服务端语义
+    /// 待定，本轮不另造工具名。
+    public static func allMentionLive(
+        _ message: ChannelMessage, privilegedSenderIds: Set<String>
+    ) -> Bool {
+        mentionsAll(message) && privilegedSenderIds.contains(message.agentId)
+    }
+
+    /// Message-center aggregate for one channel (phase-3).
+    /// A live @所有人 (see ``allMentionLive``) also counts as a
+    /// mention — it is addressed to everyone by definition.
+    public static func buildMessageCenter(
+        messages: [ChannelMessage],
+        myNames: [String],
+        lastReadId: String?,
+        privilegedSenderIds: Set<String> = []
+    ) -> MessageCenter {
+        // Mirrors Android: no marker = nothing counted; a marker that
+        // is not in the list counts everything as unread.
+        let unread: [ChannelMessage]
+        if lastReadId == nil {
+            unread = []
+        } else if let readIndex = messages.firstIndex(where: { $0.id == lastReadId }) {
+            unread = Array(messages.dropFirst(readIndex + 1))
+        } else {
+            unread = messages
+        }
+        func isMention(_ m: ChannelMessage) -> Bool {
+            mentionsAny(m, names: myNames) || allMentionLive(m, privilegedSenderIds: privilegedSenderIds)
+        }
+        let mentions = messages.filter { isMention($0) }
+        let unreadMentions = unread.filter { isMention($0) }.count
+        return MessageCenter(
+            mentionMessages: mentions,
+            unreadCount: unread.count,
+            unreadMentionCount: unreadMentions
+        )
+    }
+
+    public static func readersText(_ readers: [ChannelReader]) -> String {
+        if readers.isEmpty { return "暂无成员已读信息。" }
+        let read = readers.filter { $0.read }.map { $0.agentName.isEmpty ? $0.agentId : $0.agentName }
+        let unread = readers.filter { !$0.read }.map { $0.agentName.isEmpty ? $0.agentId : $0.agentName }
+        var parts = ["已读：" + (read.isEmpty ? "暂无人" : read.joined(separator: "、"))]
+        if !unread.isEmpty { parts.append("未读：" + unread.joined(separator: "、")) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Post idempotency key (client-side discipline):
+    /// minted once per send intent; retries reuse it and the server
+    /// dedupes on (channel, sender, key). This is just `ck_`+nonce,
+    /// not an AWM KeyMint.
+    public static func buildEffectKey(nonce: String) -> String {
+        let cleaned = nonce.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        return "ck_" + String(cleaned.prefix(100))
+    }
+
+    /// AWM evidence grade label (phase-4 evidence display; same
+    /// grades as server/awm/evidence.py). Display only — an
+    /// observation never poses as an E3 authoritative receipt.
+    public static func evidenceGradeLabel(_ grade: String?) -> String {
+        switch grade {
+        case "E0": return "E0 已入队"
+        case "E1": return "E1 已送达"
+        case "E2": return "E2 已执行"
+        case "E3": return "E3 已确认生效"
+        case "H": return "H 人工接力"
+        default: return ""
+        }
+    }
+
+    /// Highest grade wins, in evidence.py's order: E3 > H > E2 > E1 > E0.
+    public static func highestEvidenceGrade(_ grades: [String]) -> String? {
+        for grade in ["E3", "H", "E2", "E1", "E0"] where grades.contains(grade) {
+            return grade
+        }
+        return nil
+    }
+
+    public static func dueScheduled(_ items: [ScheduledChannelPost], nowSeconds: Double) -> [ScheduledChannelPost] {
+        items.filter { $0.dueAtSeconds <= nowSeconds }.sorted { $0.dueAtSeconds < $1.dueAtSeconds }
+    }
+}
+
+/// Message-center aggregate (phase-3).
+public struct MessageCenter: Equatable, Sendable {
+    public let mentionMessages: [ChannelMessage]
+    public let unreadCount: Int
+    public let unreadMentionCount: Int
+
+    public init(mentionMessages: [ChannelMessage], unreadCount: Int, unreadMentionCount: Int) {
+        self.mentionMessages = mentionMessages
+        self.unreadCount = unreadCount
+        self.unreadMentionCount = unreadMentionCount
+    }
+}
+
+/// One scheduled channel post (phase-2): persisted on-device by the
+/// caller; sent when due with its effect key so replays never
+/// double-post.
+public struct ScheduledChannelPost: Identifiable, Equatable, Codable, Sendable {
+    public let id: String
+    public let channelId: String
+    public let text: String
+    public let dueAtSeconds: Double
+    public let effectKey: String
+    public let attachmentRef: String?
+    /// 回复目标（定时发一条回复时用；与安卓 ScheduledChannelPost 同形）。
+    public let replyToId: String?
+
+    public init(id: String, channelId: String, text: String, dueAtSeconds: Double, effectKey: String, attachmentRef: String? = nil, replyToId: String? = nil) {
+        self.id = id
+        self.channelId = channelId
+        self.text = text
+        self.dueAtSeconds = dueAtSeconds
+        self.effectKey = effectKey
+        self.attachmentRef = attachmentRef
+        self.replyToId = replyToId
+    }
 }

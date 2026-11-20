@@ -51,6 +51,33 @@ public struct ChannelTransport {
         return ""
     }
 
+    /// Post with phase-2/4 extras: `effectKey` idempotency key (the
+    /// server dedupes retries on it), `attachmentRef` (reference
+    /// system — a Drive/delivery reference, never a binary) and
+    /// `forwardOf` forwarding provenance label.
+    public func postMessageEx(
+        channelID: String,
+        text: String,
+        replyTo: String? = nil,
+        effectKey: String? = nil,
+        attachmentRef: String? = nil,
+        forwardOf: String? = nil
+    ) async throws -> String {
+        guard text.count <= Self.maxPostLength else {
+            throw McpError.transport("消息超过 \(Self.maxPostLength) 字，无法发送。")
+        }
+        var args: [String: Any] = ["channel_id": channelID, "text": text]
+        if let replyTo, !replyTo.isEmpty { args["reply_to"] = replyTo }
+        if let effectKey, !effectKey.isEmpty { args["effect_key"] = effectKey }
+        if let attachmentRef, !attachmentRef.isEmpty { args["attachment_ref"] = attachmentRef }
+        if let forwardOf, !forwardOf.isEmpty { args["forward_of"] = forwardOf }
+        let result = try await client.callTool(name: "agent_channel_post", arguments: args)
+        if let id = result["id"] as? String, !id.isEmpty { return id }
+        if let message = result["message"] as? [String: Any],
+           let id = message["id"] as? String { return id }
+        return ""
+    }
+
     /// Messages in `channelID` after `afterID` (nil = latest page).
     /// `onlyUnread` / `markRead` are passed through to the server
     /// exactly as documented for `agent_channel_messages`.
@@ -120,5 +147,71 @@ public struct ChannelTransport {
         try await client.callTool(
             name: "agent_channel_remove_member",
             arguments: ["channel_id": channelID, "agent_id": agentID])
+    }
+
+    // MARK: - Message actions & phase-3 services
+    //
+    // Same honesty rule as the management section: when the server
+    // does not expose a tool yet, the call surfaces its real error.
+
+    /// Recall one of my own messages (server blanks the text and
+    /// leaves a placeholder; the action is audit-logged server-side).
+    public func recallMessage(channelID: String, messageID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_recall",
+            arguments: ["channel_id": channelID, "message_id": messageID])
+    }
+
+    /// Delete a message (sender, or channel admin for governance).
+    public func deleteMessage(channelID: String, messageID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_delete_message",
+            arguments: ["channel_id": channelID, "message_id": messageID])
+    }
+
+    /// Pin or unpin a message.
+    public func setMessagePinned(channelID: String, messageID: String, pinned: Bool) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_pin",
+            arguments: ["channel_id": channelID, "message_id": messageID, "pinned": pinned])
+    }
+
+    /// Toggle one of my emoji reactions on a message.
+    public func reactMessage(channelID: String, messageID: String, emoji: String, on: Bool) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_react",
+            arguments: ["channel_id": channelID, "message_id": messageID, "emoji": emoji, "on": on])
+    }
+
+    /// Who has read up to a message (phase-3 read receipts).
+    public func channelReaders(channelID: String, messageID: String) async throws -> [ChannelReader] {
+        let result = try await client.callTool(
+            name: "agent_channel_readers",
+            arguments: ["channel_id": channelID, "message_id": messageID])
+        return ChannelReader.list(from: result)
+    }
+
+    /// Pinned messages only (server `pinned_only`).
+    public func pollPinnedMessages(channelID: String) async throws -> [ChannelMessage] {
+        let result = try await client.callTool(
+            name: "agent_channel_messages",
+            arguments: ["channel_id": channelID, "limit": 100, "pinned_only": true])
+        return ChannelMessage.list(from: result)
+    }
+
+    /// Open (or fetch) the DM channel with one channel member
+    /// (phase-3 DM; entry is the in-page 频道/私聊 segment, scheme A).
+    public func openDm(agentID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_open_dm",
+            arguments: ["agent_id": agentID])
+    }
+
+    /// Create an inbound webhook for a channel; the token is returned
+    /// exactly once and is user-managed.
+    public func createChannelWebhook(channelID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_create_webhook",
+            arguments: ["channel_id": channelID])
     }
 }
