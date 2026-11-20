@@ -177,6 +177,7 @@ struct MessageCenterView: View {
         guard !loading else { return }
         loading = true
         errorMessage = nil
+        loadingChannels = true
         defer { loading = false }
         do {
             // 本机身份别名（@我 的判定集合）：我 / 本机 App / 协调者，加
@@ -187,21 +188,37 @@ struct MessageCenterView: View {
                 selfNames.append(agent.agentId)
                 selfNames.append(agent.displayName)
             }
-            let channels = try await appState.loadChannels()
-            await MainActor.run { loadingChannels = false }
-            guard !channels.isEmpty else {
-                snapshot = MessageCenterSnapshot()
+            // 既有读路径：AppState.loadChannels()（内部走 ChannelTransport.listChannels），
+            // 结果发布在 availableChannels；列表读失败（channelListError）如实上抛。
+            guard let transport = appState.makeChannelTransport() else {
+                await MainActor.run {
+                    loadingChannels = false
+                    errorMessage = "平台地址无效，读不到频道列表。"
+                }
                 return
             }
-            let transport = ChannelTransportMessageCenterAdapter(transport: appState.makeChannelTransport())
+            await appState.loadChannels()
+            let channels = await MainActor.run { appState.availableChannels }
+            let listError = await MainActor.run { appState.channelListError }
+            await MainActor.run { loadingChannels = false }
+            if let listError {
+                await MainActor.run { errorMessage = "消息中心刷新失败：\(listError)" }
+                return
+            }
             let sources = channels.filter { !$0.isArchived }.map {
                 MessageCenterChannelSource(channelId: $0.id, channelName: $0.displayName)
             }
-            let loaded = try await MessageCenterLoader(transport: transport)
+            guard !sources.isEmpty else {
+                await MainActor.run { snapshot = MessageCenterSnapshot() }
+                return
+            }
+            let adapter = ChannelTransportMessageCenterAdapter(transport: transport)
+            let loaded = try await MessageCenterLoader(transport: adapter)
                 .fetch(channels: sources, selfNames: selfNames)
             await MainActor.run { snapshot = loaded }
         } catch {
             await MainActor.run {
+                loadingChannels = false
                 errorMessage = "消息中心刷新失败：\(error.localizedDescription)"
             }
         }
