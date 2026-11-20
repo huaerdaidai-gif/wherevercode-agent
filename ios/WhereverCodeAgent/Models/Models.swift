@@ -552,6 +552,81 @@ public enum ChannelExtras {
     public static func dueScheduled(_ items: [ScheduledChannelPost], nowSeconds: Double) -> [ScheduledChannelPost] {
         items.filter { $0.dueAtSeconds <= nowSeconds }.sorted { $0.dueAtSeconds < $1.dueAtSeconds }
     }
+
+    /// 频道群主角色。与 ``ChannelParticipant/canMentionAll`` 分开：
+    /// 后者含群主和协调者两档，不能拿来当“不可移除”。
+    public static let channelOwnerRoles: Set<String> = [
+        "owner", "所有者", "项目主管", "群主", "频道群主",
+    ]
+
+    public static func isChannelOwnerRole(_ role: String?) -> Bool {
+        guard let role else { return false }
+        let normalized = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return channelOwnerRoles.contains(normalized)
+    }
+
+    /// 成员移除保护：只有本人和频道群主。协调者即使能 @所有人也可移除。
+    public static func isProtectedChannelMember(isSelf: Bool, role: String?) -> Bool {
+        isSelf || isChannelOwnerRole(role)
+    }
+
+    /// 转发 @所有人门闩。无目标频道权限时返回应展示的错误，调用方不得发帖。
+    public static func forwardMentionAllBlockReason(text: String, canMentionAllInTarget: Bool) -> String? {
+        guard mentionsAllText(text), !canMentionAllInTarget else { return nil }
+        return "只有目标频道 owner/协调者可以转发 @所有人，消息未发送。"
+    }
+
+    public enum ForwardFailure: Error {
+        case blocked(String)
+        case failed(String)
+
+        public var message: String {
+            switch self {
+            case .blocked(let message), .failed(let message):
+                return message
+            }
+        }
+    }
+
+    /// 先过目标频道 @所有人门闩，被拦时不调用 `post`。
+    public static func forwardMessage(
+        text: String,
+        canMentionAllInTarget: Bool,
+        post: () async throws -> String
+    ) async -> Result<String, ForwardFailure> {
+        if let reason = forwardMentionAllBlockReason(
+            text: text, canMentionAllInTarget: canMentionAllInTarget) {
+            return .failure(.blocked(reason))
+        }
+        do {
+            return .success(try await post())
+        } catch {
+            let message = (error as? McpError)?.message ?? "转发失败。"
+            return .failure(.failed(message))
+        }
+    }
+
+    /// 展示用 isAgent。平台明确给了 is_agent 就用平台值（含本人）；
+    /// 缺失时本人按非 Agent 兜底，其他人再看成员名单。
+    public static func displayedIsAgent(
+        platformIsAgent: Bool?,
+        senderIsSelf: Bool,
+        rosterIsAgent: Bool? = nil
+    ) -> Bool {
+        if let platformIsAgent { return platformIsAgent }
+        if senderIsSelf { return false }
+        return rosterIsAgent ?? false
+    }
+
+    /// 定时发送回执。空 id 视为未确认：队列原样返回，effect_key 不动。
+    public static func scheduledQueueAfterFlush(
+        items: [ScheduledChannelPost],
+        itemID: String,
+        postedID: String
+    ) -> [ScheduledChannelPost] {
+        guard !postedID.isEmpty else { return items }
+        return items.filter { $0.id != itemID }
+    }
 }
 
 /// Message-center aggregate (phase-3).

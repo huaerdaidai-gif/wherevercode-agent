@@ -2423,6 +2423,8 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
     public var attachmentRef: String? = nil
     /// 转发来源标注（“来源频道 · 原发送者”）。
     public var forwardOf: String? = nil
+    /// 平台原样 `is_agent`。nil 表示响应没有该字段，不能事后当成 false。
+    public var platformIsAgent: Bool? = nil
 
     public init(
         id: String,
@@ -2444,7 +2446,8 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
         pinned: Bool = false,
         reactions: [ChannelReaction] = [],
         attachmentRef: String? = nil,
-        forwardOf: String? = nil
+        forwardOf: String? = nil,
+        platformIsAgent: Bool? = nil
     ) {
         self.id = id
         self.senderId = senderId
@@ -2466,6 +2469,7 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
         self.reactions = reactions
         self.attachmentRef = attachmentRef
         self.forwardOf = forwardOf
+        self.platformIsAgent = platformIsAgent
     }
 }
 
@@ -4038,11 +4042,13 @@ public struct ChannelDetailWorkspaceView: View {
         appState.trackChannelPost(id)
         if !id.isEmpty, let message = messages.first(where: { $0.id == id }) {
             appState.learnChannelSender(messageID: id, senderID: message.senderId)
-            if let senderID = appState.channelSenderID {
-                for index in messages.indices where messages[index].senderId == senderID {
-                    messages[index].isAgent = false
-                }
-            }
+        }
+        guard let senderID = appState.channelSenderID else { return }
+        for index in messages.indices where messages[index].senderId == senderID {
+            // 平台明确给了 is_agent 就保留；只有缺失时才把本人收成非 Agent。
+            messages[index].isAgent = ChannelExtras.displayedIsAgent(
+                platformIsAgent: messages[index].platformIsAgent,
+                senderIsSelf: true)
         }
     }
 
@@ -4090,14 +4096,20 @@ public struct ChannelDetailWorkspaceView: View {
         }
         let forwardOf = ChannelExtras.forwardOfLabel(
             sourceChannelName: channelItem?.name ?? "", senderName: source.senderName)
-        do {
-            _ = try await transport.postMessageEx(
+        let outcome = await ChannelExtras.forwardMessage(
+            text: source.text,
+            canMentionAllInTarget: localCanMentionAll(in: target.id)
+        ) {
+            try await transport.postMessageEx(
                 channelID: target.id, text: source.text,
                 effectKey: ChannelExtras.buildEffectKey(nonce: UUID().uuidString),
                 attachmentRef: source.attachmentRef, forwardOf: forwardOf)
+        }
+        switch outcome {
+        case .success:
             await refreshChannelMessages()
-        } catch {
-            actionError = (error as? McpError)?.message ?? "转发失败。"
+        case .failure(let failure):
+            actionError = failure.message
         }
     }
 
@@ -4120,6 +4132,7 @@ public struct ChannelDetailWorkspaceView: View {
             for msg in converted {
                 if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
                     messages[idx].isAgent = msg.isAgent
+                    messages[idx].platformIsAgent = msg.platformIsAgent
                     messages[idx].recalled = msg.recalled
                     messages[idx].pinned = msg.pinned
                     messages[idx].reactions = msg.reactions
@@ -4195,8 +4208,16 @@ public struct ChannelDetailWorkspaceView: View {
                 let id = try await transport.postMessageEx(
                     channelID: item.channelId, text: item.text, replyTo: item.replyToId,
                     effectKey: item.effectKey, attachmentRef: item.attachmentRef)
+                loadScheduled()
+                let updated = ChannelExtras.scheduledQueueAfterFlush(
+                    items: scheduledPosts, itemID: item.id, postedID: id)
+                if updated != scheduledPosts {
+                    scheduledPosts = updated
+                    saveScheduled()
+                }
+                // 空 id 不是成功：上面的队列没有删这项，effect_key 原样留着下次重试。
+                guard !id.isEmpty else { continue }
                 recordChannelPost(id)
-                cancelScheduled(item)
             } catch {
                 // 保留原队列项和 effect_key，下次到期检查时继续重试。
             }
@@ -4582,6 +4603,7 @@ public struct ChannelDetailWorkspaceView: View {
                 for msg in converted {
                     if let idx = self.messages.firstIndex(where: { $0.id == msg.id }) {
                         self.messages[idx].isAgent = msg.isAgent
+                        self.messages[idx].platformIsAgent = msg.platformIsAgent
                         self.messages[idx].recalled = msg.recalled
                         self.messages[idx].pinned = msg.pinned
                         self.messages[idx].reactions = msg.reactions
@@ -4633,8 +4655,10 @@ public struct ChannelDetailWorkspaceView: View {
             id: msg.id,
             senderId: msg.agentId,
             senderName: msg.displaySender,
-            isAgent: !isOwnSender(msg.agentId) && (
-                msg.isAgent ?? channelParticipants.first(where: { $0.id == msg.agentId })?.isAgent ?? false),
+            isAgent: ChannelExtras.displayedIsAgent(
+                platformIsAgent: msg.isAgent,
+                senderIsSelf: isOwnSender(msg.agentId),
+                rosterIsAgent: channelParticipants.first(where: { $0.id == msg.agentId })?.isAgent),
             text: msg.text,
             timestamp: timeFmt.string(from: date),
             fullDateTime: fullFmt.string(from: date),
@@ -4644,7 +4668,8 @@ public struct ChannelDetailWorkspaceView: View {
             pinned: msg.pinned,
             reactions: msg.reactions,
             attachmentRef: msg.attachmentRef,
-            forwardOf: msg.forwardOf
+            forwardOf: msg.forwardOf,
+            platformIsAgent: msg.isAgent
         )
     }
 
@@ -5014,8 +5039,10 @@ public struct ChannelSettingsSheet: View {
     private func isProtectedMember(_ member: V5ChannelMember) -> Bool {
         let participant = appState.availableChannels.first(where: { $0.id == channelId })?
             .participantDetails.first(where: { $0.id == member.id })
-        return member.id == appState.channelSenderID ||
-            participant?.isSelf == true || participant?.canMentionAll == true
+        let isSelf = member.id == appState.channelSenderID || participant?.isSelf == true
+        // 群主看 role。canMentionAll 把协调者也算进去，不能用来挡移除。
+        let role = participant?.role ?? member.role
+        return ChannelExtras.isProtectedChannelMember(isSelf: isSelf, role: role)
     }
     @MainActor private func deleteChannel() async {
         guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
