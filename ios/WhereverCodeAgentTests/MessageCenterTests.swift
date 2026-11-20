@@ -119,8 +119,9 @@ final class MessageCenterTests: XCTestCase {
             message("m1", text: "@本机 App 帮我看看构建", at: 10),
             message("m2", text: "【协调者 · 任务 a1b2c3d4 · 修复登录】已修复", at: 12),
             message("m3", text: "普通讨论", at: 11),
-            // 一条既是 @我 又是任务回执：两个区各计一条。
-            message("m4", text: "@Codex 【协调者 · 任务 e5f6a7b8 · 重构】开始重构", at: 13),
+            // 一条既是 @我 又是任务回执：归属头在前、提及在正文（真实中转
+            // 回复的形态——头总在正文最前，与 Android 端样例一致）。
+            message("m4", text: "【协调者 · 任务 e5f6a7b8 · 重构】@Codex 开始重构", at: 13),
         ]
         let unread = [
             message("u1", text: "@本机 App 新消息", at: 20),
@@ -160,11 +161,12 @@ final class MessageCenterTests: XCTestCase {
         }
         let merged = MessageCenterRules.merge([
             MessageCenterSnapshot(unread: (1...25).map { entry(String($0)) }),
-            MessageCenterSnapshot(unread: [entry("5"), entry("99")]),
+            MessageCenterSnapshot(unread: [entry("24"), entry("99")]),
         ])
         XCTAssertEqual(merged.unread.count, 20)
         XCTAssertEqual(merged.unread.first?.createdAtSeconds, 99)
-        XCTAssertEqual(merged.unread.filter { $0.messageId == "5" }.count, 1)
+        // "24" 同时出现在两份输入里，输出只该有一条（去重）且留在前 20。
+        XCTAssertEqual(merged.unread.filter { $0.messageId == "24" }.count, 1)
     }
 
     // MARK: - 已读语义（桩传输锁定）
