@@ -123,6 +123,8 @@ import wherevercode.agent.core.agent.ManusChatBridge
 import wherevercode.agent.core.agent.ManusChatPort
 import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
+import wherevercode.agent.core.agent.ChannelSummary
+import wherevercode.agent.core.agent.channelFeedRebindNeeded
 import wherevercode.agent.core.agent.McpChannelEventFeed
 import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.agent.PlatformAgentChatBridge
@@ -203,6 +205,8 @@ import wherevercode.agent.core.security.PairingRecord
 import wherevercode.agent.core.security.PairingSnapshotCache
 import wherevercode.agent.core.security.PairingState
 import wherevercode.agent.core.team.ChannelAgentRelay
+import wherevercode.agent.core.team.ChannelExtras
+import wherevercode.agent.core.team.ScheduledChannelPost
 import wherevercode.agent.core.team.FanoutCandidate
 import wherevercode.agent.core.team.InMemoryFanoutStore
 import wherevercode.agent.core.team.RelayStatus
@@ -414,6 +418,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
     private var teamChannelFeed: McpChannelEventFeed? = null
+    /**
+     * 当前 feed 实际订阅的频道 id（推送主模式整改，2026-11-20）：feed 绑
+     * 「当前打开的频道/私聊」，切换即重绑；与 [teamChannelActiveId] 的
+     * 关系是——active 是用户正在看的，feedChannelId 是 WS 正在订的，
+     * 两者应当一致，不一致时由 startTeamChannelFeed 重绑拉齐。
+     */
+    @Volatile
+    private var teamChannelFeedChannelId: String? = null
     /** 频道消息（feed 推送 + 首轮轮询攒的，时间升序；最多留 100 条）。 */
     private val teamChannelMessages = mutableListOf<PlatformChannelMessage>()
     /**
@@ -440,6 +452,15 @@ class MainActivity : AppCompatActivity() {
     private val channelTaskCards = mutableListOf<wherevercode.agent.core.team.ChannelTaskCard>()
     /** 频道页一次性提示（发帖/扇出失败原因等；下次刷新时由快照带出）。 */
     private var teamChannelNotice: String? = null
+    /** 频道补全二/三期：当前查看的频道（null = 端点默认频道；切换频道/私聊时置位）。 */
+    private var teamChannelActiveId: String? = null
+    /** 私聊分段是否选中（方案 A 分段切换的状态在本机，不进服务端）。 */
+    private var teamChannelDmMode = false
+    /** 最近一次从平台拉到的频道列表缓存（团队空间切换行与私聊列表共用）。 */
+    private var teamChannelChannelsCache: List<ChannelSummary> = emptyList()
+    /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
+    private var teamChannelSearchQuery = ""
+    private var teamChannelSearchResults: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
     /** 正在进行的频道刷新（后台线程）；进行中时新刷新跳过，等下一轮。 */
     @Volatile
     private var teamChannelRefreshRunning = false
@@ -1655,6 +1676,52 @@ class MainActivity : AppCompatActivity() {
             },
             onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onCreateNew = { showChannelCreateMenu() },
+            onSwitchChannel = { channelId ->
+                teamChannelActiveId = channelId
+                teamChannelSearchResults = null
+                // 推送跟看的频道走：重订 WS（阻塞①修法），再刷新。
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            },
+            onToggleDmMode = { dm ->
+                teamChannelDmMode = dm
+                if (!dm) teamChannelActiveId = null
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            },
+            onStartDm = { agentId -> startTeamChannelDm(agentId) },
+            onMessageRecall = { messageId -> runTeamChannelAction("撤回") { t, ch -> t.recallMessage(ch, messageId) } },
+            onMessageDelete = { messageId -> runTeamChannelAction("删除") { t, ch -> t.deleteMessage(ch, messageId) } },
+            onTogglePin = { messageId, pinned ->
+                runTeamChannelAction(if (pinned) "置顶" else "取消置顶") { t, ch ->
+                    t.setMessagePinned(ch, messageId, pinned)
+                }
+            },
+            onReact = { messageId, emoji, on ->
+                runTeamChannelAction("反应") { t, ch -> t.reactMessage(ch, messageId, emoji, on) }
+            },
+            onForward = { message -> showForwardChannelPicker(message) },
+            onShowReaders = { messageId -> showChannelReaders(messageId) },
+            onPostEx = { text, replyToId, attachmentRef ->
+                postTeamChannelMessage(text, replyToId, attachmentRef)
+            },
+            onSchedulePost = { text, delaySeconds -> scheduleTeamChannelPost(text, delaySeconds) },
+            onCancelScheduled = { id -> cancelTeamChannelScheduled(id) },
+            onNotifyModeChange = { mode ->
+                val channelId = activeTeamChannelId()
+                getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                    .edit().putString("notify_$channelId", mode).apply()
+                teamChannelNotice = "本频道通知：$mode"
+                refreshTeamChannel()
+            },
+            onSearch = { query -> searchTeamChannel(query) },
+            onClearSearch = {
+                teamChannelSearchQuery = ""
+                teamChannelSearchResults = null
+                refreshTeamChannel()
+            },
+            onOpenAttachmentRef = { ref -> openAttachmentRef(ref) },
+            onRequestAttachmentRef = { showAttachmentRefInput() },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -5937,15 +6004,29 @@ class MainActivity : AppCompatActivity() {
             )
         }
         val (host, channelId) = endpoint
-        val messages = synchronized(teamChannelMessages) { teamChannelMessages.toList() }
-        val lastReadId = teamChannelLastReadId(channelId)
+        // 频道补全三期 + 阻塞①修法：正在看的频道就是快照的频道；WS 订
+        // 阅也跟 activeId 走（startTeamChannelFeed 重绑），未读与已读
+        // 标记一律按 activeId 算，不再对非默认频道硬写 0、也不再用端
+        // 点默认频道读标。非默认频道的消息仍由快照直拉（feed 的首轮
+        // 轮询也会捡回来，之后新消息走 WS 推送）。
+        val activeId = teamChannelActiveId ?: channelId
+        val messages = if (activeId != channelId) {
+            try {
+                runBlocking { teamChannelTransport(host).pollMessages(activeId, null, 50) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else {
+            synchronized(teamChannelMessages) { teamChannelMessages.toList() }
+        }
+        val lastReadId = teamChannelLastReadId(activeId)
         val (unreadCount, unreadCapped) = if (lastReadId == null) {
-            messages.lastOrNull()?.let { saveTeamChannelLastReadId(channelId, it.id) }
+            messages.lastOrNull()?.let { saveTeamChannelLastReadId(activeId, it.id) }
             0 to false
         } else {
             // 未读数改走服务端口径（onlyUnread 原样透传）：已读过的不再
             // 计入，别处不再重复通知；服务端问不到时回落本地口径。
-            serverTeamChannelUnread(host, channelId) ?: run {
+            serverTeamChannelUnread(host, activeId) ?: run {
                 val index = messages.indexOfFirst { it.id == lastReadId }
                 val count = if (index < 0) messages.size else messages.size - index - 1
                 count to false
@@ -5975,6 +6056,25 @@ class MainActivity : AppCompatActivity() {
             taskCards = synchronized(channelTaskCards) { channelTaskCards.toList() },
             trustedAttributionPosterIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
                 synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
+            selfAgentIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
+            channels = teamChannelChannelsCache,
+            activeChannelId = activeId,
+            dmMode = teamChannelDmMode,
+            dmChannels = ChannelExtras.dmChannels(teamChannelChannelsCache),
+            messageCenter = ChannelExtras.buildMessageCenter(
+                messages,
+                teamChannelMembers()
+                    .filter { it.isLocalApp || it.agentId in synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } }
+                    .map { it.displayName } + listOf("本机 App"),
+                teamChannelLastReadId(activeId),
+                privilegedSenderIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
+                    synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
+            ),
+            scheduled = loadScheduledPosts().filter { it.channelId == activeId },
+            notifyMode = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_$activeId", "全部") ?: "全部",
+            searchQuery = teamChannelSearchQuery,
+            searchResults = teamChannelSearchResults,
         )
     }
 
@@ -5995,10 +6095,13 @@ class MainActivity : AppCompatActivity() {
 
     /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     private fun showChannelCreateMenu() {
-        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊")
+        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊", "创建入帖 Webhook")
         ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
             if (which == 6) {
-                toast("【待开发】私聊服务待开发。")
+                // 频道补全二期：发起私聊切到私聊分段（方案 A）；新私聊
+                // 从频道成员发起（控制器 onStartDm），不在此凭空建。
+                teamChannelDmMode = true
+                refreshTeamChannel()
                 return@show
             }
             val endpoint = teamChannelEndpoint()
@@ -6006,6 +6109,30 @@ class MainActivity : AppCompatActivity() {
             val channelId = endpoint?.second
             if (which != 0 && (host == null || channelId == null)) {
                 toast("频道未连接；未执行管理操作。")
+                return@show
+            }
+            if (which == 7) {
+                // 频道补全二期：创建入帖 Webhook（第七节五项之一）。
+                Thread {
+                    try {
+                        val result = teamChannelTransport(host!!).createChannelWebhook(channelId!!)
+                        val token = result.optString("token", "")
+                        runOnUiThread {
+                            AlertDialog.Builder(this)
+                                .setTitle("频道 Webhook 已创建")
+                                .setMessage(
+                                    "入帖地址路径：/api/open/v1/channel-webhook/$token\n" +
+                                        "令牌只显示这一次，请自行保存；外部系统 POST {\"text\": \"…\"} 即可入帖。",
+                                )
+                                .setPositiveButton("好", null)
+                                .show()
+                        }
+                    } catch (e: Exception) {
+                        teamChannelNotice =
+                            "建 Webhook 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+                        runOnUiThread { refreshTeamChannel() }
+                    }
+                }.start()
                 return@show
             }
             if (which == 3) {
@@ -6053,6 +6180,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+            }
+        }
+    }
 
     /** 管理调用不改变 feed 生命周期，保持 WS 推送优先与现有轮询兜底。 */
     private fun performChannelManagement(call: (PlatformChannelMcpTransport) -> org.json.JSONObject) {
@@ -6073,6 +6203,19 @@ class MainActivity : AppCompatActivity() {
         if (teamChannelRefreshRunning) return
         teamChannelRefreshRunning = true
         Thread {
+            // 频道补全二/三期前置：补发到期定时消息 + 预拉频道列表
+            // （失败静默，快照用上一份缓存，不造假列表）。
+            try {
+                flushDueScheduledPosts()
+            } catch (_: Exception) {
+            }
+            try {
+                val endpoint = teamChannelEndpoint()
+                if (endpoint != null) {
+                    teamChannelChannelsCache = teamChannelTransport(endpoint.first).listChannels()
+                }
+            } catch (_: Exception) {
+            }
             val snapshot = try {
                 buildTeamChannelSnapshot()
             } catch (e: Exception) {
@@ -6133,16 +6276,31 @@ class MainActivity : AppCompatActivity() {
      * 同一套行为（WS 推送为主、15 秒轮询兜底、45 秒后重连 WS、按 id
      * 去重），只多一层转交——每条新消息还会以 MCP 通知
      * `notifications/channel/message` 交给已连的 MCP 客户端。
-     * 本轮 mcpClient 传 null：MainActivity 手里没有已连的平台 MCP
-     * 客户端（McpServerManager 的 clients 不对外，也没有哪一处给
-     * onNotification 登记了观察者），转交口留给以后接平台 MCP 客户端
-     * 时用；频道页本身是本轮的消费者。注意口径：这只是 App 内把 WS
-     * 消息转交给 MCP 层，不是服务端 MCP 通知，更不能唤醒外部 Agent
-     * （ChatGPT / Grok Bot 从不连这个 WS，只能自己轮询查消息）。
+     * 推送主模式整改（2026-11-20，Funk 10:17/10:19 硬口径：推送为
+     * 主、轮询只兜底）：订阅绑「当前打开的频道/私聊」
+     * （[activeTeamChannelId]），不再只订端点默认频道。已在跑且订的
+     * 正是当前频道时直接返回；订的是别的频道（用户刚切换）时先停
+     * 旧订阅、清掉旧频道的消息缓冲，再按新频道重绑——新 feed 的首轮
+     * 轮询会把新频道最近一页捡回来，之后新消息一律走 WS 推送，
+     * 断线才轮询、重连自动回推送（ChannelFeed 既有行为，不变）。
+     * 推送未建立前连接态只能是 POLLING/STOPPED：新 feed 起步即
+     * STOPPED/CONNECTING，控制器如实显示“轮询兜底/未连接”，绝不
+     * 把未建立的推送说成直播。
      */
     private fun startTeamChannelFeed() {
-        val (host, channelId) = teamChannelEndpoint() ?: return
-        if (teamChannelFeed != null) return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        if (teamChannelFeed != null &&
+            !channelFeedRebindNeeded(teamChannelFeedChannelId, channelId)
+        ) {
+            return // 已订的正是当前频道，订阅不动。
+        }
+        if (teamChannelFeed != null) {
+            // 切换了频道/私聊：停旧订阅，缓冲是旧频道的，一并清掉，
+            // 免得新频道页里混进旧频道的消息。
+            stopTeamChannelFeed()
+            synchronized(teamChannelMessages) { teamChannelMessages.clear() }
+        }
         val feed = McpChannelEventFeed.forPlatformChannel(
             host = host,
             channelId = channelId,
@@ -6169,20 +6327,23 @@ class MainActivity : AppCompatActivity() {
                     synchronized(teamChannelRelayOutputIds) { teamChannelRelayOutputIds.toSet() },
             )
             // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
-            // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
-            maybeRelayChannelMessages(listOf(message))
+            // （ChannelAgentRelay：转到 Hand/API，回复贴回来源频道——
+            // 回帖目标是本 feed 订阅的频道，不是端点默认频道）。
+            maybeRelayChannelMessages(listOf(message), channelId)
             runOnUiThread { refreshTeamChannel() }
         }
         feed.onConnectionChange = { _, _ ->
             runOnUiThread { refreshTeamChannel() }
         }
         teamChannelFeed = feed
+        teamChannelFeedChannelId = channelId
         feed.start()
     }
 
     private fun stopTeamChannelFeed() {
         teamChannelFeed?.stop()
         teamChannelFeed = null
+        teamChannelFeedChannelId = null
     }
 
     /**
@@ -6195,8 +6356,11 @@ class MainActivity : AppCompatActivity() {
      * 停（边界，见 DELIVERY）。中转不计轮次（轮次只计用户发帖），
      * 不建任务、不写文件——建议-only 的围栏在 Relay 里。
      */
-    private fun maybeRelayChannelMessages(messages: List<PlatformChannelMessage>) {
-        val (host, channelId) = teamChannelEndpoint() ?: return
+    private fun maybeRelayChannelMessages(
+        messages: List<PlatformChannelMessage>,
+        channelId: String,
+    ) {
+        val (host, _) = teamChannelEndpoint() ?: return
         val agents = try {
             agentStore.listAgents()
         } catch (_: Exception) {
@@ -6251,19 +6415,68 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 往频道发一条消息（后台线程；成功计一轮，失败把原因写进提示）。 */
-    private fun postTeamChannelMessage(text: String) {
-        val (host, channelId) = teamChannelEndpoint() ?: run {
+    /** 当前查看的频道 id（切换/私聊时为选中的频道，否则端点默认频道）。 */
+    private fun activeTeamChannelId(): String =
+        teamChannelActiveId ?: teamChannelEndpoint()?.second ?: PlatformAgent.V5_CHANNEL_ID
+
+    private fun teamChannelTransport(host: String) = PlatformChannelMcpTransport(
+        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+        endpoint = PlatformAgent.mcpEndpoint(host),
+    )
+
+    /**
+     * 频道动作通用跑法（撤回/删除/置顶/反应等）：后台线程调平台工具，
+     * 成功只刷新，失败把平台的真实错误写进提示行，绝不假成功。
+     */
+    private fun runTeamChannelAction(
+        label: String,
+        block: (PlatformChannelMcpTransport, String) -> Unit,
+    ) {
+        val (host, _) = teamChannelEndpoint() ?: run {
+            teamChannelNotice = "频道还没配好，$label 失败。"
+            refreshTeamChannel()
+            return
+        }
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                block(teamChannelTransport(host), channelId)
+                teamChannelNotice = null
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "$label 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    private fun postTeamChannelMessage(
+        text: String,
+        replyToId: String? = null,
+        attachmentRef: String? = null,
+    ) {
+        val (host, _) = teamChannelEndpoint() ?: run {
             teamChannelNotice = "频道还没配好，发不出去。"
             refreshTeamChannel()
             return
         }
+        val channelId = activeTeamChannelId()
         Thread {
             try {
-                val transport = PlatformChannelMcpTransport(
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
-                    endpoint = PlatformAgent.mcpEndpoint(host),
-                )
-                val postedId = runBlocking { transport.postMessage(channelId, text) }
+                val transport = teamChannelTransport(host)
+                // 幂等（阻塞⑤修法）：一次发送意图只铸一次 effect_key，
+                // 失败重试把同一键再交给 postMessageEx，平台按 key 去重，
+                // 不会双发。重试逻辑见 ChannelExtras.sendWithSameEffectKey。
+                val effectKey = ChannelExtras.buildEffectKey(UUID.randomUUID().toString())
+                val postedId = ChannelExtras.sendWithSameEffectKey(effectKey) { key ->
+                    transport.postMessageEx(
+                        channelId,
+                        text,
+                        replyTo = replyToId,
+                        effectKey = key,
+                        attachmentRef = attachmentRef,
+                    )
+                }
                 if (postedId.isNotBlank()) teamChannelOwnPostIds += postedId
                 teamChannelRoundsUsed++
                 teamChannelNotice = null
@@ -6273,6 +6486,223 @@ class MainActivity : AppCompatActivity() {
             }
             runOnUiThread { refreshTeamChannel() }
         }.start()
+    }
+
+    // ---- 定时发送（频道补全二期）：本机队列，偏好存储持久化，到期在刷新时发出 ----
+
+    private fun loadScheduledPosts(): List<ScheduledChannelPost> {
+        val raw = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .getString("scheduled_posts", null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            val out = mutableListOf<ScheduledChannelPost>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                out += ScheduledChannelPost(
+                    id = o.optString("id"),
+                    channelId = o.optString("channel_id"),
+                    text = o.optString("text"),
+                    dueAtSeconds = o.optDouble("due_at", 0.0),
+                    effectKey = o.optString("effect_key"),
+                    attachmentRef = o.optString("attachment_ref", "").takeIf { it.isNotBlank() },
+                )
+            }
+            out.filter { it.id.isNotBlank() && it.text.isNotBlank() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveScheduledPosts(items: List<ScheduledChannelPost>) {
+        val arr = org.json.JSONArray()
+        items.forEach { item ->
+            arr.put(
+                org.json.JSONObject().apply {
+                    put("id", item.id)
+                    put("channel_id", item.channelId)
+                    put("text", item.text)
+                    put("due_at", item.dueAtSeconds)
+                    put("effect_key", item.effectKey)
+                    item.attachmentRef?.let { put("attachment_ref", it) }
+                },
+            )
+        }
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit().putString("scheduled_posts", arr.toString()).apply()
+    }
+
+    private fun scheduleTeamChannelPost(text: String, delaySeconds: Long) {
+        val item = ScheduledChannelPost(
+            id = UUID.randomUUID().toString(),
+            channelId = activeTeamChannelId(),
+            text = text,
+            dueAtSeconds = System.currentTimeMillis() / 1000.0 + delaySeconds,
+            effectKey = ChannelExtras.buildEffectKey(UUID.randomUUID().toString()),
+        )
+        saveScheduledPosts(loadScheduledPosts() + item)
+        teamChannelNotice = "已设定时发送（${ChannelExtras.scheduledDelayText(delaySeconds)}），发送前可在频道页取消。"
+        refreshTeamChannel()
+    }
+
+    private fun cancelTeamChannelScheduled(id: String) {
+        saveScheduledPosts(loadScheduledPosts().filter { it.id != id })
+        teamChannelNotice = "已取消一条定时消息。"
+        refreshTeamChannel()
+    }
+
+    /** 到期定时消息补发（在频道刷新线程里调；带原 effect_key，重复补发不重复落帖）。 */
+    private fun flushDueScheduledPosts() {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val now = System.currentTimeMillis() / 1000.0
+        val all = loadScheduledPosts()
+        val due = ChannelExtras.dueScheduled(all, now)
+        if (due.isEmpty()) return
+        val transport = teamChannelTransport(host)
+        val remaining = all.toMutableList()
+        for (item in due) {
+            try {
+                transport.postMessageEx(item.channelId, item.text, effectKey = item.effectKey, attachmentRef = item.attachmentRef)
+                remaining.removeAll { it.id == item.id }
+            } catch (_: Exception) {
+                // 发失败保留在队列，下次刷新再试（effect_key 保证不重复落帖）。
+            }
+        }
+        if (remaining.size != all.size) saveScheduledPosts(remaining)
+    }
+
+    /** 发起私聊：向平台 open_dm，成功后切到私聊分段并打开该私聊频道。 */
+    private fun startTeamChannelDm(agentId: String) {
+        val (host, _) = teamChannelEndpoint() ?: run {
+            teamChannelNotice = "频道还没配好，私聊发不出去。"
+            refreshTeamChannel()
+            return
+        }
+        Thread {
+            try {
+                val result = teamChannelTransport(host).openDm(agentId)
+                val dmId = result.optString("id", "")
+                if (dmId.isBlank()) throw IllegalStateException("平台没有返回私聊频道。")
+                teamChannelDmMode = true
+                teamChannelActiveId = dmId
+                teamChannelNotice = null
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "发起私聊失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread {
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            }
+        }.start()
+    }
+
+    /** 转发：选目标频道/私聊后，把原消息正文以转发标注发过去（平台 forward_of）。 */
+    private fun showForwardChannelPicker(message: wherevercode.agent.core.team.TeamThreadMessage) {
+        val targets = teamChannelChannelsCache.filter { it.id != activeTeamChannelId() }
+        if (targets.isEmpty()) {
+            toast("暂无可转发的其他频道（频道列表还没拉到，先刷新频道页）。")
+            return
+        }
+        ListDialog.show(this, "转发到", null, targets.map { it.name }) { which ->
+            val target = targets.getOrNull(which)
+            val host = teamChannelEndpoint()?.first
+            if (target == null || host == null) return@show
+            val label = ChannelExtras.forwardOfLabel(
+                teamChannelChannelsCache.firstOrNull { it.id == activeTeamChannelId() }?.name ?: "频道",
+                message.senderName,
+            )
+            Thread {
+                try {
+                    teamChannelTransport(host).postMessageEx(
+                        target.id,
+                        message.text,
+                        effectKey = ChannelExtras.buildEffectKey(UUID.randomUUID().toString()),
+                        forwardOf = label,
+                    )
+                    teamChannelNotice = "已转发到「${target.name}」。"
+                } catch (e: Exception) {
+                    teamChannelNotice =
+                        "转发失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+                }
+                runOnUiThread { refreshTeamChannel() }
+            }.start()
+        }
+    }
+
+    /** 已读回执：拉成员已读名单，用对话框如实呈现。 */
+    private fun showChannelReaders(messageId: String) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            val text = try {
+                ChannelExtras.readersText(teamChannelTransport(host).channelReaders(channelId, messageId))
+            } catch (e: Exception) {
+                "已读名单拉取失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle("已读情况")
+                    .setMessage(text)
+                    .setPositiveButton("好", null)
+                    .show()
+            }
+        }.start()
+    }
+
+    /** 频道内搜索（平台 q）：结果回填快照，列表切到搜索结果。 */
+    private fun searchTeamChannel(query: String) {
+        if (query.isBlank()) {
+            teamChannelSearchResults = null
+            refreshTeamChannel()
+            return
+        }
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                teamChannelSearchResults = teamChannelTransport(host).searchMessages(channelId, query)
+                teamChannelSearchQuery = query
+                teamChannelNotice = null
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "搜索失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** 附件引用：像链接的用系统打开，其余（网盘路径/投递编号）原样展示给用户核对。 */
+    private fun openAttachmentRef(ref: String) {
+        if (ref.startsWith("http://") || ref.startsWith("https://")) {
+            try {
+                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(ref)))
+                return
+            } catch (_: Exception) {
+                // 落到下面原样展示。
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("附件引用")
+            .setMessage(ref)
+            .setPositiveButton("好", null)
+            .show()
+    }
+
+    /** 附件引用输入（引用制：只填网盘/投递/链接引用，不上传二进制）。 */
+    private fun showAttachmentRefInput() {
+        val input = android.widget.EditText(this).apply {
+            hint = "粘贴网盘链接、投递编号或文件引用"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("加附件引用")
+            .setView(input)
+            .setPositiveButton("添加") { _, _ ->
+                if (::teamChannelController.isInitialized) {
+                    teamChannelController.setPendingAttachmentRef(input.text.toString().trim())
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /**
@@ -6298,10 +6728,12 @@ class MainActivity : AppCompatActivity() {
     /**
      * 频道刷新后把服务端已读标记推到最新一条（后台线程；失败静默，
      * 下次刷新或手动“标为已读”再推）。只调 pollMessages 的 markRead
-     * 参数，不改消息内容、不建任务。
+     * 参数，不改消息内容、不建任务。标记按当前看的频道（activeId），
+     * 不是端点默认频道（阻塞①修法）。
      */
     private fun pushTeamChannelReadMark() {
-        val (host, channelId) = teamChannelEndpoint() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
@@ -6323,7 +6755,8 @@ class MainActivity : AppCompatActivity() {
 
     /** 标为已读：服务端标记推到最新一条 + 本机标记同步（后台线程）。 */
     private fun markTeamChannelRead() {
-        val (host, channelId) = teamChannelEndpoint() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(

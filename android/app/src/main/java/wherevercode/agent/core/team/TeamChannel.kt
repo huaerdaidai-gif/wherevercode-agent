@@ -250,6 +250,18 @@ data class TeamThreadMessage(
     val taskTitle: String? = null,
     val kind: TeamMessageKind = TeamMessageKind.DISCUSSION,
     val createdAtSeconds: Double = 0.0,
+    /** 回复的消息 id（频道补全二期话题串/引用行）。 */
+    val replyToId: String? = null,
+    /** 已撤回（展示占位，不展示正文）。 */
+    val recalled: Boolean = false,
+    /** 已置顶。 */
+    val pinned: Boolean = false,
+    /** 表情反应聚合。 */
+    val reactions: List<wherevercode.agent.core.agent.ChannelReaction> = emptyList(),
+    /** 附件引用（引用制）。 */
+    val attachmentRef: String? = null,
+    /** 转发来源标注。 */
+    val forwardOf: String? = null,
 )
 
 /** 一个任务的讨论串：同一任务的消息成组，串内按时间排。 */
@@ -417,10 +429,17 @@ fun teamMessageFromChannel(
         messageId = message.id,
         senderId = message.agentId,
         senderName = senderName,
-        text = stripTeamAttributionHeader(message.text),
+        text = if (message.recalled) ChannelExtras.RECALLED_PLACEHOLDER
+        else stripTeamAttributionHeader(message.text),
         taskId = attr?.taskId,
         taskTitle = attr?.taskTitle,
         kind = TeamMessageKind.DISCUSSION,
         createdAtSeconds = message.createdAtSeconds,
+        replyToId = message.replyTo,
+        recalled = message.recalled,
+        pinned = message.pinned,
+        reactions = message.reactions,
+        attachmentRef = message.attachmentRef,
+        forwardOf = message.forwardOf,
     )
 }

@@ -2454,6 +2454,14 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
     public var attachmentName: String?
     public var attachmentType: String?
     public var attachmentSize: String?
+    /// 频道补全二期字段（平台回帖直带；本地审查流消息缺省为空/假）。
+    public var recalled: Bool = false
+    public var pinned: Bool = false
+    public var reactions: [ChannelReaction] = []
+    /// 附件引用（引用制：网盘/投递引用，不存二进制）。
+    public var attachmentRef: String? = nil
+    /// 转发来源标注（“来源频道 · 原发送者”）。
+    public var forwardOf: String? = nil
 
     public init(
         id: String,
@@ -2470,7 +2478,12 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
         linkedTaskState: String? = nil,
         attachmentName: String? = nil,
         attachmentType: String? = nil,
-        attachmentSize: String? = nil
+        attachmentSize: String? = nil,
+        recalled: Bool = false,
+        pinned: Bool = false,
+        reactions: [ChannelReaction] = [],
+        attachmentRef: String? = nil,
+        forwardOf: String? = nil
     ) {
         self.id = id
         self.senderId = senderId
@@ -2487,6 +2500,11 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
         self.attachmentName = attachmentName
         self.attachmentType = attachmentType
         self.attachmentSize = attachmentSize
+        self.recalled = recalled
+        self.pinned = pinned
+        self.reactions = reactions
+        self.attachmentRef = attachmentRef
+        self.forwardOf = forwardOf
     }
 }
 
@@ -2703,7 +2721,7 @@ public struct ChannelsHomeView: View {
         .padding(.vertical, 40)
     }
 
-    /// 频道切换面板（批D）：搜索框 + [频道 | 私聊·待开发] 分段 +
+    /// 频道切换面板（批D）：搜索框 + [频道 | 私聊] 分段 +
     /// 频道列表；点选即切换并关面板，不先落列表页。
     private var switchPanel: some View {
         NavigationStack {
@@ -2762,8 +2780,9 @@ public struct ChannelsHomeView: View {
                 .accessibilityIdentifier("channels.action.createChannel")
 
                 Button {
-                    policyAlertMessage = "【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）"
-                    showPolicyAlert = true
+                    // 私聊（方案 A 的频道页分段在切换面板里）：这里直接
+                    // 打开既有的发起私聊表单，不再是待开发提示。
+                    showCreateDMSheet = true
                 } label: {
                     Label("发起私聊", systemImage: "person.2")
                 }
@@ -2792,7 +2811,7 @@ public struct ChannelsHomeView: View {
     private var partitionPicker: some View {
         Picker("分区", selection: $selectedPartition) {
             ForEach(ChannelPartition.allCases) { part in
-                Text(part == .directMessages ? "私聊 · 待开发" : part.rawValue).tag(part)
+                Text(part.rawValue).tag(part)
             }
         }
         .pickerStyle(.segmented)
@@ -2995,10 +3014,10 @@ public struct ChannelsHomeView: View {
                         Image(systemName: "person.2.slash")
                             .font(.system(size: 40))
                             .foregroundStyle(.secondary.opacity(0.6))
-                        Text("私聊服务待开发")
+                        Text("暂无私聊")
                             .font(.headline)
                             .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                        Text("与指定人员/Agent 独立私聊通道尚未开放\n团队成员与 Agent 间协同请使用频道或任务工作流")
+                        Text("点右上角「＋ 新建 → 发起私聊」，与频道成员开始 1:1 私聊\n（私聊只在频道成员之间，与单 Agent 对话并存）")
                             .font(.caption)
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
@@ -3167,7 +3186,8 @@ public struct ChannelsHomeView: View {
             }
         }
 
-        // 诚实空态：私聊服务未开发，严禁注入虚假种子私聊会话
+        // 诚实空态：私聊已开通（新建 → 发起私聊），但严禁注入虚假种子
+        // 私聊会话；无私聊时列表就是空。
         directMessages = []
 
         // 对话框直达（批D）：默认选中第一个频道；选中项已不在列表
@@ -3219,6 +3239,15 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var showChannelSettingsSheet = false
     @State private var showSendErrorAlert = false
     @State private var sendErrorMessage = ""
+    // 频道补全二/三期动作状态：定时队列、附件引用、转发、已读回执。
+    @State private var scheduledPosts: [ScheduledChannelPost] = []
+    @State private var pendingAttachmentRef: String? = nil
+    @State private var showAttachmentInput = false
+    @State private var attachmentDraft = ""
+    @State private var actionError: String? = nil
+    @State private var readersText: String? = nil
+    @State private var forwardSource: V5ChannelMessage? = nil
+    @State private var otherChannels: [ChannelInfo] = []
     @Environment(\.dismiss) private var dismiss
 
     private var currentChannelId: String {
@@ -3312,7 +3341,10 @@ public struct ChannelDetailWorkspaceView: View {
                 .accessibilityIdentifier("channel.settingsButton")
             }
         }
-        .onAppear(perform: loadWorkspaceData)
+        .onAppear {
+            loadScheduled()
+            loadWorkspaceData()
+        }
         .onDisappear(perform: stopFeed)
         .sheet(item: $selectedAgentProfile) { msg in
             AgentProfileSheet(message: msg)
@@ -3341,6 +3373,51 @@ public struct ChannelDetailWorkspaceView: View {
             Button("好的", role: .cancel) {}
         } message: {
             Text(sendErrorMessage)
+        }
+        .alert("操作失败", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(actionError ?? "")
+        }
+        .alert("已读情况", isPresented: Binding(
+            get: { readersText != nil },
+            set: { if !$0 { readersText = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(readersText ?? "")
+        }
+        .alert("加附件引用", isPresented: $showAttachmentInput) {
+            TextField("网盘链接、投递编号或文件引用", text: $attachmentDraft)
+            Button("添加") {
+                let ref = attachmentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                pendingAttachmentRef = ref.isEmpty ? nil : ref
+                attachmentDraft = ""
+            }
+            Button("取消", role: .cancel) { attachmentDraft = "" }
+        } message: {
+            Text("引用制：只填引用，不上传文件本体。")
+        }
+        .confirmationDialog(
+            "转发到",
+            isPresented: Binding(
+                get: { forwardSource != nil },
+                set: { if !$0 { forwardSource = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            ForEach(otherChannels.filter { $0.id != currentChannelId }) { target in
+                Button(target.displayName) {
+                    if let source = forwardSource {
+                        Task { await forward(source, to: target) }
+                    }
+                    forwardSource = nil
+                }
+            }
+            Button("取消", role: .cancel) { forwardSource = nil }
         }
         .sheet(isPresented: $showCreateTaskForm) {
             NavigationStack {
@@ -3506,6 +3583,10 @@ public struct ChannelDetailWorkspaceView: View {
     // MARK: - 消息分区
     private var messagesTab: some View {
         VStack(spacing: 0) {
+            messageCenterStrip
+            if !scheduledForChannel.isEmpty {
+                scheduledStrip
+            }
             if messages.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "bubble.left.and.bubble.right")
@@ -3542,6 +3623,59 @@ public struct ChannelDetailWorkspaceView: View {
 
             composerSection
         }
+    }
+
+    /// 消息中心条：未读（按本机已读游标）与置顶数。@我聚合需先学会
+    /// 本机名字（推送整改线的 learnedSelfNames，不在本分支），此处
+    /// 不报 @我数，只报能如实算出的两项。口径与 ChannelExtras
+    /// .buildMessageCenter 一致：无游标计 0，游标不在列表里计全部。
+    private var messageCenterStrip: some View {
+        let lastSeen = (try? LocalData.shared.cursors.lastSeenMessageId(channelId: currentChannelId)) ?? nil
+        let unread: Int
+        if lastSeen == nil {
+            unread = 0
+        } else if let idx = messages.firstIndex(where: { $0.id == lastSeen }) {
+            unread = messages.count - idx - 1
+        } else {
+            unread = messages.count
+        }
+        let pinnedCount = messages.filter { $0.pinned && !$0.recalled }.count
+        return HStack(spacing: 12) {
+            Text("消息中心")
+                .font(.caption)
+                .fontWeight(.semibold)
+            Text("未读 \(unread)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("置顶 \(pinnedCount)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.05))
+    }
+
+    private var scheduledForChannel: [ScheduledChannelPost] {
+        scheduledPosts.filter { $0.channelId == currentChannelId }
+    }
+
+    private var scheduledStrip: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(scheduledForChannel) { item in
+                HStack {
+                    Text("定时 \(Date(timeIntervalSince1970: item.dueAtSeconds), style: .time) 发：\(String(item.text.prefix(40)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("取消") { cancelScheduled(item) }
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
     }
 
     private func messageRow(_ msg: V5ChannelMessage) -> some View {
@@ -3603,12 +3737,47 @@ public struct ChannelDetailWorkspaceView: View {
                                 .lineLimit(1)
                         }
                         .padding(.vertical, 2)
+                    } else if let replyTo = msg.replyToId, !replyTo.isEmpty {
+                        Text("回复 \(String(replyTo.prefix(8)))…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
 
-                    Text(msg.text)
+                    if let forwardOf = msg.forwardOf, !forwardOf.isEmpty {
+                        Text("转发自 \(forwardOf)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // 撤回的消息只留占位，不展示正文。
+                    Text(msg.recalled ? ChannelExtras.recalledPlaceholder : msg.text)
                         .font(.system(size: 14))
                         .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.16))
                         .textSelection(.enabled)
+
+                    if let ref = msg.attachmentRef, !ref.isEmpty {
+                        Text("附件：\(ref)")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                            .textSelection(.enabled)
+                    }
+
+                    let reactionLine = ChannelExtras.reactionText(msg.reactions)
+                    if !reactionLine.isEmpty {
+                        Text(reactionLine)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // @所有人渲染：只有 owner/协调者发的才算全员提及；
+                    // 其他人写的 @all 只当普通文本，并如实注一句不生效。
+                    // 旗舰页已知的特权发送者只有本机自己（"user-me"）。
+                    if ChannelExtras.mentionsAllText(msg.text) {
+                        let live = msg.senderId == "user-me"
+                        Text(live ? "＠所有人" : "（@所有人未生效：仅 owner/协调者可用）")
+                            .font(.caption2)
+                            .foregroundStyle(live ? Color.accentColor : .secondary)
+                    }
 
                     // 附件卡片展示
                     if let attName = msg.attachmentName {
@@ -3641,27 +3810,66 @@ public struct ChannelDetailWorkspaceView: View {
         .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.91, green: 0.90, blue: 0.88), lineWidth: 1))
         .contextMenu {
-            Button {
-                replyingTo = msg
-            } label: {
-                Label("回复", systemImage: "arrowshape.turn.up.left")
+            if !msg.recalled {
+                Button {
+                    replyingTo = msg
+                } label: {
+                    Label("回复", systemImage: "arrowshape.turn.up.left")
+                }
+                Button {
+                    Task { await runAction { transport in
+                        _ = try await transport.setMessagePinned(
+                            channelID: currentChannelId, messageID: msg.id, pinned: !msg.pinned)
+                    } }
+                } label: {
+                    Label(msg.pinned ? "取消置顶" : "置顶", systemImage: "pin")
+                }
+                ForEach(ChannelExtras.reactionChoices.prefix(2), id: \.self) { emoji in
+                    Button {
+                        Task { await runAction { transport in
+                            _ = try await transport.reactMessage(
+                                channelID: currentChannelId, messageID: msg.id, emoji: emoji,
+                                on: !ChannelExtras.myReaction(msg.reactions, emoji: emoji))
+                        } }
+                    } label: {
+                        Label(emoji, systemImage: "face.smiling")
+                    }
+                }
+                Button {
+                    forwardSource = msg
+                } label: {
+                    Label("转发", systemImage: "arrowshape.turn.up.right")
+                }
+                Button {
+                    Task { await showReaders(msg) }
+                } label: {
+                    Label("已读情况", systemImage: "checkmark.circle")
+                }
+                // 撤回只对自己的消息显示；删除点了由平台按权限裁决，
+                // 失败如实报错，不在本地假删。
+                if msg.senderId == "user-me" {
+                    Button {
+                        Task { await runAction { transport in
+                            _ = try await transport.recallMessage(
+                                channelID: currentChannelId, messageID: msg.id)
+                        } }
+                    } label: {
+                        Label("撤回", systemImage: "arrow.uturn.backward")
+                    }
+                }
+                Button(role: .destructive) {
+                    Task { await runAction { transport in
+                        _ = try await transport.deleteMessage(
+                            channelID: currentChannelId, messageID: msg.id)
+                    } }
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
             }
             Button {
                 UIPasteboard.general.string = msg.text
             } label: {
                 Label("复制文本", systemImage: "doc.on.doc")
-            }
-            if msg.senderId == "user-me" {
-                Button {
-                    composerText = msg.text
-                } label: {
-                    Label("编辑消息", systemImage: "pencil")
-                }
-                Button(role: .destructive) {
-                    messages.removeAll { $0.id == msg.id }
-                } label: {
-                    Label("撤回消息", systemImage: "arrow.uturn.backward")
-                }
             }
             Button {
                 showLinkTaskPicker = true
@@ -3677,11 +3885,11 @@ public struct ChannelDetailWorkspaceView: View {
     private var composerSection: some View {
         DialogComposerView(
             text: $composerText,
-            placeholder: "给频道发一条短消息（≤500 字），@名字 叫一位 Agent…",
+            placeholder: "给频道发一条短消息（≤4000 字），@名字 叫一位 Agent…",
             layout: .inline,
             sendButtonStyle: .accentGlyph,
             hasAttachment: selectedAttachment != nil,
-            maxLength: 500,
+            maxLength: 4000,
             onSend: { sendMessage() },
             inputAccessibilityID: "channel.composer.input",
             sendAccessibilityID: "channel.composer.send"
@@ -3734,6 +3942,28 @@ public struct ChannelDetailWorkspaceView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
             }
+
+            if let ref = pendingAttachmentRef {
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Text("附件引用将随下一条发出：\(ref)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button {
+                        pendingAttachmentRef = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+            }
         } leading: {
             // 单一「＋」展开入口：上传附件、从项目选择、从网盘选择、关联任务
             Menu {
@@ -3768,6 +3998,22 @@ public struct ChannelDetailWorkspaceView: View {
                 } label: {
                     Label("关联任务", systemImage: "link")
                 }
+
+                // 频道补全二期：定时发送与附件引用（引用制）。
+                Menu {
+                    Button("10 分钟后") { scheduleCurrent(delaySeconds: 600) }
+                    Button("1 小时后") { scheduleCurrent(delaySeconds: 3600) }
+                    Button("3 小时后") { scheduleCurrent(delaySeconds: 10800) }
+                } label: {
+                    Label("定时发送", systemImage: "clock")
+                }
+
+                Button {
+                    attachmentDraft = pendingAttachmentRef ?? ""
+                    showAttachmentInput = true
+                } label: {
+                    Label(pendingAttachmentRef == nil ? "加附件引用" : "附件引用已加", systemImage: "paperclip")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 15, weight: .semibold))
@@ -3779,8 +4025,8 @@ public struct ChannelDetailWorkspaceView: View {
         } accessory: {
             EmptyView()
         } below: {
-            if composerText.count > 500 {
-                Text("已超出 500 字上限（当前 \(composerText.count) 字）")
+            if composerText.count > 4000 {
+                Text("已超出 4000 字上限（当前 \(composerText.count) 字）")
                     .font(.caption2)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -3796,6 +4042,157 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    /// 本机是否 owner/协调者（@all 门闩的判定依据）：成员表里本机
+    /// "user-me" 的角色含“项目主管”或“协调”。客户端没有服务端下发
+    /// 的频道 owner 字段，先按本机成员角色判定；服务端广播语义待定。
+    private var localCanMentionAll: Bool {
+        guard let me = members.first(where: { $0.id == "user-me" }) else { return false }
+        return me.role.contains("项目主管") || me.role.contains("协调")
+    }
+
+    // MARK: - 频道补全二期动作 helpers
+
+    /// 统一跑一条平台动作：成功后刷新列表，失败如实报错、不本地假改。
+    private func runAction(_ block: (ChannelTransport) async throws -> Void) async {
+        guard let transport = appState.makeChannelTransport() else {
+            actionError = "频道尚未连接。"
+            return
+        }
+        do {
+            try await block(transport)
+            await refreshChannelMessages()
+        } catch {
+            actionError = (error as? McpError)?.message ?? "操作失败。"
+        }
+    }
+
+    /// 已读情况：调 channelReaders，按“已读 X 人”如实展示。
+    private func showReaders(_ msg: V5ChannelMessage) async {
+        guard let transport = appState.makeChannelTransport() else {
+            actionError = "频道尚未连接。"
+            return
+        }
+        do {
+            let readers = try await transport.channelReaders(
+                channelID: currentChannelId, messageID: msg.id)
+            if readers.isEmpty {
+                readersText = "暂无已读回执。"
+            } else {
+                readersText = "已读 \(readers.count) 人：\(readers.map { $0.agentName }.joined(separator: "、"))"
+            }
+        } catch {
+            actionError = (error as? McpError)?.message ?? "读取已读情况失败。"
+        }
+    }
+
+    /// 转发：把原文以 forwardOf 标注发到目标频道（postMessageEx，
+    /// attachmentRef 随原文引用；转发不带正文改动）。
+    private func forward(_ source: V5ChannelMessage, to target: ChannelInfo) async {
+        guard let transport = appState.makeChannelTransport() else {
+            actionError = "频道尚未连接。"
+            return
+        }
+        let forwardOf = ChannelExtras.forwardOfLabel(
+            sourceChannelName: channelItem?.name ?? "", senderName: source.senderName)
+        do {
+            _ = try await transport.postMessageEx(
+                channelID: target.id, text: source.text,
+                effectKey: ChannelExtras.buildEffectKey(nonce: UUID().uuidString),
+                attachmentRef: source.attachmentRef, forwardOf: forwardOf)
+            await refreshChannelMessages()
+        } catch {
+            actionError = (error as? McpError)?.message ?? "转发失败。"
+        }
+    }
+
+    /// 刷新当前频道消息（动作成功后用；列表走 feed 回推为主，
+    /// 刷新只补平台已确认的最新状态）。iOS 没有独立的 searchMessages，
+    /// 取消息走 pollMessages（q 搜索是它的参数，见 ChannelTransport）。
+    private func refreshChannelMessages() async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            let fresh = try await transport.pollMessages(channelID: currentChannelId, limit: 50)
+            let converted = fresh.map { toV5Message($0) }
+            var seen = Set(messages.map { $0.id })
+            for msg in converted where !seen.contains(msg.id) {
+                seen.insert(msg.id)
+                messages.append(msg)
+            }
+            for msg in converted {
+                if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
+                    messages[idx].recalled = msg.recalled
+                    messages[idx].pinned = msg.pinned
+                    messages[idx].reactions = msg.reactions
+                    messages[idx].attachmentRef = msg.attachmentRef
+                    messages[idx].forwardOf = msg.forwardOf
+                }
+            }
+            messages.sort { $0.fullDateTime < $1.fullDateTime }
+        } catch {
+            // 刷新失败不报错到界面：feed 回推仍是主路径。
+        }
+    }
+
+    // MARK: - 定时发送队列（UserDefaults 持久化，与安卓同形）
+
+    private static let scheduledDefaultsKey = "channel_scheduled_posts"
+
+    private func loadScheduled() {
+        guard let data = UserDefaults.standard.data(forKey: Self.scheduledDefaultsKey),
+              let decoded = try? JSONDecoder().decode([ScheduledChannelPost].self, from: data) else {
+            scheduledPosts = []
+            return
+        }
+        scheduledPosts = decoded
+        flushScheduled()
+    }
+
+    private func saveScheduled() {
+        if let data = try? JSONEncoder().encode(scheduledPosts) {
+            UserDefaults.standard.set(data, forKey: Self.scheduledDefaultsKey)
+        }
+    }
+
+    private func scheduleCurrent(delaySeconds: TimeInterval) {
+        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let item = ScheduledChannelPost(
+            id: UUID().uuidString,
+            channelId: currentChannelId,
+            text: text,
+            dueAtSeconds: Date().timeIntervalSince1970 + delaySeconds,
+            effectKey: ChannelExtras.buildEffectKey(nonce: UUID().uuidString),
+            attachmentRef: pendingAttachmentRef,
+            replyToId: replyingTo?.id
+        )
+        scheduledPosts.append(item)
+        saveScheduled()
+        composerText = ""
+        replyingTo = nil
+        pendingAttachmentRef = nil
+    }
+
+    private func cancelScheduled(_ item: ScheduledChannelPost) {
+        scheduledPosts.removeAll { $0.id == item.id }
+        saveScheduled()
+    }
+
+    private func flushScheduled() {
+        let now = Date().timeIntervalSince1970
+        let due = scheduledPosts.filter { $0.dueAtSeconds <= now }
+        guard !due.isEmpty else { return }
+        scheduledPosts.removeAll { $0.dueAtSeconds <= now }
+        saveScheduled()
+        guard let transport = appState.makeChannelTransport() else { return }
+        Task {
+            for item in due {
+                _ = try? await transport.postMessageEx(
+                    channelID: item.channelId, text: item.text, replyTo: item.replyToId,
+                    effectKey: item.effectKey, attachmentRef: item.attachmentRef)
+            }
+        }
+    }
+
     private func sendMessage() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || selectedAttachment != nil else { return }
@@ -3805,6 +4202,16 @@ public struct ChannelDetailWorkspaceView: View {
             pendingTaskText = text
             taskTitle = String(text.prefix(40))
             showCreateTaskForm = true
+            return
+        }
+
+        // @所有人门闩（频道补全二期阻塞③）：只有 owner/协调者可发。
+        // 本机用户即项目主管/协调者（成员表里 "user-me" 的角色），
+        // 本机发出的 @all 放行；否则拦截并提示。服务端广播语义待定，
+        // 本轮不另造工具名。
+        if ChannelExtras.mentionsAllText(text) && !localCanMentionAll {
+            sendErrorMessage = "只有频道 owner/协调者可以 @所有人，消息未发送。"
+            showSendErrorAlert = true
             return
         }
 
@@ -3822,16 +4229,35 @@ public struct ChannelDetailWorkspaceView: View {
         }
         if postText.isEmpty { postText = "分享了附件" }
         let replyTo = replyingTo?.id
+        let attachmentRef = pendingAttachmentRef
         let channelID = currentChannelId
+        // 幂等（阻塞⑤修法）：一次发送意图只铸一次 effect_key，
+        // 失败重试把同一键再交给 postMessageEx，平台按 key 去重，
+        // 不会双发。
+        let effectKey = ChannelExtras.buildEffectKey(nonce: UUID().uuidString)
         Task {
             do {
-                _ = try await transport.postMessage(channelID: channelID, text: postText, replyTo: replyTo)
+                _ = try await transport.postMessageEx(
+                    channelID: channelID, text: postText, replyTo: replyTo,
+                    effectKey: effectKey, attachmentRef: attachmentRef)
                 composerText = ""
                 replyingTo = nil
                 selectedAttachment = nil
+                pendingAttachmentRef = nil
             } catch {
-                sendErrorMessage = (error as? McpError)?.message ?? "发送失败。"
-                showSendErrorAlert = true
+                // 同一键再试一次（首发超时但实际落帖时，平台按 key 去重）。
+                do {
+                    _ = try await transport.postMessageEx(
+                        channelID: channelID, text: postText, replyTo: replyTo,
+                        effectKey: effectKey, attachmentRef: attachmentRef)
+                    composerText = ""
+                    replyingTo = nil
+                    selectedAttachment = nil
+                    pendingAttachmentRef = nil
+                } catch {
+                    sendErrorMessage = (error as? McpError)?.message ?? "发送失败。"
+                    showSendErrorAlert = true
+                }
             }
         }
     }
@@ -4362,6 +4788,39 @@ public struct ChannelDetailWorkspaceView: View {
             webSocketURL: wsURL,
             tokenProvider: appState.tokenProvider
         )
+        // 频道补全二期：旗舰页按频道订推送——feed 回推的消息经转换
+        // 进本页列表（去重、按时间排），本地审查流消息保留；已读游
+        // 标记到最新一条，供消息中心条算未读。
+        newFeed.onMessages = { fresh in
+            Task { @MainActor in
+                let converted = fresh.map { self.toV5Message($0) }
+                var seen = Set(self.messages.map { $0.id })
+                for msg in converted where !seen.contains(msg.id) {
+                    seen.insert(msg.id)
+                    self.messages.append(msg)
+                }
+                // 刷新也可能带回已撤回/置顶等字段变化：按 id 合并新字段。
+                for msg in converted {
+                    if let idx = self.messages.firstIndex(where: { $0.id == msg.id }) {
+                        self.messages[idx].recalled = msg.recalled
+                        self.messages[idx].pinned = msg.pinned
+                        self.messages[idx].reactions = msg.reactions
+                        self.messages[idx].attachmentRef = msg.attachmentRef
+                        self.messages[idx].forwardOf = msg.forwardOf
+                        self.messages[idx].replyToId = msg.replyToId
+                        self.messages[idx].replyToText = msg.replyToText
+                    }
+                }
+                self.messages.sort { $0.fullDateTime < $1.fullDateTime }
+                if let newest = self.messages.last {
+                    let channelId = self.currentChannelId
+                    Task.detached {
+                        try? LocalData.shared.cursors.setLastSeenMessageId(
+                            channelId: channelId, messageId: newest.id)
+                    }
+                }
+            }
+        }
         newFeed.onStateChange = { state, err in
             Task { @MainActor in
                 self.connectionState = state
@@ -4371,6 +4830,41 @@ public struct ChannelDetailWorkspaceView: View {
         self.feed = newFeed
         newFeed.start()
         self.connectionState = newFeed.connectionState
+    }
+
+    /// 平台消息 → 旗舰页视图消息：回复引用行按当前列表算；时间用
+    /// 固定格式 "yyyy-MM-dd HH:mm:ss"（与旧审查流消息同格式，可按
+    /// 字符串排序），不走本地化格式。
+    private func toV5Message(_ msg: ChannelMessage) -> V5ChannelMessage {
+        let date = Date(timeIntervalSince1970: msg.createdAtSeconds)
+        let fullFmt = DateFormatter()
+        fullFmt.locale = Locale(identifier: "en_US_POSIX")
+        fullFmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let timeFmt = DateFormatter()
+        timeFmt.locale = Locale(identifier: "en_US_POSIX")
+        timeFmt.dateFormat = "HH:mm"
+        let quote: String? = {
+            guard let parentId = msg.replyTo,
+                  let parent = messages.first(where: { $0.id == parentId }) else { return nil }
+            let text = parent.recalled ? ChannelExtras.recalledPlaceholder : parent.text
+            return String(text.replacingOccurrences(of: "\n", with: " ").prefix(40))
+        }()
+        return V5ChannelMessage(
+            id: msg.id,
+            senderId: msg.agentId,
+            senderName: msg.displaySender,
+            isAgent: true,
+            text: msg.text,
+            timestamp: timeFmt.string(from: date),
+            fullDateTime: fullFmt.string(from: date),
+            replyToId: msg.replyTo,
+            replyToText: quote,
+            recalled: msg.recalled,
+            pinned: msg.pinned,
+            reactions: msg.reactions,
+            attachmentRef: msg.attachmentRef,
+            forwardOf: msg.forwardOf
+        )
     }
 
     private func stopFeed() {
@@ -4384,6 +4878,14 @@ public struct ChannelDetailWorkspaceView: View {
         members = ChannelMemberManager.loadMembers(channelId: currentChannelId)
         reloadWorkspaceTasks()
         startFeed()
+        // 转发目标列表：平台频道一览（失败不报错，转发时再报）。
+        if let transport = appState.makeChannelTransport() {
+            Task {
+                if let list = try? await transport.listChannels() {
+                    otherChannels = list
+                }
+            }
+        }
     }
 }
 
