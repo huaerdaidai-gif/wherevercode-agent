@@ -5021,6 +5021,7 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
+                "channel_manage" -> showChannelCreateMenu()
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
@@ -5992,26 +5993,81 @@ class MainActivity : AppCompatActivity() {
         refreshTeamChannel()
     }
 
-    /**
-     * 频道页「＋ 新建」菜单（双端对齐批D，与 iOS 同位同序同两项）：
-     * 本端的频道由平台配置、App 内没有新建频道的真实通道，两项都
-     * 给诚实「待开发」提示，不造假频道。
-     */
+    /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     private fun showChannelCreateMenu() {
-        ListDialog.show(
-            this,
-            "新建",
-            null,
-            listOf("新建频道", "发起私聊"),
-        ) { which ->
-            if (which == 0) {
-                toast("【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。")
+        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊")
+        ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
+            if (which == 6) {
+                toast("【待开发】私聊服务待开发。")
+                return@show
+            }
+            val endpoint = teamChannelEndpoint()
+            val host = endpoint?.first
+            val channelId = endpoint?.second
+            if (which != 0 && (host == null || channelId == null)) {
+                toast("频道未连接；未执行管理操作。")
+                return@show
+            }
+            if (which == 3) {
+                val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
+                    .filter { PlatformAgent.isPlatformAgentRecord(it) }
+                if (candidates.isEmpty()) { toast("没有可用的平台 Agent。") ; return@show }
+                ListDialog.show(this, "选择要添加的成员", null, candidates.map { it.displayName }) { index ->
+                    performChannelManagement { transport ->
+                        transport.addChannelMember(channelId!!, candidates[index].agentId)
+                    }
+                }
+            } else if (which == 4) {
+                val members = teamChannelMembers().filterNot { it.isLocalApp }
+                if (members.isEmpty()) { toast("当前没有可见的频道成员可移除。创建者不可移除。"); return@show }
+                ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.displayName }) { index ->
+                    val member = members[index]
+                    AlertDialog.Builder(this).setTitle("移除频道成员？")
+                        .setMessage("将从频道移除 ${member.displayName}。创建者不可移除；若服务端拒绝，将显示其返回原因。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("移除") { _, _ ->
+                            performChannelManagement { it.removeChannelMember(channelId!!, member.agentId) }
+                        }.show()
+                }
+            } else if (which == 5) {
+                AlertDialog.Builder(this).setTitle("删除频道？")
+                    .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("删除") { _, _ ->
+                        performChannelManagement { it.deleteChannel(channelId!!) }
+                    }.show()
+            } else if (which == 0 || which == 1) {
+                val input = EditText(this).apply { hint = if (which == 0) "频道名称" else "新频道名称" }
+                AlertDialog.Builder(this).setTitle(if (which == 0) "新建频道" else "修改频道名称").setView(input)
+                    .setNegativeButton("取消", null).setPositiveButton("确定") { _, _ ->
+                        val name = input.text.toString().trim()
+                        if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
+                        if (which == 0) performChannelManagement { it.createChannel(name) }
+                        else performChannelManagement { it.renameChannel(channelId!!, name) }
+                    }.show()
             } else {
-                toast("【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）")
+                AlertDialog.Builder(this).setTitle("归档频道？").setMessage("将归档频道 $channelId。")
+                    .setNegativeButton("取消", null).setPositiveButton("归档") { _, _ ->
+                        performChannelManagement { it.setChannelArchived(channelId!!, true) }
+                    }.show()
             }
         }
     }
 
+    /** 管理调用不改变 feed 生命周期，保持 WS 推送优先与现有轮询兜底。 */
+    private fun performChannelManagement(call: (PlatformChannelMcpTransport) -> org.json.JSONObject) {
+        val host = teamChannelEndpoint()?.first
+        if (host == null) { toast("频道未连接；未执行管理操作。"); return }
+        val transport = PlatformChannelMcpTransport(
+            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+            endpoint = PlatformAgent.mcpEndpoint(host),
+        )
+        Thread {
+            val result = try { call(transport); "频道管理操作已提交。" }
+                catch (e: Exception) { "频道管理失败：${(e.message ?: e.javaClass.simpleName).take(180)}" }
+            runOnUiThread { teamChannelNotice = result; toast(result); refreshTeamChannel() }
+        }.start()
+    }
     private fun refreshTeamChannel() {
         if (!::teamChannelController.isInitialized) return
         if (teamChannelRefreshRunning) return
