@@ -41,7 +41,30 @@ class TeamChannelTest {
         assertEquals("消息不能为空。", TeamChatRules.validatePost("   ", 0))
         val overlong = "x".repeat(TeamChatLimits.MAX_MESSAGE_CHARS + 1)
         assertTrue(TeamChatRules.validatePost(overlong, 0)!!.contains("消息太长"))
-        assertEquals(TeamChatLimits.MAX_MESSAGE_CHARS, 500)
+        assertEquals(TeamChatLimits.MAX_MESSAGE_CHARS, 4000)
+    }
+
+    @Test
+    fun `validatePost accepts long messages up to the unified 4000 limit`() {
+        // 频道补全一期：双端口径统一为平台的 4000 字（原安卓 500）。
+        assertNull(TeamChatRules.validatePost("x".repeat(3000), 0))
+        assertNull(TeamChatRules.validatePost("x".repeat(4000), 0))
+        assertTrue(
+            TeamChatRules.validatePost("x".repeat(4001), 0)!!.contains("消息太长"),
+        )
+    }
+
+    @Test
+    fun `channelTaskGoal carries sender provenance and the original text`() {
+        // 频道补全一期·显式派发：与 iOS「转为正式任务」同格式。
+        assertEquals(
+            "来自团队频道 (@示例Agent)：把登录页改一下",
+            wherevercode.agent.core.team.channelTaskGoal("示例Agent", "把登录页改一下"),
+        )
+        assertEquals(
+            "来自团队频道 (@未知)：在吗",
+            wherevercode.agent.core.team.channelTaskGoal("  ", " 在吗 "),
+        )
     }
 
     @Test

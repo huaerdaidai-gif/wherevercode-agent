@@ -26,12 +26,100 @@ data class PlatformChannelMessage(
     val agentName: String,
     val text: String,
     val createdAtSeconds: Double,
+    /** 回复的消息 id（平台 reply_to，频道补全二期话题串用）。 */
+    val replyTo: String? = null,
+    /** 已撤回（平台 recalled；正文已被平台清空，界面显示占位）。 */
+    val recalled: Boolean = false,
+    /** 已置顶（平台 channel_pins）。 */
+    val pinned: Boolean = false,
+    /** 表情反应聚合（平台 channel_reactions）。 */
+    val reactions: List<ChannelReaction> = emptyList(),
+    /** 附件引用（频道补全二期·引用制：只存引用，不存二进制）。 */
+    val attachmentRef: String? = null,
+    /** 转发来源标注（“来源频道 · 原发送者”）。 */
+    val forwardOf: String? = null,
 )
+
+/** 一条表情反应的聚合（平台 reactions 数组一项）。 */
+data class ChannelReaction(
+    val emoji: String,
+    val count: Int,
+    val mine: Boolean = false,
+)
+
+/** 频道列表一项（平台 agent_channel_list 输出；kind=dm 为私聊）。 */
+data class ChannelSummary(
+    val id: String,
+    val name: String,
+    val kind: String = "channel",
+    val archived: Boolean = false,
+    val participantIds: List<String> = emptyList(),
+)
+
+/** 一位成员对某条消息的已读状态（平台 agent_channel_readers 输出）。 */
+data class ChannelReader(
+    val agentId: String,
+    val agentName: String,
+    val read: Boolean,
+)
+
+/** 平台消息 JSON → [PlatformChannelMessage]（含二/三期新字段；缺字段按旧形状容错）。 */
+fun parsePlatformChannelMessage(obj: JSONObject): PlatformChannelMessage {
+    val reactions = mutableListOf<ChannelReaction>()
+    val rawReactions = obj.optJSONArray("reactions")
+    if (rawReactions != null) {
+        for (i in 0 until rawReactions.length()) {
+            val r = rawReactions.optJSONObject(i) ?: continue
+            val emoji = r.optString("emoji", "")
+            if (emoji.isBlank()) continue
+            reactions += ChannelReaction(
+                emoji = emoji,
+                count = r.optInt("count", 0),
+                mine = r.optBoolean("mine", false),
+            )
+        }
+    }
+    return PlatformChannelMessage(
+        id = obj.optString("id", ""),
+        agentId = obj.optString("agent_id", ""),
+        agentName = obj.optString("agent_name", ""),
+        text = obj.optString("text", ""),
+        createdAtSeconds = obj.optDouble("created_at", 0.0),
+        replyTo = obj.optString("reply_to", "").takeIf { it.isNotBlank() },
+        recalled = obj.optBoolean("recalled", false),
+        pinned = obj.optBoolean("pinned", false),
+        reactions = reactions,
+        attachmentRef = obj.optString("attachment_ref", "").takeIf { it.isNotBlank() },
+        forwardOf = obj.optString("forward_of", "").takeIf { it.isNotBlank() },
+    )
+}
+
+/** 平台频道 JSON → [ChannelSummary]。 */
+fun parseChannelSummary(obj: JSONObject): ChannelSummary {
+    val participants = mutableListOf<String>()
+    val raw = obj.optJSONArray("participants")
+    if (raw != null) {
+        for (i in 0 until raw.length()) {
+            val p = raw.optJSONObject(i) ?: continue
+            val pid = p.optString("agent_id", "")
+            if (pid.isNotBlank()) participants += pid
+        }
+    }
+    return ChannelSummary(
+        id = obj.optString("id", ""),
+        name = obj.optString("name", ""),
+        kind = obj.optString("kind", "channel").ifBlank { "channel" },
+        archived = obj.optBoolean("archived", false),
+        participantIds = participants,
+    )
+}
 
 /**
  * 平台频道调用口（App → WhereverCode 平台 MCP 端点）。
- * 只做两件事：往频道发一条消息、轮询读回消息。不建频道、不派
- * 任务、不碰项目——那是平台后台的事。实现绝不能记令牌日志。
+ * 本接口只做两件事：往频道发一条消息、轮询读回消息。不派任务、
+ * 不碰项目。频道管理（建/改名/归档/删/成员增删）是频道补全一期在
+ * [PlatformChannelMcpTransport] 上另加的方法组，不进本接口——
+ * 平台服务端尚未提供对应工具，见那里的说明。实现绝不能记令牌日志。
  */
 interface PlatformChannelTransport {
     /** 往 [channelId] 发 [text]，返回发出的消息 id（平台不给时返回 ""）。 */
@@ -228,12 +316,31 @@ class PlatformChannelMcpTransport(
     private val endpoint: String = PlatformAgent.mcpEndpoint(null),
 ) : PlatformChannelTransport {
 
-    override suspend fun postMessage(channelId: String, text: String): String {
+    override suspend fun postMessage(channelId: String, text: String): String =
+        postMessageEx(channelId, text)
+
+    /**
+     * 发帖（频道补全二/四期扩展）：[replyTo] 回复引用、[effectKey] 幂等键
+     * （同键重复发帖平台只落一条，返回原消息）、[attachmentRef] 附件引用
+     * （引用制：网盘/投递引用，不传二进制）、[forwardOf] 转发来源标注。
+     */
+    fun postMessageEx(
+        channelId: String,
+        text: String,
+        replyTo: String? = null,
+        effectKey: String? = null,
+        attachmentRef: String? = null,
+        forwardOf: String? = null,
+    ): String {
         val result = toolsCall(
             "agent_channel_post",
             JSONObject().apply {
                 put("channel_id", channelId)
                 put("text", text)
+                if (!replyTo.isNullOrBlank()) put("reply_to", replyTo)
+                if (!effectKey.isNullOrBlank()) put("effect_key", effectKey)
+                if (!attachmentRef.isNullOrBlank()) put("attachment_ref", attachmentRef)
+                if (!forwardOf.isNullOrBlank()) put("forward_of", forwardOf)
             },
         )
         return result.optString("id", "").ifBlank {
@@ -256,20 +363,181 @@ class PlatformChannelMcpTransport(
             if (markRead) put("mark_read", true)
         }
         val result = toolsCall("agent_channel_messages", args)
+        return parseMessageList(result)
+    }
+
+    /** 频道内搜索（平台 q 透传，频道补全一期补齐安卓侧）。 */
+    fun searchMessages(channelId: String, query: String, limit: Int = 50): List<PlatformChannelMessage> {
+        val args = JSONObject().apply {
+            put("channel_id", channelId)
+            put("limit", limit)
+            put("q", query)
+        }
+        return parseMessageList(toolsCall("agent_channel_messages", args))
+    }
+
+    /** 只看置顶消息（平台 pinned_only）。 */
+    fun pollPinnedMessages(channelId: String): List<PlatformChannelMessage> {
+        val args = JSONObject().apply {
+            put("channel_id", channelId)
+            put("limit", 100)
+            put("pinned_only", true)
+        }
+        return parseMessageList(toolsCall("agent_channel_messages", args))
+    }
+
+    private fun parseMessageList(result: JSONObject): List<PlatformChannelMessage> {
         val out = mutableListOf<PlatformChannelMessage>()
         val messages: JSONArray = result.optJSONArray("messages") ?: return out
         for (i in 0 until messages.length()) {
             val obj = messages.optJSONObject(i) ?: continue
-            out += PlatformChannelMessage(
-                id = obj.optString("id", ""),
-                agentId = obj.optString("agent_id", ""),
-                agentName = obj.optString("agent_name", ""),
-                text = obj.optString("text", ""),
-                createdAtSeconds = obj.optDouble("created_at", 0.0),
+            out += parsePlatformChannelMessage(obj)
+        }
+        return out
+    }
+
+    // ---- 消息动作（频道补全二期：撤回/删除/置顶/反应）----
+    // 与管理工具同口径：平台未提供工具时原样抛回真实错误，绝不假成功。
+
+    /** 撤回自己的一条消息（平台留占位、正文清空）。 */
+    fun recallMessage(channelId: String, messageId: String): JSONObject = toolsCall(
+        "agent_channel_recall",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("message_id", messageId)
+        },
+    )
+
+    /** 删除一条消息（发送者或频道管理员；平台审计留痕）。 */
+    fun deleteMessage(channelId: String, messageId: String): JSONObject = toolsCall(
+        "agent_channel_delete_message",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("message_id", messageId)
+        },
+    )
+
+    /** 置顶 / 取消置顶。 */
+    fun setMessagePinned(channelId: String, messageId: String, pinned: Boolean): JSONObject = toolsCall(
+        "agent_channel_pin",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("message_id", messageId)
+            put("pinned", pinned)
+        },
+    )
+
+    /** 表情反应开关（on=false 为取消自己的这枚反应）。 */
+    fun reactMessage(channelId: String, messageId: String, emoji: String, on: Boolean): JSONObject = toolsCall(
+        "agent_channel_react",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("message_id", messageId)
+            put("emoji", emoji)
+            put("on", on)
+        },
+    )
+
+    /** 某条消息的成员已读名单（频道补全三期·已读回执）。 */
+    fun channelReaders(channelId: String, messageId: String): List<ChannelReader> {
+        val result = toolsCall(
+            "agent_channel_readers",
+            JSONObject().apply {
+                put("channel_id", channelId)
+                put("message_id", messageId)
+            },
+        )
+        val out = mutableListOf<ChannelReader>()
+        val readers = result.optJSONArray("readers") ?: return out
+        for (i in 0 until readers.length()) {
+            val r = readers.optJSONObject(i) ?: continue
+            out += ChannelReader(
+                agentId = r.optString("agent_id", ""),
+                agentName = r.optString("agent_name", ""),
+                read = r.optBoolean("read", false),
             )
         }
         return out
     }
+
+    /** 频道列表（含 kind/archived/成员；私聊与团队空间共用，频道补全三期）。 */
+    fun listChannels(): List<ChannelSummary> {
+        val result = toolsCall("agent_channel_list", JSONObject())
+        val out = mutableListOf<ChannelSummary>()
+        val channels = result.optJSONArray("channels") ?: return out
+        for (i in 0 until channels.length()) {
+            val c = channels.optJSONObject(i) ?: continue
+            val summary = parseChannelSummary(c)
+            if (summary.id.isNotBlank()) out += summary
+        }
+        return out
+    }
+
+    /** 打开与某位成员的私聊（已有则返回原私聊频道；私聊只给频道成员）。 */
+    fun openDm(agentId: String): JSONObject = toolsCall(
+        "agent_channel_open_dm",
+        JSONObject().apply { put("agent_id", agentId) },
+    )
+
+    /** 给频道建一个入帖 Webhook（令牌只在本次返回里出现一次，用户自管）。 */
+    fun createChannelWebhook(channelId: String): JSONObject = toolsCall(
+        "agent_channel_create_webhook",
+        JSONObject().apply { put("channel_id", channelId) },
+    )
+
+    // ---- 频道管理（频道补全一期）----
+    // 工具名按既有 agent_channel_* 命名惯例。注意：当前平台服务端尚未
+    // 提供这些工具（平台服务端不在本仓），调用会原样抛回平台的真实
+    // 错误（IOException），调用方必须如实呈现，绝不能假装成功；
+    // 服务端补齐这些工具后，本层无需改动即可用。
+
+    /** 新建频道，返回平台给出的频道 JSON（形状由平台决定，含 id 时可读）。 */
+    fun createChannel(name: String): JSONObject = toolsCall(
+        "agent_channel_create",
+        JSONObject().apply { put("name", name) },
+    )
+
+    /** 频道改名。 */
+    fun renameChannel(channelId: String, name: String): JSONObject = toolsCall(
+        "agent_channel_rename",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("name", name)
+        },
+    )
+
+    /** 归档 / 移出归档。 */
+    fun setChannelArchived(channelId: String, archived: Boolean): JSONObject = toolsCall(
+        "agent_channel_set_archived",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("archived", archived)
+        },
+    )
+
+    /** 删除频道（破坏性动作：调用方必须先经用户确认）。 */
+    fun deleteChannel(channelId: String): JSONObject = toolsCall(
+        "agent_channel_delete",
+        JSONObject().apply { put("channel_id", channelId) },
+    )
+
+    /** 邀请一位 Agent 加入频道。 */
+    fun addChannelMember(channelId: String, agentId: String): JSONObject = toolsCall(
+        "agent_channel_add_member",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("agent_id", agentId)
+        },
+    )
+
+    /** 把一位 Agent 移出频道。 */
+    fun removeChannelMember(channelId: String, agentId: String): JSONObject = toolsCall(
+        "agent_channel_remove_member",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("agent_id", agentId)
+        },
+    )
 
     /**
      * 一次通用的 MCP `tools/call`（供平台令牌签发等不走频道消息的

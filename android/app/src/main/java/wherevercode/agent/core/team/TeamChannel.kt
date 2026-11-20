@@ -11,7 +11,8 @@ import wherevercode.agent.core.agent.AgentRecord
  * 收敛结论是“一个总调度 + 一次性隔离子 Agent、建议-only”，老项目
  * 群聊后端真跑过，但缺两样东西，本文件补的就是这两样：
  * ① 扇出的结构化形态（只读分支 + 摘要回执，不并行写）；
- * ② 建议-only 围栏（群消息绝不直接触发派活）。
+ * ② 不自动派活的围栏（群消息绝不自动触发派活；派发只走用户显式
+ * 动作，见下方「频道补全一期」口径）。
  *
  * 范围改（maintainer 2026-11-11 22:19）：频道成员不再是 2–3 位，而是
  * App 注册表里的**全部 Agent**。设备 Agent（Codex、CodeBuddy、
@@ -21,16 +22,20 @@ import wherevercode.agent.core.agent.AgentRecord
  * 再回流进频道。平台 Agent（Example Agent 等）是端点直连成员，消息直达，
  * 不走代理。
  *
- * “有界”现在的意思：短消息（500 字）、轮次上限（3 轮）、建议-only、
- * 只读扇出 ≤5——不再是成员数上限。
+ * “有界”现在的意思：消息上限 4000 字（与平台/iOS 统一）、轮次上限
+ * （3 轮）、频道不执行代码、只读扇出 ≤5——不再是成员数上限。
  *
  * 围栏是结构性的，不是文案：扇出走 [TeamFanoutRunner]，它只调
  * [wherevercode.agent.core.mcp.RemoteAgentChatPort.runAgent] 读一次
  * 摘要，不建 P0 任务、不碰 TaskStore、不写文件；中转走
- * [ChannelAgentRelay]，同样只做一次聊天调用、不建任务、不写文件；
- * 频道页（[wherevercode.agent.ui.TeamChannelController]）上没有任何
- * 改任务状态、认领、标记完成的入口——只有发消息、1:1 聊天、只读扇出
- * 三个动作。想派活必须回一对一聊天走正常派活流程。
+ * [ChannelAgentRelay]，同样只做一次聊天调用、不建任务、不写文件。
+ *
+ * 频道补全一期口径（2026-11-20 定版，supersede 旧「建议-only」）：
+ * 频道本身不执行代码——@ 提及只提醒、不直达执行；频道**可以**派发
+ * 任务，但只能是用户显式动作：输入栏「作为任务发送」或每条消息的
+ * 「转为正式任务」，两条路都先打开创建任务表单、用户确认后才建单，
+ * 派发后频道内留一张任务卡回显（[ChannelTaskCard]）。频道页仍没有
+ * 改任务状态、认领、标记完成的入口——那些都在任务侧。
  *
  * 不做：对等 swarm、自由群聊、LLM 经理、A2A、默认多 Agent。
  */
@@ -38,8 +43,8 @@ object TeamChatLimits {
     /** 一轮讨论的轮次上限（用户每发一条消息计一轮；到顶后须点“开始新一轮”）。 */
     const val MAX_ROUNDS: Int = 3
 
-    /** 一条频道消息最长 500 字（短结构化消息；服务端上限 4000 字是另一回事）。 */
-    const val MAX_MESSAGE_CHARS: Int = 500
+    /** 一条频道消息最长 4000 字（频道补全一期统一口径：与平台服务端、iOS 同值）。 */
+    const val MAX_MESSAGE_CHARS: Int = 4000
 
     /** 一次只读扇出的分支上限（调研：扇出 ≤5）。 */
     const val MAX_FANOUT_BRANCHES: Int = 5
@@ -56,6 +61,25 @@ object TeamChatLimits {
     /** 一条中转回流的回复最多贴 2000 字（再长只截断、不丢回复）。 */
     const val RELAY_REPLY_CHARS: Int = 2000
 }
+
+/**
+ * 频道消息 → 正式任务的目标文案（频道补全一期·显式派发）：带上来源
+ * 发送者，正文原样保留；用户在创建任务表单里还能再改。与 iOS
+ * 「转为正式任务」的说明文案同格式。
+ */
+fun channelTaskGoal(senderName: String, text: String): String {
+    val sender = senderName.trim().ifBlank { "未知" }
+    return "来自团队频道 (@$sender)：${text.trim()}"
+}
+
+/**
+ * 本会话内从频道显式派发的一张任务卡（回显用）：任务本体与状态都在
+ * 任务列表里，频道里只留这张「已派发」的凭据卡，不在频道内改状态。
+ */
+data class ChannelTaskCard(
+    val goal: String,
+    val createdAtSeconds: Double = 0.0,
+)
 
 /** 频道页的一位成员（本机 App 打头 + 注册表里的全部 Agent）。 */
 data class TeamChannelMember(
@@ -226,6 +250,18 @@ data class TeamThreadMessage(
     val taskTitle: String? = null,
     val kind: TeamMessageKind = TeamMessageKind.DISCUSSION,
     val createdAtSeconds: Double = 0.0,
+    /** 回复的消息 id（频道补全二期话题串/引用行）。 */
+    val replyToId: String? = null,
+    /** 已撤回（展示占位，不展示正文）。 */
+    val recalled: Boolean = false,
+    /** 已置顶。 */
+    val pinned: Boolean = false,
+    /** 表情反应聚合。 */
+    val reactions: List<wherevercode.agent.core.agent.ChannelReaction> = emptyList(),
+    /** 附件引用（引用制）。 */
+    val attachmentRef: String? = null,
+    /** 转发来源标注。 */
+    val forwardOf: String? = null,
 )
 
 /** 一个任务的讨论串：同一任务的消息成组，串内按时间排。 */
@@ -393,10 +429,17 @@ fun teamMessageFromChannel(
         messageId = message.id,
         senderId = message.agentId,
         senderName = senderName,
-        text = stripTeamAttributionHeader(message.text),
+        text = if (message.recalled) ChannelExtras.RECALLED_PLACEHOLDER
+        else stripTeamAttributionHeader(message.text),
         taskId = attr?.taskId,
         taskTitle = attr?.taskTitle,
         kind = TeamMessageKind.DISCUSSION,
         createdAtSeconds = message.createdAtSeconds,
+        replyToId = message.replyTo,
+        recalled = message.recalled,
+        pinned = message.pinned,
+        reactions = message.reactions,
+        attachmentRef = message.attachmentRef,
+        forwardOf = message.forwardOf,
     )
 }

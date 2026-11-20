@@ -2576,6 +2576,8 @@ public struct ChannelsHomeView: View {
     @State private var showCreateDMSheet = false
     @State private var showPolicyAlert = false
     @State private var policyAlertMessage = ""
+    @State private var showCreateChannelInput = false
+    @State private var newChannelNameDraft = ""
 
     // 频道数据与选中
     @State private var channels: [V5ChannelItem] = []
@@ -2673,13 +2675,52 @@ public struct ChannelsHomeView: View {
         .alert("删除频道", isPresented: $showDeleteConfirmation, presenting: channelToDelete) { ch in
             Button("取消", role: .cancel) {}
             Button("删除", role: .destructive) {
-                channels.removeAll { $0.id == ch.id }
-                if activeWorkspaceChannel?.id == ch.id {
-                    activeWorkspaceChannel = channels.first
+                // 频道补全一期：先走平台删除工具，成功才动本地列表；
+                // 平台拒绝（权限/未提供工具）时如实提示且不删本地。
+                Task {
+                    if let transport = appState.makeChannelTransport() {
+                        do {
+                            _ = try await transport.deleteChannel(channelID: ch.id)
+                        } catch {
+                            policyAlertMessage = "删除失败：\((error as? McpError)?.message ?? "平台未完成删除。")"
+                            showPolicyAlert = true
+                            return
+                        }
+                    }
+                    channels.removeAll { $0.id == ch.id }
+                    if activeWorkspaceChannel?.id == ch.id {
+                        activeWorkspaceChannel = channels.first
+                    }
+                    await refreshChannels()
                 }
             }
         } message: { ch in
             Text("确定要删除「#\(ch.name)」吗？删除后该频道的消息记录将对所有成员不可见，此操作需要平台授权。")
+        }
+        .alert("新建频道", isPresented: $showCreateChannelInput) {
+            TextField("频道名称", text: $newChannelNameDraft)
+            Button("创建") {
+                let name = newChannelNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                newChannelNameDraft = ""
+                guard !name.isEmpty else { return }
+                Task {
+                    guard let transport = appState.makeChannelTransport() else {
+                        policyAlertMessage = "频道还没配好：请先在设置里填平台地址与 Token。"
+                        showPolicyAlert = true
+                        return
+                    }
+                    do {
+                        _ = try await transport.createChannel(name: name)
+                        await refreshChannels()
+                    } catch {
+                        policyAlertMessage = "建频道失败：\((error as? McpError)?.message ?? "平台未完成创建。")"
+                        showPolicyAlert = true
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { newChannelNameDraft = "" }
+        } message: {
+            Text("频道建在平台上，所有成员可见。")
         }
         .alert("安全规范提示", isPresented: $showPolicyAlert) {
             Button("我知道了", role: .cancel) {}
@@ -2756,16 +2797,18 @@ public struct ChannelsHomeView: View {
 
             Menu {
                 Button {
-                    policyAlertMessage = "【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。"
-                    showPolicyAlert = true
+                    // 频道补全一期实装：走平台 agent_channel_create，
+                    // 不再是待开发提示；失败如实弹平台错误。
+                    showCreateChannelInput = true
                 } label: {
                     Label("新建频道", systemImage: "number")
                 }
                 .accessibilityIdentifier("channels.action.createChannel")
 
                 Button {
-                    policyAlertMessage = "【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）"
-                    showPolicyAlert = true
+                    // 私聊（方案 A 的频道页分段在切换面板里）：这里直接
+                    // 打开既有的发起私聊表单，不再是待开发提示。
+                    showCreateDMSheet = true
                 } label: {
                     Label("发起私聊", systemImage: "person.2")
                 }
@@ -2794,7 +2837,7 @@ public struct ChannelsHomeView: View {
     private var partitionPicker: some View {
         Picker("分区", selection: $selectedPartition) {
             ForEach(ChannelPartition.allCases) { part in
-                Text(part == .directMessages ? "私聊 · 待开发" : part.rawValue).tag(part)
+                Text(part.rawValue).tag(part)
             }
         }
         .pickerStyle(.segmented)
@@ -3004,10 +3047,10 @@ public struct ChannelsHomeView: View {
                         Image(systemName: "person.2.slash")
                             .font(.system(size: 40))
                             .foregroundStyle(.secondary.opacity(0.6))
-                        Text("私聊服务待开发")
+                        Text("暂无私聊")
                             .font(.headline)
                             .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                        Text("与指定人员/Agent 独立私聊通道尚未开放\n团队成员与 Agent 间协同请使用频道或任务工作流")
+                        Text("点右上角「＋ 新建 → 发起私聊」，与频道成员开始 1:1 私聊\n（私聊只在频道成员之间，与单 Agent 对话并存）")
                             .font(.caption)
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
