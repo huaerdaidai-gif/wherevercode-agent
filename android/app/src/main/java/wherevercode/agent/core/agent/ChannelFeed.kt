@@ -33,6 +33,16 @@ fun parseChannelWsEvent(text: String): PlatformChannelMessage? {
 }
 
 /**
+ * feed 订阅重绑决策（推送主模式整改，2026-11-20）：WS 订阅绑「当前
+ * 打开的频道/私聊」——已订阅频道与正在看的频道不一致（或还没订）
+ * 就需要（重）绑，一致则保持现有订阅不动。纯函数，单测覆盖
+ * （ChannelFeedRebindTest）。轮询不参与这个决策：它只在
+ * [ChannelFeed] 内部 WS 断开时兜底，重连后自动回推送。
+ */
+fun channelFeedRebindNeeded(boundChannelId: String?, activeChannelId: String): Boolean =
+    boundChannelId != activeChannelId
+
+/**
  * V5 频道消息流（P3，2026-11-11）：WS 推送为主，轮询只作断线兜底。
  *
  * 规则（maintainer 19:43、21:01 两次定过：不搞过时的技术，轮询不留作主路径）：

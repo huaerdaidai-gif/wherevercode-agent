@@ -124,6 +124,7 @@ import wherevercode.agent.core.agent.ManusChatPort
 import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
 import wherevercode.agent.core.agent.McpChannelEventFeed
+import wherevercode.agent.core.agent.channelFeedRebindNeeded
 import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.agent.PlatformAgentChatBridge
 import wherevercode.agent.core.agent.PlatformAgentCredentialStore
@@ -415,6 +416,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
     private var teamChannelFeed: McpChannelEventFeed? = null
+    /**
+     * 当前 feed 实际订阅的频道 id（推送主模式整改，2026-11-20）：feed 绑
+     * 「当前打开的频道/私聊」，切换即重绑；与 [teamChannelActiveId] 的
+     * 关系是——active 是用户正在看的，feedChannelId 是 WS 正在订的，
+     * 两者应当一致，不一致时由 startTeamChannelFeed 重绑拉齐。
+     */
+    @Volatile
+    private var teamChannelFeedChannelId: String? = null
     /** 频道消息（feed 推送 + 首轮轮询攒的，时间升序；最多留 100 条）。 */
     private val teamChannelMessages = mutableListOf<PlatformChannelMessage>()
     /**
@@ -1664,11 +1673,15 @@ class MainActivity : AppCompatActivity() {
             onSwitchChannel = { channelId ->
                 teamChannelActiveId = channelId
                 teamChannelSearchResults = null
+                // 推送订阅跟着切（绑当前打开的频道/私聊，切换即重绑）。
+                startTeamChannelFeed()
                 refreshTeamChannel()
             },
             onToggleDmMode = { dm ->
                 teamChannelDmMode = dm
                 if (!dm) teamChannelActiveId = null
+                // 离开私聊分段回到默认频道时，订阅一并绑回去。
+                startTeamChannelFeed()
                 refreshTeamChannel()
             },
             onStartDm = { agentId -> startTeamChannelDm(agentId) },
@@ -5973,17 +5986,19 @@ class MainActivity : AppCompatActivity() {
             )
         }
         val (host, channelId) = endpoint
-        // 频道补全三期：切换到其他频道/私聊时，消息改从该频道直拉
-        // （WS 直播仍只订默认频道，其他频道靠刷新轮询，快照如实如此）。
+        // 推送主模式整改（2026-11-20）：feed 绑当前打开的频道/私聊，
+        // 哪个频道在看，哪个频道的消息就走 feed 缓冲（WS 推送 + 断线
+        // 轮询兜底攒的）。只有 feed 没订到当前频道时（订阅还没起/刚被
+        // 停）才一次性直拉一页兜底显示，不靠它常态刷新。
         val activeId = teamChannelActiveId ?: channelId
-        val messages = if (activeId != channelId) {
+        val messages = if (teamChannelFeedChannelId == activeId && teamChannelFeed != null) {
+            synchronized(teamChannelMessages) { teamChannelMessages.toList() }
+        } else {
             try {
                 runBlocking { teamChannelTransport(host).pollMessages(activeId, null, 50) }
             } catch (_: Exception) {
                 emptyList()
             }
-        } else {
-            synchronized(teamChannelMessages) { teamChannelMessages.toList() }
         }
         val lastReadId = teamChannelLastReadId(channelId)
         val (unreadCount, unreadCapped) = if (activeId != channelId) {
@@ -6118,7 +6133,11 @@ class MainActivity : AppCompatActivity() {
                     teamChannelNotice =
                         "建频道失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
                 }
-                runOnUiThread { refreshTeamChannel() }
+                runOnUiThread {
+                    // 视图切到了新频道，推送订阅跟着重绑。
+                    startTeamChannelFeed()
+                    refreshTeamChannel()
+                }
             }.start()
         }
     }
@@ -6181,6 +6200,8 @@ class MainActivity : AppCompatActivity() {
                         .setPositiveButton("删除") { _, _ ->
                             runTeamChannelAction("删除频道") { t, ch -> t.deleteChannel(ch) }
                             teamChannelActiveId = null
+                            // 视图回落默认频道，推送订阅一并重绑回去。
+                            startTeamChannelFeed()
                         }
                         .setNegativeButton("取消", null)
                         .show()
@@ -6273,10 +6294,29 @@ class MainActivity : AppCompatActivity() {
      * 时用；频道页本身是本轮的消费者。注意口径：这只是 App 内把 WS
      * 消息转交给 MCP 层，不是服务端 MCP 通知，更不能唤醒外部 Agent
      * （ChatGPT / Grok Bot 从不连这个 WS，只能自己轮询查消息）。
+     *
+     * 推送主模式整改（2026-11-20，Funk 10:17/10:19 硬口径：推送为
+     * 主、轮询只兜底）：订阅绑「当前打开的频道/私聊」
+     * （[activeTeamChannelId]），不再只订端点默认频道。已在跑且订的
+     * 正是当前频道时直接返回；订的是别的频道（用户刚切换）时先停
+     * 旧订阅、清掉旧频道的消息缓冲，再按新频道重绑——新 feed 的首轮
+     * 轮询会把新频道最近一页捡回来，之后新消息一律走 WS 推送，
+     * 断线才轮询、重连自动回推送（ChannelFeed 既有行为，不变）。
      */
     private fun startTeamChannelFeed() {
-        val (host, channelId) = teamChannelEndpoint() ?: return
-        if (teamChannelFeed != null) return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        if (teamChannelFeed != null &&
+            !channelFeedRebindNeeded(teamChannelFeedChannelId, channelId)
+        ) {
+            return // 已订的正是当前频道，订阅不动。
+        }
+        if (teamChannelFeed != null) {
+            // 切换了频道/私聊：停旧订阅，缓冲是旧频道的，一并清掉，
+            // 免得新频道页里混进旧频道的消息。
+            stopTeamChannelFeed()
+            synchronized(teamChannelMessages) { teamChannelMessages.clear() }
+        }
         val feed = McpChannelEventFeed.forPlatformChannel(
             host = host,
             channelId = channelId,
@@ -6303,20 +6343,23 @@ class MainActivity : AppCompatActivity() {
                     synchronized(teamChannelRelayOutputIds) { teamChannelRelayOutputIds.toSet() },
             )
             // 刚到的消息里 @ 了设备/云端 Agent 的，调度器当中转
-            // （ChannelAgentRelay：转到 Hand/API，回复贴回频道）。
-            maybeRelayChannelMessages(listOf(message))
+            // （ChannelAgentRelay：转到 Hand/API，回复贴回来源频道——
+            // 回帖目标是本 feed 订阅的频道，不是端点默认频道）。
+            maybeRelayChannelMessages(listOf(message), channelId)
             runOnUiThread { refreshTeamChannel() }
         }
         feed.onConnectionChange = { _, _ ->
             runOnUiThread { refreshTeamChannel() }
         }
         teamChannelFeed = feed
+        teamChannelFeedChannelId = channelId
         feed.start()
     }
 
     private fun stopTeamChannelFeed() {
         teamChannelFeed?.stop()
         teamChannelFeed = null
+        teamChannelFeedChannelId = null
     }
 
     /**
@@ -6329,8 +6372,11 @@ class MainActivity : AppCompatActivity() {
      * 停（边界，见 DELIVERY）。中转不计轮次（轮次只计用户发帖），
      * 不建任务、不写文件——建议-only 的围栏在 Relay 里。
      */
-    private fun maybeRelayChannelMessages(messages: List<PlatformChannelMessage>) {
-        val (host, channelId) = teamChannelEndpoint() ?: return
+    private fun maybeRelayChannelMessages(
+        messages: List<PlatformChannelMessage>,
+        channelId: String,
+    ) {
+        val (host, _) = teamChannelEndpoint() ?: return
         val agents = try {
             agentStore.listAgents()
         } catch (_: Exception) {
@@ -6554,7 +6600,11 @@ class MainActivity : AppCompatActivity() {
                 teamChannelNotice =
                     "发起私聊失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
             }
-            runOnUiThread { refreshTeamChannel() }
+            runOnUiThread {
+                // 私聊也是实时推送：订阅重绑到刚打开的私聊频道。
+                startTeamChannelFeed()
+                refreshTeamChannel()
+            }
         }.start()
     }
 
@@ -6693,7 +6743,10 @@ class MainActivity : AppCompatActivity() {
      * 参数，不改消息内容、不建任务。
      */
     private fun pushTeamChannelReadMark() {
-        val (host, channelId) = teamChannelEndpoint() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        // 已读标记跟正在看的频道走（推送整改后消息缓冲是当前频道的，
+        // 标记再打到默认频道就是错频道已读）。
+        val channelId = activeTeamChannelId()
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
@@ -6715,7 +6768,8 @@ class MainActivity : AppCompatActivity() {
 
     /** 标为已读：服务端标记推到最新一条 + 本机标记同步（后台线程）。 */
     private fun markTeamChannelRead() {
-        val (host, channelId) = teamChannelEndpoint() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
