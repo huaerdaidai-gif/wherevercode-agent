@@ -5186,7 +5186,7 @@ public struct ControlHomeView: View {
                     HStack {
                         Text(t.title.isEmpty ? t.taskId : t.title).font(.caption).lineLimit(1)
                         Spacer()
-                        Text(t.state).font(.caption2).foregroundStyle(.secondary)
+                        Text(TaskStates.label(of: t.state)).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
                 if active.count > 5 {
@@ -5238,7 +5238,7 @@ public struct ControlHomeView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(Array(recent), id: \.taskId) { t in
-                    Text("▸ \(t.title.isEmpty ? t.taskId : t.title) · \(t.state)")
+                    Text("▸ \(t.title.isEmpty ? t.taskId : t.title) · \(TaskStates.label(of: t.state))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

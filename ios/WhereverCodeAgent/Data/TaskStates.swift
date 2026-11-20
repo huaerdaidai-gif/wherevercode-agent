@@ -166,6 +166,28 @@ public enum TaskStates {
         return isPaused ? "\(base) · 已暂停" : base
     }
 
+    /// 所有状态的中文显示标签（照片批 E）：与安卓 KanbanStatus.labelOf
+    /// 逐字一致，是任务状态标签的唯一事实来源——控制台总览面板的任务行
+    /// 与最近事件行用它，不再直出英文原始状态。未知状态显示「处理中」。
+    /// （displayLabel 是任务页的双语标签，与本标签口径不同，互不影响。）
+    public static func label(of state: String) -> String {
+        switch state.lowercased() {
+        case "queued", "pending": return "待办"
+        case "assigned", "claimed": return "已接收"
+        case "working", "running": return "进行中"
+        case "review": return "待审核"
+        case "rework": return "返工"
+        case "requeued": return "已回队"
+        case "blocked": return "已阻塞"
+        case "completed", "complete", "done": return "已完成"
+        case "paused": return "已暂停"
+        case "cancel_requested", "stopping": return "正在停止"
+        case "failed", "error": return "失败"
+        case "cancelled", "canceled", "stopped": return "已停止"
+        default: return "处理中"
+        }
+    }
+
     public static func isTerminal(_ state: String) -> Bool {
         terminalStates.contains(state)
     }

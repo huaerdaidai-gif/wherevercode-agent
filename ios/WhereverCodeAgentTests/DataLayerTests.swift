@@ -149,6 +149,21 @@ final class DataLayerTests: XCTestCase {
         XCTAssertFalse(TaskStates.isClaimable("assigned"))
     }
 
+    func testTaskStateLabelsMatchAndroidKanban() {
+        // 照片批 E：控制台总览面板的状态标签与安卓 KanbanStatus.labelOf 逐字一致。
+        XCTAssertEqual(TaskStates.label(of: "queued"), "待办")
+        XCTAssertEqual(TaskStates.label(of: "assigned"), "已接收")
+        XCTAssertEqual(TaskStates.label(of: "working"), "进行中")
+        XCTAssertEqual(TaskStates.label(of: "review"), "待审核")
+        XCTAssertEqual(TaskStates.label(of: "rework"), "返工")
+        XCTAssertEqual(TaskStates.label(of: "requeued"), "已回队")
+        XCTAssertEqual(TaskStates.label(of: "blocked"), "已阻塞")
+        XCTAssertEqual(TaskStates.label(of: "completed"), "已完成")
+        XCTAssertEqual(TaskStates.label(of: "failed"), "失败")
+        XCTAssertEqual(TaskStates.label(of: "cancelled"), "已停止")
+        XCTAssertEqual(TaskStates.label(of: "bogus"), "处理中")
+    }
+
     // MARK: - Local task store
 
     func testLocalTaskLifecycleWithAuditTrail() throws {

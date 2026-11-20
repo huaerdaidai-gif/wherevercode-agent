@@ -36,15 +36,17 @@ import wherevercode.agent.ui.EntryRegistry
 @RunWith(RobolectricTestRunner::class)
 class ConsoleScreenControllerTest {
 
-    private fun controller(): ConsoleScreenController = ConsoleScreenController(
-        RuntimeEnvironment.getApplication(),
-        onOpenTask = {},
-        onOpenFile = {},
-        onOpenChat = {},
-        onOpenDevices = {},
-        onOpenAgents = {},
-        onRefresh = {},
-    )
+    private fun controller(hasPlatformToken: Boolean = false): ConsoleScreenController =
+        ConsoleScreenController(
+            RuntimeEnvironment.getApplication(),
+            onOpenTask = {},
+            onOpenFile = {},
+            onOpenChat = {},
+            onOpenDevices = {},
+            onOpenAgents = {},
+            onRefresh = {},
+            hasPlatformToken = { hasPlatformToken },
+        )
 
     private fun task(
         id: String,
@@ -136,6 +138,34 @@ class ConsoleScreenControllerTest {
         assertContains(texts, "已配对")
         // 3 档没有执行日志模块。
         assertNotContains(texts, "执行日志")
+    }
+
+    @Test
+    fun `header chip mirrors the ios console token state`() {
+        // 照片批 E：页头 chip 与 iOS 控制页同款——无 Token 时「本地优先」，
+        // 有 Token 时「平台已配凭证」。
+        val noToken = controller()
+        noToken.render(snapshot())
+        assertContains(allTexts(noToken.root), "本地优先")
+        assertNotContains(allTexts(noToken.root), "平台已配凭证")
+
+        val withToken = controller(hasPlatformToken = true)
+        withToken.render(snapshot())
+        assertContains(allTexts(withToken.root), "平台已配凭证")
+    }
+
+    @Test
+    fun `overview panel line has no artifacts segment and task rows use chinese labels`() {
+        // 照片批 E：总览面板与 iOS 同构——第二行没有「产物文件」段
+        // （产物在自己的模块里）；进行中任务是一行式，状态出中文标签。
+        val c = controller()
+        c.setLevel(3)
+        c.render(snapshot())
+        val texts = allTexts(c.root)
+        val countLine = texts.first { it.contains("设备 1 台") }
+        assertTrue(countLine.contains("待审批 1 个"))
+        assertFalse(countLine.contains("产物文件"))
+        assertTrue("overview task row must carry the exact label", texts.any { it == "进行中" })
     }
 
     @Test
