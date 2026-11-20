@@ -2,6 +2,7 @@ package wherevercode.agent.ui
 
 import android.util.TypedValue
 import android.view.ContextThemeWrapper
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -11,6 +12,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -73,7 +75,12 @@ class ProjectScreenControllerTest {
         val projectListPane = LinearLayout(context)
         val projectList = LinearLayout(context)
         val projectListEmpty = TextView(context)
-        val buttonAddProject = TextView(context)
+        // 照片走查批 C：导入行后四项（与 iOS 同序同文案）+ 开始对话回数。
+        val buttonBrowseFiles = TextView(context)
+        val buttonStartChat = TextView(context)
+        val buttonGitTree = TextView(context)
+        val buttonPreview = TextView(context)
+        var startConversationCalls = 0
 
         // 显式类型声明：onToggleSelectProject 回调里要调 controller.showProjectList()
         // 重画列表；若 controller 在构造表达式里直接初始化，Kotlin 类型推断会报
@@ -108,7 +115,11 @@ class ProjectScreenControllerTest {
             projectListPane = projectListPane,
             projectList = projectList,
             projectListEmpty = projectListEmpty,
-            buttonAddProject = buttonAddProject,
+            buttonBrowseFiles = buttonBrowseFiles,
+            buttonStartChat = buttonStartChat,
+            buttonGitTree = buttonGitTree,
+            buttonPreview = buttonPreview,
+            onStartConversation = { startConversationCalls++ },
             projectStore = store,
             deviceDisplayName = { "设备-$it" },
             onAddProject = {},
@@ -140,6 +151,41 @@ class ProjectScreenControllerTest {
 
     private fun project(id: String, name: String = id, repoUrl: String? = null) =
         Project(projectId = id, name = name, repoUrl = repoUrl)
+
+    @Test
+    fun `import row matches iOS tools row and unimplemented tools say pending`() {
+        val h = Harness()
+        h.controller.showProjectList()
+        // 浏览文件进本机工作区树。
+        h.buttonBrowseFiles.performClick()
+        assertEquals(View.GONE, h.projectListPane.visibility)
+        assertEquals(View.VISIBLE, h.treePane.visibility)
+        // 开始对话回新对话。
+        h.buttonStartChat.performClick()
+        assertEquals(1, h.startConversationCalls)
+        // Git 工作树与预览在安卓尚无对应屏，诚实报待开发，不编假页面。
+        h.buttonGitTree.performClick()
+        assertTrue(h.toasts.contains("Git 工作树：待开发"))
+        h.buttonPreview.performClick()
+        assertTrue(h.toasts.contains("预览：待开发"))
+    }
+
+    @Test
+    fun `projects layout has no big open-folder button and the full iOS import row`() {
+        val h = Harness()
+        val root = LayoutInflater.from(h.context).inflate(R.layout.screen_projects, null) as ViewGroup
+        // 照片走查批 C：底部大「打开文件夹」按钮与右上角刷新钮都已删掉。
+        assertNull(root.findViewById<View>(R.id.buttonAddProject))
+        assertNull(root.findViewById<View>(R.id.buttonProjectRefresh))
+        val importRow = root.findViewById<LinearLayout>(R.id.projectImportRow)
+        val labels = (0 until importRow.childCount).map {
+            (importRow.getChildAt(it) as TextView).text.toString()
+        }
+        assertEquals(
+            listOf("选择本地文件夹", "导入 Git 仓库", "连接设备项目", "浏览文件", "开始对话", "Git 工作树", "预览"),
+            labels,
+        )
+    }
 
     @Test
     fun `manage actions without home offer assign rename delete and no browse`() {
