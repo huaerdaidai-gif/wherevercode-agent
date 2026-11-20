@@ -6180,9 +6180,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-            }
-        }
-    }
 
     /** 管理调用不改变 feed 生命周期，保持 WS 推送优先与现有轮询兜底。 */
     private fun performChannelManagement(call: (PlatformChannelMcpTransport) -> org.json.JSONObject) {
