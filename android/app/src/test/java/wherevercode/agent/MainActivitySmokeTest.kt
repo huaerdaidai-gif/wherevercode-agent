@@ -61,9 +61,11 @@ class MainActivitySmokeTest {
         // + 2 个 V5 C2 批 2 占位屏（成果、帮助）+ 1 个 V5 控制台（2026-11-11，
         // 按需展开的专业工作台，抽屉“控制台”进入）+ 1 个 MCP/插件屏
         // （2026-11-11，抽屉“扩展与资源”→“MCP / 插件”进入）+ 1 个团队频道屏
-        // （P3 频道，抽屉“扩展与资源”→“团队频道”进入）；
+        // （P3 频道，抽屉“扩展与资源”→“团队频道”进入）+ 1 个消息中心屏
+        // （P3-MSG 三期，频道页“＋ 新建”→“打开消息中心”进入；注册表
+        // feature_message_center 仍 TODO，翻转留到组装步）；
         // 初始入口是新对话（首页），聊天屏 VISIBLE，其余全部 GONE。
-        assertEquals(13, container.childCount)
+        assertEquals(14, container.childCount)
         assertEquals(View.VISIBLE, container.getChildAt(0).visibility)
         assertEquals(View.GONE, container.getChildAt(1).visibility)
         assertEquals(View.GONE, container.getChildAt(2).visibility)
@@ -77,6 +79,10 @@ class MainActivitySmokeTest {
         assertEquals(View.GONE, container.getChildAt(9).visibility)
         assertEquals(View.GONE, container.getChildAt(10).visibility)
         assertEquals(View.GONE, container.getChildAt(11).visibility)
+        // 第 13 个子视图是团队频道屏，第 14 个是消息中心屏（消息中心初始 GONE，
+        // 经频道页菜单进入）。
+        assertEquals(View.GONE, container.getChildAt(12).visibility)
+        assertEquals(View.GONE, container.getChildAt(13).visibility)
 
         // V5-UI：首屏保持轻量问候 + 两个建议 pill（点按填输入框）。用户名不写死：无登录用户名时
         // 只显示“你好”。
