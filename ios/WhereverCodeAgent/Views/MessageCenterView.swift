@@ -122,7 +122,7 @@ struct MessageCenterView: View {
         _ section: MessageCenterSection,
         title: String,
         entries: [MessageCenterEntry],
-        subtitle: (MessageCenterEntry) -> String,
+        subtitle: @escaping (MessageCenterEntry) -> String,
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(title) · \(entries.count)")
