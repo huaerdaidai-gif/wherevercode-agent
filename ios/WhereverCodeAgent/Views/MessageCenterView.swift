@@ -4,7 +4,9 @@
 // 任务回执 三类条目。只读视图——不发送、不派任务、不执行代码；数据经
 // MessageCenterLoader 只用既有读接口（ChannelTransport.pollMessages）拉
 // 回，全程 markRead=false（绝不推进服务端已读标记，频道页的未读状态不
-// 会被消息中心误消费——语义见 MessageCenterRules.swift 注释与桩传输测试）。
+// 会被消息中心误消费——语义见 MessageCenterRules.swift 注释与
+// MessageCenterTests.swift 的桩传输测试，读法口径与 Android 端
+// MessageCenterLoader 完全一致）。
 //
 // 条目呈现复用已摘入基线的共用对话组件 DialogMessageListView（LazyVStack
 // 脚手架，与频道工作区/单聊同款），不重复造轮子。点条目跳到对应频道：
