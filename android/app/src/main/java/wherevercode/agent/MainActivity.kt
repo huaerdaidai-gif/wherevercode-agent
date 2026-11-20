@@ -445,10 +445,10 @@ class MainActivity : AppCompatActivity() {
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
     private var teamChannelSearchQuery = ""
     private var teamChannelSearchResults: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
-    /** 正在进行的频道刷新（后台线程）；进行中时新刷新跳过，等下一轮。 */
-    @Volatile
+    /** 频道刷新在后台运行，期间收到的刷新请求合并为下一轮。 */
     private var teamChannelRefreshRunning = false
     private var teamChannelRefreshPending = false
+
     /** V5 C2-3-R4 (v4.3-01)：顶栏是品牌行，不再有会话标题/大脑 pill；
      * 会话状态在聊天屏内，大脑状态在设置页大脑分节。 */
 
