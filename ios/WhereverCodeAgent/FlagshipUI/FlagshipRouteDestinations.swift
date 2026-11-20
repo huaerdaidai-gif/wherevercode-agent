@@ -3595,6 +3595,26 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     // MARK: - 消息分区
+    private var displayedMessages: [V5ChannelMessage] {
+        guard let rootId = activeTopicThreadRootId else { return messages }
+        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
+        let topics = groupTopicThreads(messages: rawMsgs)
+        if let topic = topics.first(where: { $0.rootMessageId == rootId }) {
+            let topicIds = Set(topic.messages.map { $0.id })
+            return messages.filter { topicIds.contains($0.id) }
+        }
+        return messages.filter { $0.id == rootId || $0.replyToId == rootId }
+    }
+
+    private var activeTopicTitle: String {
+        guard let activeRootId = activeTopicThreadRootId,
+              let rootMsg = messages.first(where: { $0.id == activeRootId }) else {
+            return "话题讨论"
+        }
+        let trimmed = rootMsg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(trimmed.prefix(20))
+    }
+
     private var messagesTab: some View {
         VStack(spacing: 0) {
             messageCenterStrip
@@ -3616,17 +3636,16 @@ public struct ChannelDetailWorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.vertical, 60)
             } else {
-                if let activeRootId = activeTopicThreadRootId {
-                    let rootMsg = messages.first(where: { $0.id == activeRootId })
+                if activeTopicThreadRootId != nil {
                     HStack {
-                        Text("当前话题：\(rootMsg?.text.prefix(20) ?? "话题讨论")")
+                        Text("当前话题：\(activeTopicTitle)")
                             .font(.caption)
                             .fontWeight(.semibold)
                             .foregroundStyle(.blue)
                         Spacer()
                         Button("返回全部") {
                             activeTopicThreadRootId = nil
-                            if replyingTo?.id == activeRootId {
+                            if replyingTo?.id == activeTopicThreadRootId {
                                 replyingTo = nil
                             }
                         }
@@ -3636,16 +3655,6 @@ public struct ChannelDetailWorkspaceView: View {
                     .padding(.vertical, 6)
                     .background(Color.blue.opacity(0.1))
                 }
-                let displayedMessages: [V5ChannelMessage] = {
-                    guard let rootId = activeTopicThreadRootId else { return messages }
-                    let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
-                    let topics = groupTopicThreads(messages: rawMsgs)
-                    if let topic = topics.first(where: { $0.rootMessageId == rootId }) {
-                        let topicIds = Set(topic.messages.map { $0.id })
-                        return messages.filter { topicIds.contains($0.id) }
-                    }
-                    return messages.filter { $0.id == rootId || $0.replyToId == rootId }
-                }()
                 // 对话组件收敛：列表脚手架与单聊共用 DialogMessageListView
                 // （LazyVStack、不主动滚底，与原 ScrollViewReader 现状一致）。
                 DialogMessageListView(
@@ -5322,7 +5331,7 @@ public struct ChannelSettingsSheet: View {
                 Text("静音").tag("静音")
             }
             .pickerStyle(.segmented)
-            .onChange(of: notifyMode) { newMode in
+            .onChange(of: notifyMode) { _, newMode in
                 UserDefaults.standard.set(newMode, forKey: "channel.notify_mode.\(channelId)")
                 isMuted = (newMode == "静音")
             }

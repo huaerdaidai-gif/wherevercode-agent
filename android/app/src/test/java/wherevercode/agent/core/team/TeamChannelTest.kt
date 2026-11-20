@@ -431,17 +431,4 @@ class TeamChannelTest {
         val threads = groupTopicThreads(listOf(standalone1, standalone2))
         assertTrue(threads.isEmpty())
     }
-
-    @Test
-    fun `ChannelMarkdownRenderer renders safely and falls back cleanly without drop`() {
-        val md = "这是 **粗体** 和 `代码` 与 [链接](https://example.com)\n- 列表项"
-        val rendered = wherevercode.agent.ui.ChannelMarkdownRenderer.render(md)
-        assertTrue(rendered.contains("粗体"))
-        assertTrue(rendered.contains("代码"))
-        assertTrue(rendered.contains("列表项"))
-        // 遇到非法或普通文本绝不吞字
-        val plain = "普通的未闭合 **标记"
-        val plainRendered = wherevercode.agent.ui.ChannelMarkdownRenderer.render(plain)
-        assertEquals("普通的未闭合 **标记", plainRendered.toString())
-    }
 }

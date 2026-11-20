@@ -29,6 +29,7 @@ import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.TeamThread
 import wherevercode.agent.core.team.TeamThreadMessage
 import wherevercode.agent.core.team.groupTeamMessages
+import wherevercode.agent.core.team.groupTopicThreads
 import wherevercode.agent.core.team.teamMessageFromChannel
 import wherevercode.agent.core.team.teamThreadTitle
 
@@ -954,8 +955,7 @@ class TeamChannelController(
             col.addView(UiKit.text(context, "转发自 $it", 10f, R.color.text_tertiary))
         }
         val rendered = ChannelMarkdownRenderer.render(message.text)
-        val msgTv = UiKit.text(context, "", 13f, R.color.text_primary).apply {
-            text = rendered
+        val msgTv = UiKit.text(context, rendered, 13f, R.color.text_primary).apply {
             if (message.text.contains("http://") || message.text.contains("https://")) {
                 movementMethod = android.text.method.LinkMovementMethod.getInstance()
             }

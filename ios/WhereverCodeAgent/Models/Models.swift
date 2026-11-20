@@ -624,7 +624,7 @@ public struct TeamThread: Identifiable, Equatable, Hashable, Sendable {
 
 public func groupTopicThreads(messages: [ChannelMessage]) -> [TeamThread] {
     if messages.isEmpty { return [] }
-    let msgMap = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+    let msgMap = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     var rootIds: [String] = []
     for m in messages {
         guard let replyId = m.replyTo, !replyId.isEmpty, msgMap[replyId] != nil else { continue }

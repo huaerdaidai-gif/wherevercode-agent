@@ -379,7 +379,7 @@ fun teamThreadTitle(thread: TeamThread): String {
 fun groupTopicThreads(messages: List<TeamThreadMessage>): List<TeamThread> {
     if (messages.isEmpty()) return emptyList()
     val msgMap = messages.associateBy { it.messageId }
-    val rootIds = LinkedHashSet<String>()
+    val rootIds = linkedSetOf<String>()
     for (m in messages) {
         val replyId = m.replyToId
         if (!replyId.isNullOrBlank() && msgMap.containsKey(replyId)) {
