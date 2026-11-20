@@ -5040,12 +5040,17 @@ class MainActivity : AppCompatActivity() {
             projectListPane = screenProjects.findViewById(R.id.projectListPane),
             projectList = screenProjects.findViewById(R.id.projectList),
             projectListEmpty = screenProjects.findViewById(R.id.projectListEmpty),
-            buttonAddProject = screenProjects.findViewById(R.id.buttonAddProject),
             filterRow = screenProjects.findViewById(R.id.projectFilterRow),
             buttonImportLocal = screenProjects.findViewById(R.id.buttonImportLocal),
             buttonImportGit = screenProjects.findViewById(R.id.buttonImportGit),
             buttonImportDevice = screenProjects.findViewById(R.id.buttonImportDevice),
+            // 照片走查批 C：导入行后四项（与 iOS 同序同文案）。
+            buttonBrowseFiles = screenProjects.findViewById(R.id.buttonBrowseFiles),
+            buttonStartChat = screenProjects.findViewById(R.id.buttonStartChat),
+            buttonGitTree = screenProjects.findViewById(R.id.buttonGitTree),
+            buttonPreview = screenProjects.findViewById(R.id.buttonPreview),
             onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
+            onStartConversation = { showEntry(DrawerController.ID_NEW_CONVERSATION) },
             projectStore = projectStore,
             deviceDisplayName = { deviceId -> deviceDisplayName(deviceId) },
             // “打开文件夹”是唯一入口（2026-11-12，maintainer：项目来源收成一个）：
@@ -5072,9 +5077,7 @@ class MainActivity : AppCompatActivity() {
         screenProjects.findViewById<View>(R.id.buttonNewProject)?.setOnClickListener {
             showOpenFolderEntry()
         }
-        screenProjects.findViewById<View>(R.id.buttonProjectRefresh).setOnClickListener {
-            projectController.refresh()
-        }
+        // 照片走查批 C：右上角刷新钮已删（iOS 项目页没有），刷新走列表重画。
         screenProjects.findViewById<View>(R.id.buttonCodeBack).setOnClickListener {
             projectController.closeCode()
         }

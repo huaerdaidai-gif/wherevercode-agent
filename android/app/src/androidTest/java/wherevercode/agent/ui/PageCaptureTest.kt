@@ -325,12 +325,12 @@ class PageCaptureTest {
 
         // 04 项目页。
         deepLinkTo("nav_projects")
-        waitForId("buttonAddProject")
+        waitForId("buttonImportLocal")
         assertFalse(
             "Projects page shows the task-create button; screen did not switch",
             device.hasObject(By.res(context.packageName, "buttonCreateTask")),
         )
-        capture("04-projects", "04-projects.png", "res:buttonAddProject")
+        capture("04-projects", "04-projects.png", "res:buttonImportLocal")
 
         // 05 设备页：设备分节标题在屏，且 Agent 专属控件已被隐藏（设备视图真切换）。
         deepLinkTo("nav_devices")

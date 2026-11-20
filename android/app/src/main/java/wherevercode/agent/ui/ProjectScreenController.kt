@@ -61,15 +61,23 @@ class ProjectScreenController(
     private val projectListPane: LinearLayout,
     private val projectList: LinearLayout,
     private val projectListEmpty: TextView,
-    private val buttonAddProject: TextView,
+    // 照片走查批 C：底部大「打开文件夹」按钮已删（iOS 项目页没有），buttonAddProject
+    // 参数随之移除；导入动作在导入行，仍走同一「打开文件夹」对话框。
     // 项目页对齐（双端对齐批C）：筛选片行与导入行（与 iOS 同序同文案）。
     // 视图可缺省（单测构造不传时不建片、不接线）。
     private val filterRow: LinearLayout? = null,
     private val buttonImportLocal: TextView? = null,
     private val buttonImportGit: TextView? = null,
     private val buttonImportDevice: TextView? = null,
+    // 照片走查批 C：导入行后四项（与 iOS 同序同文案），视图可缺省。
+    private val buttonBrowseFiles: TextView? = null,
+    private val buttonStartChat: TextView? = null,
+    private val buttonGitTree: TextView? = null,
+    private val buttonPreview: TextView? = null,
     /** 导入行「连接设备项目」：去设备页（项目从设备添加）。 */
     private val onOpenDevices: () -> Unit = {},
+    /** 导入行「开始对话」：回新对话。 */
+    private val onStartConversation: () -> Unit = {},
     private val projectStore: ProjectStore,
     /** 家设备 id → 显示名（本机工作区不走这里）。 */
     private val deviceDisplayName: (String) -> String,
@@ -187,6 +195,13 @@ class ProjectScreenController(
         buttonImportLocal?.setOnClickListener { onOpenFolder() }
         buttonImportGit?.setOnClickListener { onOpenFolder() }
         buttonImportDevice?.setOnClickListener { onOpenDevices() }
+        // 照片走查批 C：导入行后四项（与 iOS 同序同文案）。浏览文件进本机
+        // 工作区树；开始对话回新对话；Git 工作树与预览在安卓尚无对应屏，
+        // 点开给诚实「待开发」提示，不编假页面。
+        buttonBrowseFiles?.setOnClickListener { showWorkspace() }
+        buttonStartChat?.setOnClickListener { onStartConversation() }
+        buttonGitTree?.setOnClickListener { onToast("Git 工作树：待开发") }
+        buttonPreview?.setOnClickListener { onToast("预览：待开发") }
         treeMoreButton.setOnClickListener {
             treeLimit += TREE_PAGE_SIZE
             render()
@@ -264,7 +279,9 @@ class ProjectScreenController(
         } catch (_: Exception) {
             emptyList()
         }
-        rootLabel.text = if (projects.isEmpty()) "还没有项目" else "${projects.size} 个项目"
+        // 照片走查批 C：标题副行删掉（iOS 标题只有「项目」）——列表态副行
+        // 不再写「还没有项目」/计数，空态由正文承担；工作区态再显示路径。
+        rootLabel.visibility = View.GONE
         projectList.removeAllViews()
         val visible = projects.filter { projectMatchesQuery(it) && projectMatchesFilter(it) }
         projectListEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
@@ -277,7 +294,6 @@ class ProjectScreenController(
         visible.forEach { project ->
             projectList.addView(projectRow(project))
         }
-        buttonAddProject.setOnClickListener { onOpenFolder() }
     }
 
     /** 本机工作区文件树（原来的项目页视图；从项目列表点“本机工作区”进来）。 */
@@ -287,6 +303,8 @@ class ProjectScreenController(
         projectListPane.visibility = View.GONE
         searchInput.visibility = View.VISIBLE
         searchInput.hint = "搜索文件…（按文件名匹配）"
+        // 副行只在工作区/文件树态显示路径（面包屑）；列表态已在 showProjectList 里藏掉。
+        rootLabel.visibility = View.VISIBLE
         rootLabel.text = "本机工作区 · ${browser.rootPath}"
         showTree()
         render()
@@ -303,6 +321,7 @@ class ProjectScreenController(
         projectListPane.visibility = View.GONE
         searchInput.visibility = View.VISIBLE
         searchInput.hint = "搜索文件…（按文件名匹配）"
+        rootLabel.visibility = View.VISIBLE
         rootLabel.text = "本机 · $relativePath"
         var prefix = ""
         relativePath.split("/").filter { it.isNotEmpty() }.forEach { part ->
