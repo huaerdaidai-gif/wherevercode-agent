@@ -21,8 +21,8 @@ import wherevercode.agent.core.agent.AgentRecord
  * 再回流进频道。平台 Agent（Example Agent 等）是端点直连成员，消息直达，
  * 不走代理。
  *
- * “有界”现在的意思：短消息（500 字）、轮次上限（3 轮）、建议-only、
- * 只读扇出 ≤5——不再是成员数上限。
+ * “有界”现在的意思：消息上限 4000 字（与平台/iOS 统一）、轮次上限
+ * （3 轮）、建议-only、只读扇出 ≤5——不再是成员数上限。
  *
  * 围栏是结构性的，不是文案：扇出走 [TeamFanoutRunner]，它只调
  * [wherevercode.agent.core.mcp.RemoteAgentChatPort.runAgent] 读一次
@@ -38,8 +38,8 @@ object TeamChatLimits {
     /** 一轮讨论的轮次上限（用户每发一条消息计一轮；到顶后须点“开始新一轮”）。 */
     const val MAX_ROUNDS: Int = 3
 
-    /** 一条频道消息最长 500 字（短结构化消息；服务端上限 4000 字是另一回事）。 */
-    const val MAX_MESSAGE_CHARS: Int = 500
+    /** 一条频道消息最长 4000 字（频道补全一期统一口径：与平台服务端、iOS 同值）。 */
+    const val MAX_MESSAGE_CHARS: Int = 4000
 
     /** 一次只读扇出的分支上限（调研：扇出 ≤5）。 */
     const val MAX_FANOUT_BRANCHES: Int = 5

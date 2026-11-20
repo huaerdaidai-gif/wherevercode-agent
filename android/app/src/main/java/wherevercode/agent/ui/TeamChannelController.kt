@@ -59,7 +59,7 @@ data class TeamChannelSnapshot(
  *   横滑，不怕人多。平台 Agent（Example Agent 等）是端点直连成员；设备/
  *   云端 Agent 由调度器当中转——频道里 `@名字` 叫它，调度器把消息
  *   转到它的 Hand/API，回复再贴回频道。
- * - 短消息：一条最多 500 字，超了发不出去，当场明说。
+ * - 消息上限：一条最多 4000 字（与平台/iOS 统一），超了发不出去，当场明说。
  * - 轮次上限 3 轮：用户每发一条消息计一轮，到顶后输入栏锁住，点
  *   “开始新一轮”才继续。
  * - 建议-only：页上没有任何改任务状态、认领、标记完成的入口——只有
@@ -128,7 +128,7 @@ class TeamChannelController(
     }
 
     private val messageInput: EditText = EditText(context).apply {
-        hint = "给频道发一条短消息（≤500 字），@名字 叫一位 Agent…"
+        hint = "给频道发一条消息（≤4000 字），@名字 叫一位 Agent…"
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
         minLines = 1
         maxLines = 4
