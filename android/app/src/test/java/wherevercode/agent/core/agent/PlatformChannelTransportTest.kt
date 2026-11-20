@@ -159,6 +159,52 @@ class PlatformChannelTransportTest {
     }
 
     @Test
+    fun `delete preserves server owner authorization rejection`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_delete" to JSONObject().apply {
+                put("jsonrpc", "2.0")
+                put("id", "1")
+                put("result", JSONObject().apply {
+                    put("isError", true)
+                    put("content", org.json.JSONArray().apply {
+                        put(JSONObject().apply { put("type", "text"); put("text", "仅频道 owner 可删除") })
+                    })
+                })
+            }.toString()),
+        )
+        try {
+            transport(http).deleteChannel("chan-1")
+            throw AssertionError("expected IOException")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message.orEmpty().contains("owner"))
+        }
+        assertEquals("agent_channel_delete", JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optString("name"))
+    }
+
+    @Test
+    fun `member removal preserves server creator protection rejection`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_remove_member" to JSONObject().apply {
+                put("jsonrpc", "2.0")
+                put("id", "1")
+                put("result", JSONObject().apply {
+                    put("isError", true)
+                    put("content", org.json.JSONArray().apply {
+                        put(JSONObject().apply { put("type", "text"); put("text", "频道创建者不可移除") })
+                    })
+                })
+            }.toString()),
+        )
+        try {
+            transport(http).removeChannelMember("chan-1", "creator-agent")
+            throw AssertionError("expected IOException")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message.orEmpty().contains("创建者不可移除"))
+        }
+    }
+
+    @Test
     fun `post sends channel id and text and returns the posted id`() = runBlocking {
         val http = ScriptedHttp(
             mapOf("agent_channel_post" to envelope("""{"ok":true,"id":"m123"}""")),

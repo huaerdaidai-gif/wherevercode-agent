@@ -169,4 +169,12 @@ class EntryRegistryTest {
                 assertTrue(entry.target.isNotBlank())
             }
     }
+    @Test
+    fun `channel management is implemented and routed to action`() {
+        val entry = EntryRegistry.find("feature_channel_manage")!!
+        assertEquals(Status.IMPLEMENTED, entry.status)
+        assertEquals(EntryRegistry.TargetKind.ACTION, entry.targetKind)
+        assertEquals("channel_manage", entry.target)
+        assertTrue(entry.note!!.contains("owner"))
+    }
 }

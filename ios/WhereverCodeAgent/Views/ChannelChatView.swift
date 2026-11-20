@@ -136,51 +136,60 @@ struct ChannelContentView: View {
 /// One message in the channel history.
 struct ChannelMessageRow: View {
     let message: ChannelMessage
-
+    @State private var showingTaskForm = false
+    @State private var taskTitle = ""
+    @State private var taskError: String?
     private func promoteToTask(_ msg: ChannelMessage) {
-        let newTask = LocalTask(
-            title: String(msg.text.prefix(40)),
-            description: "来自团队频道 (@\(msg.displaySender))：\(msg.text)",
-            state: "queued"
-        )
-        _ = try? LocalData.shared.tasks.createTask(newTask)
+        taskTitle = String(msg.text.prefix(40))
+        showingTaskForm = true
     }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(message.displaySender)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Text(message.createdAt, style: .time)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(message.displaySender).font(.caption).fontWeight(.semibold)
+                Text(message.createdAt, style: .time).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text(message.createdAt, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(message.createdAt, style: .date).font(.caption).foregroundStyle(.secondary)
             }
-            Text(message.text)
-                .font(.body)
-                .textSelection(.enabled)
+            Text(message.text).font(.body).textSelection(.enabled)
             if let replyTo = message.replyTo, !replyTo.isEmpty {
-                Text("回复 \(String(replyTo.prefix(8)))…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("回复 \(String(replyTo.prefix(8)))…").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
-                Button {
-                    promoteToTask(message)
-                } label: {
-                    Label("转为正式任务", systemImage: "arrow.triangle.branch")
-                        .font(.caption2)
+                Button { promoteToTask(message) } label: {
+                    Label("转为正式任务", systemImage: "arrow.triangle.branch").font(.caption2)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .buttonStyle(.bordered).controlSize(.mini)
             }
         }
         .padding(.vertical, 2)
+        .sheet(isPresented: $showingTaskForm) {
+            NavigationStack {
+                Form {
+                    Section("任务标题") { TextField("任务标题", text: $taskTitle) }
+                    Section("任务说明") {
+                        Text("来自团队频道 (@\(message.displaySender))：\(message.text)")
+                    }
+                    Section { Text("确认后进入任务列表（状态：排队）。") }
+                }
+                .navigationTitle("创建任务")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { showingTaskForm = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("创建") {
+                            do {
+                                try LocalData.shared.tasks.createTask(LocalTask(title: taskTitle.trimmingCharacters(in: .whitespacesAndNewlines), description: "来自团队频道 (@\(message.displaySender))：\(message.text)", state: "queued"))
+                                showingTaskForm = false
+                            } catch { taskError = "创建任务失败：\(error.localizedDescription)" }
+                        }.disabled(taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                .alert("创建失败", isPresented: Binding(get: { taskError != nil }, set: { if !$0 { taskError = nil } })) {
+                    Button("好", role: .cancel) { taskError = nil }
+                } message: { Text(taskError ?? "") }
+            }
+        }
     }
 }
 

@@ -2574,6 +2574,8 @@ public struct ChannelsHomeView: View {
     @State private var searchQuery = ""
     @State private var showSwitchPanel = false
     @State private var showCreateDMSheet = false
+    @State private var showCreateChannelSheet = false
+    @State private var showManagementSheet = false
     @State private var showPolicyAlert = false
     @State private var policyAlertMessage = ""
 
@@ -2585,9 +2587,6 @@ public struct ChannelsHomeView: View {
     @State private var directMessages: [V5DirectMessageItem] = []
     @State private var activeWorkspaceDM: V5DirectMessageItem? = nil
 
-    // 删除二次确认
-    @State private var channelToDelete: V5ChannelItem? = nil
-    @State private var showDeleteConfirmation = false
 
     public enum ChannelPartition: String, CaseIterable, Identifiable {
         case channels = "频道"
@@ -2670,16 +2669,15 @@ public struct ChannelsHomeView: View {
                 activeWorkspaceDM = newDM
             }
         }
-        .alert("删除频道", isPresented: $showDeleteConfirmation, presenting: channelToDelete) { ch in
-            Button("取消", role: .cancel) {}
-            Button("删除", role: .destructive) {
-                channels.removeAll { $0.id == ch.id }
-                if activeWorkspaceChannel?.id == ch.id {
-                    activeWorkspaceChannel = channels.first
-                }
+        .sheet(isPresented: $showCreateChannelSheet) {
+            CreateChannelSheet(appState: appState) {
+                Task { await refreshChannels() }
             }
-        } message: { ch in
-            Text("确定要删除「#\(ch.name)」吗？删除后该频道的消息记录将对所有成员不可见，此操作需要平台授权。")
+        }
+        .sheet(isPresented: $showManagementSheet) {
+            ChannelManagementListSheet(appState: appState, channels: channels) {
+                Task { await refreshChannels() }
+            }
         }
         .alert("安全规范提示", isPresented: $showPolicyAlert) {
             Button("我知道了", role: .cancel) {}
@@ -2755,10 +2753,10 @@ public struct ChannelsHomeView: View {
             Spacer()
 
             Menu {
-                Button {
-                    policyAlertMessage = "【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。"
-                    showPolicyAlert = true
-                } label: {
+                Button { showManagementSheet = true } label: {
+                    Label("管理频道", systemImage: "slider.horizontal.3")
+                }
+                Button { showCreateChannelSheet = true } label: {
                     Label("新建频道", systemImage: "number")
                 }
                 .accessibilityIdentifier("channels.action.createChannel")
@@ -2911,16 +2909,9 @@ public struct ChannelsHomeView: View {
                                 Label(ch.isIgnored ? "取消忽略" : "忽略消息", systemImage: "eye.slash")
                             }
                             Button {
-                                toggleArchive(ch)
+                                showManagementSheet = true
                             } label: {
                                 Label(ch.isArchived ? "移出归档" : "归档频道", systemImage: "archivebox")
-                            }
-                            Divider()
-                            Button(role: .destructive) {
-                                channelToDelete = ch
-                                showDeleteConfirmation = true
-                            } label: {
-                                Label("删除频道", systemImage: "trash")
                             }
                         }
                     }
@@ -3155,7 +3146,8 @@ public struct ChannelsHomeView: View {
                     isPrivate: false,
                     memberCount: c.participants.count,
                     lastMessageText: c.lastMessageText ?? "",
-                    unreadCount: 0
+                    unreadCount: 0,
+                    isArchived: c.isArchived
                 )
             }
         } else {
@@ -3274,7 +3266,7 @@ public struct ChannelDetailWorkspaceView: View {
                 HStack(spacing: 8) {
                     Button("任务详情") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered)
                     Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
-                    Button("从消息创建任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
+                    Button("转为正式任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
                 }
                 .font(.caption2)
                 .padding(.horizontal, 16)
@@ -3326,7 +3318,7 @@ public struct ChannelDetailWorkspaceView: View {
             AgentProfileSheet(message: msg)
         }
         .sheet(isPresented: $showChannelSettingsSheet) {
-            ChannelSettingsSheet(channel: channelItem, dm: dmItem) { updatedMembers in
+            ChannelSettingsSheet(appState: appState, channel: channelItem, dm: dmItem) { updatedMembers in
                 self.members = updatedMembers
             }
         }
@@ -3697,7 +3689,7 @@ public struct ChannelDetailWorkspaceView: View {
             // 发送方式（批D，与安卓频道发送区同构）：仅讨论 / 作为任务发送。
             Picker("发送方式", selection: $sendAsTask) {
                 Text("仅讨论").tag(false)
-                Text("作为任务发送").tag(true)
+                Text("转为正式任务").tag(true)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
@@ -4552,122 +4544,206 @@ public struct AgentProfileSheet: View {
     }
 }
 
+public struct CreateChannelSheet: View {
+    @ObservedObject public var appState: AppState
+    public var onCreated: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var errorText: String?
+    @State private var isWorking = false
+    public var body: some View {
+        NavigationStack {
+            Form {
+                Section("频道") { TextField("频道名称", text: $name).textInputAutocapitalization(.never) }
+                if let errorText { Section { Text(errorText).foregroundStyle(.red).textSelection(.enabled) } }
+            }
+            .navigationTitle("新建频道")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("创建") { Task { await create() } }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isWorking)
+                }
+            }
+        }
+    }
+    @MainActor private func create() async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            _ = try await transport.createChannel(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+            onCreated()
+            dismiss()
+        } catch { errorText = "创建频道失败：\(error.localizedDescription)" }
+    }
+}
+
+public struct ChannelManagementListSheet: View {
+    @ObservedObject public var appState: AppState
+    public let channels: [V5ChannelItem]
+    public var onChanged: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var selected: V5ChannelItem?
+    public var body: some View {
+        NavigationStack {
+            List(channels) { ch in
+                Button { selected = ch } label: {
+                    HStack { Text("# \(ch.name)"); Spacer(); Text(ch.isArchived ? "已归档" : "活动中").foregroundStyle(.secondary) }
+                }
+            }
+            .navigationTitle("管理频道")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .sheet(item: $selected) { ch in
+                ChannelSettingsSheet(appState: appState, channel: ch, dm: nil) { _ in onChanged() }
+            }
+        }
+    }
+}
+
 public struct ChannelSettingsSheet: View {
+    @ObservedObject public var appState: AppState
     public let channel: V5ChannelItem?
     public let dm: V5DirectMessageItem?
     public var onMembersChanged: (([V5ChannelMember]) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
-
     @State private var members: [V5ChannelMember] = []
-    @State private var showInviteAgentSheet = false
-
-    private var channelId: String {
-        channel?.id ?? dm?.id ?? "ch-general"
+    @State private var agents: [AgentRecord] = []
+    @State private var editedName = ""
+    @State private var errorText: String?
+    @State private var isWorking = false
+    @State private var showDeleteConfirmation = false
+    @State private var memberPendingRemoval: V5ChannelMember?
+    @State private var showCreatorRemovalAlert = false
+    @State private var isMuted = false
+    @State private var ignoresUnread = false
+    private var channelId: String { channel?.id ?? dm?.id ?? "ch-general" }
+    public init(appState: AppState, channel: V5ChannelItem?, dm: V5DirectMessageItem?, onMembersChanged: (([V5ChannelMember]) -> Void)? = nil) {
+        self.appState = appState; self.channel = channel; self.dm = dm; self.onMembersChanged = onMembersChanged
     }
-
-    public init(channel: V5ChannelItem?, dm: V5DirectMessageItem?, onMembersChanged: (([V5ChannelMember]) -> Void)? = nil) {
-        self.channel = channel
-        self.dm = dm
-        self.onMembersChanged = onMembersChanged
-    }
-
     public var body: some View {
         NavigationStack {
             Form {
                 if let ch = channel {
-                    Section {
-                        LabeledContent("频道名称", value: "# \(ch.name)")
+                    Section("频道信息") {
+                        TextField("频道名称", text: $editedName)
                         LabeledContent("频道性质", value: ch.isPrivate ? "私有频道" : "公开频道")
-                        LabeledContent("讨论主题", value: ch.topic.isEmpty ? "无主题" : ch.topic)
                         LabeledContent("成员总数", value: "\(members.count) 人")
-                        LabeledContent("已入驻 Agent", value: "\(members.filter { $0.isAgent }.count) 位")
-                    } header: { Text("频道信息").textCase(nil) }
+                        Button("保存名称") { Task { await rename() } }.disabled(editedName == ch.name || isWorking)
+                        Button(ch.isArchived ? "取消归档" : "归档频道") { Task { await setArchived(!ch.isArchived) } }.disabled(isWorking)
+                        Button("删除频道", role: .destructive) { showDeleteConfirmation = true }.disabled(isWorking)
+                        Text("仅频道 owner 可删除。当前数据不含 owner 身份，操作将由服务端校验权限；未经授权会显示真实错误。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } else if let d = dm {
-                    Section {
+                    Section("私聊信息") {
                         LabeledContent("对象姓名", value: d.targetName)
                         LabeledContent("身份类型", value: d.isAgent ? "平台 Agent" : "团队成员")
                         LabeledContent("归属角色", value: d.targetRole)
-                    } header: { Text("私聊信息").textCase(nil) }
+                    }
+                    Section("通知与权限") {
+                        Toggle("消息免打扰", isOn: $isMuted)
+                        Toggle("忽略未读提示", isOn: $ignoresUnread)
+                    }
                 }
-
-                Section {
-                    ForEach(members) { m in
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(m.isAgent ? Color(red: 0.85, green: 0.52, blue: 0.38) : Color(red: 0.45, green: 0.58, blue: 0.70))
-                                .frame(width: 32, height: 32)
-                                .overlay(
-                                    Text(String(m.name.prefix(1)))
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundStyle(.white)
-                                )
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(m.name)
-                                        .font(.system(size: 14, weight: .semibold))
-                                    if m.isAgent {
-                                        Text("Agent")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(Color.orange.opacity(0.12), in: Capsule())
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                                Text(m.role)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
+                Section("频道成员") {
+                    ForEach(members) { member in
+                        HStack {
+                            VStack(alignment: .leading) { Text(member.name); Text(member.role).font(.caption).foregroundStyle(.secondary) }
                             Spacer()
-                            Text(m.status)
-                                .font(.caption2)
-                                .foregroundStyle(m.status == "在线" ? .green : .secondary)
-                        }
-                    }
-                    .onDelete { indexSet in
-                        for idx in indexSet {
-                            let m = members[idx]
-                            if m.id != "user-me" {
-                                members = ChannelMemberManager.removeMember(memberId: m.id, channelId: channelId)
-                                onMembersChanged?(members)
+                            if isProtectedMember(member) { Text("创建者/Owner · 不可移除").font(.caption).foregroundStyle(.secondary) }
+                            else if member.isAgent, let agentID = member.agentRecordId {
+                                Button("移除", role: .destructive) { memberPendingRemoval = member }.disabled(isWorking)
                             }
                         }
                     }
-
-                    Button {
-                        showInviteAgentSheet = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "person.badge.plus")
-                            Text("邀请已注册 Agent 入驻频道")
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                    ForEach(agents.filter { agent in !members.contains(where: { $0.agentRecordId == agent.agentId }) }) { agent in
+                        Button("添加 \(agent.displayName)") { Task { await add(agentID: agent.agentId) } }.disabled(isWorking)
                     }
-                } header: { Text("频道成员与入驻 Agent (\(members.count))").textCase(nil) }
-
-                Section {
-                    Toggle("消息免打扰", isOn: .constant(false))
-                    Toggle("忽略未读提示", isOn: .constant(false))
-                } header: { Text("通知与权限").textCase(nil) }
-            }
-            .navigationTitle("会话设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
                 }
+                if let errorText { Section { Text(errorText).foregroundStyle(.red).textSelection(.enabled) } }
+            }
+            .navigationTitle("频道设置")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .confirmationDialog("确定删除频道？", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+                Button("删除频道", role: .destructive) { Task { await deleteChannel() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除无法撤销。仅频道 owner 有权限，服务端将验证权限。")
+            }
+            .confirmationDialog("移除频道成员？", item: $memberPendingRemoval, titleVisibility: .visible) { member in
+                Button("移除 \(member.name)", role: .destructive) {
+                    if isProtectedMember(member) { showCreatorRemovalAlert = true }
+                    else if let agentID = member.agentRecordId { Task { await remove(agentID: agentID) } }
+                }
+                Button("取消", role: .cancel) {}
+            } message: { member in
+                Text("确定将 \(member.name) 移出此频道？")
+            }
+            .alert("无法移除创建者", isPresented: $showCreatorRemovalAlert) {
+                Button("好的", role: .cancel) {}
+            } message: {
+                Text("创建者或 owner 身份不可通过成员移除操作删除。")
             }
             .onAppear {
-                members = ChannelMemberManager.loadMembers(channelId: channelId)
-            }
-            .sheet(isPresented: $showInviteAgentSheet) {
-                InviteAgentSheet(channelId: channelId) { newMember in
-                    members = ChannelMemberManager.loadMembers(channelId: channelId)
-                    onMembersChanged?(members)
+                editedName = channel?.name ?? ""
+                agents = (try? LocalData.shared.agents.listAgents()) ?? []
+                // 仅展示真实参与者；不将本地示例成员冒充平台状态。
+                let participantNames = appState.availableChannels.first(where: { $0.id == channelId })?.participants ?? []
+                members = participantNames.map { id in
+                    let match = agents.first(where: { $0.agentId == id || $0.displayName == id })
+                    return V5ChannelMember(id: "agent-\(id)", name: match?.displayName ?? id, isAgent: true, role: "平台参与者", agentRecordId: id)
                 }
             }
         }
+    }
+    @MainActor private func rename() async {
+        guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        await perform { try await transport.renameChannel(channelID: channel.id, name: editedName.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+    @MainActor private func setArchived(_ archived: Bool) async {
+        guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        await perform { try await transport.setChannelArchived(channelID: channel.id, archived: archived) }
+    }
+    @MainActor private func add(agentID: String) async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        await perform { try await transport.addChannelMember(channelID: channelId, agentID: agentID) }
+    }
+    @MainActor private func remove(agentID: String) async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        await perform { try await transport.removeChannelMember(channelID: channelId, agentID: agentID) }
+    }
+    private func isProtectedMember(_ member: V5ChannelMember) -> Bool {
+        if member.id.caseInsensitiveCompare("user-me") == .orderedSame { return true }
+        let identity = "\(member.id) \(member.role) \(member.name)".lowercased()
+        return ["owner", "creator", "创建者", "所有者"].contains(where: identity.contains)
+    }
+    @MainActor private func deleteChannel() async {
+        guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            _ = try await transport.deleteChannel(channelID: channel.id)
+            await appState.loadChannels()
+            onMembersChanged?([])
+            dismiss()
+        } catch {
+            errorText = "删除频道失败：\(error.localizedDescription)"
+        }
+    }
+    @MainActor private func perform(_ operation: () async throws -> [String: Any]) async {
+        isWorking = true; defer { isWorking = false }
+        do {
+            _ = try await operation()
+            await appState.loadChannels()
+            let participants = appState.availableChannels.first(where: { $0.id == channelId })?.participants ?? []
+            members = participants.map { id in
+                let agent = agents.first(where: { $0.agentId == id || $0.displayName == id })
+                return V5ChannelMember(id: "agent-\(id)", name: agent?.displayName ?? id, isAgent: true, role: "平台参与者", agentRecordId: id)
+            }
+            onMembersChanged?(members)
+            errorText = nil
+        } catch { errorText = "频道操作失败：\(error.localizedDescription)" }
     }
 }
 
