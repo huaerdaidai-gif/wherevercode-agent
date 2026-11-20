@@ -386,8 +386,8 @@ fun groupTopicThreads(messages: List<TeamThreadMessage>): List<TeamThread> {
             var curr: String? = replyId
             var depth = 0
             while (curr != null && depth < 20) {
-                val parent = msgMap[curr]
-                if (parent?.replyToId.isNullOrBlank() || parent?.replyToId == curr || !msgMap.containsKey(parent?.replyToId)) {
+                val parent = msgMap[curr] ?: break
+                if (parent.replyToId.isNullOrBlank() || parent.replyToId == curr || !msgMap.containsKey(parent.replyToId)) {
                     break
                 }
                 curr = parent.replyToId
