@@ -50,6 +50,18 @@ class EntryRegistryTest {
     }
 
     @Test
+    fun `model routing is implemented and opens the models page`() {
+        // 照片批 E 裁定：智能路由引擎两端都真实接在对话路径上
+        // （Android BrainBootstrap 的 failoverPolicyProvider），
+        // 注册表不再标待开发——与 iOS 的 implemented 口径一致。
+        val routing = EntryRegistry.find("feature_model_routing")!!
+        assertEquals(Status.IMPLEMENTED, routing.status)
+        assertEquals(EntryRegistry.TargetKind.DRAWER, routing.targetKind)
+        assertEquals(DrawerController.ID_MODELS, routing.target)
+        assertEquals(null, routing.todoMessage)
+    }
+
+    @Test
     fun `feature list subtitle replaces english route ids with the chinese group name`() {
         val editor = EntryRegistry.find("feature_code_editor")!!
         assertEquals("code_editor", editor.target)

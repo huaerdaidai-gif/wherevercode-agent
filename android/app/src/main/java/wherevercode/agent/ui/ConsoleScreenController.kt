@@ -105,13 +105,38 @@ class ConsoleScreenController(
     private val levelChips: List<TextView> = (ConsoleSnapshot.MIN_LEVEL..ConsoleSnapshot.MAX_LEVEL)
         .map { level -> levelChip(level) }
 
+    /**
+     * 页头状态 chip（照片批 E，与 iOS 控制页页头同款）：圆点 + 文案，
+     * 有平台 Token 时绿点「平台已配凭证」，无 Token 时橙点「本地优先」。
+     * 固定头建一次，render 时按 [hasPlatformToken] 刷新（见 updateStatusChip）。
+     */
+    private val statusChipDot: View = View(context).apply {
+        setBackgroundResource(R.drawable.bg_dot_warning)
+    }
+    private val statusChipText: TextView =
+        UiKit.text(context, "本地优先", 11f, R.color.text_secondary, bold = true)
+
     init {
         root.addView(content)
-        content.addView(
+        val titleRow = UiKit.horizontal(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        titleRow.addView(
             UiKit.text(context, "控制", 20f, R.color.text_primary, bold = true).apply {
                 setPadding(0, dp(4), 0, dp(2))
             },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
+        val statusChip = UiKit.horizontal(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.bg_chip)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+        }
+        statusChip.addView(
+            statusChipDot,
+            LinearLayout.LayoutParams(dp(8), dp(8)).apply { rightMargin = dp(6) },
+        )
+        statusChip.addView(statusChipText)
+        titleRow.addView(statusChip)
+        content.addView(titleRow)
         content.addView(
             UiKit.text(
                 context,
@@ -150,8 +175,18 @@ class ConsoleScreenController(
         renderLoading()
     }
 
+    /** 页头状态 chip 刷新：与 iOS 控制页页头同一口径（有平台 Token → 平台已配凭证）。 */
+    private fun updateStatusChip() {
+        val hasToken = hasPlatformToken()
+        statusChipText.text = if (hasToken) "平台已配凭证" else "本地优先"
+        statusChipDot.setBackgroundResource(
+            if (hasToken) R.drawable.bg_dot_success else R.drawable.bg_dot_warning,
+        )
+    }
+
     /** 大脑未建好时：只说暂不可读，不伪造空总览。 */
     fun renderLoading() {
+        updateStatusChip()
         loading = true
         loadError = false
         snapshot = null
@@ -163,6 +198,7 @@ class ConsoleScreenController(
 
     /** 读任务库失败时：明说失败，不渲染空总览。 */
     fun renderError() {
+        updateStatusChip()
         loading = false
         loadError = true
         snapshot = null
@@ -215,6 +251,7 @@ class ConsoleScreenController(
     }
 
     private fun renderModules() {
+        updateStatusChip()
         val current = snapshot
         modulesContainer.removeAllViews()
         moduleHeaders.clear()
@@ -232,8 +269,11 @@ class ConsoleScreenController(
 
         val visible = ConsoleSnapshot.visibleModules(freedomLevel, hiddenModules)
         visible.forEach { module ->
-            val section = moduleSection(module, current)
-            modulesContainer.addView(section)
+            if (module == ConsoleModule.OVERVIEW) {
+                modulesContainer.addView(buildOverviewPanel(current))
+            } else {
+                modulesContainer.addView(moduleSection(module, current))
+            }
         }
         val hidden = ConsoleModule.values().filter { it in hiddenModules }
         if (hidden.isNotEmpty()) {
@@ -465,6 +505,45 @@ class ConsoleScreenController(
         return container
     }
 
+    /**
+     * 总览面板（照片批 E，与 iOS 控制页的总览面板同构）：一张平卡、
+     * 小字分节标题、纯分节内容，没有折叠/隐藏把手——iOS 那张面板
+     * 同样不可折叠。其余模块（待审批/产物/任务/设备与 Agent/日志）
+     * 仍是可折叠模块：它们的 iOS 对应物在 8 卡背后的独立页里，
+     * 不在本页形态内，故不并入本面板。
+     */
+    private fun buildOverviewPanel(snapshot: Snapshot): LinearLayout {
+        val panel = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) }
+        }
+        panel.addView(UiKit.text(context, "总览", 12f, R.color.text_secondary, bold = true))
+        renderOverview(panel, snapshot)
+        return panel
+    }
+
+    /** 总览面板里的一行式任务行（与 iOS 总览面板同形：标题 + 中文状态标签，点按进任务详情；富信息行在任务模块里）。 */
+    private fun overviewTaskRow(task: TaskRecord): LinearLayout {
+        val row = UiKit.horizontal(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(3), 0, dp(3))
+            setOnClickListener { onOpenTask(task.taskId) }
+        }
+        row.addView(
+            UiKit.text(context, task.title.ifBlank { task.taskId }, 12f, R.color.text_primary).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        row.addView(UiKit.text(context, taskStateLabel(task.state), 11f, R.color.text_secondary))
+        return row
+    }
+
     private fun moduleSection(module: ConsoleModule, snapshot: Snapshot): LinearLayout {
         val section = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
@@ -533,8 +612,7 @@ class ConsoleScreenController(
                 context,
                 "设备 ${snapshot.devices.size} 台 · Agent ${snapshot.agents.size} 个（含本机 App） · " +
                     "模型 ${modelsCount()} 个 · " +
-                    "待审批 ${if (snapshot.pendingApproval != null) 1 else 0} 个 · " +
-                    "产物文件 ${snapshot.results.distinctArtifactCount} 个",
+                    "待审批 ${if (snapshot.pendingApproval != null) 1 else 0} 个",
                 12f,
                 R.color.text_primary,
             ).apply { setPadding(0, dp(4), 0, 0) },
@@ -544,7 +622,7 @@ class ConsoleScreenController(
             section.addView(noteText("暂无进行中任务。"))
         } else {
             snapshot.activeTasks.take(5).forEach { task ->
-                section.addView(taskRow(task, snapshot))
+                section.addView(overviewTaskRow(task))
             }
             if (snapshot.activeTasks.size > 5) {
                 section.addView(
@@ -567,18 +645,17 @@ class ConsoleScreenController(
             section.addView(
                 UiKit.text(
                     context,
-                    "▸ ${device.displayName} · ${device.host}:${device.port} · " +
-                        if (device.paired) "已配对" else "未配对",
+                    "▸ ${device.displayName} · ${device.host}:${device.port}",
                     12f,
                     R.color.text_secondary,
                 ).apply { setPadding(0, dp(2), 0, 0) },
             )
         }
-        snapshot.agents.forEach { agent ->
+        snapshot.agents.filter { !it.isSelf }.forEach { agent ->
             section.addView(
                 UiKit.text(
                     context,
-                    "▸ ${agent.displayName} · ${agent.statusLabel} · ${agent.taskCount} 个任务",
+                    "▸ ${agent.displayName} · ${agent.taskCount} 个任务",
                     12f,
                     R.color.text_secondary,
                 ).apply { setPadding(0, dp(2), 0, 0) },
@@ -592,14 +669,6 @@ class ConsoleScreenController(
                 section.addView(taskEventRow(context, event))
             }
         }
-        section.addView(
-            UiKit.text(
-                context,
-                "更新：${UiKit.shortTime(snapshot.generatedAtEpochSeconds)}",
-                10f,
-                R.color.text_tertiary,
-            ).apply { setPadding(0, dp(8), 0, 0) },
-        )
     }
 
     // ── 待审批 ──────────────────────────────────────────────────────
