@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 照片走查批 D：深色胶囊钮（对 iOS 黑色「前往 Agent 管理」钮）；与 bg_chip_accent 同形。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/text_primary" />
+    <corners android:radius="999dp" />
+</shape>

@@ -3,6 +3,7 @@ package wherevercode.agent.ui
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,6 +21,62 @@ class TeamChannelControllerTest {
             for (i in 0 until view.childCount) out += visibleTexts(view.getChildAt(i))
         }
         return out
+    }
+
+    @Test
+    fun `unconfigured channel hides dialog chrome and shows only guidance and agent management`() {
+        var openedAgents = 0
+        val controller = TeamChannelController(
+            RuntimeEnvironment.getApplication(),
+            onOpenChatWithAgent = {}, onPost = {}, onMarkRead = {}, onNewRound = {},
+            onStartFanout = {}, onRefresh = {}, onOpenAgentManagement = { openedAgents++ },
+            // 传 onCreateTask 才会建发送方式 radios（与生产调用方一致）。
+            onCreateTask = { _, _ -> },
+        )
+        controller.root.visibility = View.VISIBLE
+        controller.render(
+            TeamChannelSnapshot(
+                configured = false,
+                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，并在表单的平台凭证栏填入 App 的平台凭证（由你的平台管理员签发）。",
+                channelId = "test",
+                connectionState = ChannelConnectionState.STOPPED,
+                connectionError = null,
+                members = emptyList(), messages = emptyList(),
+                unreadCount = 0, unreadCapped = false, roundsUsed = 0,
+                fanoutRuns = emptyList(), fanoutRunning = false, notice = null,
+            ),
+        )
+        val texts = visibleTexts(controller.root).map { it.text.toString() }
+        // 照片走查批 D：未配时只留页头与引导（与 iOS 未配 Token 视图同构）。
+        assertTrue(texts.contains("频道"))
+        assertTrue(texts.any { it.contains("频道还没法连") })
+        assertTrue(texts.contains("前往 Agent 管理"))
+        assertFalse(
+            texts.any {
+                it.contains("频道未连接") || it.contains("第 1/") || it.contains("重新连接") ||
+                    it.contains("刷新消息") || it.contains("仅讨论") || it.contains("作为任务发送") ||
+                    it.contains("只读协作工具")
+            },
+        )
+        visibleTexts(controller.root).first { it.text == "前往 Agent 管理" }.performClick()
+        assertEquals(1, openedAgents)
+        // 配好后对话框铬整套回来。
+        controller.render(
+            TeamChannelSnapshot(
+                configured = true,
+                setupHint = "",
+                channelId = "test",
+                connectionState = ChannelConnectionState.LIVE,
+                connectionError = null,
+                members = emptyList(), messages = emptyList(),
+                unreadCount = 0, unreadCapped = false, roundsUsed = 0,
+                fanoutRuns = emptyList(), fanoutRunning = false, notice = null,
+            ),
+        )
+        val liveTexts = visibleTexts(controller.root).map { it.text.toString() }
+        assertTrue(liveTexts.any { it.contains("直播推送") })
+        assertTrue(liveTexts.contains("仅讨论"))
+        assertTrue(liveTexts.contains("作为任务发送"))
     }
 
     @Test
