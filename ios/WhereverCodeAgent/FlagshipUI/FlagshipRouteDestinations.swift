@@ -3529,17 +3529,22 @@ public struct ChannelDetailWorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.vertical, 60)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(messages) { msg in
-                                messageRow(msg)
-                                    .id(msg.id)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                // 对话组件收敛：列表脚手架与单聊共用 DialogMessageListView
+                // （LazyVStack、不主动滚底，与原 ScrollViewReader 现状一致）。
+                DialogMessageListView(
+                    lazy: true,
+                    spacing: 12,
+                    horizontalPadding: 16,
+                    topPadding: 12,
+                    bottomPadding: 12,
+                    scrollTrigger: messages.count
+                ) {
+                    ForEach(messages) { msg in
+                        messageRow(msg)
+                            .id(msg.id)
                     }
+                } trailing: {
+                    EmptyView()
                 }
             }
 
@@ -3674,9 +3679,21 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
-    // MARK: - 输入框区域（仅一个「＋」展开四项）
+    // MARK: - 输入框区域（对话组件收敛：与单聊共用 DialogComposerView，
+    // inline 排布；发送方式/回复横幅/附件条走 above 插槽，「＋」菜单走
+    // leading 插槽，超限提示/边界文案走 below 插槽，内容逐字不变）
     private var composerSection: some View {
-        VStack(spacing: 4) {
+        DialogComposerView(
+            text: $composerText,
+            placeholder: "给频道发一条短消息（≤500 字），@名字 叫一位 Agent…",
+            layout: .inline,
+            sendButtonStyle: .accentGlyph,
+            hasAttachment: selectedAttachment != nil,
+            maxLength: 500,
+            onSend: { sendMessage() },
+            inputAccessibilityID: "channel.composer.input",
+            sendAccessibilityID: "channel.composer.send"
+        ) {
             // 发送方式（批D，与安卓频道发送区同构）：仅讨论 / 作为任务发送。
             Picker("发送方式", selection: $sendAsTask) {
                 Text("仅讨论").tag(false)
@@ -3725,72 +3742,51 @@ public struct ChannelDetailWorkspaceView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
             }
-
-            HStack(spacing: 8) {
-                // 单一「＋」展开入口：上传附件、从项目选择、从网盘选择、关联任务
-                Menu {
-                    Button {
-                        // 上传本地附件模拟
-                        selectedAttachment = V5ChannelFile(
-                            id: UUID().uuidString,
-                            fileName: "evidence_ios_v5.png",
-                            fileSize: "2.4 MB",
-                            fileType: "image",
-                            uploaderName: "我",
-                            sourceKind: "local"
-                        )
-                    } label: {
-                        Label("上传附件", systemImage: "arrow.up.doc")
-                    }
-
-                    Button {
-                        showProjectFilePicker = true
-                    } label: {
-                        Label("从项目选择", systemImage: "folder")
-                    }
-
-                    Button {
-                        showCloudDrivePicker = true
-                    } label: {
-                        Label("从网盘选择", systemImage: "cloud")
-                    }
-
-                    Button {
-                        showLinkTaskPicker = true
-                    } label: {
-                        Label("关联任务", systemImage: "link")
-                    }
+        } leading: {
+            // 单一「＋」展开入口：上传附件、从项目选择、从网盘选择、关联任务
+            Menu {
+                Button {
+                    // 上传本地附件模拟
+                    selectedAttachment = V5ChannelFile(
+                        id: UUID().uuidString,
+                        fileName: "evidence_ios_v5.png",
+                        fileSize: "2.4 MB",
+                        fileType: "image",
+                        uploaderName: "我",
+                        sourceKind: "local"
+                    )
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                        .frame(width: 36, height: 36)
-                        .background(Color(red: 0.92, green: 0.91, blue: 0.89), in: Circle())
+                    Label("上传附件", systemImage: "arrow.up.doc")
                 }
-                .accessibilityIdentifier("channel.composer.plus")
-
-                TextField("给频道发一条短消息（≤500 字），@名字 叫一位 Agent…", text: $composerText)
-                    .font(.system(size: 14))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
-                    .accessibilityIdentifier("channel.composer.input")
 
                 Button {
-                    sendMessage()
+                    showProjectFilePicker = true
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil) ? Color.secondary.opacity(0.3) : Color(red: 0.82, green: 0.49, blue: 0.35))
+                    Label("从项目选择", systemImage: "folder")
                 }
-                .disabled((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil) || composerText.count > 500)
-                .accessibilityIdentifier("channel.composer.send")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(red: 0.95, green: 0.94, blue: 0.92))
 
+                Button {
+                    showCloudDrivePicker = true
+                } label: {
+                    Label("从网盘选择", systemImage: "cloud")
+                }
+
+                Button {
+                    showLinkTaskPicker = true
+                } label: {
+                    Label("关联任务", systemImage: "link")
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .frame(width: 36, height: 36)
+                    .background(Color(red: 0.92, green: 0.91, blue: 0.89), in: Circle())
+            }
+            .accessibilityIdentifier("channel.composer.plus")
+        } accessory: {
+            EmptyView()
+        } below: {
             if composerText.count > 500 {
                 Text("已超出 500 字上限（当前 \(composerText.count) 字）")
                     .font(.caption2)
