@@ -71,6 +71,7 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
     public let id: String
     public let agentId: String
     public let agentName: String
+    public let isAgent: Bool?
     public let text: String
     public let replyTo: String?
     /// Unix time in seconds, as sent by the server (fractional).
@@ -98,11 +99,13 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
         pinned: Bool = false,
         reactions: [ChannelReaction] = [],
         attachmentRef: String? = nil,
-        forwardOf: String? = nil
+        forwardOf: String? = nil,
+        isAgent: Bool? = nil
     ) {
         self.id = id
         self.agentId = agentId
         self.agentName = agentName
+        self.isAgent = isAgent
         self.text = text
         self.replyTo = replyTo
         self.createdAtSeconds = createdAtSeconds
@@ -123,7 +126,7 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, agentId, agentName, text, replyTo, createdAtSeconds
+        case id, agentId, agentName, isAgent, text, replyTo, createdAtSeconds
         case recalled, pinned, reactions, attachmentRef, forwardOf
     }
 
@@ -134,6 +137,7 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
         id = try c.decode(String.self, forKey: .id)
         agentId = try c.decodeIfPresent(String.self, forKey: .agentId) ?? ""
         agentName = try c.decodeIfPresent(String.self, forKey: .agentName) ?? ""
+        isAgent = try c.decodeIfPresent(Bool.self, forKey: .isAgent)
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         replyTo = try c.decodeIfPresent(String.self, forKey: .replyTo)
         createdAtSeconds = try c.decodeIfPresent(Double.self, forKey: .createdAtSeconds) ?? 0
@@ -159,7 +163,8 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
             pinned: (dict["pinned"] as? Bool) ?? false,
             reactions: ChannelReaction.list(from: dict["reactions"]),
             attachmentRef: stringField(dict, keys: ["attachment_ref"]),
-            forwardOf: stringField(dict, keys: ["forward_of"])
+            forwardOf: stringField(dict, keys: ["forward_of"]),
+            isAgent: dict["is_agent"] as? Bool
         )
     }
 
@@ -170,21 +175,38 @@ public struct ChannelMessage: Identifiable, Equatable, Hashable, Codable, Sendab
     }
 }
 
+/// Identity and role from the platform channel participant list.
+public struct ChannelParticipant: Equatable, Hashable, Codable, Sendable {
+    public let id: String
+    public let name: String
+    public let role: String?
+    public let isAgent: Bool?
+    public let isSelf: Bool
+
+    public var canMentionAll: Bool {
+        guard let role else { return false }
+        return ["owner", "coordinator", "所有者", "项目主管", "协调者"].contains(
+            role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+}
+
 /// One channel the current token can see (from `agent_channel_list`).
 public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable {
     public let id: String
     public let name: String
     public let participants: [String]
+    public let participantDetails: [ChannelParticipant]
     public let lastMessageText: String?
     /// Archived flag (phase-1 channel management); absent on the wire = false.
     public let isArchived: Bool
     /// Channel kind (phase-3): "channel" or "dm" (direct message).
     public let kind: String
 
-    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel") {
+    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel", participantDetails: [ChannelParticipant] = []) {
         self.id = id
         self.name = name
         self.participants = participants
+        self.participantDetails = participantDetails
         self.lastMessageText = lastMessageText
         self.isArchived = isArchived
         self.kind = kind
@@ -194,7 +216,7 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
     public var isDM: Bool { kind == "dm" }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, participants, lastMessageText, isArchived, kind
+        case id, name, participants, participantDetails, lastMessageText, isArchived, kind
     }
 
     /// Tolerant decoding: caches written before phase-3 lack `kind`.
@@ -203,6 +225,7 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
         id = try c.decode(String.self, forKey: .id)
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         participants = try c.decodeIfPresent([String].self, forKey: .participants) ?? []
+        participantDetails = try c.decodeIfPresent([ChannelParticipant].self, forKey: .participantDetails) ?? []
         lastMessageText = try c.decodeIfPresent(String.self, forKey: .lastMessageText)
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "channel"
@@ -212,11 +235,23 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
 
     public static func from(dict: [String: Any]) -> ChannelInfo? {
         guard let id = stringField(dict, keys: ["id", "channel_id"]), !id.isEmpty else { return nil }
-        var participants: [String] = []
-        if let raw = dict["participants"] as? [String] {
-            participants = raw
-        } else if let raw = dict["participants"] as? [[String: Any]] {
-            participants = raw.compactMap { stringField($0, keys: ["agent_name", "name", "agent_id"]) }
+        let ownerID = stringField(dict, keys: ["owner_agent_id", "owner_id"])
+        let details: [ChannelParticipant]
+        if let raw = dict["participants"] as? [[String: Any]] {
+            details = raw.compactMap { participant in
+                guard let memberID = stringField(participant, keys: ["agent_id", "id"]), !memberID.isEmpty else { return nil }
+                return ChannelParticipant(
+                    id: memberID,
+                    name: stringField(participant, keys: ["agent_name", "name"]) ?? memberID,
+                    role: memberID == ownerID ? "owner" : stringField(participant, keys: ["role"]),
+                    isAgent: participant["is_agent"] as? Bool,
+                    isSelf: participant["is_self"] as? Bool ?? false
+                )
+            }
+        } else {
+            details = (dict["participants"] as? [String] ?? []).filter { !$0.isEmpty }.map {
+                ChannelParticipant(id: $0, name: $0, role: nil, isAgent: nil, isSelf: false)
+            }
         }
         var last: String?
         if let message = dict["last_message"] as? [String: Any] {
@@ -227,10 +262,11 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
         return ChannelInfo(
             id: id,
             name: stringField(dict, keys: ["name"]) ?? "",
-            participants: participants,
+            participants: details.map(\.name),
             lastMessageText: last,
             isArchived: (dict["archived"] as? Bool) ?? (dict["is_archived"] as? Bool) ?? false,
-            kind: stringField(dict, keys: ["kind"]) ?? "channel"
+            kind: stringField(dict, keys: ["kind"]) ?? "channel",
+            participantDetails: details
         )
     }
 
