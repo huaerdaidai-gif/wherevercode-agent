@@ -306,6 +306,15 @@ struct ChannelChatView: View {
     @State private var readersText: String?
     @State private var forwardSource: ChannelMessage?
     @State private var otherChannels: [ChannelInfo] = []
+    // @我 identity (phase-3 strip completion, 2026-11-20): ids of
+    // messages THIS view posted, and the sender names learned from
+    // their server echoes — the same learn-from-own-posts approach
+    // as Android (ChannelSenderPolicy). No settings screen stores
+    // this token's channel display name, so the echo is the only
+    // reliable source; before the first own post echoes back, the
+    // strip can only match the literal "@本机 App".
+    @State private var ownPostIds: Set<String> = []
+    @State private var selfNames: [String] = []
     @State private var showAttachmentInput = false
     @State private var attachmentDraft = ""
 
@@ -440,19 +449,25 @@ struct ChannelChatView: View {
 
     // MARK: - Phase-2/3 strips and tools
 
-    /// Message center strip: unread (vs the local read cursor) and
-    /// pinned counts for this channel. (@我 aggregation lives in the
-    /// data layer + Android UI; the strip stays to what this view can
-    /// compute truthfully.)
+    /// Message center strip: unread (vs the local read cursor),
+    /// @我 unread and pinned counts for this channel — same line as
+    /// Android's message-center section. @我 matches the names
+    /// learned from own-post echoes plus the literal "本机 App"
+    /// (Android's local-app member name); with no learned name yet
+    /// the count covers only "@本机 App" mentions, never a guess.
     private var messageCenterStrip: some View {
         let lastSeen = (try? LocalData.shared.cursors.lastSeenMessageId(channelId: channel.id)) ?? nil
-        let center = ChannelExtras.buildMessageCenter(messages: messages, myNames: [], lastReadId: lastSeen)
+        let center = ChannelExtras.buildMessageCenter(
+            messages: messages, myNames: selfNames + ["本机 App"], lastReadId: lastSeen)
         let pinnedCount = ChannelExtras.pinnedMessages(messages).count
         return HStack(spacing: 12) {
             Text("消息中心")
                 .font(.caption)
                 .fontWeight(.semibold)
             Text("未读 \(center.unreadCount)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("@我未读 \(center.unreadMentionCount)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("置顶 \(pinnedCount)")
@@ -597,9 +612,10 @@ struct ChannelChatView: View {
         if due.isEmpty { return }
         for item in due {
             do {
-                _ = try await transport.postMessageEx(
+                let postedId = try await transport.postMessageEx(
                     channelID: item.channelId, text: item.text,
                     effectKey: item.effectKey, attachmentRef: item.attachmentRef)
+                if !postedId.isEmpty { ownPostIds.insert(postedId) }
                 scheduledPosts.removeAll { $0.id == item.id }
             } catch {
                 // Keep queued; the effect key prevents double-posting.
@@ -626,6 +642,10 @@ struct ChannelChatView: View {
         )
         newFeed.onMessages = { fresh in
             isLoadingHistory = false
+            // Learn this token's own channel identity from the
+            // echoes of messages posted here (see ownPostIds).
+            selfNames = ChannelExtras.learnedSelfNames(
+                from: fresh, ownPostIds: ownPostIds, existing: selfNames)
             messages.append(contentsOf: fresh)
             messages.sort { $0.createdAtSeconds < $1.createdAtSeconds }
             // Reply cursor (data layer): remember the newest seen
@@ -717,13 +737,16 @@ struct ChannelChatView: View {
         isSending = true
         defer { isSending = false }
         do {
-            _ = try await transport.postMessageEx(
+            let postedId = try await transport.postMessageEx(
                 channelID: channel.id,
                 text: text,
                 replyTo: replyingTo?.id,
                 effectKey: ChannelExtras.buildEffectKey(nonce: UUID().uuidString),
                 attachmentRef: pendingAttachmentRef
             )
+            // Remember the id so the echo teaches the strip our own
+            // channel name (see ownPostIds / selfNames).
+            if !postedId.isEmpty { ownPostIds.insert(postedId) }
             composerText = ""
             replyingTo = nil
             pendingAttachmentRef = nil

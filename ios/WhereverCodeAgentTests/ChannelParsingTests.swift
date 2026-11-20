@@ -177,6 +177,27 @@ final class ChannelParsingTests: XCTestCase {
         XCTAssertEqual(due.map(\.id), ["s1"])
     }
 
+    func testLearnedSelfNamesFromOwnPostEchoes() {
+        // @我 identity learning (2026-11-20): only echoes of ids this
+        // client posted teach names; other senders never leak in, and
+        // re-learning is idempotent.
+        let mine = ChannelMessage(id: "m1", agentId: "me-id", agentName: "本机", text: "我发的", createdAtSeconds: 1)
+        let other = ChannelMessage(id: "m2", agentId: "b", agentName: "乙", text: "@本机 看下", createdAtSeconds: 2)
+        XCTAssertEqual(
+            ChannelExtras.learnedSelfNames(from: [mine, other], ownPostIds: ["m1"]),
+            ["本机"])
+        XCTAssertEqual(
+            ChannelExtras.learnedSelfNames(from: [other], ownPostIds: ["m1"]),
+            [])
+        XCTAssertEqual(
+            ChannelExtras.learnedSelfNames(from: [mine], ownPostIds: ["m1"], existing: ["本机"]),
+            ["本机"])
+        // The learned name then drives the @我 aggregate.
+        let center = ChannelExtras.buildMessageCenter(
+            messages: [mine, other], myNames: ["本机"], lastReadId: "m1")
+        XCTAssertEqual(center.unreadMentionCount, 1)
+    }
+
     func testLegacyCodablePayloadsStillDecode() throws {
         // JSON written before phase-2/3 lacks the new keys entirely.
         let messageJSON = #"{"id":"m1","agentId":"a1","agentName":"甲","text":"hi","createdAtSeconds":7}"#

@@ -421,6 +421,29 @@ public enum ChannelExtras {
         return names.contains { !$0.isEmpty && message.text.contains("@\($0)") }
     }
 
+    /// Sender names to learn as "mine" from the server echoes of
+    /// messages this client posted (ids recorded at post time).
+    /// Mirrors Android's learn-from-own-posts approach
+    /// (ChannelSenderPolicy.learnSelfAgentIds): no settings surface
+    /// stores this token's channel display name, so the echo of an
+    /// own post is the only reliable source. Returns `existing` plus
+    /// any new non-empty names, order preserved, no duplicates.
+    /// Pure; unit-tested.
+    public static func learnedSelfNames(
+        from messages: [ChannelMessage],
+        ownPostIds: Set<String>,
+        existing: [String] = []
+    ) -> [String] {
+        var names = existing
+        for message in messages where ownPostIds.contains(message.id) {
+            for name in [message.agentName, message.displaySender]
+            where !name.isEmpty && !names.contains(name) {
+                names.append(name)
+            }
+        }
+        return names
+    }
+
     /// Message-center aggregate for one channel (phase-3).
     public static func buildMessageCenter(
         messages: [ChannelMessage],

@@ -3257,6 +3257,11 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var connectionError: String? = nil
     @State private var showConnectionDiagnostics = false
     @State private var feed: ChannelFeed? = nil
+    /// The channel the live feed is actually subscribed to (push-mode
+    /// rework, 2026-11-20): the WS subscription follows the OPEN
+    /// channel/DM; when this differs from `currentChannelId` the feed
+    /// is stale and must be rebound (see startFeed).
+    @State private var feedChannelId: String? = nil
     @State private var realOnlineAgentCount: Int? = nil
 
     // 交互状态
@@ -3365,6 +3370,14 @@ public struct ChannelDetailWorkspaceView: View {
         }
         .onAppear(perform: loadWorkspaceData)
         .onDisappear(perform: stopFeed)
+        // Switching the open channel/DM (embedded mode keeps this
+        // view's state): reload the per-channel data and let
+        // startFeed rebind the WS subscription to the new channel.
+        #if compiler(>=6.0)
+        .onChange(of: currentChannelId) { _, _ in loadWorkspaceData() }
+        #else
+        .onChange(of: currentChannelId) { _ in loadWorkspaceData() }
+        #endif
         .sheet(item: $selectedAgentProfile) { msg in
             AgentProfileSheet(message: msg)
         }
@@ -4404,8 +4417,19 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     private func startFeed() {
-        guard feed == nil,
-              appState.hasToken,
+        // Push-mode rework (2026-11-20): the subscription binds the
+        // OPEN channel/DM. Embedded in the channel page, switching
+        // channels changes `currentChannelId` without recreating this
+        // view's state, so a feed bound to the previous channel would
+        // otherwise stay live forever. Same channel: keep the running
+        // feed. Different channel: stop it and rebind below.
+        if let feed, feedChannelId == currentChannelId {
+            return
+        }
+        if feed != nil {
+            stopFeed()
+        }
+        guard appState.hasToken,
               let transport = appState.makeChannelTransport(),
               let wsURL = appState.settings.channelWebSocketURL(channelID: currentChannelId) else {
             connectionState = .stopped
@@ -4424,6 +4448,7 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         self.feed = newFeed
+        self.feedChannelId = currentChannelId
         newFeed.start()
         self.connectionState = newFeed.connectionState
     }
@@ -4431,6 +4456,7 @@ public struct ChannelDetailWorkspaceView: View {
     private func stopFeed() {
         feed?.stop()
         feed = nil
+        feedChannelId = nil
         connectionState = .stopped
         connectionError = nil
     }
