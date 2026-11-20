@@ -20,8 +20,6 @@ import wherevercode.agent.core.team.ChannelExtras
 import wherevercode.agent.core.team.ChannelTaskCard
 import wherevercode.agent.core.team.MessageCenter
 import wherevercode.agent.core.team.ScheduledChannelPost
-import wherevercode.agent.core.team.FanoutBranchStatus
-import wherevercode.agent.core.team.FanoutRun
 import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.channelTaskGoal
 import wherevercode.agent.core.team.TeamChatLimits
@@ -44,8 +42,6 @@ data class TeamChannelSnapshot(
     val unreadCount: Int,
     val unreadCapped: Boolean,
     val roundsUsed: Int,
-    val fanoutRuns: List<FanoutRun>,
-    val fanoutRunning: Boolean,
     val notice: String?,
     /** 频道补全一期：本会话已从频道显式派发的任务卡（回显；状态在任务列表）。 */
     val taskCards: List<ChannelTaskCard> = emptyList(),
@@ -92,8 +88,7 @@ data class TeamChannelSnapshot(
  *   「建议-only」口径）：页上没有任何改任务状态、认领、标记完成的
  *   入口；派发只有两条显式路——输入栏「作为任务发送」与每条消息的
  *   「转为正式任务」，都先开创建任务表单、确认后才建单，派发后频道
- *   内留任务卡回显。其余动作仍是发消息、1:1 聊、只读扇出。
- * - 只读扇出 ≤5：一次最多问 5 个分支，分支只回摘要，不并行写。
+ *   内留任务卡回显。频道讨论中的 @ 作为消息提醒。
  *
  * 连接状态如实显示：WS 推送是“直播”，断了是“轮询兜底”+ 原因，
  * 绝不把兜底说成直播。没有真实数据就明标“暂无……”，绝不造假。
@@ -104,7 +99,6 @@ class TeamChannelController(
     private val onPost: (text: String) -> Unit,
     private val onMarkRead: () -> Unit,
     private val onNewRound: () -> Unit,
-    private val onStartFanout: (question: String) -> Unit,
     private val onRefresh: () -> Unit,
     private val onCreateTask: ((String, () -> Unit) -> Unit)? = null,
     private val onReconnect: () -> Unit = {},
@@ -180,18 +174,10 @@ class TeamChannelController(
      */
     private val composer: ChatComposerView =
         ChatComposerView(context, ChatComposerView.Arrangement.INLINE).apply {
-            caption = "频道消息 · 所有成员可见，可用 @名字 邀请回复"
-            input.hint = "给频道发一条消息（≤4000 字），@名字 叫一位 Agent…"
+            caption = "频道消息 · 所有成员可见，可用 @名字 提醒成员"
+            input.hint = "给频道发一条消息（≤4000 字），@名字 提醒成员…"
             onSendRequest = { sendMessage() }
         }
-
-    private val fanoutInput: EditText = EditText(context).apply {
-        hint = "问大家一个问题（只读：大家只看不写）…"
-        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        minLines = 1
-        maxLines = 4
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-    }
 
     private var snapshot: TeamChannelSnapshot? = null
     private var asTask = false
@@ -354,34 +340,6 @@ class TeamChannelController(
             )
         }
         bar.addView(toolsRow)
-        val fanoutRow = UiKit.horizontal(context).apply { setPadding(0, dp(8), 0, 0) }
-        fanoutRow.addView(
-            fanoutInput.apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            },
-        )
-        fanoutRow.addView(
-            UiKit.text(context, "只读问大家", 12f, R.color.accent, bold = true).apply {
-                setBackgroundResource(R.drawable.bg_chip_accent)
-                setPadding(dp(14), dp(8), dp(14), dp(8))
-                setOnClickListener { startFanout() }
-            },
-        )
-        val fanoutColumn = UiKit.vertical(context)
-        fanoutColumn.addView(UiKit.text(context, "只读问大家 · 仅生成建议，不会派活或写文件", 10f, R.color.text_tertiary))
-        fanoutColumn.addView(fanoutRow)
-        fanoutColumn.visibility = View.GONE
-        val advanced = UiKit.text(context, "只读协作工具　展开 ›", 12f, R.color.text_secondary).apply {
-            minHeight = dp(48)
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        advanced.setOnClickListener {
-            val expanded = fanoutColumn.visibility != View.VISIBLE
-            fanoutColumn.visibility = if (expanded) View.VISIBLE else View.GONE
-            advanced.text = if (expanded) "只读协作工具　收起 ⌃" else "只读协作工具　展开 ›"
-        }
-        bar.addView(advanced)
-        bar.addView(fanoutColumn)
         return bar
     }
 
@@ -445,17 +403,6 @@ class TeamChannelController(
         } else {
             onPost(text)
         }
-    }
-
-    private fun startFanout() {
-        val question = fanoutInput.text.toString().trim()
-        if (question.isBlank()) {
-            noticeLine.text = "先写一个问题再问大家。"
-            return
-        }
-        noticeLine.text = ""
-        fanoutInput.setText("")
-        onStartFanout(question)
     }
 
     fun render(snapshot: TeamChannelSnapshot) {
@@ -565,7 +512,6 @@ class TeamChannelController(
         if (snapshot.taskCards.isNotEmpty()) {
             bodyContainer.addView(taskCardsSection(snapshot.taskCards))
         }
-        bodyContainer.addView(fanoutSection(snapshot))
         // 配好后对话框铬整套回来（含诊断钮按有无诊断显隐）。
         setDialogChromeVisible(true, diagnostic != null)
     }
@@ -1012,91 +958,6 @@ class TeamChannelController(
             },
         )
         return row
-    }
-
-    private fun fanoutSection(snapshot: TeamChannelSnapshot): LinearLayout {
-        val col = UiKit.vertical(context).apply { setPadding(0, dp(10), 0, 0) }
-        col.addView(
-            UiKit.text(context, "只读扇出", 14f, R.color.text_primary, bold = true),
-        )
-        col.addView(
-            UiKit.text(
-                context,
-                "一次最多问 ${TeamChatLimits.MAX_FANOUT_BRANCHES} 个分支；分支只读摘要，" +
-                    "不改文件、不认领、不提交。结果只作建议，看完再决定派不派活。",
-                11f,
-                R.color.text_tertiary,
-            ).apply { setPadding(0, 0, 0, dp(6)) },
-        )
-        if (snapshot.fanoutRunning) {
-            col.addView(note("正在问大家…分支回齐后这里会列出摘要。"))
-        }
-        if (snapshot.fanoutRuns.isEmpty() && !snapshot.fanoutRunning) {
-            col.addView(note("还没有问过大家。在下面输入问题，点“只读问大家”。"))
-        }
-        snapshot.fanoutRuns.forEach { run -> col.addView(fanoutRunRow(run)) }
-        return col
-    }
-
-    private fun fanoutRunRow(run: FanoutRun): LinearLayout {
-        val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(12)) }
-        col.addView(
-            UiKit.text(context, "问：${run.question.take(200)}", 12f, R.color.text_primary, bold = true),
-        )
-        // 2026-11-12 团队对话分串：扇出是讨论（多分支、各署名），
-        // 关联任务写清在串头上，各分支的回复按这个任务分组。
-        run.taskId?.takeIf { it.isNotBlank() }?.let { taskId ->
-            col.addView(
-                UiKit.text(context, "任务 ${taskId.take(8)}", 11f, R.color.text_tertiary)
-                    .apply { setPadding(0, dp(2), 0, 0) },
-            )
-        }
-        run.branches.forEach { branch ->
-            val statusText = when (branch.status) {
-                FanoutBranchStatus.DONE -> "已回"
-                FanoutBranchStatus.RUNNING -> "问着呢…"
-                FanoutBranchStatus.PENDING -> "等着问"
-                FanoutBranchStatus.FAILED -> "连接失败"
-                FanoutBranchStatus.TIMEOUT -> "超时没回"
-            }
-            val branchCard = UiKit.vertical(context).apply {
-                setBackgroundResource(R.drawable.bg_card)
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(5) }
-            }
-            branchCard.addView(UiKit.text(context, "${branch.displayName} · $statusText", 12f, R.color.text_primary, bold = true))
-            branch.summary?.takeIf { it.isNotBlank() }?.let { summary ->
-                val summaryView = UiKit.text(context, summary, 12f, R.color.text_tertiary).apply {
-                    maxLines = 4
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setPadding(0, dp(4), 0, 0)
-                }
-                summaryView.setOnClickListener {
-                    summaryView.maxLines = if (summaryView.maxLines == 4) 24 else 4
-                }
-                branchCard.addView(summaryView)
-            }
-            branch.error?.takeIf { it.isNotBlank() }?.let { error ->
-                val detail = UiKit.text(context, error, 10f, R.color.text_tertiary).apply {
-                    visibility = View.GONE
-                    setPadding(0, dp(4), 0, 0)
-                }
-                val toggle = UiKit.text(context, "查看失败诊断", 10f, R.color.accent).apply {
-                    setPadding(0, dp(4), 0, 0)
-                    setOnClickListener {
-                        detail.visibility = if (detail.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                        text = if (detail.visibility == View.VISIBLE) "收起失败诊断" else "查看失败诊断"
-                    }
-                }
-                branchCard.addView(toggle)
-                branchCard.addView(detail)
-            }
-            col.addView(branchCard)
-        }
-        return col
     }
 
     private fun note(text: String): TextView =

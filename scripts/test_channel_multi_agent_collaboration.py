@@ -251,22 +251,15 @@ class TestChannelMultiAgentCollaboration(unittest.TestCase):
         with open(DESTINATIONS_PATH, encoding="utf-8") as f:
             src = f.read()
 
-        # 验证新实现的组件存在
-        self.assertIn("struct V5ChannelMember", src)
-        self.assertIn("enum ChannelMemberManager", src)
-        self.assertIn("struct InviteAgentSheet", src)
-        self.assertIn("processNaturalLanguageDispatch", src)
-        self.assertIn("submitTaskForReview", src)
-        self.assertIn("approveTaskDelivery", src)
-        self.assertIn("reworkTask", src)
-        self.assertIn("taskCollaborationCard", src)
-        self.assertIn("taskStateBadge", src)
-
-        # 状态机跳转严格检查：不得有 review 直接到 working 的非法流转
-        self.assertNotIn('to: "working", note: "审查未通过"', src)
-        self.assertIn('to: "rework"', src)
-        self.assertIn('to: "completed"', src)
-        print("  -> 5. iOS 源码组件及状态机契约校验：PASS")
+        workspace = src.split("public struct ChannelDetailWorkspaceView", 1)[1]
+        workspace = workspace.split("// MARK: - 辅助弹窗与选择器", 1)[0]
+        self.assertIn("participantDetails", workspace)
+        self.assertIn("taskCollaborationCard", workspace)
+        self.assertIn("taskStateBadge", workspace)
+        self.assertIn("postMessageEx", workspace)
+        self.assertNotIn("ChannelMemberManager", src)
+        for action in ("submitTaskForReview", "approveTaskDelivery", "reworkTask", "tasks.transition", "tasks.togglePause"):
+            self.assertNotIn(action, workspace)
 
 if __name__ == "__main__":
     print("=== WHEREVERCODE V5: CHANNEL MULTI-AGENT COLLABORATION ACCEPTANCE ===")

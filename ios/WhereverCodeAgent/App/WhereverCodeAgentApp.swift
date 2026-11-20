@@ -52,7 +52,10 @@ struct WhereverCodeAgentApp: App {
 @MainActor
 public final class AppState: ObservableObject {
     @Published public var settings: AppSettings {
-        didSet { SettingsStore.save(settings) }
+        didSet {
+            if settings.mcpEndpoint != oldValue.mcpEndpoint { resetChannelIdentity() }
+            SettingsStore.save(settings)
+        }
     }
 
     @Published public var selectedTab: AppTab = .chat
@@ -187,13 +190,35 @@ public final class AppState: ObservableObject {
 
     public var hasToken: Bool { keychain.hasToken }
 
+    @Published private(set) var channelSenderID: String?
+    private var channelPostIDs: Set<String> = []
+
+    private func resetChannelIdentity() {
+        channelSenderID = nil
+        channelPostIDs.removeAll()
+        availableChannels = []
+    }
+
+    func trackChannelPost(_ id: String) {
+        guard !id.isEmpty, channelSenderID == nil else { return }
+        channelPostIDs.insert(id)
+    }
+
+    func learnChannelSender(messageID: String, senderID: String) {
+        guard channelPostIDs.contains(messageID), !senderID.isEmpty else { return }
+        channelSenderID = senderID
+        channelPostIDs.removeAll()
+    }
+
     public func saveToken(_ token: String) throws {
         try keychain.saveToken(token)
+        resetChannelIdentity()
         objectWillChange.send()
     }
 
     public func deleteToken() throws {
         try keychain.deleteToken()
+        resetChannelIdentity()
         objectWillChange.send()
     }
 

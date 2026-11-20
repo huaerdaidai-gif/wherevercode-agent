@@ -109,8 +109,19 @@ class TaskComposerTest {
         var posts = 0
         var drafts = 0
         var created: (() -> Unit)? = null
-        val channel = TeamChannelController(context, {}, { posts++ }, {}, {}, {}, {},
-            onCreateTask = { text, finish -> assertEquals("draft goal", text); drafts++; created = finish })
+        val channel = TeamChannelController(
+            context,
+            onOpenChatWithAgent = {},
+            onPost = { posts++ },
+            onMarkRead = {},
+            onNewRound = {},
+            onRefresh = {},
+            onCreateTask = { text, finish ->
+                assertEquals("draft goal", text)
+                drafts++
+                created = finish
+            },
+        )
         val views = descendants(channel.root)
         views.filterIsInstance<android.widget.EditText>().first().setText("draft goal")
         views.filterIsInstance<RadioButton>().single { it.text == "作为任务发送" }.performClick()

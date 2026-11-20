@@ -2390,52 +2390,13 @@ public struct V5ChannelMember: Identifiable, Codable, Equatable, Hashable, Senda
         self.status = status
         self.agentRecordId = agentRecordId
     }
-}
 
-public enum ChannelMemberManager {
-    public static func loadMembers(channelId: String) -> [V5ChannelMember] {
-        let key = "channel.members.\(channelId)"
-        if let stored = try? LocalData.shared.kv.getJSON(key, as: [V5ChannelMember].self), !stored.isEmpty {
-            return stored
-        }
-        let initial: [V5ChannelMember] = [
-            V5ChannelMember(id: "user-me", name: "我", isAgent: false, role: "项目主管 · 人工审批", status: "在线"),
-            V5ChannelMember(id: "agent-codex", name: "Codex", isAgent: true, role: "设备 Agent · 代码实现与构建", status: "在线", agentRecordId: "codex"),
-            V5ChannelMember(id: "agent-claude", name: "Claude Code", isAgent: true, role: "云端 Agent · 架构规划与审查", status: "就绪", agentRecordId: "claude-code")
-        ]
-        try? LocalData.shared.kv.setJSON(key, initial)
-        return initial
+    init(_ participant: ChannelParticipant) {
+        self.init(id: participant.id, name: participant.name,
+                  isAgent: participant.isAgent ?? false, role: participant.role ?? "平台参与者",
+                  status: "成员", agentRecordId: participant.id)
     }
 
-    public static func saveMembers(_ members: [V5ChannelMember], channelId: String) {
-        let key = "channel.members.\(channelId)"
-        try? LocalData.shared.kv.setJSON(key, members)
-    }
-
-    public static func addAgentMember(_ agent: AgentRecord, channelId: String) -> [V5ChannelMember] {
-        var list = loadMembers(channelId: channelId)
-        if !list.contains(where: { $0.agentRecordId == agent.agentId || $0.name == agent.displayName }) {
-            let roleDesc = "\(agent.kind == .device ? "设备" : (agent.kind == .cloud ? "云端" : "本地模型")) Agent · \(agent.brainKind)"
-            let newMember = V5ChannelMember(
-                id: "agent-\(agent.agentId.replacingOccurrences(of: ":", with: "-"))",
-                name: agent.displayName,
-                isAgent: true,
-                role: roleDesc,
-                status: agent.memberConnectionState == "CONNECTED" ? "在线" : "就绪",
-                agentRecordId: agent.agentId
-            )
-            list.append(newMember)
-            saveMembers(list, channelId: channelId)
-        }
-        return list
-    }
-
-    public static func removeMember(memberId: String, channelId: String) -> [V5ChannelMember] {
-        var list = loadMembers(channelId: channelId)
-        list.removeAll { $0.id == memberId }
-        saveMembers(list, channelId: channelId)
-        return list
-    }
 }
 
 public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
@@ -2660,6 +2621,7 @@ public struct ChannelsHomeView: View {
                     embedded: true,
                     onOpenSwitchPanel: { showSwitchPanel = true }
                 )
+                .id(dm.id)
             } else if let ch = activeWorkspaceChannel {
                 ChannelDetailWorkspaceView(
                     appState: appState,
@@ -2669,6 +2631,7 @@ public struct ChannelsHomeView: View {
                     embedded: true,
                     onOpenSwitchPanel: { showSwitchPanel = true }
                 )
+                .id(ch.id)
             } else {
                 noChannelSelectedView
             }
@@ -3221,7 +3184,6 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var messages: [V5ChannelMessage] = []
     @State private var files: [V5ChannelFile] = []
     @State private var activeTasks: [LocalTask] = []
-    @State private var members: [V5ChannelMember] = []
     @State private var connectionState: ChannelConnectionState = .stopped
     @State private var connectionError: String? = nil
     @State private var showConnectionDiagnostics = false
@@ -3247,7 +3209,7 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var actionError: String? = nil
     @State private var readersText: String? = nil
     @State private var forwardSource: V5ChannelMessage? = nil
-    @State private var otherChannels: [ChannelInfo] = []
+    private var otherChannels: [ChannelInfo] { appState.availableChannels }
     @Environment(\.dismiss) private var dismiss
 
     private var currentChannelId: String {
@@ -3342,17 +3304,21 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .onAppear {
-            loadScheduled()
             loadWorkspaceData()
         }
         .onDisappear(perform: stopFeed)
+        .task {
+            while !Task.isCancelled {
+                loadScheduled()
+                await flushScheduled()
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
+        }
         .sheet(item: $selectedAgentProfile) { msg in
             AgentProfileSheet(message: msg)
         }
         .sheet(isPresented: $showChannelSettingsSheet) {
-            ChannelSettingsSheet(appState: appState, channel: channelItem, dm: dmItem) { updatedMembers in
-                self.members = updatedMembers
-            }
+            ChannelSettingsSheet(appState: appState, channel: channelItem, dm: dmItem)
         }
         .sheet(isPresented: $showProjectFilePicker) {
             ProjectFilePickerSheet { selectedFile in
@@ -3454,6 +3420,7 @@ public struct ChannelDetailWorkspaceView: View {
     /// 消息行「转为正式任务」同一落点；频道消息本身不冒充已派任务。
     private func createTaskFromComposer() {
         let task = LocalTask(
+            sessionId: currentChannelId,
             title: taskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
             description: pendingTaskText,
             state: "queued"
@@ -3469,6 +3436,7 @@ public struct ChannelDetailWorkspaceView: View {
         composerText = ""
         replyingTo = nil
         showCreateTaskForm = false
+        reloadWorkspaceTasks()
     }
 
     private var isCertificateFailure: Bool {
@@ -3771,9 +3739,8 @@ public struct ChannelDetailWorkspaceView: View {
 
                     // @所有人渲染：只有 owner/协调者发的才算全员提及；
                     // 其他人写的 @all 只当普通文本，并如实注一句不生效。
-                    // 旗舰页已知的特权发送者只有本机自己（"user-me"）。
-                    if ChannelExtras.mentionsAllText(msg.text) {
-                        let live = msg.senderId == "user-me"
+                    if !msg.recalled && ChannelExtras.mentionsAllText(msg.text) {
+                        let live = canMentionAll(senderID: msg.senderId)
                         Text(live ? "＠所有人" : "（@所有人未生效：仅 owner/协调者可用）")
                             .font(.caption2)
                             .foregroundStyle(live ? Color.accentColor : .secondary)
@@ -3847,7 +3814,7 @@ public struct ChannelDetailWorkspaceView: View {
                 }
                 // 撤回只对自己的消息显示；删除点了由平台按权限裁决，
                 // 失败如实报错，不在本地假删。
-                if msg.senderId == "user-me" {
+                if isOwnSender(msg.senderId) {
                     Button {
                         Task { await runAction { transport in
                             _ = try await transport.recallMessage(
@@ -4042,12 +4009,41 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
-    /// 本机是否 owner/协调者（@all 门闩的判定依据）：成员表里本机
-    /// "user-me" 的角色含“项目主管”或“协调”。客户端没有服务端下发
-    /// 的频道 owner 字段，先按本机成员角色判定；服务端广播语义待定。
-    private var localCanMentionAll: Bool {
-        guard let me = members.first(where: { $0.id == "user-me" }) else { return false }
-        return me.role.contains("项目主管") || me.role.contains("协调")
+    private var channelParticipants: [ChannelParticipant] {
+        otherChannels.first(where: { $0.id == currentChannelId })?.participantDetails ?? []
+    }
+
+    private var members: [V5ChannelMember] {
+        channelParticipants.map(V5ChannelMember.init)
+    }
+
+    private func isOwnSender(_ senderID: String) -> Bool {
+        guard !senderID.isEmpty else { return false }
+        return senderID == appState.channelSenderID ||
+            channelParticipants.contains { $0.id == senderID && $0.isSelf }
+    }
+
+    private func canMentionAll(senderID: String) -> Bool {
+        channelParticipants.contains { $0.id == senderID && $0.canMentionAll }
+    }
+
+    private func localCanMentionAll(in channelID: String) -> Bool {
+        guard let channel = otherChannels.first(where: { $0.id == channelID }) else { return false }
+        return channel.participantDetails.contains {
+            $0.canMentionAll && ($0.isSelf || $0.id == appState.channelSenderID)
+        }
+    }
+
+    private func recordChannelPost(_ id: String) {
+        appState.trackChannelPost(id)
+        if !id.isEmpty, let message = messages.first(where: { $0.id == id }) {
+            appState.learnChannelSender(messageID: id, senderID: message.senderId)
+            if let senderID = appState.channelSenderID {
+                for index in messages.indices where messages[index].senderId == senderID {
+                    messages[index].isAgent = false
+                }
+            }
+        }
     }
 
     // MARK: - 频道补全二期动作 helpers
@@ -4112,6 +4108,9 @@ public struct ChannelDetailWorkspaceView: View {
         guard let transport = appState.makeChannelTransport() else { return }
         do {
             let fresh = try await transport.pollMessages(channelID: currentChannelId, limit: 50)
+            for message in fresh {
+                appState.learnChannelSender(messageID: message.id, senderID: message.agentId)
+            }
             let converted = fresh.map { toV5Message($0) }
             var seen = Set(messages.map { $0.id })
             for msg in converted where !seen.contains(msg.id) {
@@ -4120,6 +4119,7 @@ public struct ChannelDetailWorkspaceView: View {
             }
             for msg in converted {
                 if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
+                    messages[idx].isAgent = msg.isAgent
                     messages[idx].recalled = msg.recalled
                     messages[idx].pinned = msg.pinned
                     messages[idx].reactions = msg.reactions
@@ -4144,7 +4144,6 @@ public struct ChannelDetailWorkspaceView: View {
             return
         }
         scheduledPosts = decoded
-        flushScheduled()
     }
 
     private func saveScheduled() {
@@ -4165,6 +4164,11 @@ public struct ChannelDetailWorkspaceView: View {
             attachmentRef: pendingAttachmentRef,
             replyToId: replyingTo?.id
         )
+        guard !ChannelExtras.mentionsAllText(text) || localCanMentionAll(in: currentChannelId) else {
+            actionError = "只有频道 owner/协调者可以定时发送 @所有人。"
+            return
+        }
+        loadScheduled()
         scheduledPosts.append(item)
         saveScheduled()
         composerText = ""
@@ -4173,22 +4177,28 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     private func cancelScheduled(_ item: ScheduledChannelPost) {
+        loadScheduled()
         scheduledPosts.removeAll { $0.id == item.id }
         saveScheduled()
     }
 
-    private func flushScheduled() {
-        let now = Date().timeIntervalSince1970
-        let due = scheduledPosts.filter { $0.dueAtSeconds <= now }
-        guard !due.isEmpty else { return }
-        scheduledPosts.removeAll { $0.dueAtSeconds <= now }
-        saveScheduled()
+    private func flushScheduled() async {
         guard let transport = appState.makeChannelTransport() else { return }
-        Task {
-            for item in due {
-                _ = try? await transport.postMessageEx(
+        let due = ChannelExtras.dueScheduled(
+            scheduledPosts, nowSeconds: Date().timeIntervalSince1970)
+        for item in due {
+            guard !Task.isCancelled else { return }
+            loadScheduled()
+            guard scheduledPosts.contains(where: { $0.id == item.id }),
+                  !ChannelExtras.mentionsAllText(item.text) || localCanMentionAll(in: item.channelId) else { continue }
+            do {
+                let id = try await transport.postMessageEx(
                     channelID: item.channelId, text: item.text, replyTo: item.replyToId,
                     effectKey: item.effectKey, attachmentRef: item.attachmentRef)
+                recordChannelPost(id)
+                cancelScheduled(item)
+            } catch {
+                // 保留原队列项和 effect_key，下次到期检查时继续重试。
             }
         }
     }
@@ -4205,11 +4215,7 @@ public struct ChannelDetailWorkspaceView: View {
             return
         }
 
-        // @所有人门闩（频道补全二期阻塞③）：只有 owner/协调者可发。
-        // 本机用户即项目主管/协调者（成员表里 "user-me" 的角色），
-        // 本机发出的 @all 放行；否则拦截并提示。服务端广播语义待定，
-        // 本轮不另造工具名。
-        if ChannelExtras.mentionsAllText(text) && !localCanMentionAll {
+        if ChannelExtras.mentionsAllText(text) && !localCanMentionAll(in: currentChannelId) {
             sendErrorMessage = "只有频道 owner/协调者可以 @所有人，消息未发送。"
             showSendErrorAlert = true
             return
@@ -4237,9 +4243,10 @@ public struct ChannelDetailWorkspaceView: View {
         let effectKey = ChannelExtras.buildEffectKey(nonce: UUID().uuidString)
         Task {
             do {
-                _ = try await transport.postMessageEx(
+                let postedID = try await transport.postMessageEx(
                     channelID: channelID, text: postText, replyTo: replyTo,
                     effectKey: effectKey, attachmentRef: attachmentRef)
+                recordChannelPost(postedID)
                 composerText = ""
                 replyingTo = nil
                 selectedAttachment = nil
@@ -4247,9 +4254,10 @@ public struct ChannelDetailWorkspaceView: View {
             } catch {
                 // 同一键再试一次（首发超时但实际落帖时，平台按 key 去重）。
                 do {
-                    _ = try await transport.postMessageEx(
+                    let postedID = try await transport.postMessageEx(
                         channelID: channelID, text: postText, replyTo: replyTo,
                         effectKey: effectKey, attachmentRef: attachmentRef)
+                    recordChannelPost(postedID)
                     composerText = ""
                     replyingTo = nil
                     selectedAttachment = nil
@@ -4273,10 +4281,10 @@ public struct ChannelDetailWorkspaceView: View {
                         .foregroundStyle(.secondary)
 
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        cloudDriveBadge(name: "Google Drive", status: "可用 · OAuth2", isOk: true)
-                        cloudDriveBadge(name: "OneDrive", status: "可用 · OAuth2", isOk: true)
-                        cloudDriveBadge(name: "WebDAV", status: "已连接 · NAS", isOk: true)
-                        cloudDriveBadge(name: "Cloudreve", status: "已连接 · 私有", isOk: true)
+                        cloudDriveBadge(name: "Google Drive", status: "待开发", isOk: false)
+                        cloudDriveBadge(name: "OneDrive", status: "待开发", isOk: false)
+                        cloudDriveBadge(name: "WebDAV", status: "待开发", isOk: false)
+                        cloudDriveBadge(name: "Cloudreve", status: "待开发", isOk: false)
                     }
                 }
                 .padding(12)
@@ -4450,7 +4458,7 @@ public struct ChannelDetailWorkspaceView: View {
 
     private func taskCollaborationCard(taskId: String, title: String, fallbackState: String?) -> some View {
         let task = try? LocalData.shared.tasks.getTask(taskId: taskId)
-        let state = task?.state ?? fallbackState ?? "working"
+        let state = task?.state ?? fallbackState ?? "状态未知"
         let assigneeName = members.first(where: { $0.id == task?.assignedAgentId || $0.agentRecordId == task?.assignedAgentId })?.name ?? "Agent"
 
         return VStack(alignment: .leading, spacing: 6) {
@@ -4477,77 +4485,8 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
 
-            // 协作审查与执行流转动作栏
-            HStack(spacing: 6) {
-                if state == "working" {
-                    Button {
-                        submitTaskForReview(taskId: taskId)
-                    } label: {
-                        Label("提交审查", systemImage: "arrow.up.doc")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.orange)
-                    .controlSize(.mini)
-                } else if state == "review" {
-                    Button {
-                        approveTaskDelivery(taskId: taskId)
-                    } label: {
-                        Label("批准交付", systemImage: "checkmark.seal.fill")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.green)
-                    .controlSize(.mini)
-
-                    Button {
-                        reworkTask(taskId: taskId)
-                    } label: {
-                        Label("打回返工", systemImage: "arrow.uturn.backward.circle.fill")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(Color.red)
-                    .controlSize(.mini)
-                } else if state == "queued" {
-                    Button {
-                        _ = try? LocalData.shared.tasks.transition(taskId: taskId, to: "assigned")
-                        _ = try? LocalData.shared.tasks.transition(taskId: taskId, to: "working")
-                        reloadWorkspaceTasks()
-                    } label: {
-                        Text("认领执行")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
-                } else if state == "completed" {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("已完成交付")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                    }
-                } else if state == "rework" {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .foregroundStyle(.pink)
-                        Text("返工修改中")
-                            .font(.caption2)
-                            .foregroundStyle(.pink)
-                    }
-                    Button {
-                        submitTaskForReview(taskId: taskId)
-                    } label: {
-                        Text("重新提交审查")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                }
-
+            HStack {
                 Spacer()
-
                 Button("查看详情") {
                     onNavigateRoute("taskdetail")
                 }
@@ -4593,58 +4532,8 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
 
-            // 快捷流转按钮
-            HStack(spacing: 8) {
-                if t.state == "working" {
-                    Button {
-                        submitTaskForReview(taskId: t.id)
-                    } label: {
-                        Label("提交审查", systemImage: "arrow.up.doc")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.orange)
-
-                    Button {
-                        try? LocalData.shared.tasks.togglePause(taskId: t.id)
-                        reloadWorkspaceTasks()
-                    } label: {
-                        Text(t.isPaused ? "恢复" : "暂停")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.bordered)
-                } else if t.state == "review" {
-                    Button {
-                        approveTaskDelivery(taskId: t.id)
-                    } label: {
-                        Label("批准交付", systemImage: "checkmark.seal.fill")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.green)
-
-                    Button {
-                        reworkTask(taskId: t.id)
-                    } label: {
-                        Label("打回返工", systemImage: "arrow.uturn.backward.circle.fill")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(Color.red)
-                } else if t.state == "queued" {
-                    Button {
-                        _ = try? LocalData.shared.tasks.transition(taskId: t.id, to: "assigned")
-                        _ = try? LocalData.shared.tasks.transition(taskId: t.id, to: "working")
-                        reloadWorkspaceTasks()
-                    } label: {
-                        Text("认领执行")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-
+            HStack {
                 Spacer()
-
                 Button("查看详情") {
                     onNavigateRoute("taskdetail")
                 }
@@ -4657,121 +4546,10 @@ public struct ChannelDetailWorkspaceView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
     }
 
-    private func submitTaskForReview(taskId: String) {
-        do {
-            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "review", note: "Agent 执行完成，提交人工审查")
-            let t = try LocalData.shared.tasks.getTask(taskId: taskId)
-            let taskTitle = t?.title ?? "任务"
-            let agentName = members.first(where: { $0.agentRecordId == t?.assignedAgentId || $0.id == t?.assignedAgentId })?.name ?? "Agent"
-            let now = Date()
-            let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
-            let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
-
-            let reviewMsg = V5ChannelMessage(
-                id: UUID().uuidString,
-                senderId: t?.assignedAgentId ?? "agent-codex",
-                senderName: agentName,
-                isAgent: true,
-                text: "[审查请求] \(agentName) 已完成任务「\(taskTitle)」，产物与代码已就绪，请项目主管审查。",
-                timestamp: timeStr,
-                fullDateTime: fullDateStr,
-                linkedTaskId: taskId,
-                linkedTaskTitle: taskTitle,
-                linkedTaskState: "review"
-            )
-            messages.append(reviewMsg)
-            reloadWorkspaceTasks()
-        } catch {
-            sendErrorMessage = "提交审查失败: \(error.localizedDescription)"
-            showSendErrorAlert = true
-        }
-    }
-
-    private func approveTaskDelivery(taskId: String) {
-        do {
-            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "completed", note: "项目主管已批准交付")
-            let t = try LocalData.shared.tasks.getTask(taskId: taskId)
-            let taskTitle = t?.title ?? "任务"
-            let now = Date()
-            let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
-            let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
-
-            let approveMsg = V5ChannelMessage(
-                id: UUID().uuidString,
-                senderId: "user-me",
-                senderName: "我",
-                isAgent: false,
-                text: "[交付完成] 项目主管已批准交付任务：「\(taskTitle)」，状态已归档为 completed。",
-                timestamp: timeStr,
-                fullDateTime: fullDateStr,
-                linkedTaskId: taskId,
-                linkedTaskTitle: taskTitle,
-                linkedTaskState: "completed"
-            )
-            messages.append(approveMsg)
-            reloadWorkspaceTasks()
-        } catch {
-            sendErrorMessage = "批准交付失败: \(error.localizedDescription)"
-            showSendErrorAlert = true
-        }
-    }
-
-    private func reworkTask(taskId: String) {
-        do {
-            let t = try LocalData.shared.tasks.getTask(taskId: taskId)
-            let taskTitle = t?.title ?? "任务"
-            let agentName = members.first(where: { $0.agentRecordId == t?.assignedAgentId || $0.id == t?.assignedAgentId })?.name ?? "Codex"
-
-            // 统一 10 状态机严格流转：review -> rework -> assigned -> working
-            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "rework", note: "审查未通过，退回返工")
-            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "assigned", note: "重新指派给 \(agentName)")
-            _ = try LocalData.shared.tasks.transition(taskId: taskId, to: "working", note: "\(agentName) 进入返工修复阶段")
-
-            let now = Date()
-            let timeStr = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
-            let fullDateStr = DateFormatter.localizedString(from: now, dateStyle: .short, timeStyle: .medium)
-
-            let rejectMsg = V5ChannelMessage(
-                id: UUID().uuidString,
-                senderId: "user-me",
-                senderName: "我",
-                isAgent: false,
-                text: "[打回返工] 任务「\(taskTitle)」审查未通过，已退回给 \(agentName) 返工修复。",
-                timestamp: timeStr,
-                fullDateTime: fullDateStr,
-                linkedTaskId: taskId,
-                linkedTaskTitle: taskTitle,
-                linkedTaskState: "working"
-            )
-            let ackMsg = V5ChannelMessage(
-                id: UUID().uuidString,
-                senderId: t?.assignedAgentId ?? "agent-codex",
-                senderName: agentName,
-                isAgent: true,
-                text: "收到返工要求，已重新接单并进入修复修改流程。",
-                timestamp: timeStr,
-                fullDateTime: fullDateStr,
-                linkedTaskId: taskId,
-                linkedTaskTitle: taskTitle,
-                linkedTaskState: "working"
-            )
-            messages.append(rejectMsg)
-            messages.append(ackMsg)
-            reloadWorkspaceTasks()
-        } catch {
-            sendErrorMessage = "打回返工失败: \(error.localizedDescription)"
-            showSendErrorAlert = true
-        }
-    }
-
     private func reloadWorkspaceTasks() {
         let chId = currentChannelId
         let channelTasks = (try? LocalData.shared.tasks.listTasks(sessionId: chId)) ?? []
-        if !channelTasks.isEmpty {
-            activeTasks = channelTasks
-        } else {
-            activeTasks = (try? LocalData.shared.tasks.listTasks()) ?? []
-        }
+        activeTasks = channelTasks
     }
 
     private func startFeed() {
@@ -4788,11 +4566,12 @@ public struct ChannelDetailWorkspaceView: View {
             webSocketURL: wsURL,
             tokenProvider: appState.tokenProvider
         )
-        // 频道补全二期：旗舰页按频道订推送——feed 回推的消息经转换
-        // 进本页列表（去重、按时间排），本地审查流消息保留；已读游
-        // 标记到最新一条，供消息中心条算未读。
-        newFeed.onMessages = { fresh in
+        newFeed.onMessages = { [weak newFeed] fresh in
             Task { @MainActor in
+                guard let newFeed, self.feed === newFeed else { return }
+                for message in fresh {
+                    self.appState.learnChannelSender(messageID: message.id, senderID: message.agentId)
+                }
                 let converted = fresh.map { self.toV5Message($0) }
                 var seen = Set(self.messages.map { $0.id })
                 for msg in converted where !seen.contains(msg.id) {
@@ -4802,6 +4581,7 @@ public struct ChannelDetailWorkspaceView: View {
                 // 刷新也可能带回已撤回/置顶等字段变化：按 id 合并新字段。
                 for msg in converted {
                     if let idx = self.messages.firstIndex(where: { $0.id == msg.id }) {
+                        self.messages[idx].isAgent = msg.isAgent
                         self.messages[idx].recalled = msg.recalled
                         self.messages[idx].pinned = msg.pinned
                         self.messages[idx].reactions = msg.reactions
@@ -4821,8 +4601,9 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
         }
-        newFeed.onStateChange = { state, err in
+        newFeed.onStateChange = { [weak newFeed] state, err in
             Task { @MainActor in
+                guard let newFeed, self.feed === newFeed else { return }
                 self.connectionState = state
                 self.connectionError = err
             }
@@ -4833,8 +4614,7 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     /// 平台消息 → 旗舰页视图消息：回复引用行按当前列表算；时间用
-    /// 固定格式 "yyyy-MM-dd HH:mm:ss"（与旧审查流消息同格式，可按
-    /// 字符串排序），不走本地化格式。
+    /// 固定格式 "yyyy-MM-dd HH:mm:ss"，供列表排序。
     private func toV5Message(_ msg: ChannelMessage) -> V5ChannelMessage {
         let date = Date(timeIntervalSince1970: msg.createdAtSeconds)
         let fullFmt = DateFormatter()
@@ -4853,7 +4633,8 @@ public struct ChannelDetailWorkspaceView: View {
             id: msg.id,
             senderId: msg.agentId,
             senderName: msg.displaySender,
-            isAgent: true,
+            isAgent: !isOwnSender(msg.agentId) && (
+                msg.isAgent ?? channelParticipants.first(where: { $0.id == msg.agentId })?.isAgent ?? false),
             text: msg.text,
             timestamp: timeFmt.string(from: date),
             fullDateTime: fullFmt.string(from: date),
@@ -4868,23 +4649,21 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     private func stopFeed() {
-        feed?.stop()
+        let oldFeed = feed
         feed = nil
+        oldFeed?.onMessages = nil
+        oldFeed?.onStateChange = nil
+        oldFeed?.stop()
         connectionState = .stopped
         connectionError = nil
     }
 
     private func loadWorkspaceData() {
-        members = ChannelMemberManager.loadMembers(channelId: currentChannelId)
         reloadWorkspaceTasks()
         startFeed()
-        // 转发目标列表：平台频道一览（失败不报错，转发时再报）。
-        if let transport = appState.makeChannelTransport() {
-            Task {
-                if let list = try? await transport.listChannels() {
-                    otherChannels = list
-                }
-            }
+        Task {
+            await appState.loadChannels()
+            await refreshChannelMessages()
         }
     }
 }
@@ -5138,12 +4917,8 @@ public struct ChannelSettingsSheet: View {
             .onAppear {
                 editedName = channel?.name ?? ""
                 agents = (try? LocalData.shared.agents.listAgents()) ?? []
-                // 仅展示真实参与者；不将本地示例成员冒充平台状态。
-                let participantNames = appState.availableChannels.first(where: { $0.id == channelId })?.participants ?? []
-                members = participantNames.map { id in
-                    let match = agents.first(where: { $0.agentId == id || $0.displayName == id })
-                    return V5ChannelMember(id: "agent-\(id)", name: match?.displayName ?? id, isAgent: true, role: "平台参与者", agentRecordId: id)
-                }
+                members = appState.availableChannels.first(where: { $0.id == channelId })?
+                    .participantDetails.map(V5ChannelMember.init) ?? []
             }
         }
     }
@@ -5156,7 +4931,7 @@ public struct ChannelSettingsSheet: View {
                 Button("保存名称") { Task { await rename() } }.disabled(editedName == ch.name || isWorking)
                 Button(ch.isArchived ? "取消归档" : "归档频道") { Task { await setArchived(!ch.isArchived) } }.disabled(isWorking)
                 Button("删除频道", role: .destructive) { showDeleteConfirmation = true }.disabled(isWorking)
-                Text("仅频道 owner 可删除。当前数据不含 owner 身份，操作将由服务端校验权限；未经授权会显示真实错误。")
+                Text("仅频道 owner 可删除。删除权限由服务端校验。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -5186,8 +4961,8 @@ public struct ChannelSettingsSheet: View {
         HStack {
             VStack(alignment: .leading) { Text(member.name); Text(member.role).font(.caption).foregroundStyle(.secondary) }
             Spacer()
-            if isProtectedMember(member) { Text("创建者/Owner · 不可移除").font(.caption).foregroundStyle(.secondary) }
-            else if member.isAgent, member.agentRecordId != nil {
+            if isProtectedMember(member) { Text("不可移除").font(.caption).foregroundStyle(.secondary) }
+            else if member.agentRecordId != nil {
                 Button("移除", role: .destructive) {
                     memberPendingRemoval = member
                     showMemberRemovalConfirmation = true
@@ -5237,9 +5012,10 @@ public struct ChannelSettingsSheet: View {
         await perform { try await transport.removeChannelMember(channelID: channelId, agentID: agentID) }
     }
     private func isProtectedMember(_ member: V5ChannelMember) -> Bool {
-        if member.id.caseInsensitiveCompare("user-me") == .orderedSame { return true }
-        let identity = "\(member.id) \(member.role) \(member.name)".lowercased()
-        return ["owner", "creator", "创建者", "所有者"].contains(where: identity.contains)
+        let participant = appState.availableChannels.first(where: { $0.id == channelId })?
+            .participantDetails.first(where: { $0.id == member.id })
+        return member.id == appState.channelSenderID ||
+            participant?.isSelf == true || participant?.canMentionAll == true
     }
     @MainActor private func deleteChannel() async {
         guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
@@ -5259,100 +5035,11 @@ public struct ChannelSettingsSheet: View {
         do {
             _ = try await operation()
             await appState.loadChannels()
-            let participants = appState.availableChannels.first(where: { $0.id == channelId })?.participants ?? []
-            members = participants.map { id in
-                let agent = agents.first(where: { $0.agentId == id || $0.displayName == id })
-                return V5ChannelMember(id: "agent-\(id)", name: agent?.displayName ?? id, isAgent: true, role: "平台参与者", agentRecordId: id)
-            }
+            members = appState.availableChannels.first(where: { $0.id == channelId })?
+                .participantDetails.map(V5ChannelMember.init) ?? []
             onMembersChanged?(members)
             errorText = nil
         } catch { errorText = "频道操作失败：\(error.localizedDescription)" }
-    }
-}
-
-public struct InviteAgentSheet: View {
-    public let channelId: String
-    public var onInvited: (V5ChannelMember) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var registeredAgents: [AgentRecord] = []
-
-    public init(channelId: String, onInvited: @escaping (V5ChannelMember) -> Void) {
-        self.channelId = channelId
-        self.onInvited = onInvited
-    }
-
-    public var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    if registeredAgents.isEmpty {
-                        Text("暂无其他可用 Agent，所有受信任 Agent 均已在频道中。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(registeredAgents) { agent in
-                            Button {
-                                let updated = ChannelMemberManager.addAgentMember(agent, channelId: channelId)
-                                if let newlyAdded = updated.first(where: { $0.agentRecordId == agent.agentId || $0.name == agent.displayName }) {
-                                    onInvited(newlyAdded)
-                                }
-                                dismiss()
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Circle()
-                                        .fill(Color(red: 0.85, green: 0.52, blue: 0.38))
-                                        .frame(width: 36, height: 36)
-                                        .overlay(
-                                            Text(String(agent.displayName.prefix(1)))
-                                                .font(.system(size: 14, weight: .bold))
-                                                .foregroundStyle(.white)
-                                        )
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 6) {
-                                            Text(agent.displayName)
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                                            Text(agent.kind.rawValue)
-                                                .font(.system(size: 9, weight: .bold))
-                                                .padding(.horizontal, 4)
-                                                .padding(.vertical, 1)
-                                                .background(Color.orange.opacity(0.12), in: Capsule())
-                                                .foregroundStyle(.orange)
-                                        }
-                                        Text("\(agent.access.rawValue) · \(agent.memberConnectionState) · \(agent.baseUrl ?? "本地设备")")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "plus.circle.fill")
-                                        .font(.system(size: 20))
-                                        .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } header: { Text("选择已注册 Agent 入驻频道").textCase(nil) }
-            }
-            .navigationTitle("邀请 Agent 入驻")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-            }
-            .onAppear(perform: loadAvailableAgents)
-        }
-    }
-
-    private func loadAvailableAgents() {
-        let currentMembers = ChannelMemberManager.loadMembers(channelId: channelId)
-        let currentAgentRecordIds = Set(currentMembers.compactMap { $0.agentRecordId })
-        let currentNames = Set(currentMembers.map { $0.name })
-
-        var list = (try? LocalData.shared.agents.listAgents()) ?? []
-        list = list.filter { !currentAgentRecordIds.contains($0.agentId) && !currentNames.contains($0.displayName) }
-        registeredAgents = list
     }
 }
 

@@ -29,7 +29,7 @@ class TeamChannelControllerTest {
         val controller = TeamChannelController(
             RuntimeEnvironment.getApplication(),
             onOpenChatWithAgent = {}, onPost = {}, onMarkRead = {}, onNewRound = {},
-            onStartFanout = {}, onRefresh = {}, onOpenAgentManagement = { openedAgents++ },
+            onRefresh = {}, onOpenAgentManagement = { openedAgents++ },
             // 传 onCreateTask 才会建发送方式 radios（与生产调用方一致）。
             onCreateTask = { _, _ -> },
         )
@@ -43,7 +43,7 @@ class TeamChannelControllerTest {
                 connectionError = null,
                 members = emptyList(), messages = emptyList(),
                 unreadCount = 0, unreadCapped = false, roundsUsed = 0,
-                fanoutRuns = emptyList(), fanoutRunning = false, notice = null,
+                notice = null,
             ),
         )
         val texts = visibleTexts(controller.root).map { it.text.toString() }
@@ -70,13 +70,14 @@ class TeamChannelControllerTest {
                 connectionError = null,
                 members = emptyList(), messages = emptyList(),
                 unreadCount = 0, unreadCapped = false, roundsUsed = 0,
-                fanoutRuns = emptyList(), fanoutRunning = false, notice = null,
+                notice = null,
             ),
         )
         val liveTexts = visibleTexts(controller.root).map { it.text.toString() }
         assertTrue(liveTexts.any { it.contains("直播推送") })
         assertTrue(liveTexts.contains("仅讨论"))
         assertTrue(liveTexts.contains("作为任务发送"))
+        assertFalse(liveTexts.any { it.contains("只读协作工具") || it.contains("只读扇出") })
     }
 
     @Test
@@ -85,7 +86,7 @@ class TeamChannelControllerTest {
         val controller = TeamChannelController(
             RuntimeEnvironment.getApplication(),
             onOpenChatWithAgent = {}, onPost = {}, onMarkRead = {}, onNewRound = {},
-            onStartFanout = {}, onRefresh = {}, onReconnect = { reconnects++ },
+            onRefresh = {}, onReconnect = { reconnects++ },
         )
         controller.root.visibility = View.VISIBLE
         val raw = "javax.net.ssl.SSLHandshakeException: CertPathValidatorException: Trust anchor for certification path not found"
@@ -98,7 +99,7 @@ class TeamChannelControllerTest {
                 connectionError = raw,
                 members = emptyList(), messages = emptyList(),
                 unreadCount = 0, unreadCapped = false, roundsUsed = 0,
-                fanoutRuns = emptyList(), fanoutRunning = false, notice = null,
+                notice = null,
             ),
         )
         val texts = visibleTexts(controller.root).map { it.text.toString() }
