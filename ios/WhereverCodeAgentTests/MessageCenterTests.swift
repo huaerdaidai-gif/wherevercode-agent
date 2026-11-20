@@ -7,6 +7,8 @@
 // （读到哪标到哪），mark_read=false 的拉取不推进服务端已读标记，频道页
 // 的未读状态不会被消息中心误消费。StubTransport 逐调用记录参数，测试
 // 断言全部调用 markRead=false、未读区只来自 onlyUnread=true 的那一页。
+// 测试样例与 Android 端 core/message/MessageCenterRulesTest.kt 一一对照
+// （双端同口径、同边界语义），修改判定规则时请两端同步改。
 
 import XCTest
 @testable import WhereverCodeAgent
