@@ -70,6 +70,21 @@ final class ChannelParsingTests: XCTestCase {
         XCTAssertEqual(channels[1].displayName, "ch-2")
     }
 
+    func testChannelListDecodingReadsArchivedFlag() {
+        // Phase-1 channel management: archived parses tolerantly,
+        // absent means not archived.
+        let dict: [String: Any] = [
+            "channels": [
+                ["id": "ch-1", "name": "Old", "archived": true] as [String: Any],
+                ["id": "ch-2", "name": "Live"] as [String: Any],
+            ]
+        ]
+        let channels = ChannelInfo.list(from: dict)
+        XCTAssertEqual(channels.count, 2)
+        XCTAssertTrue(channels[0].isArchived)
+        XCTAssertFalse(channels[1].isArchived)
+    }
+
     func testTaskListDecodingIsTolerant() {
         let dict: [String: Any] = [
             "tasks": [

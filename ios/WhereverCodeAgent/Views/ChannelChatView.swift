@@ -204,18 +204,23 @@ struct ChannelChatView: View {
     @State private var isSending = false
     @State private var sendError: String?
     @State private var feed: ChannelFeed?
+    @State private var searchText = ""
+    @State private var isShowingSearchResults = false
 
     var body: some View {
-        ChannelContentView(
-            messages: messages,
-            connectionState: connectionState,
-            connectionError: connectionError,
-            isLoadingHistory: isLoadingHistory,
-            composerText: $composerText,
-            isSending: isSending,
-            onSend: { Task { await send() } },
-            onRefresh: { reload() }
-        )
+        VStack(spacing: 0) {
+            searchBar
+            ChannelContentView(
+                messages: messages,
+                connectionState: connectionState,
+                connectionError: connectionError,
+                isLoadingHistory: isLoadingHistory,
+                composerText: $composerText,
+                isSending: isSending,
+                onSend: { Task { await send() } },
+                onRefresh: { reload() }
+            )
+        }
         .navigationTitle(channel.displayName)
         .toolbar {
             Button("重新加载") { reload() }
@@ -286,6 +291,52 @@ struct ChannelChatView: View {
         connectionError = nil
         isLoadingHistory = true
         startFeed()
+    }
+
+    // MARK: - In-channel search (phase-1: search parity)
+    //
+    // Server-side keyword search via the `q` argument of
+    // agent_channel_messages. While results are shown the live feed
+    // is stopped, so the list is exactly what the server returned;
+    // clearing the search reloads the full history and restarts it.
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            TextField("搜索频道内消息…", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+            if isShowingSearchResults {
+                Button("清除") { clearSearch() }
+            } else {
+                Button("搜索") { Task { await runSearch() } }
+                    .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+    }
+
+    private func runSearch() async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        stopFeed()
+        isLoadingHistory = true
+        do {
+            let results = try await transport.pollMessages(
+                channelID: channel.id, limit: 100, query: query)
+            messages = results
+            isShowingSearchResults = true
+            connectionError = nil
+        } catch {
+            connectionError = (error as? McpError)?.message ?? "搜索失败。"
+        }
+        isLoadingHistory = false
+    }
+
+    private func clearSearch() {
+        searchText = ""
+        isShowingSearchResults = false
+        reload()
     }
 
     private func send() async {

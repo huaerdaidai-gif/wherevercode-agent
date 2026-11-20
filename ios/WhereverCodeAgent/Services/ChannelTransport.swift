@@ -1,8 +1,9 @@
 // WhereverCode Agent — iOS MVP
 //
-// Platform channel calls over MCP. Only two things happen here:
-// posting a message and reading messages back. No channel creation,
-// no task dispatch, no project access — those belong to the platform.
+// Platform channel calls over MCP. The core here is posting a
+// message and reading messages back; channel management calls
+// (create/rename/archive/delete/members, phase-1 completion) live
+// in the marked section below. No task dispatch, no project access.
 //
 // Argument shapes verified against the live server, 2026-11-13:
 // - `agent_channel_post`: `channel_id` + `text` (max 4000 chars) +
@@ -53,18 +54,71 @@ public struct ChannelTransport {
     /// Messages in `channelID` after `afterID` (nil = latest page).
     /// `onlyUnread` / `markRead` are passed through to the server
     /// exactly as documented for `agent_channel_messages`.
+    /// `query` (phase-1: in-channel search) is passed through as the
+    /// server's `q` argument; results are whatever the server returns.
     public func pollMessages(
         channelID: String,
         afterID: String? = nil,
         limit: Int = defaultPollLimit,
         onlyUnread: Bool = false,
-        markRead: Bool = false
+        markRead: Bool = false,
+        query: String? = nil
     ) async throws -> [ChannelMessage] {
         var args: [String: Any] = ["channel_id": channelID, "limit": limit]
         if let afterID, !afterID.isEmpty { args["after_id"] = afterID }
         if onlyUnread { args["only_unread"] = true }
         if markRead { args["mark_read"] = true }
+        if let query, !query.isEmpty { args["q"] = query }
         let result = try await client.callTool(name: "agent_channel_messages", arguments: args)
         return ChannelMessage.list(from: result)
+    }
+
+    // MARK: - Channel management (phase-1 completion)
+    //
+    // Tool names follow the existing agent_channel_* convention, with
+    // the same argument shapes as the Android transport. NOTE: the
+    // platform server does not expose these tools yet (the server is
+    // not part of this repo); calls surface the server's real error
+    // and callers must show it — never fake success. Once the server
+    // adds the tools, this layer works unchanged.
+
+    /// Create a channel; returns the server's raw result dictionary.
+    public func createChannel(name: String) async throws -> [String: Any] {
+        try await client.callTool(name: "agent_channel_create", arguments: ["name": name])
+    }
+
+    /// Rename a channel.
+    public func renameChannel(channelID: String, name: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_rename",
+            arguments: ["channel_id": channelID, "name": name])
+    }
+
+    /// Archive or unarchive a channel.
+    public func setChannelArchived(channelID: String, archived: Bool) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_set_archived",
+            arguments: ["channel_id": channelID, "archived": archived])
+    }
+
+    /// Delete a channel. Destructive: callers must confirm first.
+    public func deleteChannel(channelID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_delete",
+            arguments: ["channel_id": channelID])
+    }
+
+    /// Invite one agent into a channel.
+    public func addChannelMember(channelID: String, agentID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_add_member",
+            arguments: ["channel_id": channelID, "agent_id": agentID])
+    }
+
+    /// Remove one agent from a channel.
+    public func removeChannelMember(channelID: String, agentID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_remove_member",
+            arguments: ["channel_id": channelID, "agent_id": agentID])
     }
 }

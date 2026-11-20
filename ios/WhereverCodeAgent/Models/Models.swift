@@ -74,12 +74,15 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
     public let name: String
     public let participants: [String]
     public let lastMessageText: String?
+    /// Archived flag (phase-1 channel management); absent on the wire = false.
+    public let isArchived: Bool
 
-    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil) {
+    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false) {
         self.id = id
         self.name = name
         self.participants = participants
         self.lastMessageText = lastMessageText
+        self.isArchived = isArchived
     }
 
     public var displayName: String { name.isEmpty ? id : name }
@@ -102,7 +105,8 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
             id: id,
             name: stringField(dict, keys: ["name"]) ?? "",
             participants: participants,
-            lastMessageText: last
+            lastMessageText: last,
+            isArchived: (dict["archived"] as? Bool) ?? (dict["is_archived"] as? Bool) ?? false
         )
     }
 
