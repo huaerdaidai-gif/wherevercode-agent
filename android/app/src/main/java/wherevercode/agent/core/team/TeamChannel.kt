@@ -268,9 +268,9 @@ data class TeamThreadMessage(
 data class TeamThread(
     val taskId: String? = null,
     val taskTitle: String? = null,
+    val messages: List<TeamThreadMessage> = emptyList(),
     val rootMessageId: String? = null,
     val topicTitle: String? = null,
-    val messages: List<TeamThreadMessage> = emptyList(),
 ) {
     val isTopicThread: Boolean
         get() = rootMessageId != null

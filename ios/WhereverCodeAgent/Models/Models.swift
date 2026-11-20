@@ -664,9 +664,9 @@ public func groupTopicThreads(messages: [ChannelMessage]) -> [TeamThread] {
             .replacingOccurrences(of: "\n", with: " ")
         threads.append(
             TeamThread(
-                taskId = nil,
-                taskTitle = nil,
-                rootMessageId = rootId,
+                taskId: nil,
+                taskTitle: nil,
+                rootMessageId: rootId,
                 topicTitle: title.isEmpty ? "话题讨论" : title,
                 messages: sorted
             )

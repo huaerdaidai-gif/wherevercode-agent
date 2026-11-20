@@ -837,13 +837,15 @@ class TeamChannelController(
             "话题 · $title ($count 条)"
         }
         ListDialog.show(context, "频道自由话题列表", "选择话题进入串内讨论：", titles) { which ->
-            val chosen = topicThreads.getOrNull(which) ?: return@show
-            onSelectTopicThread(chosen.rootMessageId)
-            val root = chosen.messages.firstOrNull()
-            if (root != null) {
-                replyingTo = root
-                replyBanner.text = "正在话题回复 ${root.senderName}：${root.text.take(30)}（点此退出话题）"
-                replyBanner.visibility = View.VISIBLE
+            val chosen = topicThreads.getOrNull(which)
+            if (chosen != null) {
+                onSelectTopicThread(chosen.rootMessageId)
+                val root = chosen.messages.firstOrNull()
+                if (root != null) {
+                    replyingTo = root
+                    replyBanner.text = "正在话题回复 ${root.senderName}：${root.text.take(30)}（点此退出话题）"
+                    replyBanner.visibility = View.VISIBLE
+                }
             }
         }
     }
