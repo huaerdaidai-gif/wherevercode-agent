@@ -3,7 +3,7 @@
 - 派发包：P3-MSG 消息中心（双端），Muse 派发，2026-11-20
 - 基线：`feat/channel-phase1-20261120 @ abf94062`（已核对）
 - 分支：`feat/channel-p3-msgcenter-trae`（只在此分支作业，不合 main）
-- 代码头（双端 CI 跑此头）：`7e0a78160a8ccbcdd92f038c84f89bbc1233a4cb`；分支最终头 = 本文档提交（[skip ci]，只加报告，不改代码），回执时一并提供
+- 代码头（双端 CI 跑此头）：`7584e010`；分支最终头 = 本文档提交（[skip ci]，只加报告，不改代码），回执时一并提供
 
 ## 一、做了什么
 
@@ -73,9 +73,9 @@
 - Android：`gradle :app:testDebugUnitTest`（JDK17 + SDK34，与 CI 同参）。全量套件一次性跑不完（沙箱 Kotlin daemon 内存受限），按包分批执行，受影响测试类约 100 类全绿，含新增 `MessageCenterRulesTest`（7 条）、`MessageCenterControllerTest`（3 条），以及受接线影响的 `MainActivitySmokeTest`（2 条，容器子视图 13→14 的合法维护）、`EntryRegistryTest`（12 条）、`DrawerRoutingTest`（5 条）、`TeamChannelTest`（22 条）、`ListDialogTest`（8 条）、`HomeScreenWiringTest`（7 条）。
 - iOS：沙箱无 macOS，无法本地跑 xcodebuild；新 Swift 文件已注册进 `project.pbxproj`（app + test target），以 CI（macOS runner）为准。`MessageCenterTests` 共 7 条（与 Android 端逐条对照），CI 结论见下。
 
-CI 证据（双端均跑在代码头 `7e0a781`）：
-- Android CI：运行号 ____，结论 ____
-- iOS：运行号 ____，结论 ____（含 `MessageCenterTests` 7 条通过，日志核对）
+CI 证据（双端均跑在代码头 `7584e010`）：
+- Android CI：[#578](https://github.com/huaerdaidai-gif/wherevercode-agent/actions/runs/44769856718)，结论 `success`
+- iOS：[#294](https://github.com/huaerdaidai-gif/wherevercode-agent/actions/runs/44769856811)，结论 `success`
 
 ## 八、未做完的尾巴
 
@@ -86,4 +86,4 @@ CI 证据（双端均跑在代码头 `7e0a781`）：
 
 ## 九、报告回执
 
-（最后一行由文档提交回填）
+CHANNEL-P3-MSG-DONE
