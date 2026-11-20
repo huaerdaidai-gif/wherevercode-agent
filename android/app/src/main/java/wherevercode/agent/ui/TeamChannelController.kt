@@ -16,9 +16,11 @@ import java.util.Locale
 import wherevercode.agent.R
 import wherevercode.agent.core.agent.ChannelConnectionState
 import wherevercode.agent.core.agent.PlatformChannelMessage
+import wherevercode.agent.core.team.ChannelTaskCard
 import wherevercode.agent.core.team.FanoutBranchStatus
 import wherevercode.agent.core.team.FanoutRun
 import wherevercode.agent.core.team.TeamChannelMember
+import wherevercode.agent.core.team.channelTaskGoal
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.TeamThread
@@ -42,6 +44,8 @@ data class TeamChannelSnapshot(
     val fanoutRuns: List<FanoutRun>,
     val fanoutRunning: Boolean,
     val notice: String?,
+    /** 频道补全一期：本会话已从频道显式派发的任务卡（回显；状态在任务列表）。 */
+    val taskCards: List<ChannelTaskCard> = emptyList(),
     /** 2026-11-13 频道权限：可代人署名的发帖者（App 自己），见 teamMessageFromChannel。 */
     val trustedAttributionPosterIds: Set<String> = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID),
 )
@@ -62,9 +66,11 @@ data class TeamChannelSnapshot(
  * - 消息上限：一条最多 4000 字（与平台/iOS 统一），超了发不出去，当场明说。
  * - 轮次上限 3 轮：用户每发一条消息计一轮，到顶后输入栏锁住，点
  *   “开始新一轮”才继续。
- * - 建议-only：页上没有任何改任务状态、认领、标记完成的入口——只有
- *   发消息、找某位成员 1:1 聊、只读扇出三个动作；想派活回一对一聊天
- *   走正常派活流程。
+ * - 频道不执行代码、派发只走显式动作（频道补全一期，supersede 旧
+ *   「建议-only」口径）：页上没有任何改任务状态、认领、标记完成的
+ *   入口；派发只有两条显式路——输入栏「作为任务发送」与每条消息的
+ *   「转为正式任务」，都先开创建任务表单、确认后才建单，派发后频道
+ *   内留任务卡回显。其余动作仍是发消息、1:1 聊、只读扇出。
  * - 只读扇出 ≤5：一次最多问 5 个分支，分支只回摘要，不并行写。
  *
  * 连接状态如实显示：WS 推送是“直播”，断了是“轮询兜底”+ 原因，
@@ -395,6 +401,9 @@ class TeamChannelController(
             }
         }
         bodyContainer.addView(newRoundRow())
+        if (snapshot.taskCards.isNotEmpty()) {
+            bodyContainer.addView(taskCardsSection(snapshot.taskCards))
+        }
         bodyContainer.addView(fanoutSection(snapshot))
         // 配好后对话框铬整套回来（含诊断钮按有无诊断显隐）。
         setDialogChromeVisible(true, diagnostic != null)
@@ -475,6 +484,61 @@ class TeamChannelController(
             UiKit.text(context, "${message.senderName} · $time", 11f, R.color.text_tertiary, bold = true),
         )
         col.addView(UiKit.text(context, message.text, 13f, R.color.text_primary))
+        if (onCreateTask != null) {
+            // 显式派发（与 iOS 每条消息的「转为正式任务」同名同义）：
+            // 点按只打开创建任务表单，确认后才建单；不在频道内执行。
+            col.addView(
+                UiKit.text(context, "转为正式任务", 11f, R.color.accent, bold = true).apply {
+                    setBackgroundResource(R.drawable.bg_chip_accent)
+                    setPadding(dp(10), dp(5), dp(10), dp(5))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(4) }
+                    setOnClickListener {
+                        onCreateTask.invoke(channelTaskGoal(message.senderName, message.text)) {}
+                    }
+                },
+            )
+        }
+        return col
+    }
+
+    /** 已从频道派发的任务卡区（回显）：只展示目标与去向，状态不在频道内改。 */
+    private fun taskCardsSection(cards: List<ChannelTaskCard>): LinearLayout {
+        val col = UiKit.vertical(context).apply { setPadding(0, dp(10), 0, 0) }
+        col.addView(
+            UiKit.text(context, "已从频道派发", 14f, R.color.text_primary, bold = true),
+        )
+        col.addView(
+            UiKit.text(
+                context,
+                "任务已进入任务列表，进度与结果在任务列表查看；频道内不改任务状态。",
+                11f,
+                R.color.text_tertiary,
+            ).apply { setPadding(0, 0, 0, dp(6)) },
+        )
+        cards.forEach { card ->
+            val cardView = UiKit.vertical(context).apply {
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(5) }
+            }
+            cardView.addView(
+                UiKit.text(context, card.goal.take(200), 12f, R.color.text_primary, bold = true),
+            )
+            val time = formatTime(card.createdAtSeconds)
+            if (time.isNotBlank()) {
+                cardView.addView(
+                    UiKit.text(context, "派发于 $time", 10f, R.color.text_tertiary)
+                        .apply { setPadding(0, dp(2), 0, 0) },
+                )
+            }
+            col.addView(cardView)
+        }
         return col
     }
 

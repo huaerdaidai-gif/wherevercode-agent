@@ -11,7 +11,8 @@ import wherevercode.agent.core.agent.AgentRecord
  * 收敛结论是“一个总调度 + 一次性隔离子 Agent、建议-only”，老项目
  * 群聊后端真跑过，但缺两样东西，本文件补的就是这两样：
  * ① 扇出的结构化形态（只读分支 + 摘要回执，不并行写）；
- * ② 建议-only 围栏（群消息绝不直接触发派活）。
+ * ② 不自动派活的围栏（群消息绝不自动触发派活；派发只走用户显式
+ * 动作，见下方「频道补全一期」口径）。
  *
  * 范围改（maintainer 2026-11-11 22:19）：频道成员不再是 2–3 位，而是
  * App 注册表里的**全部 Agent**。设备 Agent（Codex、CodeBuddy、
@@ -22,15 +23,19 @@ import wherevercode.agent.core.agent.AgentRecord
  * 不走代理。
  *
  * “有界”现在的意思：消息上限 4000 字（与平台/iOS 统一）、轮次上限
- * （3 轮）、建议-only、只读扇出 ≤5——不再是成员数上限。
+ * （3 轮）、频道不执行代码、只读扇出 ≤5——不再是成员数上限。
  *
  * 围栏是结构性的，不是文案：扇出走 [TeamFanoutRunner]，它只调
  * [wherevercode.agent.core.mcp.RemoteAgentChatPort.runAgent] 读一次
  * 摘要，不建 P0 任务、不碰 TaskStore、不写文件；中转走
- * [ChannelAgentRelay]，同样只做一次聊天调用、不建任务、不写文件；
- * 频道页（[wherevercode.agent.ui.TeamChannelController]）上没有任何
- * 改任务状态、认领、标记完成的入口——只有发消息、1:1 聊天、只读扇出
- * 三个动作。想派活必须回一对一聊天走正常派活流程。
+ * [ChannelAgentRelay]，同样只做一次聊天调用、不建任务、不写文件。
+ *
+ * 频道补全一期口径（2026-11-20 定版，supersede 旧「建议-only」）：
+ * 频道本身不执行代码——@ 提及只提醒、不直达执行；频道**可以**派发
+ * 任务，但只能是用户显式动作：输入栏「作为任务发送」或每条消息的
+ * 「转为正式任务」，两条路都先打开创建任务表单、用户确认后才建单，
+ * 派发后频道内留一张任务卡回显（[ChannelTaskCard]）。频道页仍没有
+ * 改任务状态、认领、标记完成的入口——那些都在任务侧。
  *
  * 不做：对等 swarm、自由群聊、LLM 经理、A2A、默认多 Agent。
  */
@@ -56,6 +61,25 @@ object TeamChatLimits {
     /** 一条中转回流的回复最多贴 2000 字（再长只截断、不丢回复）。 */
     const val RELAY_REPLY_CHARS: Int = 2000
 }
+
+/**
+ * 频道消息 → 正式任务的目标文案（频道补全一期·显式派发）：带上来源
+ * 发送者，正文原样保留；用户在创建任务表单里还能再改。与 iOS
+ * 「转为正式任务」的说明文案同格式。
+ */
+fun channelTaskGoal(senderName: String, text: String): String {
+    val sender = senderName.trim().ifBlank { "未知" }
+    return "来自团队频道 (@$sender)：${text.trim()}"
+}
+
+/**
+ * 本会话内从频道显式派发的一张任务卡（回显用）：任务本体与状态都在
+ * 任务列表里，频道里只留这张「已派发」的凭据卡，不在频道内改状态。
+ */
+data class ChannelTaskCard(
+    val goal: String,
+    val createdAtSeconds: Double = 0.0,
+)
 
 /** 频道页的一位成员（本机 App 打头 + 注册表里的全部 Agent）。 */
 data class TeamChannelMember(

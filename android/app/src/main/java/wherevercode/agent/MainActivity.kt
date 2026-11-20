@@ -434,6 +434,8 @@ class MainActivity : AppCompatActivity() {
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     /** 本会话已发轮次（发一条消息计一轮；上限见 TeamChatLimits.MAX_ROUNDS）。 */
     private var teamChannelRoundsUsed = 0
+    /** 频道补全一期：本会话从频道显式派发的任务卡（回显用，任务本体在任务列表）。 */
+    private val channelTaskCards = mutableListOf<wherevercode.agent.core.team.ChannelTaskCard>()
     /** 频道页一次性提示（发帖/扇出失败原因等；下次刷新时由快照带出）。 */
     private var teamChannelNotice: String? = null
     /** 正在进行的频道刷新（后台线程）；进行中时新刷新跳过，等下一轮。 */
@@ -1624,7 +1626,15 @@ class MainActivity : AppCompatActivity() {
                 agentStore.getAgent(agentId)?.let { openAgentSession(it) }
             },
             onPost = { text -> postTeamChannelMessage(text) },
-            onCreateTask = { goal, created -> showCreateTaskDialog(initialGoal = goal, onCreated = created) },
+            onCreateTask = { goal, created ->
+                showCreateTaskDialog(
+                    initialGoal = goal,
+                    onCreated = {
+                        recordChannelTaskCard(goal)
+                        created()
+                    },
+                )
+            },
             onMarkRead = { markTeamChannelRead() },
             onNewRound = {
                 teamChannelRoundsUsed = 0
@@ -5943,9 +5953,25 @@ class MainActivity : AppCompatActivity() {
             fanoutRuns = fanoutRuns,
             fanoutRunning = teamChannelFanoutRunning,
             notice = teamChannelNotice,
+            taskCards = synchronized(channelTaskCards) { channelTaskCards.toList() },
             trustedAttributionPosterIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
                 synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
         )
+    }
+
+    /**
+     * 频道补全一期：一次显式派发真建单后，在频道里留一张任务卡回显。
+     * 只记本会话（不持久化）；任务状态以任务列表为准，频道不冒充进度。
+     */
+    private fun recordChannelTaskCard(goal: String) {
+        synchronized(channelTaskCards) {
+            channelTaskCards += wherevercode.agent.core.team.ChannelTaskCard(
+                goal = goal,
+                createdAtSeconds = System.currentTimeMillis() / 1000.0,
+            )
+        }
+        teamChannelNotice = "已从频道派发任务，进度与结果请在任务列表查看。"
+        refreshTeamChannel()
     }
 
     /**

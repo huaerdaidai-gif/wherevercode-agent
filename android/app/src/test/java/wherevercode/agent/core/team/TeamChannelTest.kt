@@ -55,6 +55,19 @@ class TeamChannelTest {
     }
 
     @Test
+    fun `channelTaskGoal carries sender provenance and the original text`() {
+        // 频道补全一期·显式派发：与 iOS「转为正式任务」同格式。
+        assertEquals(
+            "来自团队频道 (@示例Agent)：把登录页改一下",
+            wherevercode.agent.core.team.channelTaskGoal("示例Agent", "把登录页改一下"),
+        )
+        assertEquals(
+            "来自团队频道 (@未知)：在吗",
+            wherevercode.agent.core.team.channelTaskGoal("  ", " 在吗 "),
+        )
+    }
+
+    @Test
     fun `validatePost enforces the round cap`() {
         assertNull(TeamChatRules.validatePost("在吗", 0))
         assertNull(TeamChatRules.validatePost("在吗", TeamChatLimits.MAX_ROUNDS - 1))
