@@ -76,6 +76,7 @@ struct MessageCenterView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(loading)
+                .accessibilityIdentifier("messageCenter.action.refresh")
             }
         }
         .padding(.horizontal, 16)
