@@ -6,7 +6,6 @@ import android.view.View
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.RadioGroup
 import android.widget.RadioButton
@@ -136,21 +135,21 @@ class TeamChannelController(
         visibility = View.GONE
     }
 
-    private val scrollView: ScrollView = ScrollView(context).apply {
-        isFillViewport = true
+    /**
+     * 消息列表宿主（对话组件收敛）：与单聊页共用 [MessageListView]；
+     * 内容 padding 沿用频道现状（16/8/16/20）。
+     */
+    private val messageListView: MessageListView = MessageListView(context).apply {
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             0,
             1f,
         )
-    }
-
-    private val content: LinearLayout = UiKit.vertical(context).apply {
-        setPadding(dp(16), dp(8), dp(16), dp(20))
+        content.setPadding(dp(16), dp(8), dp(16), dp(20))
     }
 
     /** 消息 + 扇出区容器：每次 render() 重建。固定头与输入栏不在其中。 */
-    private val bodyContainer: LinearLayout = UiKit.vertical(context)
+    private val bodyContainer: LinearLayout = messageListView.content
 
     private val connectionLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
@@ -174,13 +173,17 @@ class TeamChannelController(
         setPadding(dp(16), 0, dp(16), dp(4))
     }
 
-    private val messageInput: EditText = EditText(context).apply {
-        hint = "给频道发一条消息（≤4000 字），@名字 叫一位 Agent…"
-        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        minLines = 1
-        maxLines = 4
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-    }
+    /**
+     * 输入区（对话组件收敛）：与单聊页共用 [ChatComposerView] 的
+     * INLINE 排布（说明行 + 输入框/发送钮同行）。发送语义留在本类
+     * （[sendMessage]），组件只发发送请求。hint 沿用频道现状。
+     */
+    private val composer: ChatComposerView =
+        ChatComposerView(context, ChatComposerView.Arrangement.INLINE).apply {
+            caption = "频道消息 · 所有成员可见，可用 @名字 邀请回复"
+            input.hint = "给频道发一条消息（≤4000 字），@名字 叫一位 Agent…"
+            onSendRequest = { sendMessage() }
+        }
 
     private val fanoutInput: EditText = EditText(context).apply {
         hint = "问大家一个问题（只读：大家只看不写）…"
@@ -285,9 +288,7 @@ class TeamChannelController(
         noticeLine.setPadding(dp(16), 0, dp(16), dp(6))
         root.addView(noticeLine)
         root.addView(replyBanner)
-        scrollView.addView(content)
-        content.addView(bodyContainer)
-        root.addView(scrollView)
+        root.addView(messageListView)
         inputBar = buildInputBar()
         root.addView(inputBar)
     }
@@ -315,7 +316,6 @@ class TeamChannelController(
         val bar = UiKit.vertical(context).apply {
             setPadding(dp(16), dp(8), dp(16), dp(12))
         }
-        val sendLabel = UiKit.text(context, "发送", 12f, R.color.accent, bold = true)
         if (onCreateTask != null) {
             val modes = RadioGroup(context).apply { orientation = LinearLayout.HORIZONTAL }
             val discussion = RadioButton(context).apply { id = View.generateViewId(); text = "仅讨论"; minHeight = dp(48) }
@@ -325,30 +325,12 @@ class TeamChannelController(
             modes.check(discussion.id)
             modes.setOnCheckedChangeListener { _, id ->
                 asTask = id == task.id
-                sendLabel.text = if (asTask) "创建任务" else "发送"
-                messageInput.hint = if (asTask) "任务目标与验收要求…" else "发送消息，或 @ 一位成员…"
+                composer.sendLabel?.text = if (asTask) "创建任务" else "发送"
+                composer.input.hint = if (asTask) "任务目标与验收要求…" else "发送消息，或 @ 一位成员…"
             }
             bar.addView(modes)
         }
-        val sendRow = UiKit.horizontal(context)
-        sendRow.addView(
-            messageInput.apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            },
-        )
-        sendRow.addView(
-            sendLabel.apply {
-                minHeight = dp(48)
-                gravity = android.view.Gravity.CENTER
-                setBackgroundResource(R.drawable.bg_chip_accent)
-                setPadding(dp(14), dp(8), dp(14), dp(8))
-                setOnClickListener { sendMessage() }
-            },
-        )
-        val sendColumn = UiKit.vertical(context)
-        sendColumn.addView(UiKit.text(context, "频道消息 · 所有成员可见，可用 @名字 邀请回复", 10f, R.color.text_tertiary))
-        sendColumn.addView(sendRow)
-        bar.addView(sendColumn)
+        bar.addView(composer)
         // 频道补全二期：附件引用（引用制）与定时发送，都是发送前的显式动作。
         val toolsRow = UiKit.horizontal(context).apply { setPadding(0, dp(6), 0, 0) }
         toolsRow.addView(
@@ -405,7 +387,7 @@ class TeamChannelController(
 
     /** 定时发送菜单：选延时后把当前输入交给调用方入队（发送前可取消）。 */
     private fun showScheduleMenu() {
-        val text = messageInput.text.toString().trim()
+        val text = composer.input.text.toString().trim()
         if (text.isBlank()) {
             noticeLine.text = "先写好消息，再设定时发送。"
             return
@@ -414,19 +396,19 @@ class TeamChannelController(
         ListDialog.show(context, "定时发送", null, options.map { it.first }) { which ->
             val delay = options.getOrNull(which)?.second ?: return@show
             onSchedulePost?.invoke(text, delay)
-            if (messageInput.text.toString().trim() == text) messageInput.setText("")
+            if (composer.input.text.toString().trim() == text) composer.input.setText("")
         }
     }
 
     private fun sendMessage() {
-        val text = messageInput.text.toString().trim()
+        val text = composer.input.text.toString().trim()
         if (asTask) {
             if (text.isBlank()) {
                 noticeLine.text = "请填写任务目标"
                 return
             }
             onCreateTask?.invoke(text) {
-                if (messageInput.text.toString().trim() == text) messageInput.setText("")
+                if (composer.input.text.toString().trim() == text) composer.input.setText("")
             }
             return
         }
@@ -441,7 +423,7 @@ class TeamChannelController(
             return
         }
         noticeLine.text = ""
-        messageInput.setText("")
+        composer.input.setText("")
         val replyId = replyingTo?.messageId
         val attachment = pendingAttachmentRef
         clearReply()
