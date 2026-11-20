@@ -132,24 +132,15 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <ScrollView
-            android:id="@+id/chatScroll"
+        <!-- 对话组件收敛（2026-11-20）：消息列表宿主与频道页共用
+             MessageListView；内层 ScrollView / LinearLayout 沿用
+             chatScroll / messageList id（组件从 XML 充气时设置），
+             原 XML 呈现（无滚动条、clipToPadding=false、内容
+             padding 14/4/14/16）改由 MainActivity.bindChat 配置。 -->
+        <wherevercode.agent.ui.MessageListView
+            android:id="@+id/messageListHost"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fillViewport="true"
-            android:clipToPadding="false"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/messageList"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="16dp" />
-        </ScrollView>
+            android:layout_height="match_parent" />
 
         <!-- 阶段 3（U6）：回到底部按钮；仅在用户上滑离开底部时显示。 -->
         <TextView

@@ -306,6 +306,7 @@ import wherevercode.agent.ui.ChatAttachment
 import wherevercode.agent.ui.ChatAttachmentKind
 import wherevercode.agent.ui.ChatAttachments
 import wherevercode.agent.ui.ConsoleScreenController
+import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.TeamChannelController
 import wherevercode.agent.ui.TeamChannelSnapshot
 import wherevercode.agent.ui.ConsoleSnapshot
@@ -469,6 +470,8 @@ class MainActivity : AppCompatActivity() {
     /** V5 C2-3-R4 (v4.3-01)：顶栏是品牌行，不再有会话标题/大脑 pill；
      * 会话状态在聊天屏内，大脑状态在设置页大脑分节。 */
 
+    /** 对话组件收敛：消息列表宿主（与频道页共用 MessageListView）。 */
+    private lateinit var chatListHost: MessageListView
     private lateinit var chatScroll: ScrollView
     private lateinit var messageList: LinearLayout
     private lateinit var inputPrompt: EditText
@@ -1904,7 +1907,7 @@ class MainActivity : AppCompatActivity() {
         when (screen) {
             EntryScreen.HOME -> {
                 if (inConversation) {
-                    chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+                    chatListHost.scrollToBottom()
                 }
             }
             EntryScreen.HISTORY -> refreshSessionList()
@@ -2248,8 +2251,16 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     private fun bindChat() {
+        chatListHost = screenChat.findViewById(R.id.messageListHost)
         chatScroll = screenChat.findViewById(R.id.chatScroll)
         messageList = screenChat.findViewById(R.id.messageList)
+        // 对话组件收敛：列表呈现从 screen_chat.xml 挪到这里配置，
+        // 与原 XML 逐项一致（无滚动条、clipToPadding=false、内容
+        // padding 14/4/14/16）。
+        chatScroll.clipToPadding = false
+        chatScroll.isVerticalScrollBarEnabled = false
+        chatScroll.isHorizontalScrollBarEnabled = false
+        messageList.setPadding(dp(14), dp(4), dp(14), dp(16))
         inputPrompt = screenChat.findViewById(R.id.inputPrompt)
         approvalBanner = screenChat.findViewById(R.id.approvalBanner)
         chatRouteBanner = screenChat.findViewById(R.id.chatRouteBanner)
@@ -2346,7 +2357,7 @@ class MainActivity : AppCompatActivity() {
         )
         // 阶段 3（U6）：回到底部按钮；仅在用户上滑离开底部时显示。
         buttonScrollBottom.setOnClickListener {
-            chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+            chatListHost.scrollToBottom()
         }
         chatScroll.viewTreeObserver.addOnScrollChangedListener { updateScrollBottomButton() }
         updateSendButton()
@@ -4919,17 +4930,14 @@ class MainActivity : AppCompatActivity() {
             welcomeView?.visibility = View.GONE
         }
         if (stickToBottom || state.turns.size > lastTurnCount) {
-            chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+            chatListHost.scrollToBottom()
         }
         lastTurnCount = state.turns.size
         updateSendButton()
     }
 
-    private fun isNearBottom(): Boolean {
-        val child = chatScroll.getChildAt(0) ?: return true
-        val distance = child.bottom - (chatScroll.height + chatScroll.scrollY)
-        return distance < UiKit.dp(this, 140)
-    }
+    /** 贴底判定与单聊/频道共用的列表宿主同口径（阈值 140dp）。 */
+    private fun isNearBottom(): Boolean = chatListHost.isNearBottom()
 
     /**
      * V5 C2-3-R1c：问候区照 v4.3-01 简洁首页——居中品牌 + 问候 + 引导文案 +
@@ -5110,7 +5118,7 @@ class MainActivity : AppCompatActivity() {
                 inConversation = true
                 showEntry(DrawerController.ID_NEW_CONVERSATION)
                 inputPrompt.requestFocus()
-                chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+                chatListHost.scrollToBottom()
             },
             onCopyText = { text -> copyToClipboard(text) },
             onToast = { message -> toast(message) },
