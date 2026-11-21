@@ -63,7 +63,7 @@ class SettingsHomeController(
                 Row("仓库授权", Dest.Section(SettingsSections.Section.REPOS)),
                 Row("隐私与安全", Dest.Todo("隐私与安全")),
                 Row("跨端同步", Dest.Section(SettingsSections.Section.HAND)),
-                Row("备份与恢复", Dest.Section(SettingsSections.Section.ABOUT)),
+                Row("备份与恢复", Dest.Todo("备份与恢复")),
                 Row("用量与预算", Dest.Todo("用量与预算")),
             ),
         ),
