@@ -258,8 +258,13 @@ fun mergePlatformChannelMembers(
  * （visibleTeamChannelMembers 隐藏 agentId=app）：app 是另一台
  * 设备的 App 在平台上的身份，是正当私聊对象（2026-11-21 验收实证）。
  */
-fun dmCandidates(members: List<TeamChannelMember>): List<TeamChannelMember> =
-    members.filterNot { it.isLocalApp || it.isSelf }
+fun dmCandidates(
+    members: List<TeamChannelMember>,
+    selfIds: Set<String> = emptySet(),
+): List<TeamChannelMember> =
+    // 服务端 participants 实测不带 is_self（2026-11-22 实查），isSelf 常为 false；
+    // 本机平台身份以 selfIds 为准绳兜底排除（调用方传本机口径的身份集合）。
+    members.filterNot { it.isLocalApp || it.isSelf || it.agentId in selfIds }
 
 // ---------------------------------------------------------------------------
 // 团队对话按任务分串 + 发言权（2026-11-12，回复归属修复的团队部分）。

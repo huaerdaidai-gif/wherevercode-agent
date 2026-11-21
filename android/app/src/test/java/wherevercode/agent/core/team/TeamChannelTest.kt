@@ -246,6 +246,20 @@ class TeamChannelTest {
     }
 
     @Test
+    fun `dmCandidates drops self by selfIds when server omits is_self`() {
+        // 服务端 participants 不带 is_self 时（2026-11-22 实查），靠本机身份集合排自己：
+        // app-qa 必须出名单，app（另一台设备的 App 身份）必须保留。
+        val members = listOf(
+            TeamChannelMember(agentId = "local-app", displayName = "本机 App", isLocalApp = true),
+            TeamChannelMember(agentId = "app-qa", displayName = "App QA", isPlatformAgent = true),
+            TeamChannelMember(agentId = "app", displayName = "App", isPlatformAgent = true),
+            TeamChannelMember(agentId = "muse", displayName = "Muse", isPlatformAgent = true),
+        )
+        val result = dmCandidates(members, selfIds = setOf("app-qa"))
+        assertEquals(listOf("app", "muse"), result.map { it.agentId })
+    }
+
+    @Test
     fun `mergePlatformChannelMembers with no platform list keeps local list`() {
         val local = buildChannelMembers(listOf(record("codex", "Codex")))
         assertEquals(local, mergePlatformChannelMembers(local, emptyList()))

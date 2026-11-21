@@ -9,6 +9,14 @@ enum class ChannelConnectionState {
     CONNECTING, LIVE, POLLING, STOPPED,
 }
 
+/** 连接状态的统一文案：频道页与设置「连接管理」摘要共用，两处不许各写一套。 */
+fun channelConnectionStateLabel(state: ChannelConnectionState): String = when (state) {
+    ChannelConnectionState.CONNECTING -> "○ 正在连接频道…"
+    ChannelConnectionState.LIVE -> "● 直播推送（WS 已连）"
+    ChannelConnectionState.POLLING -> "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）"
+    ChannelConnectionState.STOPPED -> "○ 频道未连接"
+}
+
 /**
  * 解析端点 WS 事件 JSON。`{"type":"message", "message": {...}}` 返回
  * 一条消息；hello / ping / 未知类型返回 null（调用方忽略）。
