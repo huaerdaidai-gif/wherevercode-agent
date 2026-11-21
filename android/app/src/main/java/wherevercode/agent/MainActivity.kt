@@ -307,6 +307,11 @@ import wherevercode.agent.ui.SettingsHomeController
 import wherevercode.agent.ui.SettingsSections
 import wherevercode.agent.ui.TeamChannelController
 import wherevercode.agent.ui.TeamChannelSnapshot
+import wherevercode.agent.ui.MessageCenterController
+import wherevercode.agent.core.message.MessageCenterChannelSource
+import wherevercode.agent.core.message.MessageCenterEntry
+import wherevercode.agent.core.message.MessageCenterLoader
+import wherevercode.agent.core.message.MessageCenterSnapshot
 import wherevercode.agent.ui.ConsoleSnapshot
 import wherevercode.agent.ui.ConsoleWsFeed
 import wherevercode.agent.ui.EventGroupViews
@@ -420,6 +425,13 @@ class MainActivity : AppCompatActivity() {
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天。 */
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
+
+    /** P3-MSG 三期（2026-11-20）：消息中心（@我 / 未读 / 任务回执聚合，只读）。 */
+    private lateinit var screenMessageCenter: View
+    private lateinit var messageCenterController: MessageCenterController
+    /** 正在进行的消息中心刷新（后台线程）；进行中时新刷新跳过。 */
+    @Volatile
+    private var messageCenterRefreshRunning = false
     private var teamChannelFeed: McpChannelEventFeed? = null
     /**
      * 当前 feed 实际订阅的频道 id（推送主模式整改，2026-11-20）：feed 绑
@@ -1737,6 +1749,17 @@ class MainActivity : AppCompatActivity() {
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
         screenTeamChannel.visibility = View.GONE
+        // P3-MSG：消息中心屏（只读聚合；注册表 feature_message_center 仍
+        // TODO，翻转留到组装步；入口走频道页“＋ 新建”菜单与字面 id 路由）。
+        messageCenterController = MessageCenterController(
+            this,
+            onRefresh = { refreshMessageCenter() },
+            onOpenEntry = { entry -> openMessageCenterEntry(entry) },
+            onClose = { showEntry(DrawerController.ID_TEAM_CHANNEL) },
+        )
+        screenMessageCenter = messageCenterController.root
+        container.addView(screenMessageCenter)
+        screenMessageCenter.visibility = View.GONE
         screenChat.visibility = View.VISIBLE
         screenProjects.visibility = View.GONE
         screenTasks.visibility = View.GONE
@@ -1892,6 +1915,7 @@ class MainActivity : AppCompatActivity() {
             EntryScreen.CONSOLE -> DrawerController.ID_CONSOLE
             EntryScreen.MCP_PLUGINS -> DrawerController.ID_MCP_PLUGINS
             EntryScreen.TEAM_CHANNEL -> DrawerController.ID_TEAM_CHANNEL
+            EntryScreen.MESSAGE_CENTER -> DrawerRouter.ID_MESSAGE_CENTER
         }
         if (!isSettingsEntry(entry)) lastEntry = entry
         currentEntry = entry
@@ -1913,6 +1937,7 @@ class MainActivity : AppCompatActivity() {
         screenConsole.visibility = if (screen == EntryScreen.CONSOLE) View.VISIBLE else View.GONE
         screenMcpPlugins.visibility = if (screen == EntryScreen.MCP_PLUGINS) View.VISIBLE else View.GONE
         screenTeamChannel.visibility = if (screen == EntryScreen.TEAM_CHANNEL) View.VISIBLE else View.GONE
+        screenMessageCenter.visibility = if (screen == EntryScreen.MESSAGE_CENTER) View.VISIBLE else View.GONE
         // 离开控制台即停自动刷新（不空转耗电）；进入时由 CONSOLE 分支起 ticker。
         if (screen != EntryScreen.CONSOLE) stopConsoleTicker()
         // 离开频道即停 WS 订阅与兜底轮询（不空转耗电）；进入时由 TEAM_CHANNEL 分支重起。
@@ -1960,6 +1985,7 @@ class MainActivity : AppCompatActivity() {
                 refreshTeamChannel()
                 startTeamChannelFeed()
             }
+            EntryScreen.MESSAGE_CENTER -> refreshMessageCenter()
         }
     }
 
@@ -6134,8 +6160,12 @@ class MainActivity : AppCompatActivity() {
 
     /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     private fun showChannelCreateMenu() {
-        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊", "创建入帖 Webhook")
+        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊", "创建入帖 Webhook", "打开消息中心")
         ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
+            if (which == 8) {
+                showEntry(DrawerRouter.ID_MESSAGE_CENTER)
+                return@show
+            }
             if (which == 6) {
                 // 频道补全二期：发起私聊切到私聊分段（方案 A）；新私聊
                 // 从频道成员发起（控制器 onStartDm），不在此凭空建。
@@ -6216,6 +6246,27 @@ class MainActivity : AppCompatActivity() {
                     .setNegativeButton("取消", null).setPositiveButton("归档") { _, _ ->
                         performChannelManagement { it.setChannelArchived(channelId!!, true) }
                     }.show()
+    /**
+     * 频道页「＋ 新建」菜单（双端对齐批D，与 iOS 同位同序；P3-MSG 起
+     * 加第三项「打开消息中心」直达聚合视图）：本端的频道由平台配置、
+     * App 内没有新建频道的真实通道，新建两项都给诚实「待开发」提示，
+     * 不造假频道。
+     */
+    private fun showChannelCreateMenu() {
+        ListDialog.show(
+            this,
+            "新建",
+            null,
+            // P3-MSG：第三项直达消息中心（注册表 feature_message_center 仍
+            // TODO，翻转留到组装步；入口先走频道页菜单，可达可测）。
+            listOf("新建频道", "发起私聊", "打开消息中心"),
+        ) { which ->
+            if (which == 0) {
+                toast("【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。")
+            } else if (which == 1) {
+                toast("【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）")
+            } else {
+                showEntry(DrawerRouter.ID_MESSAGE_CENTER)
             }
         }
     }
@@ -6288,6 +6339,81 @@ class MainActivity : AppCompatActivity() {
             }
         }.start()
     }
+
+    /**
+     * P3-MSG：拉取并渲染消息中心（只读聚合）。
+     *
+     * 已读语义（与桩传输测试一起读）：数据经 [MessageCenterLoader] 只用
+     * 既有读接口 pollMessages 拉回——@我/任务回执取普通最新一页
+     * (onlyUnread=false)，未读取 only_unread=true 一页；全程
+     * markRead=false，绝不推进服务端已读标记，频道页的未读状态（探针
+     * 与 mark_read 推送都只属于频道页自己）不会被消息中心误消费。
+     * 拉取失败如实提示，不假装成功。
+     */
+    private fun refreshMessageCenter() {
+        if (!::messageCenterController.isInitialized) return
+        if (messageCenterRefreshRunning) return
+        messageCenterRefreshRunning = true
+        messageCenterController.render(null, loading = true)
+        Thread {
+            val snapshot = try {
+                val endpoint = teamChannelEndpoint()
+                if (endpoint == null) {
+                    MessageCenterSnapshot()
+                } else {
+                    val (host, channelId) = endpoint
+                    val transport = PlatformChannelMcpTransport(
+                        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                        endpoint = PlatformAgent.mcpEndpoint(host),
+                    )
+                    // 本机身份别名（@我 的判定集合）：本机 App / 协调者，
+                    // 加注册表里启用的本机 Agent（@ 到自己的 Agent 也算 @我，
+                    // 与 ChannelAgentRelay.findMentions 的 @寻址口径同族）。
+                    val agentNames = try {
+                        agentStore.listAgents().enabledAgents()
+                            .flatMap { listOf(it.agentId, it.displayName) }
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    runBlocking {
+                        MessageCenterLoader(transport).fetch(
+                            listOf(MessageCenterChannelSource(channelId, "频道 ${channelId.take(8)}")),
+                            listOf("本机 App", "协调者") + agentNames,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    messageCenterRefreshRunning = false
+                    if (!::messageCenterController.isInitialized) return@runOnUiThread
+                    messageCenterController.render(
+                        null,
+                        notice = "消息中心刷新失败：${(e.message ?: e.javaClass.simpleName).take(200)}",
+                    )
+                }
+                return@Thread
+            }
+            runOnUiThread {
+                messageCenterRefreshRunning = false
+                if (!::messageCenterController.isInitialized) return@runOnUiThread
+                messageCenterController.render(snapshot)
+            }
+        }.start()
+    }
+
+    /**
+     * 点消息中心条目 → 跳到对应频道对应位置。当前位置语义：Android 端
+     * 频道页是唯一频道页（单频道现状），跳转 = 切到频道页并刷新，消息
+     * 就在该页的消息流/任务串里（与 iOS 端点条目推回频道工作区一致）；
+     * 不改 TeamChannelController（工作包禁区），页内像素级滚动定位留待
+     * 频道页支持焦点参数后接线。
+     */
+    private fun openMessageCenterEntry(entry: MessageCenterEntry) {
+        showEntry(DrawerController.ID_TEAM_CHANNEL)
+        val preview = entry.text.take(40)
+        toast("已回到频道，定位：来自 ${entry.senderName} 的${if (preview.isBlank()) "一条消息" else "「$preview…」"}")
+    }
+
 
     /** 快照组装失败时的兜底渲染（只报失败原因，不丢已有消息）。 */
     private fun refreshTeamChannelFallback() {

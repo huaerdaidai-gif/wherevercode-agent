@@ -121,7 +121,11 @@ public struct FlagshipRouteDestinationView: View {
             AccountSettingsView(appState: appState, chatModel: chatModel, capabilities: capabilities, onNavigateRoute: onNavigateRoute, onDismiss: {})
         case "onboarding":
             OnboardingLocalFirstScreen(appState: appState, onNavigateRoute: onNavigateRoute)
-        case "activity", "notifications", "audit", "usage", "sync", "recovery", "baseline":
+        // P3-MSG 消息中心挂在既有 notifications 路由上（注册表
+        // feature_message_center 保持 TODO，翻转留到组装步）。
+        case "notifications":
+            MessageCenterView(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
+        case "activity", "audit", "usage", "sync", "recovery", "baseline":
             ConsoleSystemSubScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
         case "autoloop", "loopguard", "templates", "automation", "automaker", "triggers", "wakepolicy":
             ConsoleAutomationSubScreen(route: route, appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
@@ -2753,6 +2757,15 @@ public struct ChannelsHomeView: View {
                     Label("发起私聊", systemImage: "person.2")
                 }
                 .accessibilityIdentifier("channels.action.createDM")
+
+                // P3-MSG：直达消息中心（注册表 feature_message_center 保持
+                // TODO，翻转留到组装步；入口先走频道页顶栏，可达可测）。
+                Button {
+                    onNavigateRoute("notifications")
+                } label: {
+                    Label("打开消息中心", systemImage: "tray.full")
+                }
+                .accessibilityIdentifier("channels.action.messageCenter")
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
