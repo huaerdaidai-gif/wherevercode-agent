@@ -329,30 +329,8 @@ class ProjectScreenController(
                 descStart, styled.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
             projectListEmpty.text = styled
-            projectList.addView(android.widget.Button(context).apply {
-                text = "立即创建项目"
-                isAllCaps = false
-                setTextColor(UiKit.color(context, R.color.on_accent))
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                    cornerRadius = UiKit.dp(context, 999).toFloat()
-                    setColor(UiKit.color(context, R.color.accent))
-                }
-                setPadding(
-                    UiKit.dp(context, 20), UiKit.dp(context, 10),
-                    UiKit.dp(context, 20), UiKit.dp(context, 10),
-                )
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    topMargin = UiKit.dp(context, 8)
-                }
-                setOnClickListener { onOpenFolder() }
-            })
+            // 创建按钮只留页眉一个（Funk 2026-11-22 定，挪到原「新建
+            // 项目」位置），空态只剩图标与文案，不再另加按钮。
         }
         visible.forEach { project ->
             projectList.addView(projectRow(project))

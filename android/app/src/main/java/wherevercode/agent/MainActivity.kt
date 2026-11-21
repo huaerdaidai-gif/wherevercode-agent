@@ -5321,8 +5321,11 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
-        // 右上角「新建项目」按钮已删（Funk 2026-11-22 定）：创建入口只留
-        // 空态的「立即创建项目」，与 iOS 一致。
+        // 创建入口只留一个（Funk 2026-11-22 定）：「立即创建项目」放在
+        // 页眉原「新建项目」的位置，点开走「打开文件夹」，与 iOS 一致。
+        screenProjects.findViewById<View>(R.id.buttonNewProject)?.setOnClickListener {
+            showOpenFolderEntry()
+        }
         // 照片走查批 C：右上角刷新钮已删（iOS 项目页没有），刷新走列表重画。
         screenProjects.findViewById<View>(R.id.buttonCodeBack).setOnClickListener {
             projectController.closeCode()

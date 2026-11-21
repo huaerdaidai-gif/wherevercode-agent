@@ -699,9 +699,26 @@ public struct ProjectsHomeView: View {
 
                 Spacer()
 
-                // 创建入口只留空态的「立即创建项目」（Funk 2026-11-22 定）：
-                // 右上角「新建项目」按钮删除，两端一致；它原先在 iOS 弹旧
-                // 表单、安卓进打开文件夹对话框，本身就是不一致的来源。
+                // 创建入口只留一个（Funk 2026-11-22 定）：「立即创建项目」
+                // 挪到页眉原「新建项目」的位置，点开走「打开文件夹」对话
+                // 框；空态不再另放按钮，旧表单只是对话框里 git 一项的下级
+                // 登记流程。
+                Button {
+                    showProjectSources = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("立即创建项目")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white, in: Capsule())
+                    .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                }
+                .accessibilityIdentifier("projects.createButton")
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -776,17 +793,6 @@ public struct ProjectsHomeView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
-                            Button {
-                                showProjectSources = true
-                            } label: {
-                                Text("立即创建项目")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 10)
-                                    .background(Color(red: 0.82, green: 0.49, blue: 0.35), in: Capsule())
-                            }
-                            .padding(.top, 8)
                         }
                     } else {
                         ForEach(filteredProjects) { item in

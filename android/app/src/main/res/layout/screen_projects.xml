@@ -42,6 +42,19 @@
 
         <!-- 照片走查批 C：标题副行与右上角刷新钮删掉（iOS 标题只有「项目」）；副行
              的「还没有项目」/计数文案由空态正文承担，刷新走列表重画。 -->
+        <TextView
+            android:id="@+id/buttonNewProject"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_chip_accent"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="＋ 立即创建项目"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <EditText
