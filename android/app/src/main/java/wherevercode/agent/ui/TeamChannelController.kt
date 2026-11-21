@@ -14,6 +14,7 @@ import java.util.Date
 import java.util.Locale
 import wherevercode.agent.R
 import wherevercode.agent.core.agent.ChannelConnectionState
+import wherevercode.agent.core.agent.channelConnectionStateLabel
 import wherevercode.agent.core.agent.ChannelSummary
 import wherevercode.agent.core.agent.PlatformChannelMessage
 import wherevercode.agent.core.team.ChannelExtras
@@ -426,14 +427,12 @@ class TeamChannelController(
         this.snapshot = snapshot
         val diagnostic = snapshot.connectionError?.takeIf { it.isNotBlank() }
         val certificateFailure = diagnostic?.let(::isCertificateFailure) == true
-        connectionLine.text = when (snapshot.connectionState) {
-            ChannelConnectionState.LIVE -> "● 直播推送（WS 已连）"
-            ChannelConnectionState.CONNECTING -> "○ 正在连接频道…"
-            ChannelConnectionState.POLLING ->
-                "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）" +
-                    if (certificateFailure) " · 证书验证失败，安全连接未建立" else ""
-            ChannelConnectionState.STOPPED -> "○ 频道未连接"
-        }
+        connectionLine.text = channelConnectionStateLabel(snapshot.connectionState) +
+            if (snapshot.connectionState == ChannelConnectionState.POLLING && certificateFailure) {
+                " · 证书验证失败，安全连接未建立"
+            } else {
+                ""
+            }
         diagnosticLine.text = diagnostic.orEmpty()
         diagnosticToggle.text = "查看连接诊断"
         roundLine.text = if (snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS) {

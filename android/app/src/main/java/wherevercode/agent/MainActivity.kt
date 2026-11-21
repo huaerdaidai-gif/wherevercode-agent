@@ -123,6 +123,7 @@ import wherevercode.agent.core.agent.ManusChatBridge
 import wherevercode.agent.core.agent.ManusChatPort
 import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
+import wherevercode.agent.core.agent.channelConnectionStateLabel
 import wherevercode.agent.core.agent.ChannelSummary
 import wherevercode.agent.core.agent.channelFeedRebindNeeded
 import wherevercode.agent.core.agent.McpChannelEventFeed
@@ -452,6 +453,13 @@ class MainActivity : AppCompatActivity() {
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val teamChannelSelfAgentIds =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** 频道 feed 最近一次上报的连接状态（按频道记；设置摘要与频道页共用同一口径）。 */
+    @Volatile
+    private var teamChannelLastConnectionState: ChannelConnectionState? = null
+
+    @Volatile
+    private var teamChannelLastConnectionChannelId: String? = null
     /** 本会话已发轮次（发一条消息计一轮；上限见 TeamChatLimits.MAX_ROUNDS）。 */
     private var teamChannelRoundsUsed = 0
     /** 频道补全一期：本会话从频道显式派发的任务卡（回显用，任务本体在任务列表）。 */
@@ -6120,8 +6128,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 私聊发起名单（频道全体成员减本机自己；不套 app 隐藏，理由见 dmCandidates）。 */
-    private fun teamChannelDmCandidates(): List<TeamChannelMember> =
-        dmCandidates(mergedTeamChannelMembers())
+    private fun teamChannelDmCandidates(): List<TeamChannelMember> {
+        // 本机平台身份：已学到的 selfAgentIds + 频道端点用的第一条平台 Agent 记录的
+        // agentId（服务端 participants 不带 is_self，只能靠本机口径排自己）。
+        val selfIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } +
+            listOfNotNull(firstPlatformAgentRecord()?.agentId?.trim()?.takeIf { it.isNotBlank() })
+        return dmCandidates(mergedTeamChannelMembers(), selfIds)
+    }
 
     /** 已读标记（本机持久化，键按频道分；服务端标记由 markTeamChannelRead 同步推）。 */
     private fun teamChannelLastReadId(channelId: String): String? =
@@ -6547,7 +6560,9 @@ class MainActivity : AppCompatActivity() {
             )
             runOnUiThread { refreshTeamChannel() }
         }
-        feed.onConnectionChange = { _, _ ->
+        feed.onConnectionChange = { state, _ ->
+            teamChannelLastConnectionState = state
+            teamChannelLastConnectionChannelId = channelId
             runOnUiThread {
                 if (teamChannelFeed === feed) refreshTeamChannel()
             }
@@ -10026,14 +10041,13 @@ class MainActivity : AppCompatActivity() {
             else -> "$channelName · $activeId"
         }
         val feed = if (activeId.isBlank()) null else teamChannelFeedSnapshot(activeId).second
-        val feedState = feed?.connectionState ?: ChannelConnectionState.STOPPED
-        val connection = when (feedState) {
-            ChannelConnectionState.CONNECTING -> "连接中"
-            ChannelConnectionState.LIVE -> "实时已连接"
-            ChannelConnectionState.POLLING -> "轮询连接"
-            ChannelConnectionState.STOPPED -> "未连接"
-        }
-        platformConnectionSummaryConnectionState.text = "连接状态　$channelLabel · $connection"
+        // 与频道页同一口径：优先当前 feed 的实时状态；feed 因离开频道页停订时，
+        // 用它最后上报的状态（同一文案函数），不把"离开页面停订"显示成"未连接"。
+        val feedState = feed?.connectionState
+            ?: teamChannelLastConnectionState?.takeIf { teamChannelLastConnectionChannelId == activeId }
+            ?: ChannelConnectionState.STOPPED
+        platformConnectionSummaryConnectionState.text =
+            "连接状态　$channelLabel · ${channelConnectionStateLabel(feedState)}"
         platformConnectionSummaryCredentialState.text =
             "凭证状态　" + if (hasCredential) "已保存" else "未保存"
     }
