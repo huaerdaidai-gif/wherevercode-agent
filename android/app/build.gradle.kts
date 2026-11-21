@@ -124,6 +124,9 @@ android {
         }
     }
 
+    // With AGP 8.1, extract page-aligned ELF libraries during installation.
+    packaging.jniLibs.useLegacyPackaging = true
+
     buildFeatures {
         // V5 C1：新版 AGP 默认不生成 BuildConfig；打开它才能读 COMMIT_SHA / BUILD_TIME。
         buildConfig = true
@@ -183,7 +186,6 @@ android {
 
 chaquopy {
     defaultConfig {
-        // Chaquopy 14.0 stable combo; see android/README.md for the version note.
         version = "3.11"
     }
 }
