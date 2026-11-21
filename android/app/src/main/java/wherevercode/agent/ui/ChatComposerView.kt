@@ -220,6 +220,8 @@ class ChatComposerView private constructor(
             removeView(child)
             if (child.id == R.id.contextPill) {
                 top.addView(child)
+            } else if (child.id == R.id.buttonDictateDraft || child.id == R.id.buttonVoiceWaveform) {
+                lowerRow?.let { row -> row.addView(child, row.childCount - 1) }
             } else {
                 addLeadingControl(child)
             }

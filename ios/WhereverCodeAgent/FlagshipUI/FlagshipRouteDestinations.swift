@@ -569,6 +569,7 @@ public struct ProjectsHomeView: View {
     @State private var searchQuery = ""
     @State private var selectedFilter: ProjectFilter = .all
     @State private var showNewProjectSheet = false
+    @State private var showProjectSources = false
     @State private var newProjectName = ""
     @State private var newProjectRepo = ""
     @State private var newProjectBranch = "main"
@@ -725,7 +726,7 @@ public struct ProjectsHomeView: View {
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
                             Button {
-                                showNewProjectSheet = true
+                                showProjectSources = true
                             } label: {
                                 Text("立即创建项目")
                                     .font(.system(size: 14, weight: .semibold))
@@ -774,6 +775,14 @@ public struct ProjectsHomeView: View {
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
         .onAppear(perform: loadProjects)
+        .confirmationDialog("打开文件夹", isPresented: $showProjectSources, titleVisibility: .visible) {
+            Button("本机文件夹") { onNavigateRoute("files") }
+            Button("远程设备上的文件夹") { onNavigateRoute("devices") }
+            Button("git 仓库地址") { showNewProjectSheet = true }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("选一个位置打开它作为项目之家。")
+        }
         .sheet(isPresented: $showNewProjectSheet) {
             NavigationStack {
                 Form {

@@ -187,7 +187,7 @@
              充气时先挂在本组件下，组件 onFinishInflate 按 id 把
              它们收编进上层插槽 / 下层行，父子结构与原 XML 一致
              （MainLayoutTest 按此结构校验）。+ 号开上下文菜单；
-             麦克风不做（V5-UI.md §二原文“可选麦克风”），不留假按钮。 -->
+             右侧是听写与语音模式入口。 -->
         <wherevercode.agent.ui.ChatComposerView
             android:id="@+id/inputBox"
             android:layout_width="match_parent"
@@ -241,13 +241,24 @@
                 android:ellipsize="end"
                 android:contentDescription="选择对话方" />
 
-            <TextView
+            <ImageButton
                 android:id="@+id/buttonDictateDraft"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:gravity="center"
-                android:text="🎙"
-                android:contentDescription="语音输入" />
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="语音输入"
+                android:padding="9dp"
+                android:src="@drawable/ic_composer_mic" />
+
+            <ImageButton
+                android:id="@+id/buttonVoiceWaveform"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_chip_home"
+                android:contentDescription="语音模式"
+                android:padding="9dp"
+                android:src="@drawable/ic_composer_waveform" />
 
             <TextView
                 android:id="@+id/brainCapsule"

@@ -1268,12 +1268,11 @@ class MainActivity : AppCompatActivity() {
             onEntrySelected = { id -> onDrawerEntrySelected(id) },
             onPrefsChanged = { saveDrawerPrefs() },
             activeTargetProvider = { currentEntry },
-            userLabelProvider = { drawerUserLabel() },
+            userLabelProvider = { "开发者" },
             themeLabelProvider = { currentThemeLabel() },
             recentSessionsProvider = { cachedRecentSessions },
             onDeleteSession = { sessionId -> confirmDeleteSession(sessionId, "") },
             onNewConversation = { newConversationAndShow() },
-            onOpenFeatureCenter = { showFeatureCenterDialog() },
         ).also { view ->
             drawerContainer.addView(view.root)
         }
@@ -2388,6 +2387,9 @@ class MainActivity : AppCompatActivity() {
                 toast("本机未安装语音识别服务")
             }
         }
+        screenChat.findViewById<View>(R.id.buttonVoiceWaveform).setOnClickListener {
+            toast("语音模式暂未开放")
+        }
         // V5 C2（批 2）：输入框状态驱动发送按钮（HomeScreenController）。
         inputPrompt.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(
@@ -2475,6 +2477,10 @@ class MainActivity : AppCompatActivity() {
         val canSend = homeScreenController.canSend(allowEmptyText = pendingAttachments.isNotEmpty())
         // 对话组件收敛：发送状态呈现走共用输入区组件（enabled + alpha）。
         chatComposer.setSendEnabled(canSend)
+        val showWaveform = inputPrompt.text.isNullOrBlank() && pendingAttachments.isEmpty()
+        screenChat.findViewById<View>(R.id.buttonVoiceWaveform).visibility =
+            if (showWaveform) View.VISIBLE else View.GONE
+        buttonSend.visibility = if (showWaveform) View.GONE else View.VISIBLE
     }
 
     /** V5-UI：+ 号菜单是底部抽屉“添加到对话”（Claude 参照），只放真实可用的操作。 */
@@ -13229,16 +13235,6 @@ class MainActivity : AppCompatActivity() {
         THEME_LIGHT -> "浅色"
         THEME_DARK -> "深色"
         else -> "跟随系统"
-    }
-
-    /**
-     * 抽屉底部用户行标签。App 内没有登录用户名可取（不写死真人姓名，
-     * 见首页问候的同款处理），只显示登录状态；有用户档案后再接真实用户名。
-     */
-    private fun drawerUserLabel(): String = try {
-        if (brainComponents?.authManager?.isSignedIn() == true) "已登录" else "未登录"
-    } catch (_: Exception) {
-        "未登录"
     }
 
     /**
