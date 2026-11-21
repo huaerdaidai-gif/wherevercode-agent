@@ -1956,6 +1956,11 @@ class MainActivity : AppCompatActivity() {
         currentEntry = entry
         screenChat.visibility = if (screen == EntryScreen.HOME) View.VISIBLE else View.GONE
         screenProjects.visibility = if (screen == EntryScreen.PROJECTS) View.VISIBLE else View.GONE
+        // 项目页统一设计（Funk 2026-11-22 定，双端完全一致）：项目页自带页眉
+        // （☰＋项目＋新建项目，与 iOS 同式），进项目页时藏掉全局顶栏，
+        // 离开恢复；页内 ☰ 仍开同一个抽屉。
+        findViewById<View>(R.id.topBar).visibility =
+            if (screen == EntryScreen.PROJECTS) View.GONE else View.VISIBLE
         screenTasks.visibility = if (screen == EntryScreen.TASKS) View.VISIBLE else View.GONE
         screenAgents.visibility =
             if (screen == EntryScreen.AGENTS || screen == EntryScreen.DEVICES) View.VISIBLE else View.GONE
@@ -5288,16 +5293,6 @@ class MainActivity : AppCompatActivity() {
             projectList = screenProjects.findViewById(R.id.projectList),
             projectListEmpty = screenProjects.findViewById(R.id.projectListEmpty),
             filterRow = screenProjects.findViewById(R.id.projectFilterRow),
-            buttonImportLocal = screenProjects.findViewById(R.id.buttonImportLocal),
-            buttonImportGit = screenProjects.findViewById(R.id.buttonImportGit),
-            buttonImportDevice = screenProjects.findViewById(R.id.buttonImportDevice),
-            // 照片走查批 C：导入行后四项（与 iOS 同序同文案）。
-            buttonBrowseFiles = screenProjects.findViewById(R.id.buttonBrowseFiles),
-            buttonStartChat = screenProjects.findViewById(R.id.buttonStartChat),
-            buttonGitTree = screenProjects.findViewById(R.id.buttonGitTree),
-            buttonPreview = screenProjects.findViewById(R.id.buttonPreview),
-            onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
-            onStartConversation = { showEntry(DrawerController.ID_NEW_CONVERSATION) },
             projectStore = projectStore,
             deviceDisplayName = { deviceId -> deviceDisplayName(deviceId) },
             // “打开文件夹”是唯一入口（2026-11-12，maintainer：项目来源收成一个）：
@@ -5325,6 +5320,10 @@ class MainActivity : AppCompatActivity() {
         // 点开走「打开文件夹」，与 iOS 一致；空态不再另放按钮。
         screenProjects.findViewById<View>(R.id.buttonNewProject)?.setOnClickListener {
             showOpenFolderEntry()
+        }
+        // 项目页页内 ☰（统一设计）：与顶栏 ☰ 同一个抽屉。
+        screenProjects.findViewById<View>(R.id.buttonProjectsMenu)?.setOnClickListener {
+            openDrawer()
         }
         // 照片走查批 C：右上角刷新钮已删（iOS 项目页没有），刷新走列表重画。
         screenProjects.findViewById<View>(R.id.buttonCodeBack).setOnClickListener {

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 项目页统一设计（Funk 2026-11-22 定，与 iOS 同式）：白底胶囊 + 细边，
+     用于页眉「新建项目」按钮与筛选选中片。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/surface" />
+    <corners android:radius="999dp" />
+    <stroke android:width="1dp" android:color="@color/home_card_border" />
+</shape>

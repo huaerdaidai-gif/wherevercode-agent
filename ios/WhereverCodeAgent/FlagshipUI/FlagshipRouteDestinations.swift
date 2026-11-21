@@ -578,8 +578,7 @@ public struct ProjectsHomeView: View {
 
     public enum ProjectFilter: String, CaseIterable, Identifiable {
         case all = "全部"
-        case active = "活跃"
-        case sandbox = "本地沙盒"
+        case local = "本机"
         case remote = "远端设备"
 
         public var id: String { rawValue }
@@ -605,9 +604,9 @@ public struct ProjectsHomeView: View {
             }
         }
         switch selectedFilter {
-        case .all, .active:
+        case .all:
             return list
-        case .sandbox:
+        case .local:
             return list.filter { $0.project.origin.contains("LOCAL") || $0.project.origin.contains("SANDBOX") }
         case .remote:
             return list.filter { $0.project.origin.contains("REMOTE") }
@@ -777,24 +776,29 @@ public struct ProjectsHomeView: View {
             Divider()
 
             // 项目列表
-            ScrollView {
+            if filteredProjects.isEmpty {
+                // 空态居中（项目页统一设计，Funk 2026-11-22 定）：图标 + 标题 +
+                // 说明在剩余空间正中；「导入与开发工具」区已删除——来源只在
+                // 「新建项目」的打开文件夹对话框里出现一次，其余功能各回各页。
                 VStack(spacing: 12) {
-                    if filteredProjects.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "shippingbox")
-                                .font(.system(size: 44))
-                                .foregroundStyle(.secondary.opacity(0.6))
-                                .padding(.top, 40)
-                            Text(projects.isEmpty ? "还没有创建任何项目" : "未找到匹配的项目")
-                                .font(.headline)
-                                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                            Text("项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
-                        }
-                    } else {
+                    Spacer()
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                    Text(projects.isEmpty ? "还没有创建任何项目" : "未找到匹配的项目")
+                        .font(.headline)
+                        .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                    Text("项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 12) {
                         ForEach(filteredProjects) { item in
                             ProjectCardView(
                                 project: item,
@@ -805,29 +809,8 @@ public struct ProjectsHomeView: View {
                             )
                         }
                     }
-
-                    // 导入方式与开发全流程快捷按钮
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("导入与开发工具")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: 8) {
-                            Button("选择本地文件夹") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                            Button("导入 Git 仓库") { showProjectSources = true }.buttonStyle(.bordered)
-                            Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
-                            Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                                .accessibilityIdentifier("projects.browseFiles")
-                            Button("开始对话") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
-                            Button("Git 工作树") { onNavigateRoute("git") }.buttonStyle(.bordered)
-                            Button("预览") { onNavigateRoute("preview") }.buttonStyle(.bordered)
-                        }
-                        .font(.caption)
-                    }
-                    .padding(14)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1))
+                    .padding(16)
                 }
-                .padding(16)
             }
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())

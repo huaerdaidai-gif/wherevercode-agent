@@ -63,21 +63,11 @@ class ProjectScreenController(
     private val projectListEmpty: TextView,
     // 照片走查批 C：底部大「打开文件夹」按钮已删（iOS 项目页没有），buttonAddProject
     // 参数随之移除；导入动作在导入行，仍走同一「打开文件夹」对话框。
-    // 项目页对齐（双端对齐批C）：筛选片行与导入行（与 iOS 同序同文案）。
+    // 项目页统一设计（Funk 2026-11-22 定）：只剩筛选片行（与 iOS 同序同文案）。
+    // 「导入与开发工具」区已删——来源只在「新建项目」的打开文件夹对话框里
+    // 出现一次，其余功能各回各页，连带只服务它的按钮参数与回调一并清除。
     // 视图可缺省（单测构造不传时不建片、不接线）。
     private val filterRow: LinearLayout? = null,
-    private val buttonImportLocal: TextView? = null,
-    private val buttonImportGit: TextView? = null,
-    private val buttonImportDevice: TextView? = null,
-    // 照片走查批 C：导入行后四项（与 iOS 同序同文案），视图可缺省。
-    private val buttonBrowseFiles: TextView? = null,
-    private val buttonStartChat: TextView? = null,
-    private val buttonGitTree: TextView? = null,
-    private val buttonPreview: TextView? = null,
-    /** 导入行「连接设备项目」：去设备页（项目从设备添加）。 */
-    private val onOpenDevices: () -> Unit = {},
-    /** 导入行「开始对话」：回新对话。 */
-    private val onStartConversation: () -> Unit = {},
     private val projectStore: ProjectStore,
     /** 家设备 id → 显示名（本机工作区不走这里）。 */
     private val deviceDisplayName: (String) -> String,
@@ -108,7 +98,7 @@ class ProjectScreenController(
 ) {
     companion object {
         /** 项目筛选片文案（与 iOS ProjectFilter 同序同字）。 */
-        val PROJECT_FILTER_LABELS: List<String> = listOf("全部", "活跃", "本地沙盒", "远端设备")
+        val PROJECT_FILTER_LABELS: List<String> = listOf("全部", "本机", "远端设备")
 
         /** 大文件首档：只读前 512 KB；点“加载更多”后读前 2 MB。 */
         const val READ_TIER_SMALL: Int = 512 * 1024
@@ -190,18 +180,6 @@ class ProjectScreenController(
             }
             refreshProjectFilterChips()
         }
-        // 导入行（批C）：本地/Git 都走“打开文件夹”唯一入口（对话框里
-        // 按种类分项）；连接设备项目去设备页。
-        buttonImportLocal?.setOnClickListener { onOpenFolder() }
-        buttonImportGit?.setOnClickListener { onOpenFolder() }
-        buttonImportDevice?.setOnClickListener { onOpenDevices() }
-        // 照片走查批 C：导入行后四项（与 iOS 同序同文案）。浏览文件进本机
-        // 工作区树；开始对话回新对话；Git 工作树与预览在安卓尚无对应屏，
-        // 点开给诚实「待开发」提示，不编假页面。
-        buttonBrowseFiles?.setOnClickListener { showWorkspace() }
-        buttonStartChat?.setOnClickListener { onStartConversation() }
-        buttonGitTree?.setOnClickListener { onToast("Git 工作树：待开发") }
-        buttonPreview?.setOnClickListener { onToast("预览：待开发") }
         treeMoreButton.setOnClickListener {
             treeLimit += TREE_PAGE_SIZE
             render()
@@ -239,20 +217,24 @@ class ProjectScreenController(
     }
 
     private fun refreshProjectFilterChips() {
+        // 与 iOS 同式：选中 = 白底胶囊 + 细边 + 加粗主色；未选 = 无底、次色常字。
         filterChips.forEachIndexed { index, chip ->
-            chip.setBackgroundResource(
-                if (index == projectFilterIndex) R.drawable.bg_chip_accent else R.drawable.bg_chip,
+            val selected = index == projectFilterIndex
+            chip.setBackgroundResource(if (selected) R.drawable.bg_capsule_white else 0)
+            chip.setTextColor(
+                UiKit.color(context, if (selected) R.color.text_primary else R.color.text_secondary),
             )
+            chip.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
         }
     }
 
     /**
-     * 筛选口径与 iOS 一致：全部/活跃不过滤；本地沙盒 = 有本机家；
+     * 筛选口径与 iOS 一致：全部不过滤；本机 = 有本机家；
      * 远端设备 = 有设备家。
      */
     private fun projectMatchesFilter(project: Project): Boolean = when (projectFilterIndex) {
-        2 -> homesOf(project).any { it.homeKind == ProjectHomeKind.LOCAL }
-        3 -> homesOf(project).any { it.homeKind == ProjectHomeKind.DEVICE }
+        1 -> homesOf(project).any { it.homeKind == ProjectHomeKind.LOCAL }
+        2 -> homesOf(project).any { it.homeKind == ProjectHomeKind.DEVICE }
         else -> true
     }
 
@@ -285,6 +267,9 @@ class ProjectScreenController(
         projectList.removeAllViews()
         val visible = projects.filter { projectMatchesQuery(it) && projectMatchesFilter(it) }
         projectListEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
+        // 空态居中（统一设计）：空态可见时藏列表滚动区，空态视图占满剩余空间。
+        (projectList.parent as? View)?.visibility =
+            if (visible.isEmpty()) View.GONE else View.VISIBLE
         if (visible.isEmpty()) {
             val title = if (projects.isEmpty()) "还没有创建任何项目" else "未找到匹配的项目"
             // 空态与 iOS 同构：立方体图标 + 标题（加粗主色）+ 说明（次色）

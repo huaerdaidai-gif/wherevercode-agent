@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 项目页统一设计（Funk 2026-11-22 定，与 iOS 同式）：页内 ☰ 圆形按钮，
+     白底 + 细边。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/surface" />
+    <stroke android:width="1dp" android:color="@color/home_card_border" />
+</shape>
