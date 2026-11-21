@@ -526,6 +526,11 @@ class PlatformChannelTransportTest {
         assertEquals("dm", channels[1].kind)
         assertEquals(true, channels[1].archived)
         assertEquals(listOf("a1"), channels[0].participantIds)
+        // participants 明细要带名字（平台成员名单的显示名来源，与 iOS 同口径）。
+        assertEquals(1, channels[0].participantDetails.size)
+        assertEquals("a1", channels[0].participantDetails[0].agentId)
+        assertEquals("甲", channels[0].participantDetails[0].agentName)
+        assertEquals(emptyList<ChannelParticipant>(), channels[1].participantDetails)
         val dm = t.openDm("a9")
         assertEquals("d1", dm.optString("id"))
         val dmArgs = JSONObject(http.calls[1].bodyJson)

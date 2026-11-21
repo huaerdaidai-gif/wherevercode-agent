@@ -2,6 +2,7 @@ package wherevercode.agent.core.team
 
 import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.core.agent.AgentRecord
+import wherevercode.agent.core.agent.ChannelParticipant
 
 /**
  * P3 团队频道（2026-11-11）：只读扇出 + 有界团队聊天的规则与模型。
@@ -207,6 +208,34 @@ fun buildChannelMembers(agents: List<AgentRecord>): List<TeamChannelMember> {
         )
     }
     return members
+}
+
+/**
+ * 把平台口径的频道成员并进本地成员表（统一口径：私聊只给频道成员，
+ * 名单 = 频道全体成员）。
+ *
+ * [participants] 是平台 `agent_channel_list` 给当前频道的参与者名单
+ * （平台为准，与 iOS 的 participantDetails 同源）：本地已有的按
+ * agentId 保留本地条目（本机 App 行、本地显示名优先），平台独有的
+ * 按平台顺序追加在后、标 [TeamChannelMember.isPlatformAgent]（端点
+ * 直连成员）。纯函数：去重、保序都在这里，调用方只管传两份名单。
+ */
+fun mergePlatformChannelMembers(
+    local: List<TeamChannelMember>,
+    participants: List<ChannelParticipant>,
+): List<TeamChannelMember> {
+    val seen = local.mapTo(mutableSetOf()) { it.agentId }
+    val merged = local.toMutableList()
+    for (participant in participants) {
+        if (!seen.add(participant.agentId)) continue
+        merged += TeamChannelMember(
+            agentId = participant.agentId,
+            displayName = participant.agentName,
+            isLocalApp = false,
+            isPlatformAgent = true,
+        )
+    }
+    return merged
 }
 
 // ---------------------------------------------------------------------------

@@ -213,6 +213,7 @@ import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.buildChannelMembers
+import wherevercode.agent.core.team.mergePlatformChannelMembers
 import wherevercode.agent.core.team.visibleTeamChannelMembers
 import wherevercode.agent.core.dispatch.McpDispatchRuntime
 import wherevercode.agent.core.team.loadPairingRecord
@@ -6061,6 +6062,11 @@ class MainActivity : AppCompatActivity() {
      * 频道成员（maintainer 2026-11-11 22:19：全部 Agent 拉入频道）：本机 App
      * 打头 + 注册表里的全部 Agent（[buildChannelMembers]，注册表顺序，
      * 按 agentId 去重）。平台 Agent 标出来——它是端点直连成员。
+     *
+     * 再并入平台口径的当前频道成员（[mergePlatformChannelMembers]）：
+     * 频道列表缓存在每次刷新时先于快照更新，当前频道的 participants
+     * 就是平台为准的全体成员——只在本机加过的 Agent 不等于频道成员，
+     * 私聊名单（私聊只给频道成员）与成员行都以这份合并表为准。
      */
     private fun teamChannelMembers(): List<TeamChannelMember> {
         val agents = try {
@@ -6068,7 +6074,13 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             emptyList()
         }
-        return visibleTeamChannelMembers(buildChannelMembers(agents))
+        val participants = teamChannelChannelsCache
+            .firstOrNull { it.id == activeTeamChannelId() }
+            ?.participantDetails
+            .orEmpty()
+        return visibleTeamChannelMembers(
+            mergePlatformChannelMembers(buildChannelMembers(agents), participants),
+        )
     }
 
     /** 已读标记（本机持久化，键按频道分；服务端标记由 markTeamChannelRead 同步推）。 */

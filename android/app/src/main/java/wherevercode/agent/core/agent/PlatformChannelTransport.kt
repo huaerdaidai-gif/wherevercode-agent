@@ -54,6 +54,21 @@ data class ChannelSummary(
     val kind: String = "channel",
     val archived: Boolean = false,
     val participantIds: List<String> = emptyList(),
+    /** 参与者明细（平台为准的频道成员名单，与 iOS ChannelParticipant 同口径）。 */
+    val participantDetails: List<ChannelParticipant> = emptyList(),
+)
+
+/**
+ * 频道的一位参与者（平台 `agent_channel_list` 输出的 participants 一项）。
+ * 这是平台口径的成员名单：成员以平台为准，不以本机加过的 Agent 为准。
+ * [agentName] 缺失时回落 agentId（与 iOS 同口径），不编造名字。
+ */
+data class ChannelParticipant(
+    val agentId: String,
+    val agentName: String,
+    val role: String? = null,
+    val isAgent: Boolean? = null,
+    val isSelf: Boolean = false,
 )
 
 /** 一位成员对某条消息的已读状态（平台 agent_channel_readers 输出）。 */
@@ -96,13 +111,34 @@ fun parsePlatformChannelMessage(obj: JSONObject): PlatformChannelMessage {
 
 /** 平台频道 JSON → [ChannelSummary]。 */
 fun parseChannelSummary(obj: JSONObject): ChannelSummary {
-    val participants = mutableListOf<String>()
+    val details = mutableListOf<ChannelParticipant>()
     val raw = obj.optJSONArray("participants")
     if (raw != null) {
         for (i in 0 until raw.length()) {
-            val p = raw.optJSONObject(i) ?: continue
-            val pid = p.optString("agent_id", "")
-            if (pid.isNotBlank()) participants += pid
+            when (val item = raw.opt(i)) {
+                is JSONObject -> {
+                    val pid = item.optString("agent_id", "")
+                        .ifBlank { item.optString("id", "") }
+                    if (pid.isBlank()) continue
+                    details += ChannelParticipant(
+                        agentId = pid,
+                        agentName = item.optString("agent_name", "")
+                            .ifBlank { item.optString("name", "") }
+                            .ifBlank { pid },
+                        role = item.optString("role", "").takeIf { it.isNotBlank() },
+                        isAgent = if (item.has("is_agent") && !item.isNull("is_agent")) {
+                            item.optBoolean("is_agent")
+                        } else {
+                            null
+                        },
+                        isSelf = item.optBoolean("is_self", false),
+                    )
+                }
+                // 容错：participants 也可能是纯字符串数组（iOS 同口径）。
+                is String -> if (item.isNotBlank()) {
+                    details += ChannelParticipant(agentId = item, agentName = item)
+                }
+            }
         }
     }
     return ChannelSummary(
@@ -110,7 +146,8 @@ fun parseChannelSummary(obj: JSONObject): ChannelSummary {
         name = obj.optString("name", ""),
         kind = obj.optString("kind", "channel").ifBlank { "channel" },
         archived = obj.optBoolean("archived", false),
-        participantIds = participants,
+        participantIds = details.map { it.agentId },
+        participantDetails = details,
     )
 }
 

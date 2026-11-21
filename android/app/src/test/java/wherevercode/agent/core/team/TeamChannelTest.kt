@@ -10,6 +10,7 @@ import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.core.agent.AgentAccess
 import wherevercode.agent.core.agent.AgentKind
 import wherevercode.agent.core.agent.AgentRecord
+import wherevercode.agent.core.agent.ChannelParticipant
 
 /**
  * P3 团队频道规则测试（2026-11-11）：发帖校验、扇出选枝、只读简报、
@@ -190,6 +191,33 @@ class TeamChannelTest {
             ),
         )
         assertEquals(listOf("local-app", "codex", "example-agent"), members.map { it.agentId })
+    }
+
+    @Test
+    fun `mergePlatformChannelMembers adds platform-only members in platform order`() {
+        // 私聊名单口径：频道成员以平台为准——只在平台频道里、没在本机
+        // 加过的成员也必须进名单（本地条目与本机 App 行保留在前）。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val merged = mergePlatformChannelMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "codex", agentName = "Codex"),
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA（平台名）"),
+                ChannelParticipant(agentId = "gemini", agentName = "Gemini"),
+            ),
+        )
+        assertEquals(listOf("local-app", "app-qa", "codex", "gemini"), merged.map { it.agentId })
+        // 本地已有成员保留本地显示名，不被平台名覆盖。
+        assertEquals("App QA", merged.first { it.agentId == "app-qa" }.displayName)
+        // 平台补进的成员是端点直连成员。
+        assertTrue(merged.first { it.agentId == "gemini" }.isPlatformAgent)
+        assertTrue(merged.first().isLocalApp)
+    }
+
+    @Test
+    fun `mergePlatformChannelMembers with no platform list keeps local list`() {
+        val local = buildChannelMembers(listOf(record("codex", "Codex")))
+        assertEquals(local, mergePlatformChannelMembers(local, emptyList()))
     }
 
     @Test
