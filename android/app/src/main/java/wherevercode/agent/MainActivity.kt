@@ -6256,27 +6256,6 @@ class MainActivity : AppCompatActivity() {
                     .setNegativeButton("取消", null).setPositiveButton("归档") { _, _ ->
                         performChannelManagement { it.setChannelArchived(channelId!!, true) }
                     }.show()
-    /**
-     * 频道页「＋ 新建」菜单（双端对齐批D，与 iOS 同位同序；P3-MSG 起
-     * 加第三项「打开消息中心」直达聚合视图）：本端的频道由平台配置、
-     * App 内没有新建频道的真实通道，新建两项都给诚实「待开发」提示，
-     * 不造假频道。
-     */
-    private fun showChannelCreateMenu() {
-        ListDialog.show(
-            this,
-            "新建",
-            null,
-            // P3-MSG：第三项直达消息中心（注册表 feature_message_center 仍
-            // TODO，翻转留到组装步；入口先走频道页菜单，可达可测）。
-            listOf("新建频道", "发起私聊", "打开消息中心"),
-        ) { which ->
-            if (which == 0) {
-                toast("【待开发】新建频道尚未开发：频道由平台配置，App 内暂不能新建。")
-            } else if (which == 1) {
-                toast("【待开发】私聊服务待开发（与指定人员/Agent 独立私聊通道）")
-            } else {
-                showEntry(DrawerRouter.ID_MESSAGE_CENTER)
             }
         }
     }
