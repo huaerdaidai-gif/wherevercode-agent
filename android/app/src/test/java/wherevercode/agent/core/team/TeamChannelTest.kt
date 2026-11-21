@@ -215,6 +215,36 @@ class TeamChannelTest {
     }
 
     @Test
+    fun `mergePlatformChannelMembers propagates isSelf to new and local members`() {
+        // 私聊名单排自己靠 is_self：平台独有成员带标记进来；与本地同 id
+        // 的成员保留本地条目，但 self 标记要回写（app-qa 即此例）。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val merged = mergePlatformChannelMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA", isSelf = true),
+                ChannelParticipant(agentId = "app", agentName = "App"),
+            ),
+        )
+        assertEquals(listOf("local-app", "app-qa", "app"), merged.map { it.agentId })
+        assertTrue(merged.first { it.agentId == "app-qa" }.isSelf)
+        assertFalse(merged.first { it.agentId == "app" }.isSelf)
+    }
+
+    @Test
+    fun `dmCandidates drops local app and self but keeps platform app member`() {
+        // 验收实证口径：频道 9 名成员里，私聊名单 = 全体减本机自己；
+        // agentId=app（另一台设备的 App 身份）必须在名单里。
+        val members = listOf(
+            TeamChannelMember(agentId = "local-app", displayName = "本机 App", isLocalApp = true),
+            TeamChannelMember(agentId = "app-qa", displayName = "App QA", isPlatformAgent = true, isSelf = true),
+            TeamChannelMember(agentId = "app", displayName = "App", isPlatformAgent = true),
+            TeamChannelMember(agentId = "codex", displayName = "Codex", isPlatformAgent = true),
+        )
+        assertEquals(listOf("app", "codex"), dmCandidates(members).map { it.agentId })
+    }
+
+    @Test
     fun `mergePlatformChannelMembers with no platform list keeps local list`() {
         val local = buildChannelMembers(listOf(record("codex", "Codex")))
         assertEquals(local, mergePlatformChannelMembers(local, emptyList()))

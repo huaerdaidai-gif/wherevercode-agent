@@ -89,6 +89,8 @@ data class TeamChannelMember(
     val isLocalApp: Boolean = false,
     /** 平台 Agent（端点直连成员，消息直达，不走代理中转）。 */
     val isPlatformAgent: Boolean = false,
+    /** 平台口径的「本机自己」（participants 的 is_self）：本机凭证在频道里的身份。 */
+    val isSelf: Boolean = false,
 )
 
 /** 只读扇出的候选 Agent（由调用方从 Agent 记录解析出 RemoteTarget 再传进来）。 */
@@ -224,19 +226,40 @@ fun mergePlatformChannelMembers(
     local: List<TeamChannelMember>,
     participants: List<ChannelParticipant>,
 ): List<TeamChannelMember> {
-    val seen = local.mapTo(mutableSetOf()) { it.agentId }
     val merged = local.toMutableList()
+    val indexById = HashMap<String, Int>()
+    merged.forEachIndexed { i, member -> indexById.putIfAbsent(member.agentId, i) }
     for (participant in participants) {
-        if (!seen.add(participant.agentId)) continue
+        val idx = indexById[participant.agentId]
+        if (idx != null) {
+            // 平台 is_self 是「本机在平台上的身份」的真值信号：本地同 id
+            // 条目保留在前、显示名不被覆盖，但 self 标记必须回写——否则
+            // 私聊名单排不掉自己（2026-11-21 验收实证：名单混进 app-qa）。
+            if (participant.isSelf && !merged[idx].isSelf) {
+                merged[idx] = merged[idx].copy(isSelf = true)
+            }
+            continue
+        }
+        indexById[participant.agentId] = merged.size
         merged += TeamChannelMember(
             agentId = participant.agentId,
             displayName = participant.agentName,
             isLocalApp = false,
             isPlatformAgent = true,
+            isSelf = participant.isSelf,
         )
     }
     return merged
 }
+
+/**
+ * 私聊发起名单：频道全体成员减去本机自己——本机 App 行与平台
+ * is_self 身份都不进名单。注意不要套成员行的可见性过滤
+ * （visibleTeamChannelMembers 隐藏 agentId=app）：app 是另一台
+ * 设备的 App 在平台上的身份，是正当私聊对象（2026-11-21 验收实证）。
+ */
+fun dmCandidates(members: List<TeamChannelMember>): List<TeamChannelMember> =
+    members.filterNot { it.isLocalApp || it.isSelf }
 
 // ---------------------------------------------------------------------------
 // 团队对话按任务分串 + 发言权（2026-11-12，回复归属修复的团队部分）。

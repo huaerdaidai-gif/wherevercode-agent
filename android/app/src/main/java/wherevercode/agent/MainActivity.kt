@@ -214,6 +214,7 @@ import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.buildChannelMembers
 import wherevercode.agent.core.team.mergePlatformChannelMembers
+import wherevercode.agent.core.team.dmCandidates
 import wherevercode.agent.core.team.visibleTeamChannelMembers
 import wherevercode.agent.core.dispatch.McpDispatchRuntime
 import wherevercode.agent.core.team.loadPairingRecord
@@ -6068,7 +6069,11 @@ class MainActivity : AppCompatActivity() {
      * 就是平台为准的全体成员——只在本机加过的 Agent 不等于频道成员，
      * 私聊名单（私聊只给频道成员）与成员行都以这份合并表为准。
      */
-    private fun teamChannelMembers(): List<TeamChannelMember> {
+    private fun teamChannelMembers(): List<TeamChannelMember> =
+        visibleTeamChannelMembers(mergedTeamChannelMembers())
+
+    /** 合并表（未套成员行可见性过滤）：本地成员 + 平台当前频道 participants。 */
+    private fun mergedTeamChannelMembers(): List<TeamChannelMember> {
         val agents = try {
             agentStore.listAgents()
         } catch (_: Exception) {
@@ -6078,10 +6083,12 @@ class MainActivity : AppCompatActivity() {
             .firstOrNull { it.id == activeTeamChannelId() }
             ?.participantDetails
             .orEmpty()
-        return visibleTeamChannelMembers(
-            mergePlatformChannelMembers(buildChannelMembers(agents), participants),
-        )
+        return mergePlatformChannelMembers(buildChannelMembers(agents), participants)
     }
+
+    /** 私聊发起名单（频道全体成员减本机自己；不套 app 隐藏，理由见 dmCandidates）。 */
+    private fun teamChannelDmCandidates(): List<TeamChannelMember> =
+        dmCandidates(mergedTeamChannelMembers())
 
     /** 已读标记（本机持久化，键按频道分；服务端标记由 markTeamChannelRead 同步推）。 */
     private fun teamChannelLastReadId(channelId: String): String? =
@@ -6144,6 +6151,7 @@ class MainActivity : AppCompatActivity() {
                 ?: ChannelConnectionState.STOPPED,
             connectionError = feed?.lastError,
             members = teamChannelMembers(),
+            dmCandidates = teamChannelDmCandidates(),
             messages = messages,
             unreadCount = unreadCount,
             unreadCapped = unreadCapped,
@@ -6441,6 +6449,7 @@ class MainActivity : AppCompatActivity() {
                     ?: ChannelConnectionState.STOPPED,
                 connectionError = feed?.lastError,
                 members = teamChannelMembers(),
+                dmCandidates = teamChannelDmCandidates(),
                 messages = messages,
                 unreadCount = 0,
                 unreadCapped = false,

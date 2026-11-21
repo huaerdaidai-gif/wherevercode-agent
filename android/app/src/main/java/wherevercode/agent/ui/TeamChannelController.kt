@@ -39,6 +39,8 @@ data class TeamChannelSnapshot(
     val connectionState: ChannelConnectionState,
     val connectionError: String?,
     val members: List<TeamChannelMember>,
+    /** 私聊发起名单（频道全体成员减本机自己；与成员行分开，理由见 dmCandidates）。 */
+    val dmCandidates: List<TeamChannelMember> = emptyList(),
     val messages: List<PlatformChannelMessage>,
     val unreadCount: Int,
     val unreadCapped: Boolean,
@@ -705,7 +707,7 @@ class TeamChannelController(
         }
         val startRow = UiKit.horizontal(context).apply { setPadding(0, dp(4), 0, 0) }
         startRow.addView(UiKit.text(context, "发起私聊：", 11f, R.color.text_tertiary))
-        snapshot.members.filter { !it.isLocalApp }.forEach { member ->
+        snapshot.dmCandidates.forEach { member ->
             startRow.addView(
                 UiKit.text(context, member.displayName, 11f, R.color.accent).apply {
                     setPadding(dp(8), dp(4), dp(8), dp(4))
