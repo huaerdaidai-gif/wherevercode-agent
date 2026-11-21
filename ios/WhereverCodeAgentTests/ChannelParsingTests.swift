@@ -209,4 +209,66 @@ final class ChannelParsingTests: XCTestCase {
             privilegedSenderIds: ["owner"])
         XCTAssertEqual(center.mentionMessages.map(\.id), ["m1"])
     }
+
+    func testNotificationModesAndEffectiveUnread() {
+        XCTAssertEqual(ChannelNotifyMode.all.rawValue, "全部消息")
+        XCTAssertEqual(ChannelNotifyMode.mentionsOnly.rawValue, "仅@我")
+        XCTAssertEqual(ChannelNotifyMode.muted.rawValue, "静音")
+
+        // 验证三档未读过滤口径：
+        // 1. 全部消息：全量未读
+        XCTAssertEqual(ChannelExtras.effectiveUnreadCount(unreadCount: 5, unreadMentionCount: 2, notifyMode: "全部消息"), 5)
+        // 2. 仅@我：只计提及数
+        XCTAssertEqual(ChannelExtras.effectiveUnreadCount(unreadCount: 5, unreadMentionCount: 2, notifyMode: "仅@我"), 2)
+        // 3. 静音：未读归零
+        XCTAssertEqual(ChannelExtras.effectiveUnreadCount(unreadCount: 5, unreadMentionCount: 2, notifyMode: "静音"), 0)
+        XCTAssertEqual(ChannelExtras.effectiveUnreadCount(unreadCount: 5, unreadMentionCount: 2, notifyMode: "免打扰"), 0)
+    }
+
+    func testSafeMarkdownAttributedString() {
+        let md = "这是 **粗体** 和 `行内代码` 以及 [链接](https://example.com)"
+        let attr = ChannelExtras.safeMarkdownAttributedString(md)
+        let plain = String(attr.characters)
+        XCTAssertTrue(plain.contains("粗体"))
+        XCTAssertTrue(plain.contains("行内代码"))
+
+        // 遇到非法或未闭合标记必须回退纯文本，绝不崩溃、绝不吞字
+        let broken = "未闭合标记 **没闭合"
+        let fallback = ChannelExtras.safeMarkdownAttributedString(broken)
+        XCTAssertEqual(String(fallback.characters), broken)
+    }
+
+    func testTeamThreadAndGroupTopicThreads() {
+        let root = ChannelMessage(id: "root-1", agentId: "user-1", agentName: "主管", text: "发起话题：重构传输层", createdAtSeconds: 100)
+        let reply1 = ChannelMessage(id: "reply-1", agentId: "agent-1", agentName: "Codex", text: "已开始设计", replyTo: "root-1", createdAtSeconds: 105)
+        let reply2 = ChannelMessage(id: "reply-2", agentId: "agent-2", agentName: "Claude", text: "同意方案", replyTo: "reply-1", createdAtSeconds: 110)
+        let standalone = ChannelMessage(id: "standalone", agentId: "user-2", agentName: "乙", text: "收到通知", createdAtSeconds: 115)
+
+        let threads = groupTopicThreads(messages: [root, reply1, reply2, standalone])
+        XCTAssertEqual(threads.count, 1)
+        let topic = threads[0]
+        XCTAssertTrue(topic.isTopicThread)
+        XCTAssertEqual(topic.rootMessageId, "root-1")
+        XCTAssertEqual(topic.topicTitle, "发起话题：重构传输层")
+        XCTAssertEqual(topic.messages.map(\.id), ["root-1", "reply-1", "reply-2"])
+        XCTAssertEqual(teamThreadTitle(thread: topic), "话题 · 发起话题：重构传输层")
+
+        let emptyThreads = groupTopicThreads(messages: [standalone])
+        XCTAssertTrue(emptyThreads.isEmpty)
+    }
+
+    func testParseChannelTypingWsEvent() {
+        let json = """
+        {"type":"typing","channel_id":"ch-100","sender_id":"agent-codex","sender_name":"Codex","is_typing":true}
+        """
+        let event = parseChannelTypingWsEvent(json)
+        XCTAssertNotNil(event)
+        XCTAssertEqual(event?.channelId, "ch-100")
+        XCTAssertEqual(event?.senderId, "agent-codex")
+        XCTAssertEqual(event?.senderName, "Codex")
+        XCTAssertEqual(event?.isTyping, true)
+
+        XCTAssertNil(parseChannelTypingWsEvent(#"{"type":"message","message":{"id":"x"}}"#))
+        XCTAssertNil(parseChannelTypingWsEvent("invalid json"))
+    }
 }

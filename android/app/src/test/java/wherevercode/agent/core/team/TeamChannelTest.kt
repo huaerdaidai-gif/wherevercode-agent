@@ -367,4 +367,68 @@ class TeamChannelTest {
         assertNull(plainView.taskId)
         assertEquals("大家早。", plainView.text)
     }
+
+    @Test
+    fun `groupTopicThreads groups root message and chained replies into free topic thread`() {
+        val root = TeamThreadMessage(
+            messageId = "msg-root-1",
+            senderId = "user-1",
+            senderName = "Alice",
+            text = "探讨一下客户端架构演进方案",
+            createdAtSeconds = 100.0,
+        )
+        val reply1 = TeamThreadMessage(
+            messageId = "msg-reply-1",
+            senderId = "agent-1",
+            senderName = "Codex",
+            text = "建议把状态机和视图层彻底解耦",
+            replyToId = "msg-root-1",
+            createdAtSeconds = 101.0,
+        )
+        val reply2 = TeamThreadMessage(
+            messageId = "msg-reply-2",
+            senderId = "agent-2",
+            senderName = "Claude",
+            text = "同意，而且网络层信令也应拆出来",
+            replyToId = "msg-reply-1",
+            createdAtSeconds = 102.0,
+        )
+        val standalone = TeamThreadMessage(
+            messageId = "msg-standalone",
+            senderId = "user-2",
+            senderName = "Bob",
+            text = "午饭吃什么？",
+            createdAtSeconds = 105.0,
+        )
+
+        val threads = groupTopicThreads(listOf(root, reply1, reply2, standalone))
+        assertEquals(1, threads.size)
+        val topic = threads.single()
+        assertTrue(topic.isTopicThread)
+        assertEquals("msg-root-1", topic.rootMessageId)
+        assertEquals("探讨一下客户端架构演进方案", topic.topicTitle)
+        assertEquals(3, topic.messages.size)
+        assertEquals(listOf("msg-root-1", "msg-reply-1", "msg-reply-2"), topic.messages.map { it.messageId })
+        assertEquals("话题 · 探讨一下客户端架构演进方案", teamThreadTitle(topic))
+    }
+
+    @Test
+    fun `groupTopicThreads returns empty list when no messages have replies`() {
+        val standalone1 = TeamThreadMessage(
+            messageId = "m1",
+            senderId = "u1",
+            senderName = "A",
+            text = "消息一",
+            createdAtSeconds = 1.0,
+        )
+        val standalone2 = TeamThreadMessage(
+            messageId = "m2",
+            senderId = "u2",
+            senderName = "B",
+            text = "消息二",
+            createdAtSeconds = 2.0,
+        )
+        val threads = groupTopicThreads(listOf(standalone1, standalone2))
+        assertTrue(threads.isEmpty())
+    }
 }

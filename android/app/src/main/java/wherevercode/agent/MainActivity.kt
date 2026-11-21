@@ -465,6 +465,10 @@ class MainActivity : AppCompatActivity() {
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
     private var teamChannelSearchQuery = ""
     private var teamChannelSearchResults: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
+    /** 输入中信令：正在输入成员名称（零 token）。 */
+    private var teamChannelTypingSender: String? = null
+    /** 激活的自由话题根消息 id（非空时仅聚焦该话题串）。 */
+    private var teamChannelActiveTopicRootId: String? = null
     /** 频道刷新在后台运行，期间收到的刷新请求合并为下一轮。 */
     private var teamChannelRefreshRunning = false
     private var teamChannelRefreshPending = false
@@ -1745,6 +1749,10 @@ class MainActivity : AppCompatActivity() {
             },
             onOpenAttachmentRef = { ref -> openAttachmentRef(ref) },
             onRequestAttachmentRef = { showAttachmentRefInput() },
+            onSelectTopicThread = { rootId ->
+                teamChannelActiveTopicRootId = rootId
+                refreshTeamChannel()
+            },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
@@ -6140,6 +6148,8 @@ class MainActivity : AppCompatActivity() {
                 .getString("notify_$activeId", "全部") ?: "全部",
             searchQuery = teamChannelSearchQuery,
             searchResults = teamChannelSearchResults,
+            typingSenderName = teamChannelTypingSender,
+            activeTopicThreadRootId = teamChannelActiveTopicRootId,
         )
     }
 
@@ -6508,6 +6518,14 @@ class MainActivity : AppCompatActivity() {
         synchronized(teamChannelMessages) {
             teamChannelFeed = feed
             teamChannelFeedChannelId = channelId
+        }
+        feed.onTyping = { typing ->
+            runOnUiThread {
+                if (teamChannelFeed === feed) {
+                    teamChannelTypingSender = if (typing.isTyping) typing.senderName else null
+                    refreshTeamChannel()
+                }
+            }
         }
         feed.start()
     }

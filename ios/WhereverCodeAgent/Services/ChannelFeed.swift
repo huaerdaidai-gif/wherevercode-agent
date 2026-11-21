@@ -30,6 +30,22 @@ public func parseChannelWsEvent(_ text: String) -> ChannelMessage? {
     return ChannelMessage.from(dict: message)
 }
 
+/// Parse one WS event frame for typing signals (zero token, phase-3 orphan).
+public func parseChannelTypingWsEvent(_ text: String) -> ChannelTypingEvent? {
+    guard let data = text.data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data),
+          let obj = json as? [String: Any],
+          obj["type"] as? String == "typing" else {
+        return nil
+    }
+    let senderId = (obj["sender_id"] as? String) ?? (obj["agent_id"] as? String) ?? ""
+    guard !senderId.isEmpty else { return nil }
+    let senderName = (obj["sender_name"] as? String) ?? (obj["agent_name"] as? String) ?? senderId
+    let channelId = (obj["channel_id"] as? String) ?? ""
+    let isTyping = (obj["is_typing"] as? Bool) ?? true
+    return ChannelTypingEvent(channelId: channelId, senderId: senderId, senderName: senderName, isTyping: isTyping)
+}
+
 /// Id-based dedup for the feed. Pure value type, unit-tested.
 public struct MessageDeduper {
     public static let maxSeenIDs = 1000
@@ -117,6 +133,7 @@ public final class ChannelFeed {
 
     public var onMessages: (([ChannelMessage]) -> Void)?
     public var onStateChange: ((ChannelConnectionState, String?) -> Void)?
+    public var onTyping: ((ChannelTypingEvent) -> Void)?
     /// Fired exactly once, after the first history poll completes:
     /// nil on success, the real error text on failure. Lets the UI
     /// stop its "loading history" indicator and surface poll errors.
@@ -236,7 +253,9 @@ public final class ChannelFeed {
                 switch message {
                 case .string(let text):
                     if stateMachine.state != .live { setState(.wsOpened) }
-                    if let parsed = parseChannelWsEvent(text) {
+                    if let typing = parseChannelTypingWsEvent(text) {
+                        onTyping?(typing)
+                    } else if let parsed = parseChannelWsEvent(text) {
                         deliver([parsed])
                     }
                 case .data:

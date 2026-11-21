@@ -46,11 +46,19 @@ class McpChannelEventFeed(
     var onChannelMessage: ((PlatformChannelMessage) -> Unit)? = null,
     /** 连接状态变化的监听（LIVE = WS 推送，POLLING = 断线兜底）。 */
     var onConnectionChange: ((ChannelConnectionState, String?) -> Unit)? = null,
+    /** 输入中信令监听（零 token，不调模型）。 */
+    var onTyping: ((ChannelTypingEvent) -> Unit)? = null,
 ) {
     private val feed = ChannelFeed(
         channelId = channelId,
         transport = transport,
         wsFactory = wsFactory,
+        onTyping = { typing ->
+            try {
+                onTyping?.invoke(typing)
+            } catch (_: Exception) {
+            }
+        },
         onMessages = { messages ->
             for (message in messages) {
                 try {

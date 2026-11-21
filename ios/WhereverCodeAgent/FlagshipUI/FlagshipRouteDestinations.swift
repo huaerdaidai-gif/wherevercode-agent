@@ -3226,6 +3226,9 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var readersText: String? = nil
     @State private var forwardSource: V5ChannelMessage? = nil
     private var otherChannels: [ChannelInfo] { appState.availableChannels }
+    @State private var activeTopicThreadRootId: String? = nil
+    @State private var showTopicThreadsSheet = false
+    @State private var typingSenderName: String? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var currentChannelId: String {
@@ -3332,6 +3335,17 @@ public struct ChannelDetailWorkspaceView: View {
         }
         .sheet(item: $selectedAgentProfile) { msg in
             AgentProfileSheet(message: msg)
+        }
+        .sheet(isPresented: $showTopicThreadsSheet) {
+            TopicThreadsSheet(
+                threads: groupTopicThreads(messages: messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }),
+                onSelect: { rootId in
+                    activeTopicThreadRootId = rootId
+                    if let root = messages.first(where: { $0.id == rootId }) {
+                        replyingTo = root
+                    }
+                }
+            )
         }
         .sheet(isPresented: $showChannelSettingsSheet) {
             ChannelSettingsSheet(appState: appState, channel: channelItem, dm: dmItem)
@@ -3565,6 +3579,26 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     // MARK: - 消息分区
+    private var displayedMessages: [V5ChannelMessage] {
+        guard let rootId = activeTopicThreadRootId else { return messages }
+        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
+        let topics = groupTopicThreads(messages: rawMsgs)
+        if let topic = topics.first(where: { $0.rootMessageId == rootId }) {
+            let topicIds = Set(topic.messages.map { $0.id })
+            return messages.filter { topicIds.contains($0.id) }
+        }
+        return messages.filter { $0.id == rootId || $0.replyToId == rootId }
+    }
+
+    private var activeTopicTitle: String {
+        guard let activeRootId = activeTopicThreadRootId,
+              let rootMsg = messages.first(where: { $0.id == activeRootId }) else {
+            return "话题讨论"
+        }
+        let trimmed = rootMsg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(trimmed.prefix(20))
+    }
+
     private var messagesTab: some View {
         VStack(spacing: 0) {
             messageCenterStrip
@@ -3586,6 +3620,25 @@ public struct ChannelDetailWorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.vertical, 60)
             } else {
+                if activeTopicThreadRootId != nil {
+                    HStack {
+                        Text("当前话题：\(activeTopicTitle)")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                        Spacer()
+                        Button("返回全部") {
+                            if replyingTo?.id == activeTopicThreadRootId {
+                                replyingTo = nil
+                            }
+                            activeTopicThreadRootId = nil
+                        }
+                        .font(.caption)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                }
                 // 对话组件收敛：列表脚手架与单聊共用 DialogMessageListView
                 // （LazyVStack、不主动滚底，与原 ScrollViewReader 现状一致）。
                 DialogMessageListView(
@@ -3594,9 +3647,9 @@ public struct ChannelDetailWorkspaceView: View {
                     horizontalPadding: 16,
                     topPadding: 12,
                     bottomPadding: 12,
-                    scrollTrigger: messages.count
+                    scrollTrigger: displayedMessages.count
                 ) {
-                    ForEach(messages) { msg in
+                    ForEach(displayedMessages) { msg in
                         messageRow(msg)
                             .id(msg.id)
                     }
@@ -3623,17 +3676,32 @@ public struct ChannelDetailWorkspaceView: View {
         } else {
             unread = messages.count
         }
+        let notifyMode = UserDefaults.standard.string(forKey: "channel.notify_mode.\(currentChannelId)") ?? "全部消息"
+        let effectiveUnread = ChannelExtras.effectiveUnreadCount(
+            unreadCount: unread,
+            unreadMentionCount: 0,
+            notifyMode: notifyMode
+        )
         let pinnedCount = messages.filter { $0.pinned && !$0.recalled }.count
+        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
+        let topicCount = groupTopicThreads(messages: rawMsgs).count
         return HStack(spacing: 12) {
             Text("消息中心")
                 .font(.caption)
                 .fontWeight(.semibold)
-            Text("未读 \(unread)")
+            Text("未读 \(effectiveUnread)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("置顶 \(pinnedCount)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Button {
+                showTopicThreadsSheet = true
+            } label: {
+                Text(topicCount > 0 ? "话题 (\(topicCount))" : "话题")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -3733,8 +3801,8 @@ public struct ChannelDetailWorkspaceView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // 撤回的消息只留占位，不展示正文。
-                    Text(msg.recalled ? ChannelExtras.recalledPlaceholder : msg.text)
+                    // 撤回的消息只留占位，不展示正文；未撤回的使用 Markdown 渲染（失败回退纯文本）。
+                    Text(ChannelExtras.safeMarkdownAttributedString(msg.recalled ? ChannelExtras.recalledPlaceholder : msg.text))
                         .font(.system(size: 14))
                         .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.16))
                         .textSelection(.enabled)
@@ -3798,6 +3866,12 @@ public struct ChannelDetailWorkspaceView: View {
                     replyingTo = msg
                 } label: {
                     Label("回复", systemImage: "arrowshape.turn.up.left")
+                }
+                Button {
+                    activeTopicThreadRootId = msg.id
+                    replyingTo = msg
+                } label: {
+                    Label("发起话题", systemImage: "bubble.left.and.bubble.right")
                 }
                 Button {
                     Task { await runAction { transport in
@@ -3903,6 +3977,17 @@ public struct ChannelDetailWorkspaceView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
+            }
+
+            if let typing = typingSenderName {
+                HStack(spacing: 6) {
+                    Text("\(typing) 正在输入…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
             }
 
             if let att = selectedAttachment {
@@ -4267,7 +4352,7 @@ public struct ChannelDetailWorkspaceView: View {
             postText += (postText.isEmpty ? "" : "\n") + "（附件：\(att.fileName)）"
         }
         if postText.isEmpty { postText = "分享了附件" }
-        let replyTo = replyingTo?.id
+        let replyTo = replyingTo?.id ?? activeTopicThreadRootId
         let attachmentRef = pendingAttachmentRef
         let channelID = currentChannelId
         // 幂等（阻塞⑤修法）：一次发送意图只铸一次 effect_key，
@@ -4642,6 +4727,11 @@ public struct ChannelDetailWorkspaceView: View {
                 self.connectionError = err
             }
         }
+        newFeed.onTyping = { typing in
+            Task { @MainActor in
+                self.typingSenderName = typing.isTyping ? typing.senderName : nil
+            }
+        }
         self.feed = newFeed
         newFeed.start()
         self.connectionState = newFeed.connectionState
@@ -4919,6 +5009,64 @@ public struct ChannelManagementListSheet: View {
     }
 }
 
+public struct TopicThreadsSheet: View {
+    public let threads: [TeamThread]
+    public let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    public init(threads: [TeamThread], onSelect: @escaping (String) -> Void) {
+        self.threads = threads
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                if threads.isEmpty {
+                    Text("当前频道暂无自由话题。\n点击任意消息长按菜单中的「发起话题」即可发起。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(threads) { thread in
+                        Button {
+                            if let rootId = thread.rootMessageId {
+                                onSelect(rootId)
+                                dismiss()
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(thread.topicTitle ?? "话题讨论")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                    Spacer()
+                                    Text("\(thread.messages.count) 条消息")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let first = thread.messages.first {
+                                    Text("\(first.displaySender): \(first.text)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("自由话题列表")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 public struct ChannelSettingsSheet: View {
     @ObservedObject public var appState: AppState
     public let channel: V5ChannelItem?
@@ -4936,6 +5084,7 @@ public struct ChannelSettingsSheet: View {
     @State private var showCreatorRemovalAlert = false
     @State private var isMuted = false
     @State private var ignoresUnread = false
+    @State private var notifyMode = "全部消息"
     private var channelId: String { channel?.id ?? dm?.id ?? "ch-general" }
     public init(appState: AppState, channel: V5ChannelItem?, dm: V5DirectMessageItem?, onMembersChanged: (([V5ChannelMember]) -> Void)? = nil) {
         self.appState = appState; self.channel = channel; self.dm = dm; self.onMembersChanged = onMembersChanged
@@ -4945,6 +5094,7 @@ public struct ChannelSettingsSheet: View {
             Form {
                 channelInformationSection
                 directMessageInformationSections
+                notificationSettingsSection
                 channelMembersSection
                 if let errorText { Section { Text(errorText).foregroundStyle(.red).textSelection(.enabled) } }
             }
@@ -4953,6 +5103,9 @@ public struct ChannelSettingsSheet: View {
             .background(managementDialogs)
             .onAppear {
                 editedName = channel?.name ?? ""
+                let modeKey = "channel.notify_mode.\(channelId)"
+                notifyMode = UserDefaults.standard.string(forKey: modeKey) ?? (channel?.isMuted == true || dm?.isMuted == true ? "静音" : "全部消息")
+                isMuted = (notifyMode == "静音")
                 agents = (try? LocalData.shared.agents.listAgents()) ?? []
                 members = appState.availableChannels.first(where: { $0.id == channelId })?
                     .participantDetails.map(V5ChannelMember.init) ?? []
@@ -4980,10 +5133,30 @@ public struct ChannelSettingsSheet: View {
                 LabeledContent("身份类型", value: d.isAgent ? "平台 Agent" : "团队成员")
                 LabeledContent("归属角色", value: d.targetRole)
             }
-            Section("通知与权限") {
-                Toggle("消息免打扰", isOn: $isMuted)
-                Toggle("忽略未读提示", isOn: $ignoresUnread)
+        }
+    }
+    @ViewBuilder private var notificationSettingsSection: some View {
+        Section("通知设置") {
+            Picker("通知级别", selection: $notifyMode) {
+                Text("全部消息").tag("全部消息")
+                Text("仅@我").tag("仅@我")
+                Text("静音").tag("静音")
             }
+            .pickerStyle(.segmented)
+            .onChange(of: notifyMode) { _, newMode in
+                UserDefaults.standard.set(newMode, forKey: "channel.notify_mode.\(channelId)")
+                isMuted = (newMode == "静音")
+            }
+            Text(notifyModePrompt(notifyMode))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+    private func notifyModePrompt(_ mode: String) -> String {
+        switch mode {
+        case "仅@我": return "仅接收提及我的消息通知与未读提醒"
+        case "静音": return "不接收通知，不计入未读提醒"
+        default: return "接收所有新消息通知与未读计数"
         }
     }
     private var channelMembersSection: some View {
