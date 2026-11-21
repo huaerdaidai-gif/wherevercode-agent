@@ -303,6 +303,8 @@ import wherevercode.agent.ui.ChatAttachments
 import wherevercode.agent.ui.ConsoleScreenController
 import wherevercode.agent.ui.ChatComposerView
 import wherevercode.agent.ui.MessageListView
+import wherevercode.agent.ui.SettingsHomeController
+import wherevercode.agent.ui.SettingsSections
 import wherevercode.agent.ui.TeamChannelController
 import wherevercode.agent.ui.TeamChannelSnapshot
 import wherevercode.agent.ui.ConsoleSnapshot
@@ -373,6 +375,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var screenAgents: View
     private lateinit var screenSettings: View
     private lateinit var screenModels: View
+
+    /** 设置首页（照片批 F）：分节菜单，与 iOS 设置页同构；进设置先落首页。 */
+    private lateinit var settingsHomeController: SettingsHomeController
+
+    /** 当前打开的设置分节；null = 在设置首页（或不在设置页）。 */
+    private var settingsSection: SettingsSections.Section? = null
 
     /** V5 应用更新（2026-11-11）：设置页“关于”分节的更新控制器。 */
     private lateinit var appUpdateSettings: AppUpdateSettings
@@ -1550,6 +1558,21 @@ class MainActivity : AppCompatActivity() {
         container.addView(screenAgents)
         container.addView(screenSettings)
         container.addView(screenModels)
+        // 设置首页（照片批 F）：插进设置页根布局首位，与旧长表单的各块
+        // 共用同一 ScrollView；可见性由 SettingsSections 按形态切换。
+        settingsHomeController = SettingsHomeController(
+            this,
+            onBack = { hideSettings() },
+            onOpenSection = { section -> openSettingsSection(section) },
+            onOpenScreen = { entryId -> showEntry(entryId) },
+            onCycleTheme = { cycleTheme() },
+            onTodo = { title -> toast("【待开发】$title 尚未开发") },
+            platformStatus = {
+                if (platformCredentialStore.loadPlatformToken() != null) "平台已配置（凭证已存本机）"
+                else "平台未配置（本地优先）"
+            },
+        )
+        settingsRootLayout().addView(settingsHomeController.root, 0)
         taskDetailController = TaskDetailController(
             this,
             onBack = { hideTaskDetail() },
@@ -1909,13 +1932,14 @@ class MainActivity : AppCompatActivity() {
             }
             EntryScreen.TOOLS -> {
                 refreshBrainStatus()
-                // 设置页是单 ScrollView：回到页顶即大脑分节（分节在页首）。
-                screenSettings.post { (screenSettings as ScrollView).scrollTo(0, 0) }
+                // 照片批 F：进设置先落设置首页（分节菜单），不再直接摊长表单。
+                showSettingsHome()
             }
             EntryScreen.SETTINGS -> {
                 refreshBrainStatus()
                 // V5 应用更新：设置页打开时，已登录且上次检查超过 5 分钟就自动检查一次。
                 if (::appUpdateSettings.isInitialized) appUpdateSettings.onSettingsShown()
+                showSettingsHome()
             }
             EntryScreen.RESULTS -> refreshResults()
             EntryScreen.HELP -> Unit
@@ -1935,6 +1959,47 @@ class MainActivity : AppCompatActivity() {
      * 模型页是独立一页（与设备、Agent 并列），不按设置处理。 */
     private fun isSettingsEntry(entry: String): Boolean =
         entry == DrawerController.ID_SETTINGS || entry == DrawerController.ID_TOOLS_CONNECTIONS
+
+    // ── 设置首页与分节（照片批 F） ──────────────────────────────────
+
+    private fun settingsRootLayout(): LinearLayout =
+        (screenSettings as ScrollView).getChildAt(0) as LinearLayout
+
+    /** 落设置首页：旧长表单各块全隐，只显首页菜单；平台状态现取刷新。 */
+    private fun showSettingsHome() {
+        settingsSection = null
+        SettingsSections.applyHome(settingsRootLayout())
+        settingsHomeController.render()
+        (screenSettings as ScrollView).scrollTo(0, 0)
+    }
+
+    /** 从首页进行一节：只显该节的块（内容与接线一字不动）+ 页头（标题换成本节名）。 */
+    private fun openSettingsSection(section: SettingsSections.Section) {
+        settingsSection = section
+        settingsHomeController.root.visibility = View.GONE
+        SettingsSections.apply(settingsRootLayout(), section)
+        setSettingsHeaderTitle(section.title)
+        (screenSettings as ScrollView).scrollTo(0, 0)
+    }
+
+    /** 页头标题换名（分节形态）：页头是根布局第一个非主页子级，标题/副标题在其内层布局的前两个 TextView。 */
+    private fun setSettingsHeaderTitle(title: String) {
+        val root = settingsRootLayout()
+        val header = (0 until root.childCount)
+            .map { root.getChildAt(it) }
+            .firstOrNull { it.tag != SettingsSections.HOME_TAG } as? LinearLayout ?: return
+        val titleBox = (0 until header.childCount)
+            .map { header.getChildAt(it) }
+            .filterIsInstance<LinearLayout>()
+            .firstOrNull() ?: return
+        (titleBox.getChildAt(0) as? TextView)?.text = title
+        (titleBox.getChildAt(1) as? TextView)?.visibility = View.GONE
+    }
+
+    /** 设置页头返回键：在分节里先回首页，在首页才离开设置。 */
+    private fun onSettingsBack() {
+        if (settingsSection != null) showSettingsHome() else hideSettings()
+    }
 
     private fun hideSettings() {
         // 离开设置页即放弃未保存的通用大脑编辑（恢复新增模式、表单
@@ -9235,7 +9300,7 @@ class MainActivity : AppCompatActivity() {
             buttonAdvancedInfo.text = if (expanded) "收起高级信息" else "高级信息"
         }
 
-        screenSettings.findViewById<View>(R.id.buttonSettingsBack).setOnClickListener { hideSettings() }
+        screenSettings.findViewById<View>(R.id.buttonSettingsBack).setOnClickListener { onSettingsBack() }
         buttonSignInChatGpt.isEnabled = false
         buttonSignInChatGpt.setOnClickListener { signInWithChatGpt() }
         buttonSignOut.setOnClickListener { signOut() }
@@ -13127,7 +13192,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (isSettingsEntry(currentEntry)) {
-            hideSettings()
+            onSettingsBack()
             return
         }
         if (taskDetailVisible) {

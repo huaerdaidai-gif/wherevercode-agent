@@ -4,6 +4,7 @@
 // zero bottom TabBar, full PR #13 AppState capabilities preserved.
 
 import SwiftUI
+import UIKit
 
 public enum AppTab: String, CaseIterable, Hashable {
     case chat
@@ -90,6 +91,12 @@ public final class AppState: ObservableObject {
         self.brainConfigStore = configStore
         self.brainKeyStore = keyStore
         let brainModel = BrainSettingsModel(configStore: configStore, keyStore: keyStore)
+        // 会员设备码登录（Qwen / Kimi / Grok）：设置页登录动作与
+        // 注册表的适配器共用同一套 manager 构造；令牌状态只存
+        // Keychain，两边读到的永远一致。
+        brainModel.deviceCodeManagers = BrainBootstrap.makeDeviceCodeManagers(
+            keyStore: keyStore)
+        KimiDeviceHeaders.deviceName = UIDevice.current.model
         self.brainSettingsModel = brainModel
 
         let modelStore = KeyValueModelConfigStore(kv: data.kv)

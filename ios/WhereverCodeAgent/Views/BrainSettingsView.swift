@@ -27,6 +27,11 @@ public final class BrainSettingsModel: ObservableObject {
     /// The owner's live adapter registry (rebuilt on change), for
     /// the editor's real model-list fetches.
     public var registryProvider: () -> BrainAdapterRegistry = { BrainAdapterRegistry() }
+    /// Device-code membership managers (Qwen / Kimi / Grok),
+    /// keyed by brain id; wired by the owner at startup from
+    /// BrainBootstrap.makeDeviceCodeManagers. Empty in tests that
+    /// do not exercise membership login.
+    public var deviceCodeManagers: [String: DeviceCodeManager] = [:]
 
     public init(
         configStore: BrainConfigStore,
@@ -63,10 +68,51 @@ public final class BrainSettingsModel: ObservableObject {
                 ? "会员登录在 iOS 上尚未接入，不能作为当前模型"
                 : "此模型的接入模块未加载"
         }
+        // Login-only brains (Gemini): signing in never makes them
+        // a brain — the adapter refuses inference by design.
+        if config.extra[loginOnlyExtraKey] == "true" {
+            return LoginOnlyBrainAdapter.notABrainMessage
+        }
+        // Device-code membership brains (Android caliber): usable
+        // when the vendor token is live (or refreshable) AND the
+        // user filled a model name. A signed-in brain with a blank
+        // model is not configured — the model is never silently
+        // defaulted.
+        if DeviceCodeConfigs.isDeviceCodeBrainId(config.brainId) {
+            guard let manager = deviceCodeManagers[config.brainId] else {
+                return "会员登录在 iOS 上尚未接入，不能作为当前模型"
+            }
+            if !manager.isSignedIn() {
+                return "尚未登录：先打开编辑页点「登录」完成授权"
+            }
+            if config.model.trimmingCharacters(in: .whitespaces).isEmpty {
+                return "尚未填写模型名：登录后在编辑页填好模型名"
+            }
+            return nil
+        }
         if config.kind != .subscription && !hasKey(for: config) {
             return "尚未填写 API Key"
         }
         return nil
+    }
+
+    /// True when a device-code membership brain has a live (or
+    /// refreshable) vendor token on this device.
+    public func isDeviceCodeSignedIn(for config: BrainConfig) -> Bool {
+        deviceCodeManagers[config.brainId]?.isSignedIn() ?? false
+    }
+
+    /// Device-code sign-out: wipe the local tokens (no vendor
+    /// revocation endpoint exists — the user revokes on the
+    /// vendor's account page). Unsets the current brain when the
+    /// signed-out brain was current, like Android.
+    public func signOutDeviceCode(for config: BrainConfig) {
+        deviceCodeManagers[config.brainId]?.signOut()
+        if configStore.currentBrainId() == config.brainId {
+            configStore.setCurrentBrainId(nil)
+        }
+        reload()
+        onChange()
     }
 
     public func setCurrent(brainId: String?) {
@@ -406,10 +452,22 @@ public struct BrainSettingsView: View {
             BrainRowView(
                 config: config,
                 isCurrent: model.currentBrainId == config.brainId,
-                hasKey: model.hasKey(for: config)
+                hasKey: model.hasKey(for: config),
+                credentialLabel: credentialLabel(for: config)
             )
         }
         .foregroundStyle(.primary)
+    }
+
+    /// Row credential wording: device-code membership brains show
+    /// login state (they have no API Key), the login-only brain
+    /// shows its honest marker, everything else keeps Key wording.
+    private func credentialLabel(for config: BrainConfig) -> String? {
+        if config.extra[loginOnlyExtraKey] == "true" { return "仅登录" }
+        if DeviceCodeConfigs.isDeviceCodeBrainId(config.brainId) {
+            return model.isDeviceCodeSignedIn(for: config) ? "已登录" : "未登录"
+        }
+        return nil
     }
 
 }
@@ -430,6 +488,7 @@ private struct BrainRowView: View {
     let config: BrainConfig
     let isCurrent: Bool
     let hasKey: Bool
+    var credentialLabel: String? = nil
 
     var body: some View {
         HStack {
@@ -470,6 +529,9 @@ private struct BrainRowView: View {
         let model = config.model.isEmpty ? "未选模型" : config.model
         if config.adapterId == BrainBootstrap.siwcBrainId {
             return "\(kind) · 登录接入开发中"
+        }
+        if let credentialLabel {
+            return "\(kind) · \(model) · \(credentialLabel)"
         }
         return "\(kind) · \(model) · \(hasKey ? "已填 Key" : "未填 Key")"
     }
@@ -1198,6 +1260,13 @@ private struct BrainEditorView: View {
     private var isSiwc: Bool { original.adapterId == BrainBootstrap.siwcBrainId }
     private var isCloudflare: Bool { original.adapterId == CloudflareBrainAdapter.adapterId }
     private var isGeneric: Bool { original.adapterId == GenericOpenAiBrainAdapter.adapterId }
+    private var deviceConfig: DeviceCodeConfig? {
+        DeviceCodeConfigs.byId(original.brainId)
+    }
+    private var isDeviceCode: Bool { deviceConfig != nil }
+    private var isLoginOnly: Bool { original.extra[loginOnlyExtraKey] == "true" }
+
+    @State private var showDeviceCodeLogin = false
 
     var body: some View {
         NavigationStack {
@@ -1208,12 +1277,26 @@ private struct BrainEditorView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+                } else if isLoginOnly {
+                    Section {
+                        Text("仅登录，不能当大脑用推理：会员 token 调不了 Gemini API，内部端点未文档化且条款禁止复用；请用 API Key（AI Studio）或 Vertex AI 作 Gemini 大脑。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("登录入口尚未开放：需要先为本应用注册自有的 Google OAuth 客户端并填入客户端 ID，之后这一行才能登录。在那之前，这里不提供假的登录按钮。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } header: { Text("Gemini（仅登录）").textCase(nil) }
                 } else {
+                    if let deviceConfig {
+                        deviceCodeLoginSection(deviceConfig)
+                    }
                     Section {
                         TextField("名称", text: $label)
-                        TextField("服务地址（https://…）", text: $baseUrl)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                        if !isDeviceCode {
+                            TextField("服务地址（https://…）", text: $baseUrl)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                         if isCloudflare {
                             TextField("Cloudflare Account ID", text: $accountId)
                                 .textInputAutocapitalization(.never)
@@ -1269,16 +1352,18 @@ private struct BrainEditorView: View {
                             .foregroundStyle(.primary)
                         }
                     } header: { Text("模型").textCase(nil) }
-                    Section {
-                        SecureField(
-                            model.hasKey(for: original) ? "已保存（留空不改，输入则替换）" : "粘贴 API Key",
-                            text: $apiKey)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Text("只存本机 Keychain，不显示、不写日志、不经过平台服务器。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } header: { Text("API Key").textCase(nil) }
+                    if !isDeviceCode {
+                        Section {
+                            SecureField(
+                                model.hasKey(for: original) ? "已保存（留空不改，输入则替换）" : "粘贴 API Key",
+                                text: $apiKey)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            Text("只存本机 Keychain，不显示、不写日志、不经过平台服务器。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } header: { Text("API Key").textCase(nil) }
+                    }
                 }
                 Section {
                     if model.currentBrainId != original.brainId {
@@ -1287,7 +1372,7 @@ private struct BrainEditorView: View {
                             model.setCurrent(brainId: original.brainId)
                             dismiss()
                         }
-                        .disabled(isSiwc || (!model.hasKey(for: original) && apiKey.isEmpty))
+                        .disabled(setCurrentDisabled)
                         if let reason = model.unusableReason(for: original), apiKey.isEmpty {
                             Text(reason)
                                 .font(.caption)
@@ -1316,6 +1401,12 @@ private struct BrainEditorView: View {
                 }
             }
             .navigationTitle(original.label)
+            .sheet(isPresented: $showDeviceCodeLogin) {
+                if let deviceConfig, let manager = model.deviceCodeManagers[original.brainId] {
+                    DeviceCodeLoginView(
+                        model: model, config: deviceConfig, manager: manager)
+                }
+            }
             .confirmationDialog("删除这个模型？", isPresented: $showDeleteConfirm) {
                 Button("删除", role: .destructive) {
                     model.delete(config: original)
@@ -1328,17 +1419,65 @@ private struct BrainEditorView: View {
         }
     }
 
+    /// 「设为当前模型」可点条件：SIWC 与仅登录大脑永不可设为当前；
+    /// 设备码大脑须已登录且编辑中的模型名非空（保存后由
+    /// BrainSettingsModel.setCurrent 再按同一口径复核）；其余沿用
+    /// 原口径（已有 Key 或正在输入新 Key）。
+    private var setCurrentDisabled: Bool {
+        if isSiwc || isLoginOnly { return true }
+        if isDeviceCode {
+            return !model.isDeviceCodeSignedIn(for: original)
+                || modelName.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return !model.hasKey(for: original) && apiKey.isEmpty
+    }
+
+    /// 设备码会员大脑的登录分节：登录状态 + 合规/风险说明 +
+    /// 登录/退出登录。文案口径与安卓 BrainLoginRows 一致。
+    @ViewBuilder
+    private func deviceCodeLoginSection(_ deviceConfig: DeviceCodeConfig) -> some View {
+        Section {
+            let signedIn = model.isDeviceCodeSignedIn(for: original)
+            Text(signedIn ? "已登录 \(deviceConfig.displayName)（token 只存本机 Keychain）。" : "未登录。点「登录」后在浏览器里输验证码完成授权。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if deviceConfig.experimental {
+                Text(deviceConfig.experimentalNote)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if !deviceConfig.complianceNote.isEmpty {
+                Text(deviceConfig.complianceNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if signedIn {
+                Button("退出登录", role: .destructive) {
+                    model.signOutDeviceCode(for: original)
+                }
+            } else {
+                Button("登录…") {
+                    showDeviceCodeLogin = true
+                }
+            }
+        } header: { Text("会员登录（设备码）").textCase(nil) }
+    }
+
     private func save() {
         var config = original
         config.label = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        let url = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        config.baseUrl = url.isEmpty ? nil : url
+        if !isDeviceCode {
+            // 设备码大脑的服务地址是厂商推理地址（种子写定），
+            // 编辑页不提供改址，更不能把令牌槽位写成 Key。
+            let url = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+            config.baseUrl = url.isEmpty ? nil : url
+        }
         config.model = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         if isCloudflare {
             config.extra[CloudflareBrainAdapter.extraAccountId] =
                 accountId.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        model.save(config: config, apiKey: apiKey)
+        model.save(config: config, apiKey: isDeviceCode ? "" : apiKey)
     }
 
     private func fetchModels() async {
@@ -1349,6 +1488,9 @@ private struct BrainEditorView: View {
         var adapter = appRegistryAdapter()
         if let generic = adapter as? GenericOpenAiBrainAdapter {
             adapter = generic.forBrain(original.brainId)
+        }
+        if let deviceCode = adapter as? DeviceCodeBrainAdapter {
+            adapter = deviceCode.forBrain(original.brainId)
         }
         guard let adapter else {
             modelFetchError = "这个模型的适配器还没有接入，暂时拉不到模型列表。"
