@@ -25,6 +25,7 @@ class SettingsHomeController(
     private val onCycleTheme: () -> Unit,
     private val onTodo: (String) -> Unit,
     private val platformStatus: () -> String,
+    private val platformAddress: () -> String = { "" },
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         tag = SettingsSections.HOME_TAG
@@ -34,6 +35,9 @@ class SettingsHomeController(
 
     private val statusText: TextView =
         UiKit.text(context, "", 12f, R.color.text_secondary)
+
+    private val addressText = UiKit.text(context, "", 14f, R.color.text_primary)
+    private val addressState = UiKit.text(context, "", 14f, R.color.text_primary)
 
     private sealed interface Dest {
         data class Section(val section: SettingsSections.Section) : Dest
@@ -49,9 +53,7 @@ class SettingsHomeController(
     private val groups: List<SectionGroup> = listOf(
         SectionGroup(
             "平台连接",
-            listOf(
-                Row("平台连接与令牌签发", Dest.Section(SettingsSections.Section.TOKEN)),
-            ),
+            emptyList(),
         ),
         SectionGroup(
             "账户",
@@ -68,6 +70,7 @@ class SettingsHomeController(
             "应用",
             listOf(
                 Row("模型配置", Dest.Screen(DrawerController.ID_MODELS)),
+                Row("平台连接与令牌签发", Dest.Section(SettingsSections.Section.TOKEN)),
                 Row("仓库授权", Dest.Section(SettingsSections.Section.REPOS)),
                 Row("插件与工具", Dest.Screen(DrawerController.ID_MCP_PLUGINS)),
                 Row("Webhook 唤醒与自动触发", Dest.Todo("Webhook 唤醒与自动触发")),
@@ -121,7 +124,11 @@ class SettingsHomeController(
                 setBackgroundResource(R.drawable.bg_card)
                 setPadding(dp(14), dp(4), dp(14), dp(4))
             }
-            if (group.title == "平台连接") cardRows.addView(statusText)
+            if (group.title == "平台连接") {
+                cardRows.addView(addressText)
+                cardRows.addView(addressState)
+                cardRows.addView(statusText)
+            }
             group.rows.forEach { row -> cardRows.addView(rowView(row)) }
             root.addView(cardRows)
         }
@@ -134,6 +141,9 @@ class SettingsHomeController(
 
     /** 每次进首页时刷新平台状态文案（现取，不缓存）。 */
     fun render() {
+        val address = platformAddress()
+        addressText.text = "平台地址　" + address.ifBlank { "未配置" }
+        addressState.text = "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
         statusText.text = platformStatus()
     }
 

@@ -1574,6 +1574,7 @@ class MainActivity : AppCompatActivity() {
             onOpenScreen = { entryId -> showEntry(entryId) },
             onCycleTheme = { cycleTheme() },
             onTodo = { title -> toast("【待开发】$title 尚未开发") },
+            platformAddress = ::normalizedConsolePlatformRoot,
             platformStatus = {
                 if (platformCredentialStore.loadPlatformToken() != null) "平台已配置（凭证已存本机）"
                 else "平台未配置（本地优先）"

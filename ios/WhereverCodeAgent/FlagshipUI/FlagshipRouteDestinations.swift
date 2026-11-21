@@ -755,6 +755,7 @@ public struct ProjectsHomeView: View {
                             Button("导入 Git 仓库") { showNewProjectSheet = true }.buttonStyle(.bordered)
                             Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
                             Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
+                                .accessibilityIdentifier("projects.browseFiles")
                             Button("开始对话") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
                             Button("Git 工作树") { onNavigateRoute("git") }.buttonStyle(.bordered)
                             Button("预览") { onNavigateRoute("preview") }.buttonStyle(.bordered)
