@@ -110,7 +110,7 @@ public struct FlagshipRouteDestinationView: View {
         case "skills":
             SkillsManagementScreen(routeId: "skills", appState: appState, onNavigateRoute: onNavigateRoute)
         case "connections":
-            SettingsView(appState: appState, onNavigateRoute: onNavigateRoute)
+            ConnectionManagementView(appState: appState)
         case "agentimport", "network", "routes":
             ConnectionExtendedScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
@@ -5983,6 +5983,12 @@ public struct AccountSettingsView: View {
                 .foregroundStyle(.primary)
 
                 NavigationLink {
+                    RepoAuthorizationView()
+                } label: {
+                    Label("仓库授权", systemImage: "lock.rectangle")
+                }
+
+                NavigationLink {
                     PrivacyAndSecurityScreen()
                 } label: {
                     Label("隐私与安全", systemImage: "lock.shield")
@@ -6066,6 +6072,12 @@ public struct AccountSettingsView: View {
                 }
                 .foregroundStyle(.primary)
 
+                NavigationLink {
+                    WorkspaceSettingsView()
+                } label: {
+                    Label("工作区", systemImage: "folder")
+                }
+
                 Button {
                     onNavigateRoute("personas")
                 } label: {
@@ -6091,6 +6103,12 @@ public struct AccountSettingsView: View {
                 }
                 .foregroundStyle(.primary)
 
+                NavigationLink {
+                    AutonomySettingsView()
+                } label: {
+                    Label("自主度", systemImage: "slider.horizontal.3")
+                }
+
                 // 大脑入口（已砍下放角落：主设置留一行安静入口，进现成 BrainSettingsView，页面内容不动）
                 NavigationLink {
                     BrainSettingsView(model: appState.brainSettingsModel)
@@ -6112,6 +6130,14 @@ public struct AccountSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier("settings.developerDiagnostics")
+
+                NavigationLink {
+                    AboutSettingsView()
+                } label: {
+                    Label("关于", systemImage: "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("设置")
