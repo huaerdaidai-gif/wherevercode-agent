@@ -121,8 +121,7 @@ public struct FlagshipRouteDestinationView: View {
             AccountSettingsView(appState: appState, chatModel: chatModel, capabilities: capabilities, onNavigateRoute: onNavigateRoute, onDismiss: {})
         case "onboarding":
             OnboardingLocalFirstScreen(appState: appState, onNavigateRoute: onNavigateRoute)
-        // P3-MSG 消息中心挂在既有 notifications 路由上（注册表
-        // feature_message_center 保持 TODO，翻转留到组装步）。
+        // 消息中心复用既有 notifications 路由。
         case "notifications":
             MessageCenterView(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
         case "activity", "audit", "usage", "sync", "recovery", "baseline":
@@ -4727,8 +4726,9 @@ public struct ChannelDetailWorkspaceView: View {
                 self.connectionError = err
             }
         }
-        newFeed.onTyping = { typing in
+        newFeed.onTyping = { [weak newFeed] typing in
             Task { @MainActor in
+                guard let newFeed, self.feed === newFeed else { return }
                 self.typingSenderName = typing.isTyping ? typing.senderName : nil
             }
         }
@@ -4780,7 +4780,9 @@ public struct ChannelDetailWorkspaceView: View {
         feed = nil
         oldFeed?.onMessages = nil
         oldFeed?.onStateChange = nil
+        oldFeed?.onTyping = nil
         oldFeed?.stop()
+        typingSenderName = nil
         connectionState = .stopped
         connectionError = nil
     }

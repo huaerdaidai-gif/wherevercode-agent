@@ -98,7 +98,7 @@ public enum EntryRegistry {
         Entry(id: "feature_channel_files", title: "频道文件", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "频道文件待开发（附件/网盘引用/预览下载）", routeId: "channels"),
         Entry(id: "feature_direct_message", title: "私聊服务", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "私聊服务待开发（与指定人员/Agent 独立私聊通道）", routeId: "channel"),
         Entry(id: "feature_team_space", title: "团队空间", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "团队空间待开发（成员与频道同页的统一空间 + 创建频道尚未开发）", routeId: "team"),
-        Entry(id: "feature_message_center", title: "消息中心", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "消息中心待开发（尚未开发）", routeId: "notifications"),
+        Entry(id: "feature_message_center", title: "消息中心", group: .feature, status: .implemented, parentId: "nav_channels", todoMessage: nil, routeId: "notifications"),
 
         // MARK: - 四、控制分组 (35 条)
         Entry(id: "feature_brain", title: "大脑", group: .feature, status: .implemented, parentId: "nav_feature_center", todoMessage: nil, routeId: "models"),

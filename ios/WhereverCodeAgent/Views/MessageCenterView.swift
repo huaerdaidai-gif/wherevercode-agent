@@ -152,7 +152,7 @@ struct MessageCenterView: View {
 
     private func entryRow(_ entry: MessageCenterEntry, subtitle: String) -> some View {
         Button {
-            // 点条目跳到对应频道（频道工作区路由）；跳转语义见文件头注释。
+            appState.selectChannel(entry.channelId)
             onNavigateRoute("channel")
         } label: {
             VStack(alignment: .leading, spacing: 4) {

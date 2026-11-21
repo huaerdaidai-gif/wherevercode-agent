@@ -6371,7 +6371,7 @@ class MainActivity : AppCompatActivity() {
                 if (endpoint == null) {
                     MessageCenterSnapshot()
                 } else {
-                    val (host, channelId) = endpoint
+                    val (host, _) = endpoint
                     val transport = PlatformChannelMcpTransport(
                         tokenProvider = { platformCredentialStore.loadPlatformToken() },
                         endpoint = PlatformAgent.mcpEndpoint(host),
@@ -6385,10 +6385,13 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: Exception) {
                         emptyList()
                     }
+                    val sources = transport.listChannels()
+                        .filter { !it.archived && it.kind != "dm" }
+                        .map { MessageCenterChannelSource(it.id, it.name) }
                     runBlocking {
                         MessageCenterLoader(transport).fetch(
-                            listOf(MessageCenterChannelSource(channelId, "频道 ${channelId.take(8)}")),
-                            listOf("本机 App", "协调者") + agentNames,
+                            sources,
+                            listOf("我", "本机 App", "协调者") + agentNames,
                         )
                     }
                 }
@@ -6411,19 +6414,13 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /**
-     * 点消息中心条目 → 跳到对应频道对应位置。当前位置语义：Android 端
-     * 频道页是唯一频道页（单频道现状），跳转 = 切到频道页并刷新，消息
-     * 就在该页的消息流/任务串里（与 iOS 端点条目推回频道工作区一致）；
-     * 不改 TeamChannelController（工作包禁区），页内像素级滚动定位留待
-     * 频道页支持焦点参数后接线。
-     */
     private fun openMessageCenterEntry(entry: MessageCenterEntry) {
+        teamChannelDmMode = false
+        teamChannelActiveId = entry.channelId
+        teamChannelSearchResults = null
+        teamChannelActiveTopicRootId = null
         showEntry(DrawerController.ID_TEAM_CHANNEL)
-        val preview = entry.text.take(40)
-        toast("已回到频道，定位：来自 ${entry.senderName} 的${if (preview.isBlank()) "一条消息" else "「$preview…」"}")
     }
-
 
     /** 快照组装失败时的兜底渲染（只报失败原因，不丢已有消息）。 */
     private fun refreshTeamChannelFallback() {
@@ -6531,6 +6528,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopTeamChannelFeed() {
+        teamChannelTypingSender = null
         val oldFeed = synchronized(teamChannelMessages) {
             val feed = teamChannelFeed
             teamChannelFeed = null

@@ -214,9 +214,8 @@ object EntryRegistry {
             "空", null, "nav_channels",
             "团队空间待开发（成员与频道同页的统一空间 + 创建频道尚未开发）", null),
         Entry("feature_message_center", "消息中心", Group.FEATURE,
-            Status.TODO, TargetKind.TODO, "",
-            "消", null, "nav_channels",
-            "消息中心待开发（尚未开发）", null),
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerRouter.ID_MESSAGE_CENTER,
+            "消", null, "nav_channels", null, null),
 
         // ── 四、控制分组 (35 条) ──
         Entry("feature_brain", "大脑", Group.FEATURE,
