@@ -700,7 +700,10 @@ public struct ProjectsHomeView: View {
                 Spacer()
 
                 Button {
-                    showNewProjectSheet = true
+                    // 与安卓一致：「新建项目」与空态「立即创建项目」走同一个
+                    // 「打开文件夹」对话框；旧表单只是对话框里 git 仓库地址
+                    // 一项的下级登记流程，不再作顶层入口。
+                    showProjectSources = true
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "plus")
@@ -820,7 +823,7 @@ public struct ProjectsHomeView: View {
                             .foregroundStyle(.secondary)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: 8) {
                             Button("选择本地文件夹") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                            Button("导入 Git 仓库") { showNewProjectSheet = true }.buttonStyle(.bordered)
+                            Button("导入 Git 仓库") { showProjectSources = true }.buttonStyle(.bordered)
                             Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
                             Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
                                 .accessibilityIdentifier("projects.browseFiles")

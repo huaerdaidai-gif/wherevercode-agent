@@ -287,9 +287,70 @@ class ProjectScreenController(
         projectListEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
         if (visible.isEmpty()) {
             val title = if (projects.isEmpty()) "还没有创建任何项目" else "未找到匹配的项目"
-            projectListEmpty.text = "$title\n项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付"
+            // 空态与 iOS 同构：立方体图标 + 标题（加粗主色）+ 说明（次色）
+            // + 强调色胶囊主按钮；iOS 是 shippingbox 图标，安卓用 ic_cube。
+            val desc = "项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付"
+            projectListEmpty.gravity = Gravity.CENTER
+            projectListEmpty.setPadding(
+                UiKit.dp(context, 32), UiKit.dp(context, 32),
+                UiKit.dp(context, 32), UiKit.dp(context, 8),
+            )
+            val cube = context.getDrawable(R.drawable.ic_cube)?.mutate()
+            if (cube != null) {
+                val side = UiKit.dp(context, 44)
+                cube.setBounds(0, 0, side, side)
+                cube.setTint(UiKit.color(context, R.color.text_tertiary))
+                projectListEmpty.setCompoundDrawables(null, cube, null, null)
+                projectListEmpty.compoundDrawablePadding = UiKit.dp(context, 12)
+            }
+            val styled = SpannableStringBuilder()
+            styled.append(title)
+            styled.setSpan(
+                android.text.style.StyleSpan(Typeface.BOLD),
+                0, title.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            styled.setSpan(
+                android.text.style.AbsoluteSizeSpan(17, true),
+                0, title.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            styled.setSpan(
+                ForegroundColorSpan(UiKit.color(context, R.color.text_primary)),
+                0, title.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            styled.append("\n")
+            val descStart = styled.length
+            styled.append(desc)
+            styled.setSpan(
+                android.text.style.AbsoluteSizeSpan(13, true),
+                descStart, styled.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            styled.setSpan(
+                ForegroundColorSpan(UiKit.color(context, R.color.text_secondary)),
+                descStart, styled.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            projectListEmpty.text = styled
             projectList.addView(android.widget.Button(context).apply {
                 text = "立即创建项目"
+                isAllCaps = false
+                setTextColor(UiKit.color(context, R.color.on_accent))
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = UiKit.dp(context, 999).toFloat()
+                    setColor(UiKit.color(context, R.color.accent))
+                }
+                setPadding(
+                    UiKit.dp(context, 20), UiKit.dp(context, 10),
+                    UiKit.dp(context, 20), UiKit.dp(context, 10),
+                )
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    topMargin = UiKit.dp(context, 8)
+                }
                 setOnClickListener { onOpenFolder() }
             })
         }
