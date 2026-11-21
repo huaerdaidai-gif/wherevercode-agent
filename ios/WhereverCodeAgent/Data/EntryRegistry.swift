@@ -93,7 +93,7 @@ public enum EntryRegistry {
 
         // MARK: - 三、频道分组 (7 条)
         Entry(id: "nav_channels", title: "频道", group: .drawerTop, status: .implemented, parentId: nil, todoMessage: nil, routeId: "channels"),
-        Entry(id: "nav_team_channel", title: "团队频道", group: .drawerExtensions, status: .implemented, parentId: nil, todoMessage: nil, routeId: "channel"),
+        Entry(id: "nav_team_channel", title: "频道", group: .drawerExtensions, status: .implemented, parentId: nil, todoMessage: nil, routeId: "channel"),
         Entry(id: "feature_channel_manage", title: "频道管理", group: .feature, status: .implemented, parentId: "nav_channels", todoMessage: nil, routeId: "channels"),
         Entry(id: "feature_channel_files", title: "频道文件", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "频道文件待开发（附件/网盘引用/预览下载）", routeId: "channels"),
         Entry(id: "feature_direct_message", title: "私聊服务", group: .feature, status: .todo, parentId: "nav_channels", todoMessage: "私聊服务待开发（与指定人员/Agent 独立私聊通道）", routeId: "channel"),

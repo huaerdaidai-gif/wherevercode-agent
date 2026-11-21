@@ -750,18 +750,16 @@ public struct ProjectsHomeView: View {
                         Text("导入与开发工具")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                Button("选择本地文件夹") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                                Button("导入 Git 仓库") { showNewProjectSheet = true }.buttonStyle(.bordered)
-                                Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
-                                Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                                Button("开始对话") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
-                                Button("Git 工作树") { onNavigateRoute("git") }.buttonStyle(.bordered)
-                                Button("预览") { onNavigateRoute("preview") }.buttonStyle(.bordered)
-                            }
-                            .font(.caption)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: 8) {
+                            Button("选择本地文件夹") { onNavigateRoute("files") }.buttonStyle(.bordered)
+                            Button("导入 Git 仓库") { showNewProjectSheet = true }.buttonStyle(.bordered)
+                            Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
+                            Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
+                            Button("开始对话") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
+                            Button("Git 工作树") { onNavigateRoute("git") }.buttonStyle(.bordered)
+                            Button("预览") { onNavigateRoute("preview") }.buttonStyle(.bordered)
                         }
+                        .font(.caption)
                     }
                     .padding(14)
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 14))

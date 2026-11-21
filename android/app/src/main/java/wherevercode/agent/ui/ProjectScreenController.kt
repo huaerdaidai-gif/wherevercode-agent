@@ -285,11 +285,13 @@ class ProjectScreenController(
         projectList.removeAllViews()
         val visible = projects.filter { projectMatchesQuery(it) && projectMatchesFilter(it) }
         projectListEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
-        if (projects.isEmpty()) {
-            projectListEmpty.text =
-                "还没有项目。\n打开一个文件夹就能加项目：本机工作区里的文件夹，或已配对设备上的文件夹；也可以粘一个 GitHub / GitLab / Gitee 仓库地址登记位置，经 API 读。\n局域网 NAS 与网盘同步文件夹不用单独选：NAS 挂在设备上就是远程设备文件夹，同步下来的就是本机文件夹。"
-        } else if (visible.isEmpty()) {
-            projectListEmpty.text = "未找到匹配的项目"
+        if (visible.isEmpty()) {
+            val title = if (projects.isEmpty()) "还没有创建任何项目" else "未找到匹配的项目"
+            projectListEmpty.text = "$title\n项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付"
+            projectList.addView(android.widget.Button(context).apply {
+                text = "立即创建项目"
+                setOnClickListener { onOpenFolder() }
+            })
         }
         visible.forEach { project ->
             projectList.addView(projectRow(project))

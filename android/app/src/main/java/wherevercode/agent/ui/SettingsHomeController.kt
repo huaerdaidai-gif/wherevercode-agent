@@ -91,13 +91,12 @@ class SettingsHomeController(
 
     init {
         val header = UiKit.horizontal(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(
-            UiKit.text(context, "‹", 24f, R.color.text_primary, bold = true).apply {
-                setPadding(0, dp(2), dp(12), dp(2))
-                setOnClickListener { onBack() }
-            },
-        )
-        header.addView(UiKit.text(context, "设置", 20f, R.color.text_primary, bold = true))
+        header.addView(UiKit.text(context, "设置", 20f, R.color.text_primary, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(UiKit.text(context, "完成", 16f, R.color.text_primary).apply {
+            setPadding(dp(12), dp(8), dp(4), dp(8))
+            setOnClickListener { onBack() }
+        })
         root.addView(header)
 
         val card = UiKit.vertical(context).apply {
@@ -108,8 +107,8 @@ class SettingsHomeController(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12); bottomMargin = dp(4) }
         }
-        card.addView(UiKit.text(context, "平台账户", 14f, R.color.text_primary, bold = true))
-        card.addView(statusText.apply { setPadding(0, dp(3), 0, 0) })
+        card.addView(UiKit.text(context, "WhereverCode 用户", 14f, R.color.text_primary, bold = true))
+        card.addView(UiKit.text(context, "本地优先 · 无需强制登录即可使用本地对话与项目工作区", 12f, R.color.text_secondary))
         root.addView(card)
 
         groups.forEach { group ->
@@ -122,6 +121,7 @@ class SettingsHomeController(
                 setBackgroundResource(R.drawable.bg_card)
                 setPadding(dp(14), dp(4), dp(14), dp(4))
             }
+            if (group.title == "平台连接") cardRows.addView(statusText)
             group.rows.forEach { row -> cardRows.addView(rowView(row)) }
             root.addView(cardRows)
         }

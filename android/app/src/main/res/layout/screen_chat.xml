@@ -242,6 +242,14 @@
                 android:contentDescription="选择对话方" />
 
             <TextView
+                android:id="@+id/buttonDictateDraft"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="🎙"
+                android:contentDescription="语音输入" />
+
+            <TextView
                 android:id="@+id/brainCapsule"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"

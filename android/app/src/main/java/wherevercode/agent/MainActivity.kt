@@ -469,6 +469,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inputPrompt: EditText
     /** V5 Phase B C2（批 2）：发送按钮与 + 号按钮（输入状态驱动发送）。 */
     private lateinit var buttonSend: View
+    private val dictateDraft = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val words = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!words.isNullOrBlank()) inputPrompt.append(words)
+        }
+    }
+
     private lateinit var buttonPlus: View
     /** V5 按主流改（maintainer 2026-11-11）：“+”菜单附件——待发送的附件与输入框上方条带。 */
     private val pendingAttachments = mutableListOf<ChatAttachment>()
@@ -2337,6 +2344,15 @@ class MainActivity : AppCompatActivity() {
         buttonPlus = screenChat.findViewById(R.id.buttonPlus)
         buttonSend.setOnClickListener { sendPrompt() }
         buttonPlus.setOnClickListener { showPlusMenu() }
+        screenChat.findViewById<View>(R.id.buttonDictateDraft).setOnClickListener {
+            val speech = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            try {
+                dictateDraft.launch(speech)
+            } catch (_: android.content.ActivityNotFoundException) {
+                toast("本机未安装语音识别服务")
+            }
+        }
         // V5 C2（批 2）：输入框状态驱动发送按钮（HomeScreenController）。
         inputPrompt.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(

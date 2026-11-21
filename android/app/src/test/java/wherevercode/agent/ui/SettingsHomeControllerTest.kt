@@ -69,7 +69,7 @@ class SettingsHomeControllerTest {
         c.render() // 生产里由 showSettingsHome() 在进设置时调；构造时不再现取状态
         val texts = allTexts(c.root)
         assertTrue(texts.any { it == "设置" })
-        assertTrue(texts.any { it == "平台账户" })
+        assertTrue(texts.any { it == "WhereverCode 用户" })
         assertTrue(texts.any { it == "平台已配置（凭证已存本机）" })
         assertTrue(texts.any { it == "平台连接" })
         assertTrue(texts.any { it == "账户" })
