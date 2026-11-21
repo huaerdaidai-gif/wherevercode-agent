@@ -5023,6 +5023,11 @@ class MainActivity : AppCompatActivity() {
                 turnRevisions[turn.id] = turn.revision
             }
         }
+        messageList.gravity = if (state.turns.isEmpty()) {
+            android.view.Gravity.CENTER_VERTICAL
+        } else {
+            android.view.Gravity.TOP
+        }
         if (state.turns.isEmpty()) {
             // V5 C2（批 2）：问候只在“未手动关闭、且尚未开始聊天”时出现。
             if (homeScreenController.greetingVisible()) {

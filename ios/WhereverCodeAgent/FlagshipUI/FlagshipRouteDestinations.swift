@@ -614,6 +614,70 @@ public struct ProjectsHomeView: View {
         }
     }
 
+    private var projectSourceDialog: some View {
+        ZStack {
+            Color.black.opacity(0.32)
+                .ignoresSafeArea()
+                .onTapGesture { showProjectSources = false }
+                .accessibilityHidden(true)
+
+            ViewThatFits(in: .vertical) {
+                projectSourceDialogContent
+                ScrollView { projectSourceDialogContent }
+            }
+            .frame(maxWidth: 360)
+            .background(.background, in: RoundedRectangle(cornerRadius: 20))
+            .padding(24)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { showProjectSources = false }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var projectSourceDialogContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("打开文件夹")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Text("选一个位置打开它作为项目之家。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+
+            projectSourceRow("本机文件夹", detail: "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。") {
+                onNavigateRoute("files")
+            }
+            projectSourceRow("远程设备上的文件夹", detail: "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。") {
+                onNavigateRoute("devices")
+            }
+            projectSourceRow("git 仓库地址", detail: "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。") {
+                showNewProjectSheet = true
+            }
+
+            Button("取消") { showProjectSources = false }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 8)
+        }
+        .padding(24)
+    }
+
+    private func projectSourceRow(_ title: String, detail: String, action: @escaping () -> Void) -> some View {
+        Button {
+            showProjectSources = false
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             // 顶部导航栏
@@ -775,13 +839,11 @@ public struct ProjectsHomeView: View {
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
         .onAppear(perform: loadProjects)
-        .confirmationDialog("打开文件夹", isPresented: $showProjectSources, titleVisibility: .visible) {
-            Button("本机文件夹") { onNavigateRoute("files") }
-            Button("远程设备上的文件夹") { onNavigateRoute("devices") }
-            Button("git 仓库地址") { showNewProjectSheet = true }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("选一个位置打开它作为项目之家。")
+        .accessibilityHidden(showProjectSources)
+        .overlay {
+            if showProjectSources {
+                projectSourceDialog
+            }
         }
         .sheet(isPresented: $showNewProjectSheet) {
             NavigationStack {

@@ -74,8 +74,8 @@ public enum EntryRegistry {
         Entry(id: "feature_project_files", title: "项目文件与代码", group: .feature, status: .implemented, parentId: "nav_projects", todoMessage: nil, routeId: "files"),
         Entry(id: "feature_project_overview", title: "项目概览", group: .feature, status: .implemented, parentId: "nav_projects", todoMessage: nil, routeId: "projectdetail"),
         Entry(id: "feature_change_diff", title: "变更对比", group: .feature, status: .implemented, parentId: "nav_projects", todoMessage: nil, routeId: "diff"),
-        Entry(id: "feature_terminal_logs", title: "终端与日志", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "终端与日志待开发（iOS沙盒禁止本地任意Shell，须远端Hand执行）", routeId: "terminal"),
-        Entry(id: "feature_git_worktree", title: "Git 与工作树", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "Git 与工作树待开发（iOS无本地CLI，远端Hand同步待接入）", routeId: "git"),
+        Entry(id: "feature_terminal_logs", title: "终端与日志", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "终端与日志待开发（远端 Hand 执行尚未接入）", routeId: "terminal"),
+        Entry(id: "feature_git_worktree", title: "Git 与工作树", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "Git 与工作树待开发（远端 Hand 同步尚未接入）", routeId: "git"),
         Entry(id: "feature_run_preview", title: "运行预览", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "运行预览待开发（尚未开发）", routeId: "preview"),
         Entry(id: "feature_browser_workbench", title: "浏览器工作台", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "浏览器工作台待开发（服务端浏览器快照服务未接入）", routeId: "browser"),
         Entry(id: "feature_test_matrix", title: "测试矩阵", group: .feature, status: .todo, parentId: "nav_projects", todoMessage: "测试矩阵待开发（仅作为内置契约核对视图，机械检查未运行）", routeId: "testmatrix"),
@@ -148,7 +148,7 @@ public enum EntryRegistry {
 
         // MARK: - 六、功能中心（跨导航总索引，2 条）
         Entry(id: "nav_feature_center", title: "功能中心", group: .drawerExtensions, status: .implemented, parentId: nil, todoMessage: nil, routeId: "feature_center"),
-        Entry(id: "feature_nesting", title: "收纳系统与自定义引擎", group: .feature, status: .todo, parentId: "nav_feature_center", todoMessage: "收纳系统与自定义引擎待开发（极简/标准/专家模式、自定义首页尚未开发）", routeId: "settings"),
+        Entry(id: "feature_nesting", title: "收纳系统与自定义引擎", group: .feature, status: .todo, parentId: "nav_feature_center", todoMessage: "收纳系统与自定义引擎待开发（极简 / 标准 / 专家模式、自定义首页尚未开发）", routeId: "settings"),
     ]
 
     /// 查找条目（含旧别名兼容：nav_console -> nav_control; feature_team_chat -> nav_team_channel）
