@@ -699,25 +699,9 @@ public struct ProjectsHomeView: View {
 
                 Spacer()
 
-                Button {
-                    // 与安卓一致：「新建项目」与空态「立即创建项目」走同一个
-                    // 「打开文件夹」对话框；旧表单只是对话框里 git 仓库地址
-                    // 一项的下级登记流程，不再作顶层入口。
-                    showProjectSources = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("新建项目")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.white, in: Capsule())
-                    .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
-                }
-                .accessibilityIdentifier("projects.newButton")
+                // 创建入口只留空态的「立即创建项目」（Funk 2026-11-22 定）：
+                // 右上角「新建项目」按钮删除，两端一致；它原先在 iOS 弹旧
+                // 表单、安卓进打开文件夹对话框，本身就是不一致的来源。
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
