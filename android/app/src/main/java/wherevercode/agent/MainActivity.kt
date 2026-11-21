@@ -5321,8 +5321,8 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
-        // 创建入口只留一个（Funk 2026-11-22 定）：「立即创建项目」放在
-        // 页眉原「新建项目」的位置，点开走「打开文件夹」，与 iOS 一致。
+        // 创建入口只留一个（Funk 2026-11-22 定）：页眉「新建项目」，
+        // 点开走「打开文件夹」，与 iOS 一致；空态不再另放按钮。
         screenProjects.findViewById<View>(R.id.buttonNewProject)?.setOnClickListener {
             showOpenFolderEntry()
         }

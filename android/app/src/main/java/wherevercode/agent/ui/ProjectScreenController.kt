@@ -329,8 +329,8 @@ class ProjectScreenController(
                 descStart, styled.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
             projectListEmpty.text = styled
-            // 创建按钮只留页眉一个（Funk 2026-11-22 定，挪到原「新建
-            // 项目」位置），空态只剩图标与文案，不再另加按钮。
+            // 创建按钮只留页眉「新建项目」一个（Funk 2026-11-22 定），
+            // 空态只剩图标与文案，不再另加按钮。
         }
         visible.forEach { project ->
             projectList.addView(projectRow(project))

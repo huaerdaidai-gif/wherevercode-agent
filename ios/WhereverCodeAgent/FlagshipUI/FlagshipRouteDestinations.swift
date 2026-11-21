@@ -699,9 +699,9 @@ public struct ProjectsHomeView: View {
 
                 Spacer()
 
-                // 创建入口只留一个（Funk 2026-11-22 定）：「立即创建项目」
-                // 挪到页眉原「新建项目」的位置，点开走「打开文件夹」对话
-                // 框；空态不再另放按钮，旧表单只是对话框里 git 一项的下级
+                // 创建入口只留一个（Funk 2026-11-22 定）：页眉「新建项目」，
+                // 点开走「打开文件夹」对话框（iOS 原先弹旧表单，已统一）；
+                // 空态不再另放按钮，旧表单只是对话框里 git 一项的下级
                 // 登记流程。
                 Button {
                     showProjectSources = true
@@ -709,7 +709,7 @@ public struct ProjectsHomeView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "plus")
                             .font(.system(size: 13, weight: .semibold))
-                        Text("立即创建项目")
+                        Text("新建项目")
                             .font(.system(size: 14, weight: .medium))
                     }
                     .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
@@ -718,7 +718,7 @@ public struct ProjectsHomeView: View {
                     .background(Color.white, in: Capsule())
                     .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
                 }
-                .accessibilityIdentifier("projects.createButton")
+                .accessibilityIdentifier("projects.newButton")
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
