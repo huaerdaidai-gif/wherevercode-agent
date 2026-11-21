@@ -16,14 +16,14 @@ import android.widget.TextView
 object SettingsSections {
 
     /** 内容块（与布局里出现的先后一致）。 */
-    enum class Block { BRAIN, REPOS, TOKEN, WORKSPACE, AUTONOMY, HAND, ABOUT, DEV }
+    enum class Block { BRAIN, CONNECTION_STATUS, REPOS, TOKEN, WORKSPACE, AUTONOMY, HAND, ABOUT, DEV }
 
     /** 设置首页一行菜单打开的目标节：一节可含一块或多块。 */
     enum class Section(val title: String, val blocks: Set<Block>) {
         BRAIN("大脑", setOf(Block.BRAIN)),
         REPOS("仓库授权", setOf(Block.REPOS)),
         TOKEN("平台连接与令牌签发", setOf(Block.TOKEN)),
-        CONNECTIONS("连接管理", setOf(Block.REPOS, Block.TOKEN)),
+        CONNECTIONS("连接管理", setOf(Block.CONNECTION_STATUS, Block.REPOS, Block.TOKEN)),
         WORKSPACE("工作区", setOf(Block.WORKSPACE)),
         AUTONOMY("自主度", setOf(Block.AUTONOMY)),
         HAND("跨端同步", setOf(Block.HAND)),
@@ -36,8 +36,9 @@ object SettingsSections {
 
     private val ANCHORS: List<Pair<Block, String>> = listOf(
         Block.BRAIN to "大脑",
+        Block.CONNECTION_STATUS to "平台连接状态",
         Block.REPOS to "GitHub 授权",
-        Block.TOKEN to "平台令牌",
+        Block.TOKEN to "平台地址",
         Block.WORKSPACE to "工作区",
         Block.AUTONOMY to "自主度（大脑总管）",
         Block.HAND to "Hand 同步",

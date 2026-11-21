@@ -1132,6 +1132,60 @@
 
         </LinearLayout>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="平台连接状态"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/platformConnectionSummaryAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="平台地址　未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/platformConnectionSummaryAddressState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="地址状态　未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/platformConnectionSummaryPlatformState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="平台状态　平台未配置（本地优先）"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/platformConnectionSummaryConnectionState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="连接状态　未连接"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/platformConnectionSummaryCredentialState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="凭证状态　未保存"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
         <!-- GitHub 闭环（2026-11-11）：设置页 GitHub 授权行。放在高级配置
              折叠之外，常驻可见——用户在设置里找得到。token 只存本机
              Keystore，状态只显示“已配/未配”，绝不显示 token 值。 -->
@@ -1351,6 +1405,175 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <!-- 平台连接设置与令牌签发：地址、凭证、频道选择均为 App 级配置。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="平台地址"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/platformConnectionAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="https://平台域名"
+            android:inputType="textUri"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/buttonSavePlatformAddress"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip_accent"
+            android:text="保存平台地址"
+            android:textAllCaps="false"
+            android:textColor="@color/accent"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/platformConnectionAddressState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="地址状态　未配置"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="粘贴平台凭证"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/platformConnectionCredentialInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="平台 Agent 凭证（只存本机 Keystore）"
+            android:inputType="textPassword"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/buttonSavePlatformCredential"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_accent"
+                android:text="保存凭证"
+                android:textAllCaps="false"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/buttonClearPlatformCredential"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:text="清除凭证"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/platformConnectionCredentialState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="凭证状态　未保存"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="频道列表"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/platformConnectionChannelState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="当前频道　未选择"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonLoadPlatformChannels"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:text="加载频道列表并选择"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="高级手动频道 ID"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/platformManualChannelId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="手动输入频道 ID"
+            android:inputType="text"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/buttonSavePlatformManualChannelId"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:text="保存手动频道 ID"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
         <!-- 平台令牌（2026-11-12，maintainer：App 没有 token 生成按钮）：
              给 ChatGPT 这类外部客户端签发 V5 平台令牌。签发用 App 自己
              的平台凭证（须 owner 权限），不用去终端；令牌只显示一次，
@@ -1359,7 +1582,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="平台令牌"
+            android:text="令牌签发"
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />

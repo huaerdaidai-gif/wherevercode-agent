@@ -2722,7 +2722,10 @@ public struct ChannelsHomeView: View {
             switchPanel
         }
         .sheet(isPresented: $showCreateDMSheet) {
-            CreateDirectMessageSheet(appState: appState) { newDM in
+            CreateDirectMessageSheet(
+                appState: appState,
+                currentChannelID: activeWorkspaceChannel?.id ?? appState.settings.channelID
+            ) { newDM in
                 directMessages.insert(newDM, at: 0)
                 activeWorkspaceDM = newDM
             }
@@ -3205,39 +3208,33 @@ public struct ChannelsHomeView: View {
             return
         }
 
-        if !appState.availableChannels.isEmpty {
-            channels = appState.availableChannels.map { c in
-                V5ChannelItem(
-                    id: c.id,
-                    name: c.displayName,
-                    topic: "团队频道",
-                    isPrivate: false,
-                    memberCount: c.participants.count,
-                    lastMessageText: c.lastMessageText ?? "",
-                    unreadCount: 0,
-                    isArchived: c.isArchived
-                )
-            }
-        } else {
-            let cached = ChannelListCache().load()
-            if !cached.isEmpty {
-                channels = cached.map { c in
-                    V5ChannelItem(
-                        id: c.id,
-                        name: c.displayName,
-                        topic: "团队频道",
-                        isPrivate: false,
-                        memberCount: c.participants.count,
-                        lastMessageText: c.lastMessageText ?? "",
-                        unreadCount: 0
-                    )
-                }
-            }
+        let source = appState.availableChannels.isEmpty
+            ? ChannelListCache().load()
+            : appState.availableChannels
+        channels = source.filter { !$0.isDM }.map { c in
+            V5ChannelItem(
+                id: c.id,
+                name: c.displayName,
+                topic: "团队频道",
+                isPrivate: false,
+                memberCount: c.participants.count,
+                lastMessageText: c.lastMessageText ?? "",
+                unreadCount: 0,
+                isArchived: c.isArchived
+            )
         }
-
-        // 诚实空态：私聊已开通（新建 → 发起私聊），但严禁注入虚假种子
-        // 私聊会话；无私聊时列表就是空。
-        directMessages = []
+        directMessages = source.filter(\.isDM).map { c in
+            let peer = c.participantDetails.first(where: { !$0.isSelf })
+            return V5DirectMessageItem(
+                id: c.id,
+                targetId: peer?.id ?? c.participants.first ?? c.id,
+                targetName: peer?.name ?? c.name,
+                isAgent: peer?.isAgent ?? true,
+                targetRole: peer?.role ?? "私聊",
+                lastMessageText: c.lastMessageText ?? "",
+                lastMessageTime: ""
+            )
+        }
 
         // 对话框直达（批D）：默认选中第一个频道；选中项已不在列表
         // 时回落到第一个。
@@ -3245,6 +3242,9 @@ public struct ChannelsHomeView: View {
             // 保持当前选中
         } else {
             activeWorkspaceChannel = channels.first
+        }
+        if let activeDM = activeWorkspaceDM {
+            activeWorkspaceDM = directMessages.first(where: { $0.id == activeDM.id })
         }
     }
 }
@@ -4872,64 +4872,40 @@ public struct ChannelDetailWorkspaceView: View {
 
 public struct CreateDirectMessageSheet: View {
     @ObservedObject public var appState: AppState
+    public var currentChannelID: String?
     public var onCreated: (V5DirectMessageItem) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    @State private var recipientType: RecipientType = .agent
-    @State private var selectedAgent = "Codex"
-    @State private var targetUsername = ""
-    @State private var initiatorIsAgent = false
-    @State private var targetIsAgent = true
+    @State private var selectedMemberID = ""
+    @State private var isOpening = false
     @State private var errorText: String? = nil
 
-    public enum RecipientType: String, CaseIterable, Identifiable {
-        case agent = "平台 Agent"
-        case user = "团队成员"
-
-        public var id: String { rawValue }
+    private var currentChannelMembers: [ChannelParticipant] {
+        let channelID = currentChannelID ?? appState.settings.channelID
+        return appState.availableChannels
+            .first(where: { $0.id == channelID })?
+            .participantDetails
+            .filter { !$0.isSelf } ?? []
     }
 
     public var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("对象类型", selection: $recipientType) {
-                        ForEach(RecipientType.allCases) { t in
-                            Text(t.rawValue).tag(t)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: recipientType) { _, val in
-                        targetIsAgent = (val == .agent)
-                        errorText = nil
-                    }
-
-                    if recipientType == .agent {
-                        Picker("选择 Agent", selection: $selectedAgent) {
-                            Text("Codex (设备 Agent)").tag("Codex")
-                            Text("Claude Code (云端 Agent)").tag("Claude Code")
-                            Text("CodeBuddy (协作 Agent)").tag("CodeBuddy")
-                            Text("Example Agent").tag("Example Agent")
-                        }
+                    if currentChannelMembers.isEmpty {
+                        Text("当前频道没有可发起私聊的成员。")
+                            .foregroundStyle(.secondary)
                     } else {
-                        TextField("输入成员账号或姓名", text: $targetUsername)
+                        Picker("选择成员", selection: $selectedMemberID) {
+                            ForEach(currentChannelMembers, id: \.id) { member in
+                                Text(member.name).tag(member.id)
+                            }
+                        }
                     }
-                } header: { Text("私聊对象").textCase(nil) }
-
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("✓ 允许：用户 ↔ 用户 私聊")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("✓ 允许：用户 ↔ Agent 私聊")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("✕ 严格禁止：Agent ↔ Agent 直连私聊")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.red)
-                    }
-                } header: { Text("平台安全规则校验").textCase(nil) }
+                    Text("名单来自当前频道，已排除本机成员。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: { Text("当前频道成员").textCase(nil) }
 
                 if let err = errorText {
                     Section {
@@ -4941,34 +4917,65 @@ public struct CreateDirectMessageSheet: View {
             }
             .navigationTitle("发起私聊")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if selectedMemberID.isEmpty {
+                    selectedMemberID = currentChannelMembers.first?.id ?? ""
+                }
+            }
+            .onChange(of: currentChannelMembers.map(\.id)) { _, ids in
+                if !ids.contains(selectedMemberID) { selectedMemberID = ids.first ?? "" }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("确定") {
-                        do {
-                            try PrivateChatPolicyValidator.validate(
-                                initiatorIsAgent: initiatorIsAgent,
-                                targetIsAgent: targetIsAgent
-                            )
-                            let targetName = (recipientType == .agent) ? selectedAgent : (targetUsername.isEmpty ? "团队成员" : targetUsername)
-                            let newDM = V5DirectMessageItem(
-                                id: "dm-\(UUID().uuidString.prefix(6))",
-                                targetId: "target-\(UUID().uuidString.prefix(4))",
-                                targetName: targetName,
-                                isAgent: (recipientType == .agent),
-                                targetRole: (recipientType == .agent) ? "平台 Agent · 1:1 私聊" : "团队成员",
-                                lastMessageText: "私聊会话已建立",
-                                lastMessageTime: "刚刚"
-                            )
-                            onCreated(newDM)
-                            dismiss()
-                        } catch {
-                            errorText = error.localizedDescription
-                        }
+                        openSelectedMemberDM()
                     }
+                    .disabled(isOpening || selectedMember == nil)
                 }
+            }
+        }
+    }
+
+    private var selectedMember: ChannelParticipant? {
+        currentChannelMembers.first(where: { $0.id == selectedMemberID })
+    }
+
+    private func openSelectedMemberDM() {
+        guard let member = selectedMember else {
+            errorText = "请选择当前频道中的成员。"
+            return
+        }
+        guard let transport = appState.makeChannelTransport() else {
+            errorText = "无法连接频道服务。"
+            return
+        }
+        errorText = nil
+        isOpening = true
+        Task {
+            defer { isOpening = false }
+            do {
+                let result = try await transport.openDm(agentID: member.id)
+                guard let channelID = (result["id"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !channelID.isEmpty else {
+                    errorText = "平台未返回私聊频道 ID。"
+                    return
+                }
+                onCreated(V5DirectMessageItem(
+                    id: channelID,
+                    targetId: member.id,
+                    targetName: member.name,
+                    isAgent: member.isAgent ?? true,
+                    targetRole: member.role ?? "私聊",
+                    lastMessageText: "",
+                    lastMessageTime: ""
+                ))
+                dismiss()
+            } catch {
+                errorText = (error as? McpError)?.message ?? error.localizedDescription
             }
         }
     }

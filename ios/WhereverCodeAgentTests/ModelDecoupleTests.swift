@@ -374,6 +374,32 @@ final class ModelDecoupleTests: XCTestCase {
         XCTAssertNil(modelStore.getConfig(modelId: "builtin-claude"))
     }
 
+    func testSubscriptionDirectorySeedsAllBrainBootstrapModelsAndPreservesOverridesAndTombstones() throws {
+        let data = try LocalData.inMemory()
+        let modelStore = KeyValueModelConfigStore(kv: data.kv)
+        let brainStore = KeyValueBrainConfigStore(kv: data.kv)
+
+        ModelMigrationManager.seedSubscriptionDirectory(modelStore: modelStore)
+
+        XCTAssertEqual(Set(modelStore.listConfigs().map(\.modelId)), Set(BrainBootstrap.seedableBrainIds))
+        XCTAssertEqual(modelStore.listConfigs().count, 10)
+        XCTAssertTrue(brainStore.listConfigs().isEmpty, "种子只写入独立模型存储")
+        XCTAssertNil(try data.kv.get(KeyValueBrainConfigStore.keyConfigs))
+
+        var existing = try XCTUnwrap(modelStore.getConfig(modelId: BrainBootstrap.qwenBrainId))
+        existing.label = "用户修改的标签"
+        modelStore.saveConfig(existing)
+        modelStore.deleteConfig(modelId: BrainBootstrap.grokBrainId)
+        modelStore.markModelDeleted(modelId: BrainBootstrap.grokBrainId)
+
+        ModelMigrationManager.seedSubscriptionDirectory(modelStore: modelStore)
+
+        XCTAssertEqual(modelStore.getConfig(modelId: BrainBootstrap.qwenBrainId)?.label, "用户修改的标签")
+        XCTAssertNil(modelStore.getConfig(modelId: BrainBootstrap.grokBrainId), "墓碑种子不得复活")
+        XCTAssertEqual(modelStore.listConfigs().count, 9)
+        XCTAssertTrue(brainStore.listConfigs().isEmpty, "重复补齐也不得污染大脑存储")
+    }
+
     // MARK: - 6. 密钥引用计数测试
 
     func testKeyStoreReferenceCountingOnModelDelete() throws {
