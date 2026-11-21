@@ -6561,8 +6561,13 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { refreshTeamChannel() }
         }
         feed.onConnectionChange = { state, _ ->
-            teamChannelLastConnectionState = state
-            teamChannelLastConnectionChannelId = channelId
+            // STOPPED 只表示 feed 被停订（离开频道页/切换频道），不是连接
+            // 本身的真实状态；不许它覆盖最后已知状态，否则设置摘要永远
+            // 显示「未连接」，与频道页口径不一致。
+            if (state != ChannelConnectionState.STOPPED) {
+                teamChannelLastConnectionState = state
+                teamChannelLastConnectionChannelId = channelId
+            }
             runOnUiThread {
                 if (teamChannelFeed === feed) refreshTeamChannel()
             }

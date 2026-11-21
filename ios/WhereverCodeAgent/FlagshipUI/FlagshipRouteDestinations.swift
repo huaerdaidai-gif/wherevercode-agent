@@ -4885,7 +4885,9 @@ public struct CreateDirectMessageSheet: View {
         return appState.availableChannels
             .first(where: { $0.id == channelID })?
             .participantDetails
-            .filter { !$0.isSelf } ?? []
+            // 服务端 participants 不带 is_self（实查），单靠 isSelf 排不掉
+            // 本机；再按本机频道发送者 ID 排除，与 isOwnSender 同一口径。
+            .filter { !$0.isSelf && $0.id != appState.channelSenderID } ?? []
     }
 
     public var body: some View {
