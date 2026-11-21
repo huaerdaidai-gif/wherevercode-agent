@@ -233,6 +233,7 @@
 			DA000000000000000000E402,
 			DA000000000000000000F102,
 			DA000000000000000000F202,
+			DA000000000000000000F402,
 			DA000000000000000000F502,
 			DA000000000000000000F504,
 			DA000000000000000000F506,
@@ -354,6 +355,7 @@
 			F61BE8AE8EDB3888F3137986,
 			DA000000000000000000006F,
 			DA000000000000000000F201,
+			DA000000000000000000F401,
 			DA000000000000000000F50D,
 			1C0DE00000000000000000A3,
 		); name = Views; path = Views; sourceTree = "<group>"; };
@@ -419,6 +421,8 @@
 		DA000000000000000000F102 = {isa = PBXBuildFile; fileRef = DA000000000000000000F101; };
 		DA000000000000000000F201 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		DA000000000000000000F202 = {isa = PBXBuildFile; fileRef = DA000000000000000000F201; };
+		DA000000000000000000F401 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionsViews.swift; sourceTree = "<group>"; };
+		DA000000000000000000F402 = {isa = PBXBuildFile; fileRef = DA000000000000000000F401; };
 		DA000000000000000000F301 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecoupleTests.swift; sourceTree = "<group>"; };
 		DA000000000000000000F302 = {isa = PBXBuildFile; fileRef = DA000000000000000000F301; };
 		A1B2C3D4E5F6000000000010 = {isa = PBXGroup; children = (
