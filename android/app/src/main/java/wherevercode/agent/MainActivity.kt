@@ -129,6 +129,7 @@ import wherevercode.agent.core.agent.McpChannelEventFeed
 import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.agent.PlatformAgentChatBridge
 import wherevercode.agent.core.agent.PlatformAgentCredentialStore
+import wherevercode.agent.core.agent.PlatformConnectionStore
 import wherevercode.agent.core.agent.PlatformAgentForm
 import wherevercode.agent.core.agent.PlatformChannelMessage
 import wherevercode.agent.core.agent.PlatformChannelMcpTransport
@@ -570,6 +571,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var platformTokenStatus: TextView
     private lateinit var platformTokenAgentId: EditText
     private lateinit var platformTokenName: EditText
+    private lateinit var platformConnectionAddressField: EditText
+    private lateinit var platformConnectionAddressState: TextView
+    private lateinit var platformConnectionCredentialInput: EditText
+    private lateinit var platformConnectionCredentialState: TextView
+    private lateinit var platformConnectionChannelState: TextView
+    private lateinit var platformManualChannelId: EditText
+    private lateinit var platformConnectionSummaryAddress: TextView
+    private lateinit var platformConnectionSummaryAddressState: TextView
+    private lateinit var platformConnectionSummaryPlatformState: TextView
+    private lateinit var platformConnectionSummaryConnectionState: TextView
+    private lateinit var platformConnectionSummaryCredentialState: TextView
 
     // V5 C3-C：设置页大脑多模式登陆（统一列表 / SIWC 模型选择 /
     // 通用 MODEL_API 表单 / CLI 行 / 换号·取消）。
@@ -679,6 +691,7 @@ class MainActivity : AppCompatActivity() {
      * 已删除，不留两种状态源（方案 §1.2）。
      */
     private var currentEntry: String = DrawerController.ID_NEW_CONVERSATION
+    private var consoleSubpageBackTarget: String? = null
     private var lastEntry: String = DrawerController.ID_NEW_CONVERSATION
     /** 阶段 3（U3/批 3a）：任务详情浮层（复用设置浮层的宿主模式）。 */
     private var taskDetailVisible = false
@@ -874,6 +887,9 @@ class MainActivity : AppCompatActivity() {
      */
     private val platformCredentialStore: PlatformAgentCredentialStore by lazy {
         PlatformAgentCredentialStore.create(applicationContext)
+    }
+    private val platformConnectionStore: PlatformConnectionStore by lazy {
+        PlatformConnectionStore(applicationContext)
     }
 
     /** 云端 Agent 凭证存储（V5，2026-11-11）：每云端 Agent 一把随机 Bearer 钥匙，只存本机 Keystore。 */
@@ -1634,9 +1650,9 @@ class MainActivity : AppCompatActivity() {
             onOpenTask = { taskId -> openTaskDetail(taskId) },
             onOpenFile = { path -> openDetailFile(path) },
             onOpenChat = { showEntry(DrawerController.ID_NEW_CONVERSATION) },
-            onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
-            onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
-            onOpenModels = { showEntry(DrawerController.ID_MODELS) },
+            onOpenDevices = { openConsoleSubpage(DrawerController.ID_DEVICES) },
+            onOpenAgents = { openConsoleSubpage(DrawerController.ID_AGENTS_TEAM) },
+            onOpenModels = { openConsoleSubpage(DrawerController.ID_MODELS) },
             modelsCount = {
                 // 差异 9（B3）：角标只数独立模型存储中模型页会显示的
                 // 条目（与 refreshModelList 同一份 buildRows 可见性
@@ -1651,8 +1667,8 @@ class MainActivity : AppCompatActivity() {
                 ).size
             },
             onRefresh = { refreshConsole() },
-            onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
-            onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
+            onOpenTasks = { openConsoleSubpage(DrawerController.ID_TASKS) },
+            onOpenMcp = { openConsoleSubpage(DrawerController.ID_MCP_PLUGINS) },
             onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
             onToast = { msg -> toast(msg) },
             platformRoot = { normalizedConsolePlatformRoot() },
@@ -1706,6 +1722,7 @@ class MainActivity : AppCompatActivity() {
             onCreateNew = { showChannelCreateMenu() },
             onSwitchChannel = { channelId ->
                 teamChannelActiveId = channelId
+                if (!teamChannelDmMode) saveActiveChannelId(channelId)
                 teamChannelSearchResults = null
                 // 推送跟看的频道走：重订 WS（阻塞①修法），再刷新。
                 startTeamChannelFeed()
@@ -1926,6 +1943,7 @@ class MainActivity : AppCompatActivity() {
             EntryScreen.TEAM_CHANNEL -> DrawerController.ID_TEAM_CHANNEL
             EntryScreen.MESSAGE_CENTER -> DrawerRouter.ID_MESSAGE_CENTER
         }
+        if (entry != consoleSubpageBackTarget) consoleSubpageBackTarget = null
         if (!isSettingsEntry(entry)) lastEntry = entry
         currentEntry = entry
         screenChat.visibility = if (screen == EntryScreen.HOME) View.VISIBLE else View.GONE
@@ -1998,6 +2016,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openConsoleSubpage(entryId: String) {
+        val supported = setOf(
+            DrawerController.ID_DEVICES,
+            DrawerController.ID_AGENTS_TEAM,
+            DrawerController.ID_MODELS,
+            DrawerController.ID_MCP_PLUGINS,
+            DrawerController.ID_TASKS,
+        )
+        consoleSubpageBackTarget = entryId.takeIf {
+            currentEntry == DrawerController.ID_CONSOLE && it in supported
+        }
+        showEntry(entryId)
+    }
+
     /** 设置页与“工具与连接”入口共用同一屏；返回键与 lastEntry 按设置处理。
      * 模型页是独立一页（与设备、Agent 并列），不按设置处理。 */
     private fun isSettingsEntry(entry: String): Boolean =
@@ -2022,6 +2054,8 @@ class MainActivity : AppCompatActivity() {
         settingsHomeController.root.visibility = View.GONE
         SettingsSections.apply(settingsRootLayout(), section)
         setSettingsHeaderTitle(section.title)
+        if (section == SettingsSections.Section.CONNECTIONS) refreshPlatformConnectionSummary()
+        if (section == SettingsSections.Section.TOKEN) refreshPlatformConnectionForm()
         (screenSettings as ScrollView).scrollTo(0, 0)
     }
 
@@ -6040,20 +6074,19 @@ class MainActivity : AppCompatActivity() {
     // V5 团队频道（P3，2026-11-11）：有界团队聊天。
     // ------------------------------------------------------------------
 
-    /**
-     * 频道端点（host，channelId）：取第一条地址和频道均已配置的平台
-     * Agent 记录。公开构建没有预置这些值；未配置时频道页显示配置指引。
-     */
+    /** 频道端点（host，channelId）：使用 App 级地址、Keystore 凭证和当前频道。 */
     private fun teamChannelEndpoint(): Pair<String, String>? {
-        if (platformCredentialStore.loadPlatformToken().isNullOrBlank()) return null
-        val records = try {
-            agentStore.listAgents()
+        val hasCredential = try {
+            !platformCredentialStore.loadPlatformToken().isNullOrBlank()
         } catch (_: Exception) {
-            emptyList()
-        }.filter { PlatformAgent.isPlatformAgentRecord(it) }
-        val record = records.firstOrNull { !it.platformHost.isNullOrBlank() } ?: return null
-        val host = record.platformHost!!.trim()
-        val channelId = record.platformChannelId?.trim().takeIf { !it.isNullOrBlank() }
+            false
+        }
+        if (!hasCredential) return null
+        val host = resolvedPlatformHost()
+        if (host.isBlank()) return null
+        val record = firstPlatformAgentRecord()
+        val channelId = savedActiveChannelId()
+            ?: record?.platformChannelId?.trim()?.takeIf { it.isNotBlank() }
             ?: PlatformAgent.V5_CHANNEL_ID
         if (channelId.isBlank()) return null
         return host to channelId
@@ -6113,9 +6146,7 @@ class MainActivity : AppCompatActivity() {
         if (endpoint == null) {
             return TeamChannelSnapshot(
                 configured = false,
-                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
-                    "并在表单的平台凭证栏填入 App 的平台凭证" +
-                    "（由你的平台管理员签发）。",
+                setupHint = "频道还没法连：请到设置里的“平台连接与令牌签发”填写平台地址、保存凭证并选择频道。",
                 channelId = PlatformAgent.V5_CHANNEL_ID,
                 connectionState = ChannelConnectionState.STOPPED,
                 connectionError = null,
@@ -6440,9 +6471,7 @@ class MainActivity : AppCompatActivity() {
         teamChannelController.render(
             TeamChannelSnapshot(
                 configured = endpoint != null,
-                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
-                    "并在表单的平台凭证栏填入 App 的平台凭证" +
-                    "（由你的平台管理员签发）。",
+                setupHint = "频道还没法连：请到设置里的“平台连接与令牌签发”填写平台地址、保存凭证并选择频道。",
                 channelId = endpoint?.second.orEmpty(),
                 activeChannelId = activeId,
                 connectionState = feed?.connectionState
@@ -6554,9 +6583,47 @@ class MainActivity : AppCompatActivity() {
         messages to teamChannelFeed.takeIf { teamChannelFeedChannelId == channelId }
     }
 
-    /** 当前查看的频道 id（切换/私聊时为选中的频道，否则端点默认频道）。 */
+    /** 当前查看的频道 id（切换频道优先，其次本机保存选择，再回落到 Agent/构建默认）。 */
     private fun activeTeamChannelId(): String =
-        teamChannelActiveId ?: teamChannelEndpoint()?.second ?: PlatformAgent.V5_CHANNEL_ID
+        teamChannelActiveId ?: savedActiveChannelId() ?: teamChannelEndpoint()?.second ?: PlatformAgent.V5_CHANNEL_ID
+
+    private fun savedActiveChannelId(): String? =
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .getString(KEY_ACTIVE_CHANNEL_ID, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+    private fun saveActiveChannelId(channelId: String) {
+        val value = channelId.trim()
+        if (value.isEmpty()) return
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACTIVE_CHANNEL_ID, value)
+            .apply()
+    }
+
+    private fun persistActiveTeamChannel(channelId: String) {
+        saveActiveChannelId(channelId)
+        teamChannelActiveId = channelId
+        teamChannelDmMode = false
+    }
+
+    private fun firstPlatformAgentRecord(): AgentRecord? = try {
+        agentStore.listAgents().firstOrNull { PlatformAgent.isPlatformAgentRecord(it) }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun resolvedPlatformHost(): String = try {
+        platformConnectionStore.platformHost(
+            firstPlatformAgentHost = firstPlatformAgentRecord()?.platformHost,
+            buildDefaultHost = PlatformAgent.DEFAULT_PLATFORM_HOST,
+        )
+    } catch (_: Exception) {
+        firstPlatformAgentRecord()?.platformHost?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: PlatformAgent.DEFAULT_PLATFORM_HOST
+    }
 
     private fun teamChannelTransport(host: String) = PlatformChannelMcpTransport(
         tokenProvider = { platformCredentialStore.loadPlatformToken() },
@@ -9340,26 +9407,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * 控制台总览的平台根地址。优先已添加平台 Agent 的主机，否则用构建配置；
-     * 都没有时为空串，总览显示「未配置」——平台地址不预置任何默认值。
-     * 控制器初始化早于 [agentStore]，未就绪时只走默认。
-     */
+    /** App 级地址优先；旧平台 Agent 记录与构建默认值作为迁移回落。 */
     private fun normalizedConsolePlatformRoot(): String {
-        val configured = if (::agentStore.isInitialized) {
-            try {
-                agentStore.listAgents()
-                    .firstOrNull { PlatformAgent.isPlatformAgentRecord(it) && !it.platformHost.isNullOrBlank() }
-                    ?.platformHost
-            } catch (_: Exception) {
-                null
-            }
-        } else {
-            null
-        }
-        return ConsoleScreenController.normalizedPlatformRoot(
-            configured?.takeIf { it.isNotBlank() } ?: PlatformAgent.DEFAULT_PLATFORM_HOST,
-        )
+        return ConsoleScreenController.normalizedPlatformRoot(resolvedPlatformHost())
     }
 
     /** 本机 Keystore 里是否已有平台 Token。读失败按未配置，按钮显示「配置 Token」。 */
@@ -9781,9 +9831,211 @@ class MainActivity : AppCompatActivity() {
         if (platformTokenName.text.isNullOrBlank()) {
             platformTokenName.setText(PlatformTokenIssuer.DEFAULT_NAME)
         }
+        bindPlatformConnectionSettings()
         refreshPlatformTokenStatus()
         screenSettings.findViewById<View>(R.id.buttonGeneratePlatformToken)
             .setOnClickListener { generatePlatformToken() }
+    }
+
+    private fun bindPlatformConnectionSettings() {
+        platformConnectionAddressField = screenSettings.findViewById(R.id.platformConnectionAddress)
+        platformConnectionAddressState = screenSettings.findViewById(R.id.platformConnectionAddressState)
+        platformConnectionCredentialInput = screenSettings.findViewById(R.id.platformConnectionCredentialInput)
+        platformConnectionCredentialState = screenSettings.findViewById(R.id.platformConnectionCredentialState)
+        platformConnectionChannelState = screenSettings.findViewById(R.id.platformConnectionChannelState)
+        platformManualChannelId = screenSettings.findViewById(R.id.platformManualChannelId)
+        platformConnectionSummaryAddress = screenSettings.findViewById(R.id.platformConnectionSummaryAddress)
+        platformConnectionSummaryAddressState = screenSettings.findViewById(R.id.platformConnectionSummaryAddressState)
+        platformConnectionSummaryPlatformState = screenSettings.findViewById(R.id.platformConnectionSummaryPlatformState)
+        platformConnectionSummaryConnectionState = screenSettings.findViewById(R.id.platformConnectionSummaryConnectionState)
+        platformConnectionSummaryCredentialState = screenSettings.findViewById(R.id.platformConnectionSummaryCredentialState)
+
+        screenSettings.findViewById<View>(R.id.buttonSavePlatformAddress)
+            .setOnClickListener { savePlatformConnectionAddress() }
+        screenSettings.findViewById<View>(R.id.buttonSavePlatformCredential)
+            .setOnClickListener { savePlatformConnectionCredential() }
+        screenSettings.findViewById<View>(R.id.buttonClearPlatformCredential)
+            .setOnClickListener { clearPlatformConnectionCredential() }
+        screenSettings.findViewById<View>(R.id.buttonLoadPlatformChannels)
+            .setOnClickListener { loadPlatformChannelsForSelection() }
+        screenSettings.findViewById<View>(R.id.buttonSavePlatformManualChannelId)
+            .setOnClickListener { saveManualPlatformChannelId() }
+        refreshPlatformConnectionForm()
+        refreshPlatformConnectionSummary()
+    }
+
+    private fun refreshPlatformConnectionForm() {
+        if (!::platformConnectionAddressField.isInitialized) return
+        platformConnectionAddressField.setText(normalizedConsolePlatformRoot())
+        if (!::platformManualChannelId.isInitialized) return
+        val channelId = savedActiveChannelId()
+            ?: firstPlatformAgentRecord()?.platformChannelId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: PlatformAgent.V5_CHANNEL_ID
+        platformManualChannelId.setText(channelId)
+        refreshPlatformConnectionFormStatus()
+    }
+
+    private fun refreshPlatformConnectionFormStatus() {
+        if (!::platformConnectionAddressState.isInitialized) return
+        val address = normalizedConsolePlatformRoot()
+        platformConnectionAddressState.text =
+            "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
+        platformConnectionCredentialState.text =
+            "凭证状态　" + if (hasSavedPlatformToken()) "已保存" else "未保存"
+        platformConnectionChannelState.text = currentPlatformChannelLabel()
+    }
+
+    private fun savePlatformConnectionAddress() {
+        val host = PlatformConnectionStore.hostFromAddress(
+            platformConnectionAddressField.text?.toString().orEmpty(),
+        )
+        if (host == null) {
+            platformConnectionAddressState.text = "地址状态　地址无效，请填写 HTTPS 平台域名。"
+            return
+        }
+        try {
+            firstPlatformAgentRecord()?.let { agentStore.saveAgent(it.copy(platformHost = host)) }
+            platformConnectionStore.savePlatformHost(host)
+        } catch (e: Exception) {
+            platformConnectionAddressState.text = "地址状态　保存失败"
+            toast("保存平台地址失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
+            return
+        }
+        platformConnectionAddressField.setText("https://$host")
+        refreshPlatformConnectionFormStatus()
+        refreshPlatformConnectionSummary()
+        refreshPlatformTokenStatus()
+        toast("平台地址已保存。")
+    }
+
+    private fun savePlatformConnectionCredential() {
+        val token = platformConnectionCredentialInput.text?.toString().orEmpty()
+        if (token.isBlank()) {
+            toast("请先粘贴平台凭证。")
+            return
+        }
+        try {
+            platformCredentialStore.savePlatformToken(token)
+        } catch (e: Exception) {
+            toast("保存平台凭证失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
+            return
+        }
+        platformConnectionCredentialInput.setText("")
+        refreshPlatformConnectionFormStatus()
+        refreshPlatformConnectionSummary()
+        refreshPlatformTokenStatus()
+        toast("平台凭证已保存到本机 Keystore。")
+    }
+
+    private fun clearPlatformConnectionCredential() {
+        try {
+            platformCredentialStore.clearPlatformToken()
+        } catch (e: Exception) {
+            toast("清除平台凭证失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
+            return
+        }
+        platformConnectionCredentialInput.setText("")
+        refreshPlatformConnectionFormStatus()
+        refreshPlatformConnectionSummary()
+        refreshPlatformTokenStatus()
+        toast("本机平台凭证已清除。")
+    }
+
+    private fun loadPlatformChannelsForSelection() {
+        val host = resolvedPlatformHost()
+        if (host.isBlank()) {
+            toast("请先保存平台地址。")
+            return
+        }
+        if (!hasSavedPlatformToken()) {
+            toast("请先保存平台凭证。")
+            return
+        }
+        platformConnectionChannelState.text = "当前频道　正在加载频道列表…"
+        Thread {
+            val result = runCatching { teamChannelTransport(host).listChannels() }
+            runOnUiThread {
+                if (result.isFailure) {
+                    platformConnectionChannelState.text = "当前频道　频道列表加载失败"
+                    toast("加载频道列表失败：${(result.exceptionOrNull()?.message ?: "未知错误").take(160)}")
+                    return@runOnUiThread
+                }
+                val all = result.getOrDefault(emptyList())
+                teamChannelChannelsCache = all
+                val available = all.filter { it.kind != "dm" && !it.archived }
+                if (available.isEmpty()) {
+                    platformConnectionChannelState.text = "当前频道　平台没有可选择的团队频道"
+                    refreshPlatformConnectionSummary()
+                    return@runOnUiThread
+                }
+                val labels = available.map { "${it.name} · ${it.id}" }.toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("选择平台频道")
+                    .setItems(labels) { _, index ->
+                        val channel = available[index]
+                        persistActiveTeamChannel(channel.id)
+                        platformManualChannelId.setText(channel.id)
+                        platformConnectionChannelState.text =
+                            "当前频道　${channel.name} · ${channel.id}"
+                        refreshPlatformConnectionSummary()
+                        toast("已选择频道：${channel.name}")
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+                refreshPlatformConnectionSummary()
+            }
+        }.start()
+    }
+
+    private fun saveManualPlatformChannelId() {
+        val channelId = platformManualChannelId.text?.toString()?.trim().orEmpty()
+        if (channelId.isBlank()) {
+            toast("频道 ID 不能为空。")
+            return
+        }
+        persistActiveTeamChannel(channelId)
+        platformConnectionChannelState.text = currentPlatformChannelLabel()
+        refreshPlatformConnectionSummary()
+        toast("手动频道 ID 已保存。")
+    }
+
+    private fun currentPlatformChannelLabel(): String {
+        val id = activeTeamChannelId().trim()
+        if (id.isBlank()) return "当前频道　未选择"
+        val name = teamChannelChannelsCache.firstOrNull { it.id == id }?.name
+        return "当前频道　${name?.takeIf { it.isNotBlank() }?.let { "$it · " }.orEmpty()}$id"
+    }
+
+    private fun refreshPlatformConnectionSummary() {
+        if (!::platformConnectionSummaryAddress.isInitialized) return
+        val address = normalizedConsolePlatformRoot()
+        val hasCredential = hasSavedPlatformToken()
+        platformConnectionSummaryAddress.text = "平台地址　" + address.ifBlank { "未配置" }
+        platformConnectionSummaryAddressState.text =
+            "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
+        platformConnectionSummaryPlatformState.text = if (hasCredential) {
+            "平台状态　平台已配置（凭证已存本机）"
+        } else {
+            "平台状态　平台未配置（本地优先）"
+        }
+        val activeId = activeTeamChannelId().trim()
+        val channelName = teamChannelChannelsCache.firstOrNull { it.id == activeId }?.name
+        val channelLabel = when {
+            activeId.isBlank() -> "未选择频道"
+            channelName.isNullOrBlank() -> activeId
+            else -> "$channelName · $activeId"
+        }
+        val feed = if (activeId.isBlank()) null else teamChannelFeedSnapshot(activeId).second
+        val feedState = feed?.connectionState ?: ChannelConnectionState.STOPPED
+        val connection = when (feedState) {
+            ChannelConnectionState.CONNECTING -> "连接中"
+            ChannelConnectionState.LIVE -> "实时已连接"
+            ChannelConnectionState.POLLING -> "轮询连接"
+            ChannelConnectionState.STOPPED -> "未连接"
+        }
+        platformConnectionSummaryConnectionState.text = "连接状态　$channelLabel · $connection"
+        platformConnectionSummaryCredentialState.text =
+            "凭证状态　" + if (hasCredential) "已保存" else "未保存"
     }
 
     /** 平台令牌分节的状态行：有没有平台凭证、签发走哪个端点。 */
@@ -9797,8 +10049,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 令牌签发用的平台端点：须有 App 的平台凭证；主机取第一条有平台
-     * 地址的平台 Agent 记录；公开版没有预置默认服务端点。
+     * 令牌签发用的平台端点：须有 App 的平台凭证；地址按 App 设置、
+     * 第一条平台 Agent 记录、构建默认值的顺序回落。
      * 没配平台凭证时返回 null——按钮只给提示，不假装能签发。
      */
     private fun platformTokenEndpoint(): String? {
@@ -9810,14 +10062,7 @@ class MainActivity : AppCompatActivity() {
             null
         }
         if (token.isNullOrBlank()) return null
-        val records = try {
-            agentStore.listAgents()
-        } catch (_: Exception) {
-            emptyList()
-        }.filter { PlatformAgent.isPlatformAgentRecord(it) }
-        val host = records.firstOrNull { !it.platformHost.isNullOrBlank() }
-            ?.platformHost?.trim()
-            ?: PlatformAgent.DEFAULT_PLATFORM_HOST
+        val host = resolvedPlatformHost()
         if (host.isBlank()) return null
         return PlatformAgent.mcpEndpoint(host).takeIf { it.isNotBlank() }
     }
@@ -10284,18 +10529,9 @@ class MainActivity : AppCompatActivity() {
         buttonTaskMark.visibility = View.GONE
     }
 
-    /** 首页状态行平台段（照片走查批 B）：平台地址按平台 Agent 的
-     * platformHost 计——任一平台 Agent 填了主机名即视为已配置；否则
-     * 如实报「平台未配置（本地优先）」，与 iOS 同文案。安卓首页不做
-     * 实时连通探测，故已配置时只报「平台已配置」，不谎称已连接。 */
+    /** 对话状态行使用与设置页相同的 App 级地址来源，不声称实时连通。 */
     private fun platformStatusLabel(): String {
-        val configured = try {
-            agentStore.listAgents().any {
-                it.brainKind == BrainKind.PLATFORM_AGENT && !it.platformHost.isNullOrBlank()
-            }
-        } catch (_: Exception) {
-            false
-        }
+        val configured = resolvedPlatformHost().isNotBlank()
         return if (configured) "平台已配置" else "平台未配置（本地优先）"
     }
 
@@ -13359,6 +13595,11 @@ class MainActivity : AppCompatActivity() {
             hideTaskDetail()
             return
         }
+        if (currentEntry == consoleSubpageBackTarget && consoleSubpageBackTarget != null) {
+            consoleSubpageBackTarget = null
+            showEntry(DrawerController.ID_CONSOLE)
+            return
+        }
         if (currentEntry == DrawerController.ID_PROJECTS && projectController.hasCodeOpen()) {
             projectController.closeCode()
             return
@@ -13407,6 +13648,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val KEY_ACTIVE_CHANNEL_ID = "active_channel_id"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_ENTRY = "ui_entry"
         private const val KEY_IN_CONVERSATION = "ui_in_conversation"
