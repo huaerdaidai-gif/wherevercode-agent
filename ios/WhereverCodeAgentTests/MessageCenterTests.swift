@@ -35,14 +35,14 @@ private final class StubTransport: MessageCenterTransport {
         afterID: String?,
         limit: Int,
         onlyUnread: Bool,
-        markRead: Bool,
+        markRead: Bool
     ) async throws -> [ChannelMessage] {
         recordedPolls.append(RecordedPoll(
             channelId: channelID,
             afterId: afterID,
             limit: limit,
             onlyUnread: onlyUnread,
-            markRead: markRead,
+            markRead: markRead
         ))
         return pages[channelID]?[onlyUnread] ?? []
     }
@@ -52,14 +52,14 @@ private func message(
     _ id: String,
     agentName: String = "协调者",
     text: String,
-    at: Double,
+    at: Double
 ) -> ChannelMessage {
     ChannelMessage(
         id: id,
         agentId: "local-app",
         agentName: agentName,
         text: text,
-        createdAtSeconds: at,
+        createdAtSeconds: at
     )
 }
 
@@ -72,16 +72,16 @@ final class MessageCenterTests: XCTestCase {
         // 平台寻址惯例：正文前缀 @<Name>（传输层无收件人字段）。
         XCTAssertEqual(
             MessageCenterRules.mentionAlias(in: "@协调者 你看一下", selfNames: selfNames),
-            "协调者",
+            "协调者"
         )
         XCTAssertEqual(
             MessageCenterRules.mentionAlias(in: "让 @Codex 看看", selfNames: selfNames),
-            "Codex",
+            "Codex"
         )
         // 最长别名优先：@本机 App 命中“本机 App”而不是“本机”。
         XCTAssertEqual(
             MessageCenterRules.mentionAlias(in: "@本机 App 收一下", selfNames: selfNames),
-            "本机 App",
+            "本机 App"
         )
     }
 
@@ -92,7 +92,7 @@ final class MessageCenterTests: XCTestCase {
         XCTAssertNil(MessageCenterRules.mentionAlias(in: "@GeminiCli 帮忙", selfNames: selfNames))
         // 邮箱/词内 @ 不算提及。
         XCTAssertNil(
-            MessageCenterRules.mentionAlias(in: "abc@coord1ner 后缀相连", selfNames: ["协调者"]),
+            MessageCenterRules.mentionAlias(in: "abc@coord1ner 后缀相连", selfNames: ["协调者"])
         )
         // 无 @ 不算。
         XCTAssertNil(MessageCenterRules.mentionAlias(in: "讨论里提到我", selfNames: selfNames))
@@ -102,7 +102,7 @@ final class MessageCenterTests: XCTestCase {
 
     func testTaskReceiptRecognizedFromAttributionHeader() {
         let attribution = MessageCenterRules.teamAttribution(
-            in: "【协调者 · 任务 a1b2c3d4 · 修复登录】任务已完成，构建绿。",
+            in: "【协调者 · 任务 a1b2c3d4 · 修复登录】任务已完成，构建绿。"
         )
         XCTAssertEqual(attribution?.senderName, "协调者")
         XCTAssertEqual(attribution?.taskId, "a1b2c3d4")
@@ -132,7 +132,7 @@ final class MessageCenterTests: XCTestCase {
             channelName: "构建频道",
             recent: recent,
             unread: unread,
-            selfNames: selfNames,
+            selfNames: selfNames
         )
         XCTAssertEqual(snapshot.mentions.map(\.messageId), ["m4", "m1"])
         XCTAssertEqual(snapshot.mentions.last?.matchedAlias, "本机 App")
@@ -141,7 +141,7 @@ final class MessageCenterTests: XCTestCase {
         XCTAssertEqual(snapshot.unread.map(\.messageId), ["u1", "m1"])
         XCTAssertGreaterThanOrEqual(
             snapshot.mentions.first!.createdAtSeconds,
-            snapshot.mentions.last!.createdAtSeconds,
+            snapshot.mentions.last!.createdAtSeconds
         )
         // 展示正文剥归属头。
         XCTAssertTrue(snapshot.taskReceipts.last!.text.hasPrefix("已修复"))
@@ -156,7 +156,7 @@ final class MessageCenterTests: XCTestCase {
                 messageId: id,
                 senderName: "s",
                 text: "t",
-                createdAtSeconds: Double(id)!,
+                createdAtSeconds: Double(id)!
             )
         }
         let merged = MessageCenterRules.merge([
@@ -183,7 +183,7 @@ final class MessageCenterTests: XCTestCase {
         ])
         let snapshot = try await MessageCenterLoader(transport: stub).fetch(
             channels: [MessageCenterChannelSource(channelId: "ch1", channelName: "测试频道")],
-            selfNames: selfNames,
+            selfNames: selfNames
         )
         // 逐频道两页：普通读 + only_unread 读。
         XCTAssertEqual(stub.recordedPolls.count, 2)
@@ -209,7 +209,7 @@ final class MessageCenterTests: XCTestCase {
                 MessageCenterChannelSource(channelId: "ch1", channelName: "频道一"),
                 MessageCenterChannelSource(channelId: "ch2", channelName: "频道二"),
             ],
-            selfNames: selfNames,
+            selfNames: selfNames
         )
         XCTAssertEqual(stub.recordedPolls.map(\.channelId), ["ch1", "ch1", "ch2", "ch2"])
         XCTAssertEqual(snapshot, MessageCenterSnapshot())
@@ -222,10 +222,10 @@ final class MessageCenterTests: XCTestCase {
         // 前缀与中段提及都算命中；非本机别名不算。
         XCTAssertEqual(
             MessageCenterRules.mentionAlias(in: "@本机 App 帮忙", selfNames: ["本机 App"]),
-            "本机 App",
+            "本机 App"
         )
         XCTAssertNil(
-            MessageCenterRules.mentionAlias(in: "@ClaudeCode 你好", selfNames: ["本机 App"]),
+            MessageCenterRules.mentionAlias(in: "@ClaudeCode 你好", selfNames: ["本机 App"])
         )
     }
 }

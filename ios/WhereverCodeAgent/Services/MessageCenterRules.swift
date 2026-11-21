@@ -43,7 +43,7 @@ public struct MessageCenterEntry: Identifiable, Equatable, Sendable {
         createdAtSeconds: Double,
         matchedAlias: String? = nil,
         taskId: String? = nil,
-        taskTitle: String? = nil,
+        taskTitle: String? = nil
     ) {
         self.section = section
         self.channelId = channelId
@@ -76,7 +76,7 @@ public struct MessageCenterSnapshot: Equatable, Sendable {
     public init(
         mentions: [MessageCenterEntry] = [],
         unread: [MessageCenterEntry] = [],
-        taskReceipts: [MessageCenterEntry] = [],
+        taskReceipts: [MessageCenterEntry] = []
     ) {
         self.mentions = mentions
         self.unread = unread
@@ -93,7 +93,7 @@ public protocol MessageCenterTransport {
         afterID: String?,
         limit: Int,
         onlyUnread: Bool,
-        markRead: Bool,
+        markRead: Bool
     ) async throws -> [ChannelMessage]
 }
 
@@ -109,14 +109,14 @@ public struct ChannelTransportMessageCenterAdapter: MessageCenterTransport {
         afterID: String?,
         limit: Int,
         onlyUnread: Bool,
-        markRead: Bool,
+        markRead: Bool
     ) async throws -> [ChannelMessage] {
         try await transport.pollMessages(
             channelID: channelID,
             afterID: afterID,
             limit: limit,
             onlyUnread: onlyUnread,
-            markRead: markRead,
+            markRead: markRead
         )
     }
 }
@@ -175,7 +175,7 @@ public enum MessageCenterRules {
                     guard end <= chars.count else { continue }
                     guard Array(chars[(at + 1)..<end]).elementsEqual(
                         aliasChars,
-                        by: { $0.lowercased() == $1.lowercased() },
+                        by: { $0.lowercased() == $1.lowercased() }
                     ) else { continue }
                     let next = end < chars.count ? chars[end] : nil
                     let latinContinuation = next.map { ($0.isLetter || $0.isNumber) && !isCjk($0) } ?? false
@@ -228,7 +228,7 @@ public enum MessageCenterRules {
             return TeamAttribution(
                 senderName: sender,
                 taskId: taskId.isEmpty ? nil : taskId,
-                taskTitle: (title?.isEmpty == false) ? title : nil,
+                taskTitle: (title?.isEmpty == false) ? title : nil
             )
         }
         if trimmed.hasPrefix("[") {
@@ -267,7 +267,7 @@ public enum MessageCenterRules {
         channelName: String,
         recent: [ChannelMessage],
         unread: [ChannelMessage],
-        selfNames: [String],
+        selfNames: [String]
     ) -> MessageCenterSnapshot {
         var mentions: [MessageCenterEntry] = []
         var receipts: [MessageCenterEntry] = []
@@ -285,7 +285,7 @@ public enum MessageCenterRules {
                     senderName: senderName(message, attribution: attribution),
                     text: body,
                     createdAtSeconds: message.createdAtSeconds,
-                    matchedAlias: alias,
+                    matchedAlias: alias
                 ))
             }
             if let task = teamAttribution(in: message.text), task.taskId != nil,
@@ -299,7 +299,7 @@ public enum MessageCenterRules {
                     text: body,
                     createdAtSeconds: message.createdAtSeconds,
                     taskId: task.taskId,
-                    taskTitle: task.taskTitle,
+                    taskTitle: task.taskTitle
                 ))
             }
         }
@@ -315,7 +315,7 @@ public enum MessageCenterRules {
                 messageId: message.id,
                 senderName: senderName(message, attribution: attribution),
                 text: displayText(message.text),
-                createdAtSeconds: message.createdAtSeconds,
+                createdAtSeconds: message.createdAtSeconds
             ))
         }
         func cap(_ list: [MessageCenterEntry]) -> [MessageCenterEntry] {
@@ -324,7 +324,7 @@ public enum MessageCenterRules {
         return MessageCenterSnapshot(
             mentions: cap(mentions),
             unread: cap(unreadEntries),
-            taskReceipts: cap(receipts),
+            taskReceipts: cap(receipts)
         )
     }
 
@@ -338,7 +338,7 @@ public enum MessageCenterRules {
         return MessageCenterSnapshot(
             mentions: cap(snapshots.flatMap(\.mentions)),
             unread: cap(snapshots.flatMap(\.unread)),
-            taskReceipts: cap(snapshots.flatMap(\.taskReceipts)),
+            taskReceipts: cap(snapshots.flatMap(\.taskReceipts))
         )
     }
 }
@@ -369,7 +369,7 @@ public final class MessageCenterLoader: @unchecked Sendable {
     /// 逐频道拉取并聚合。任一频道读失败即抛出（调用方如实呈现，绝不假装成功）。
     public func fetch(
         channels: [MessageCenterChannelSource],
-        selfNames: [String],
+        selfNames: [String]
     ) async throws -> MessageCenterSnapshot {
         var parts: [MessageCenterSnapshot] = []
         for channel in channels {
@@ -378,21 +378,21 @@ public final class MessageCenterLoader: @unchecked Sendable {
                 afterID: nil,
                 limit: pageLimit,
                 onlyUnread: false,
-                markRead: false,
+                markRead: false
             )
             let unread = try await transport.pollMessages(
                 channelID: channel.channelId,
                 afterID: nil,
                 limit: pageLimit,
                 onlyUnread: true,
-                markRead: false,
+                markRead: false
             )
             parts.append(MessageCenterRules.buildEntries(
                 channelId: channel.channelId,
                 channelName: channel.channelName,
                 recent: recent,
                 unread: unread,
-                selfNames: selfNames,
+                selfNames: selfNames
             ))
         }
         return MessageCenterRules.merge(parts)

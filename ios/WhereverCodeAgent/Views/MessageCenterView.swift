@@ -46,7 +46,7 @@ struct MessageCenterView: View {
                     horizontalPadding: 16,
                     topPadding: 12,
                     bottomPadding: 20,
-                    scrollTrigger: 0,
+                    scrollTrigger: 0
                 ) {
                     sections
                 } trailing: {
@@ -123,7 +123,7 @@ struct MessageCenterView: View {
         _ section: MessageCenterSection,
         title: String,
         entries: [MessageCenterEntry],
-        subtitle: @escaping (MessageCenterEntry) -> String,
+        subtitle: @escaping (MessageCenterEntry) -> String
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(title) · \(entries.count)")
