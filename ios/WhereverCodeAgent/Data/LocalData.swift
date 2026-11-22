@@ -433,6 +433,39 @@ public final class LocalChatModel: ObservableObject {
         reload()
     }
 
+    // MARK: - 新建项目待绑定（本机 / 远程来源离开聊天去建项目时）
+
+    private var pendingProjectBindKey: String { "chat.pendingProjectBindIds" }
+
+    /// 离开聊天去建项目（文件页 / 设备页）前记下当前项目 id 集合；
+    /// 回到聊天时若有新项目出现，自动绑最新建的那个（与安卓
+    /// 「建好自动切过去」同口径，见 consumePendingProjectBindIfNeeded）。
+    public func markPendingProjectBind() {
+        let ids = ((try? data.projects.listProjects()) ?? []).map { $0.project.projectId }
+        try? data.kv.setJSON(pendingProjectBindKey, ids)
+    }
+
+    /// 显式选定项目（名单点选 / git 当场建好）时清掉待绑定标记，
+    /// 防它日后误绑无关的新项目。
+    public func clearPendingProjectBind() {
+        try? data.kv.setJSON(pendingProjectBindKey, nil as [String]?)
+    }
+
+    /// 聊天页出现时消费待绑定标记：有新建项目则绑最新一个并清
+    /// 标记；还没有新项目则保留标记（可能还没建完）。
+    public func consumePendingProjectBindIfNeeded() {
+        guard let known = (try? data.kv.getJSON(pendingProjectBindKey, as: [String].self)) ?? nil else { return }
+        let projects = (try? data.projects.listProjects()) ?? []
+        let fresh = projects.filter { !known.contains($0.project.projectId) }
+        guard let newest = fresh.max(by: { $0.project.createdAtEpochSeconds < $1.project.createdAtEpochSeconds }) else { return }
+        clearPendingProjectBind()
+        projectSource = ProjectSourceBinding(
+            providerId: "local", targetId: newest.project.projectId,
+            targetTitle: newest.project.name, path: newest.activeHome?.workspacePath)
+        permissionMode = .readOnly
+        persistSessionConfig()
+    }
+
     public func newConversation() {
         guard !isSending else {
             error = "请等待当前回复完成后新建对话"
@@ -1316,6 +1349,7 @@ public struct LocalChatHomeView: View {
             ChatComposerBar(model: model, focused: $inputFocused, onSelectRoute: onSelectRoute)
         }
         .background(Color(red: 0.98, green: 0.976, blue: 0.968).ignoresSafeArea())
+        .onAppear { model.consumePendingProjectBindIfNeeded() }
         .sheet(isPresented: $model.showHistory) {
             NavigationStack {
                 List {
@@ -1926,9 +1960,20 @@ public struct ProjectPickerSheet: View {
 
     public var body: some View {
         NavigationStack {
-            List {
+            VStack(spacing: 0) {
+                // 顶部说明与安卓卡片对话框同文案（2026-11-22 顶部文字双端统一）。
+                Text(projects.isEmpty
+                    ? "还没有建好的项目。先聊也行，建好后自动切过去。"
+                    : "选一个项目作为当前对话的项目。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                List {
                 Section {
                     Button {
+                        model.clearPendingProjectBind()
                         model.projectSource = .localDefault
                         model.permissionMode = .readOnly
                         model.persistSessionConfig()
@@ -1948,6 +1993,7 @@ public struct ProjectPickerSheet: View {
                     }
                     ForEach(projects) { project in
                         Button {
+                            model.clearPendingProjectBind()
                             model.projectSource = ProjectSourceBinding(
                                 providerId: "local", targetId: project.project.projectId,
                                 targetTitle: project.project.name,
@@ -1970,11 +2016,7 @@ public struct ProjectPickerSheet: View {
                             }
                         }
                     }
-                    if projects.isEmpty {
-                        Text("还没有建好的项目。先聊也行，建好后回到这里选它。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } header: { Text("项目").textCase(nil) }
+                }
                 Section {
                     NavigationLink {
                         ProjectSourceStepView(model: model)
@@ -1984,6 +2026,7 @@ public struct ProjectPickerSheet: View {
                             Text("新建项目").foregroundStyle(.blue)
                         }
                     }
+                }
                 }
             }
             .navigationTitle("选择项目")
@@ -2001,27 +2044,36 @@ public struct ProjectSourceStepView: View {
     @Environment(\.dismiss) private var dismiss
 
     public var body: some View {
-        List {
-            Section {
-                Button {
-                    dismiss()
-                    model.appState.onSelectRoute?("files")
-                } label: {
-                    sourceRow("本机文件夹", detail: "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。")
-                }
-                Button {
-                    dismiss()
-                    model.appState.onSelectRoute?("devices")
-                } label: {
-                    sourceRow("远程设备上的文件夹", detail: "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。")
-                }
-                NavigationLink {
-                    GitProjectFormView(model: model)
-                } label: {
-                    sourceRow("git 仓库地址", detail: "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。")
-                }
-            } header: { Text("打开文件夹").textCase(nil) } footer: {
-                Text("选一个位置打开它作为项目之家。")
+        VStack(spacing: 0) {
+            // 顶部说明与安卓卡片对话框同文案、同位置（标题之下）。
+            Text("选一个位置打开它作为项目之家。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+            List {
+                Section {
+                    Button {
+                        model.markPendingProjectBind()
+                        dismiss()
+                        model.appState.onSelectRoute?("files")
+                    } label: {
+                        sourceRow("本机文件夹", detail: "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。")
+                    }
+                    Button {
+                        model.markPendingProjectBind()
+                        dismiss()
+                        model.appState.onSelectRoute?("devices")
+                    } label: {
+                        sourceRow("远程设备上的文件夹", detail: "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。")
+                    }
+                    NavigationLink {
+                        GitProjectFormView(model: model)
+                    } label: {
+                        sourceRow("git 仓库地址", detail: "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。")
+                    }
+                } header: { Text("打开文件夹").textCase(nil) }
             }
         }
         .navigationTitle("新建项目")
@@ -2069,6 +2121,7 @@ public struct GitProjectFormView: View {
                         path: path,
                         data: model.data
                     ) {
+                        model.clearPendingProjectBind()
                         model.projectSource = ProjectSourceBinding(
                             providerId: "local", targetId: created.project.projectId,
                             targetTitle: created.project.name,
