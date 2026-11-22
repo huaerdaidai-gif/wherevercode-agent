@@ -179,15 +179,34 @@
         android:paddingTop="4dp"
         android:paddingBottom="6dp">
 
+        <!-- 项目来源按钮（2026-11-22 双端统一，与 iOS ProjectSourceChip
+             同形态）：浮在输入卡上方、页面背景上，白底描边胶囊 +
+             来源图标 + 「提供方 · 目标」+ 下箭头（图标与文案由
+             MainActivity.updateContextPill 按当前来源设置），不再
+             收编进输入卡内部。 -->
+        <TextView
+            android:id="@+id/contextPill"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginStart="2dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center_vertical"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="本机 · App 沙盒"
+            android:textColor="@color/home_text"
+            android:textSize="13sp"
+            android:contentDescription="当前项目上下文" />
+
         <!-- 对话组件收敛（2026-11-20）：输入区骨架与频道页共用
              ChatComposerView（STACKED 排布：输入框 + 下层控制行 +
              发送钮由组件内建，沿用 inputPrompt / inputLowerRow /
-             buttonSend id）；页面外壳控件（contextPill 与下层行四
-             控件）仍在 XML 里声明（属性逐字沿用组件化之前），
-             充气时先挂在本组件下，组件 onFinishInflate 按 id 把
-             它们收编进上层插槽 / 下层行，父子结构与原 XML 一致
-             （MainLayoutTest 按此结构校验）。+ 号开上下文菜单；
-             右侧是听写与语音模式入口。 -->
+             buttonSend id）；页面外壳控件（下层行四控件）仍在 XML
+             里声明（属性逐字沿用组件化之前），充气时先挂在本组件
+             下，组件 onFinishInflate 按 id 把它们收编进下层行，
+             父子结构与原 XML 一致（MainLayoutTest 按此结构校验）。
+             + 号开上下文菜单；右侧是听写与语音模式入口。 -->
         <wherevercode.agent.ui.ChatComposerView
             android:id="@+id/inputBox"
             android:layout_width="match_parent"
@@ -196,22 +215,6 @@
             android:background="@drawable/bg_input_home"
             android:padding="4dp"
             app:composerArrangement="stacked">
-
-            <TextView
-                android:id="@+id/contextPill"
-                android:layout_width="wrap_content"
-                android:layout_height="32dp"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/bg_chip_home"
-                android:gravity="center_vertical"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:text="本机 · App 沙盒 ⌄"
-                android:textColor="@color/home_text"
-                android:textSize="12sp"
-                android:contentDescription="当前项目上下文" />
 
             <TextView
                 android:id="@+id/buttonPlus"

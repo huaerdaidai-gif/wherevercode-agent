@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 卡片式对话框底（2026-11-22 双端统一，与 iOS 对话框同形态）：白卡 + 20dp 圆角。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/surface" />
+    <corners android:radius="20dp" />
+</shape>

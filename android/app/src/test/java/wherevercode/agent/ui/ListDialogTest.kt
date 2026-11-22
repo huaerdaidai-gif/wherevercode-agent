@@ -191,6 +191,38 @@ class ListDialogTest {
         assertFalse(dialog.isShowing)
     }
 
+    @Test
+    fun `card dialog shows title message items and cancel in one card`() {
+        // 卡片式对话框（2026-11-22 双端统一，与 iOS 同形态）：标题、
+        // 说明、三项来源与「取消」必须同时可见，点行回调下标并关掉。
+        val picked = mutableListOf<Int>()
+        val dialog = ListDialog.showCardWithDescriptions(
+            context,
+            "打开文件夹",
+            "选一个位置打开它作为项目之家。",
+            listOf(
+                "本机文件夹" to "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。",
+                "远程设备上的文件夹" to "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。",
+                "git 仓库地址" to "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。",
+            ),
+        ) { picked += it }
+        val decor = dialog.window?.decorView ?: throw AssertionError("卡片对话框没有 decorView")
+        val text = collectText(decor)
+        assertTrue(text.contains("打开文件夹"))
+        assertTrue(text.contains("选一个位置打开它作为项目之家。"))
+        assertTrue(text.contains("本机文件夹"))
+        assertTrue(text.contains("远程设备上的文件夹"))
+        assertTrue(text.contains("git 仓库地址"))
+        assertTrue(text.contains("取消"))
+        val nameView = findTextView(decor, "git 仓库地址")
+            ?: throw AssertionError("第三个选项的名没显示出来")
+        val row = nameView.parent as? View
+            ?: throw AssertionError("选项行没有父级")
+        row.performClick()
+        assertEquals(listOf(2), picked)
+        assertFalse(dialog.isShowing)
+    }
+
     private fun showingDialog(): AlertDialog? =
         ShadowDialog.getShownDialogs().lastOrNull { it.isShowing } as? AlertDialog
 

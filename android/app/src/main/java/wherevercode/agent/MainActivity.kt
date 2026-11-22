@@ -4208,7 +4208,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showOpenFolderEntry(forProjectId: String? = null) {
         val options = openFolderEntryOptions()
-        ListDialog.showWithDescriptions(
+        ListDialog.showCardWithDescriptions(
             this,
             "打开文件夹",
             "选一个位置打开它作为项目之家。",
@@ -10516,8 +10516,10 @@ class MainActivity : AppCompatActivity() {
     private fun updateContextPill() {
         if (!::contextPill.isInitialized) return
         val binding = chatProjectBinding.projectId
+        var iconRes = R.drawable.ic_device
+        val label: String
         if (binding == null) {
-            contextPill.text = "本机 · App 沙盒 ⌄"
+            label = "本机 · App 沙盒"
         } else {
             val name = try {
                 projectStore.getProject(binding)?.name
@@ -10529,14 +10531,31 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 null
             }
-            val homeLabel = when {
-                home == null -> "未指定家"
-                home.gitHost() != null -> "${home.gitHost()?.displayName} · ${home.workspacePath}"
-                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · ${home.workspacePath}"
-                else -> "设备 · ${deviceDisplayName(home.hostId)}"
+            // 文案与 iOS ProjectSourceChip 同构成：「提供方 · 目标」——
+            // 目标 = 当前绑定的项目，提供方按家的位置种类取标题
+            // （本机 / 设备名 / Git 托管名），不再用「项目名（家）」式。
+            label = when {
+                home == null -> "$name · 未指定家"
+                home.gitHost() != null -> {
+                    iconRes = R.drawable.ic_folder
+                    "${home.gitHost()?.displayName} · $name"
+                }
+                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · $name"
+                else -> "${deviceDisplayName(home.hostId)} · $name"
             }
-            contextPill.text = "$name（$homeLabel）⌄"
         }
+        contextPill.text = label
+        // 图标与 iOS 同形态：前置来源图标 + 尾部下箭头（不再用文字符号 ⌄）。
+        val lead = ContextCompat.getDrawable(this, iconRes)?.mutate()?.apply {
+            setTint(ContextCompat.getColor(this@MainActivity, R.color.home_text))
+            setBounds(0, 0, dp(16), dp(16))
+        }
+        val chevron = ContextCompat.getDrawable(this, R.drawable.ic_chevron_down)?.mutate()?.apply {
+            setTint(ContextCompat.getColor(this@MainActivity, R.color.home_text_secondary))
+            setBounds(0, 0, dp(12), dp(12))
+        }
+        contextPill.setCompoundDrawables(lead, null, chevron, null)
+        contextPill.compoundDrawablePadding = dp(5)
     }
 
     /**
