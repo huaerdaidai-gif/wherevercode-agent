@@ -6332,9 +6332,9 @@ class MainActivity : AppCompatActivity() {
 
     /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     private fun showChannelCreateMenu() {
-        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "设置成员角色", "删除频道", "发起私聊", "创建入帖 Webhook", "打开消息中心")
+        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "设置成员角色", "删除频道", "发起私聊", "创建入帖 Webhook", "管理 Webhook", "打开消息中心")
         ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
-            if (which == 9) {
+            if (which == 10) {
                 showEntry(DrawerRouter.ID_MESSAGE_CENTER)
                 return@show
             }
@@ -6357,13 +6357,19 @@ class MainActivity : AppCompatActivity() {
                 Thread {
                     try {
                         val result = teamChannelTransport(host!!).createChannelWebhook(channelId!!)
-                        val token = result.optString("token", "")
+                        // 服务端真实返回：url_path（复数 channel-webhooks）＋
+                        // secret（只此一次）＋签名说明；没有 token 字段。
+                        val urlPath = result.optString("url_path", "")
+                        val secret = result.optString("secret", "")
+                        val signature = result.optString("signature", "")
                         runOnUiThread {
                             AlertDialog.Builder(this)
                                 .setTitle("频道 Webhook 已创建")
                                 .setMessage(
-                                    "入帖地址路径：/api/open/v1/channel-webhook/$token\n" +
-                                        "令牌只显示这一次，请自行保存；外部系统 POST {\"text\": \"…\"} 即可入帖。",
+                                    "入帖地址路径：$urlPath\n" +
+                                        "密钥（只显示这一次，请自行保存）：$secret\n" +
+                                        signature + "\n" +
+                                        "外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能在「管理 Webhook」里删掉重建。",
                                 )
                                 .setPositiveButton("好", null)
                                 .show()
@@ -6371,6 +6377,46 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         teamChannelNotice =
                             "建 Webhook 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+                        runOnUiThread { refreshTeamChannel() }
+                    }
+                }.start()
+                return@show
+            }
+            if (which == 9) {
+                // 管理 Webhook：列表＋删除（服务端 list/delete 工具现成；
+                // secret 不回显——库里只存哈希，丢了删掉重建）。
+                Thread {
+                    try {
+                        val result = teamChannelTransport(host!!).listChannelWebhooks(channelId!!)
+                        val hooks = result.optJSONArray("webhooks")
+                        val items = mutableListOf<Pair<String, String>>()
+                        if (hooks != null) {
+                            for (i in 0 until hooks.length()) {
+                                val h = hooks.optJSONObject(i) ?: continue
+                                val id = h.optString("webhook_id", "")
+                                if (id.isBlank()) continue
+                                val name = h.optString("name", "").ifBlank { id }
+                                items += id to "$name（建于 ${h.optString("created_at", "")}）"
+                            }
+                        }
+                        runOnUiThread {
+                            if (items.isEmpty()) {
+                                toast("本频道还没有 Webhook。")
+                                return@runOnUiThread
+                            }
+                            ListDialog.show(this, "管理 Webhook", "点一个可删除；删除后原地址立即失效。", items.map { it.second }) { index ->
+                                val (hookId, label) = items[index]
+                                AlertDialog.Builder(this).setTitle("删除这个 Webhook？")
+                                    .setMessage(label)
+                                    .setNegativeButton("取消", null)
+                                    .setPositiveButton("删除") { _, _ ->
+                                        performChannelManagement { it.deleteChannelWebhook(channelId!!, hookId) }
+                                    }.show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        teamChannelNotice =
+                            "取 Webhook 列表失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
                         runOnUiThread { refreshTeamChannel() }
                     }
                 }.start()

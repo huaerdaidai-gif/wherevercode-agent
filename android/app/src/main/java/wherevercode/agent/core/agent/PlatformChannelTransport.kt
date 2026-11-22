@@ -684,4 +684,16 @@ class PlatformChannelMcpTransport(
             throw IOException("平台返回了无法解析的工具结果。")
         }
     }
+
+    /** 列出频道的入帖 Webhook（不含 secret，库里只存哈希）。 */
+    fun listChannelWebhooks(channelId: String): JSONObject = toolsCall(
+        "agent_channel_list_webhooks",
+        mapOf("channel_id" to channelId),
+    )
+
+    /** 删除一个入帖 Webhook（删后原地址立即失效）。 */
+    fun deleteChannelWebhook(channelId: String, webhookId: String): JSONObject = toolsCall(
+        "agent_channel_delete_webhook",
+        mapOf("channel_id" to channelId, "webhook_id" to webhookId),
+    )
 }
