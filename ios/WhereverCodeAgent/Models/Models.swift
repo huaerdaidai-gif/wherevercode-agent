@@ -201,8 +201,10 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
     public let isArchived: Bool
     /// Channel kind (phase-3): "channel" or "dm" (direct message).
     public let kind: String
+    /// New members can see full history (№12); absent on the wire = true.
+    public let historyVisible: Bool
 
-    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel", participantDetails: [ChannelParticipant] = []) {
+    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel", participantDetails: [ChannelParticipant] = [], historyVisible: Bool = true) {
         self.id = id
         self.name = name
         self.participants = participants
@@ -210,16 +212,18 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
         self.lastMessageText = lastMessageText
         self.isArchived = isArchived
         self.kind = kind
+        self.historyVisible = historyVisible
     }
 
     /// True for direct-message channels (phase-3 DM, scheme A segment).
     public var isDM: Bool { kind == "dm" }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, participants, participantDetails, lastMessageText, isArchived, kind
+        case id, name, participants, participantDetails, lastMessageText, isArchived, kind, historyVisible
     }
 
-    /// Tolerant decoding: caches written before phase-3 lack `kind`.
+    /// Tolerant decoding: caches written before phase-3 lack `kind`;
+    /// caches before №12 lack `historyVisible` (defaults to true).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -229,6 +233,7 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
         lastMessageText = try c.decodeIfPresent(String.self, forKey: .lastMessageText)
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "channel"
+        historyVisible = try c.decodeIfPresent(Bool.self, forKey: .historyVisible) ?? true
     }
 
     public var displayName: String { name.isEmpty ? id : name }
@@ -266,7 +271,8 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
             lastMessageText: last,
             isArchived: (dict["archived"] as? Bool) ?? (dict["is_archived"] as? Bool) ?? false,
             kind: stringField(dict, keys: ["kind"]) ?? "channel",
-            participantDetails: details
+            participantDetails: details,
+            historyVisible: (dict["history_visible"] as? Bool) ?? true
         )
     }
 

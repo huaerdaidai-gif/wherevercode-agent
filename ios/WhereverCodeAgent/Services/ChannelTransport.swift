@@ -83,21 +83,44 @@ public struct ChannelTransport {
     /// exactly as documented for `agent_channel_messages`.
     /// `query` (phase-1: in-channel search) is passed through as the
     /// server's `q` argument; results are whatever the server returns.
+    /// №12 filters pass through untouched: `beforeID` pages older
+    /// history, `sender` matches one member (id or display name),
+    /// `fromTs`/`toTs` bound a Unix-second window (from inclusive,
+    /// to exclusive), `kind` is image / file / link.
     public func pollMessages(
         channelID: String,
         afterID: String? = nil,
+        beforeID: String? = nil,
         limit: Int = defaultPollLimit,
         onlyUnread: Bool = false,
         markRead: Bool = false,
-        query: String? = nil
+        query: String? = nil,
+        sender: String? = nil,
+        fromTs: Int? = nil,
+        toTs: Int? = nil,
+        kind: String? = nil
     ) async throws -> [ChannelMessage] {
         var args: [String: Any] = ["channel_id": channelID, "limit": limit]
         if let afterID, !afterID.isEmpty { args["after_id"] = afterID }
+        if let beforeID, !beforeID.isEmpty { args["before_id"] = beforeID }
         if onlyUnread { args["only_unread"] = true }
         if markRead { args["mark_read"] = true }
         if let query, !query.isEmpty { args["q"] = query }
+        if let sender, !sender.isEmpty { args["sender"] = sender }
+        if let fromTs { args["from_ts"] = fromTs }
+        if let toTs { args["to_ts"] = toTs }
+        if let kind, !kind.isEmpty { args["kind"] = kind }
         let result = try await client.callTool(name: "agent_channel_messages", arguments: args)
         return ChannelMessage.list(from: result)
+    }
+
+    /// New-member history visibility switch (№12). Only the channel
+    /// owner / a coordinator may flip it; the server's real error
+    /// surfaces untouched when it refuses.
+    public func setHistoryVisible(channelID: String, visible: Bool) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_set_history_visible",
+            arguments: ["channel_id": channelID, "visible": visible])
     }
 
     // MARK: - Channel management (phase-1 completion)

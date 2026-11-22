@@ -130,6 +130,8 @@ public final class ChannelFeed {
     private var webSocketTask: URLSessionWebSocketTask?
     private var runTask: Task<Void, Never>?
     private var running = false
+    /// Set by `reconnectNow()` to cut the polling fallback short.
+    private var fallbackDeadlineOverride: Date?
 
     public var onMessages: (([ChannelMessage]) -> Void)?
     public var onStateChange: ((ChannelConnectionState, String?) -> Void)?
@@ -174,6 +176,17 @@ public final class ChannelFeed {
         setState(.stopped)
     }
 
+    /// Foreground reconnect (№12): while polling fallback is waiting
+    /// out its 45-second deadline, pull the deadline to now so the
+    /// loop retries the WebSocket immediately, and poll once right
+    /// away so anything missed shows up without waiting. No-op when
+    /// the feed is not running.
+    public func reconnectNow() {
+        guard running else { return }
+        fallbackDeadlineOverride = Date()
+        Task { [weak self] in await self?.pollOnce() }
+    }
+
     // MARK: - Loop
 
     private func loop() async {
@@ -196,12 +209,23 @@ public final class ChannelFeed {
     }
 
     /// Poll until the reconnect deadline, then return so the WS is retried.
+    /// The sleep runs in half-second slices so `reconnectNow()` (which
+    /// pulls the deadline to now) takes effect at once.
     private func pollFallback() async {
         let deadline = Date().addingTimeInterval(Self.reconnectAfterSeconds)
-        while running && !Task.isCancelled && Date() < deadline {
+        while running && !Task.isCancelled {
+            let effective = fallbackDeadlineOverride ?? deadline
+            if Date() >= effective { break }
             await pollOnce()
-            try? await Task.sleep(nanoseconds: UInt64(Self.pollIntervalSeconds * 1_000_000_000))
+            var waited: TimeInterval = 0
+            while running && !Task.isCancelled && waited < Self.pollIntervalSeconds {
+                let current = fallbackDeadlineOverride ?? deadline
+                if Date() >= current { break }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                waited += 0.5
+            }
         }
+        fallbackDeadlineOverride = nil
     }
 
     /// One poll. Returns nil on success, the real error text on failure.
