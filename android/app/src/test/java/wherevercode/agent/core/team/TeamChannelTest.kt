@@ -233,6 +233,19 @@ class TeamChannelTest {
     }
 
     @Test
+    fun `transient notice shows briefly then hides`() {
+        // 定版口径：状态只在异常时短暂出现——首次出现后 TTL 内可见、
+        // 过期即隐；空通知与未计时（firstSeen=0）永不显示。
+        assertTrue(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 1_000))
+        assertTrue(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 5_999))
+        assertFalse(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 6_000))
+        assertFalse(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 60_000))
+        assertFalse(transientNoticeVisible(null, firstSeenAtMs = 1_000, nowMs = 1_000))
+        assertFalse(transientNoticeVisible("", firstSeenAtMs = 1_000, nowMs = 1_000))
+        assertFalse(transientNoticeVisible("出错了", firstSeenAtMs = 0, nowMs = 1_000))
+    }
+
+    @Test
     fun `mergePlatformChannelMembers carries platform roles`() {
         // 角色管理口径：成员角色以平台为准——本地已有成员回写平台
         // 角色，平台补进的成员带角色进来，标签函数给徽标用。
