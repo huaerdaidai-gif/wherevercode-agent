@@ -484,6 +484,11 @@ class MainActivity : AppCompatActivity() {
     private var teamChannelTypingSender: String? = null
     /** 激活的自由话题根消息 id（非空时仅聚焦该话题串）。 */
     private var teamChannelActiveTopicRootId: String? = null
+    /** 218 分段二（0 消息 1 文件 2 任务）与文件分段缓存（按频道 id）。 */
+    private var teamChannelSectionTab = 0
+    private var teamChannelFiles: List<wherevercode.agent.core.agent.PlatformChannelMessage> = emptyList()
+    private var teamChannelFilesChannelId: String? = null
+    private var teamChannelFilesLoaded = false
     /** 频道刷新在后台运行，期间收到的刷新请求合并为下一轮。 */
     private var teamChannelRefreshRunning = false
     private var teamChannelRefreshPending = false
@@ -1168,6 +1173,7 @@ class MainActivity : AppCompatActivity() {
         // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
         // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
         window.decorView.post { handleFlagshipEntryIntent(intent) }
+        window.decorView.post { handleChannelDeepLink(intent) }
         // V5 按主流改（maintainer 2026-11-11）：“+”菜单附件选择器与相机权限。
         // 必须在 onCreate 里注册（Activity 结果回调的注册点）。
         registerAttachmentLaunchers()
@@ -1787,6 +1793,11 @@ class MainActivity : AppCompatActivity() {
             },
             onJumpToDate = { fromTs -> jumpToTeamChannelDate(fromTs) },
             onHistoryVisibleChange = { visible -> setTeamChannelHistoryVisible(visible) },
+            onSectionTabChange = { tab ->
+                teamChannelSectionTab = tab
+                if (tab == 1) ensureChannelFilesLoaded()
+                refreshTeamChannel()
+            },
             onClearSearch = {
                 teamChannelSearchQuery = ""
                 teamChannelSearchResults = null
@@ -5292,6 +5303,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         window.decorView.post { handleFlagshipEntryIntent(intent) }
+        window.decorView.post { handleChannelDeepLink(intent) }
     }
 
     private fun handleFlagshipEntryIntent(intent: Intent?) {
@@ -6251,17 +6263,18 @@ class MainActivity : AppCompatActivity() {
         val activeId = teamChannelActiveId ?: channelId
         val (messages, feed) = teamChannelFeedSnapshot(activeId)
         val lastReadId = teamChannelLastReadId(activeId)
+        // 218 计数口径 B（与 iOS 同一定义）：未读只按本机已读游标在
+        // 当前已加载消息内计——无游标计 0 并把游标推到最新、游标
+        // 不在列表计全部。不再优先服务端口径，保证两端同数同义；
+        // 服务端已读标记仍照常推（pushTeamChannelReadMark），只是
+        // 不拿它的计数当本页显示值。
         val (unreadCount, unreadCapped) = if (lastReadId == null) {
             messages.lastOrNull()?.let { saveTeamChannelLastReadId(activeId, it.id) }
             0 to false
         } else {
-            // 未读数改走服务端口径（onlyUnread 原样透传）：已读过的不再
-            // 计入，别处不再重复通知；服务端问不到时回落本地口径。
-            serverTeamChannelUnread(host, activeId) ?: run {
-                val index = messages.indexOfFirst { it.id == lastReadId }
-                val count = if (index < 0) messages.size else messages.size - index - 1
-                count to false
-            }
+            val index = messages.indexOfFirst { it.id == lastReadId }
+            val count = if (index < 0) messages.size else messages.size - index - 1
+            count to false
         }
         val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeId }
         val selfIdsForRole = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() }
@@ -6312,6 +6325,9 @@ class MainActivity : AppCompatActivity() {
             historyVisible = activeSummary?.historyVisible ?: true,
             canManageHistory = myHistoryRole == "owner" || myHistoryRole == "coordinator",
             showHistoryToggle = activeSummary != null && activeSummary.kind == "channel",
+            sectionTab = teamChannelSectionTab,
+            channelFiles = if (teamChannelFilesChannelId == activeId) teamChannelFiles else emptyList(),
+            filesLoaded = teamChannelFilesChannelId == activeId && teamChannelFilesLoaded,
         )
     }
 
@@ -6503,6 +6519,106 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { teamChannelNotice = result; toast(result); refreshTeamChannel() }
         }.start()
     }
+    /** 218 文件分段：kind=file/image/link 三次过滤拉取合并去重（后台线程）。 */
+    private fun ensureChannelFilesLoaded() {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        if (teamChannelFilesChannelId == channelId && teamChannelFilesLoaded) return
+        teamChannelFilesChannelId = channelId
+        teamChannelFilesLoaded = false
+        Thread {
+            try {
+                val transport = teamChannelTransport(host)
+                val merged = listOf("file", "image", "link")
+                    .flatMap { kind -> transport.fetchMessages(channelId, limit = 50, kind = kind) }
+                    .distinctBy { it.id }
+                    .sortedBy { it.createdAtSeconds }
+                if (teamChannelFilesChannelId == channelId) {
+                    teamChannelFiles = merged
+                    teamChannelFilesLoaded = true
+                    refreshTeamChannel()
+                }
+            } catch (e: Exception) {
+                if (teamChannelFilesChannelId == channelId) {
+                    teamChannelFilesLoaded = true
+                    teamChannelNotice = "频道文件加载失败：${(e.message ?: e.javaClass.simpleName).take(160)}"
+                    refreshTeamChannel()
+                }
+            }
+        }.start()
+    }
+
+    // ---- 218 深链（路由带 channelId，与 iOS 同语义）----
+    // 入口：wherevercode://channel/<id> 的 VIEW intent（冷启动走
+    // onCreate、后台走 onNewIntent）与 App 内调用 requestOpenChannel。
+    // pending 存 SharedPreferences，登录/连接恢复后由刷新链消费。
+
+    private fun requestOpenChannel(channelId: String) {
+        val id = channelId.trim()
+        if (id.isEmpty()) return
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit().putString("pending_channel_id", id).apply()
+        consumePendingChannelLink()
+        // 若频道页还没建好或端点未配，pending 留待刷新链消费。
+        refreshTeamChannel()
+    }
+
+    private fun handleChannelDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "wherevercode" && data.host == "channel") {
+            val id = data.pathSegments.firstOrNull().orEmpty()
+            if (id.isNotEmpty()) requestOpenChannel(id)
+        }
+    }
+
+    /**
+     * 消费 pending 频道跳转（在 refreshTeamChannel 的后台线程、频道
+     * 列表缓存刷新之后调用）：列表里有就直达（频道/私聊按 kind）；
+     * 没有按三类异常定性并以提示行告知——格式不对 = 链接无效；
+     * 探针被成员/权限类错误拒绝 = 无权限；不存在类错误 = 已删除。
+     */
+    private fun consumePendingChannelLink() {
+        val prefs = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+        val target = prefs.getString("pending_channel_id", null)?.trim().orEmpty()
+        if (target.isEmpty()) return
+        val (host, _) = teamChannelEndpoint() ?: return // 未配端点：留待配好后消费
+        val summary = teamChannelChannelsCache.firstOrNull { it.id == target }
+        if (summary != null) {
+            prefs.edit().remove("pending_channel_id").apply()
+            teamChannelDmMode = summary.kind == "dm"
+            teamChannelActiveId = target
+            if (!teamChannelDmMode) saveActiveChannelId(target)
+            teamChannelSearchResults = null
+            teamChannelBrowseMessages = null
+            teamChannelNotice = "已打开频道：${summary.name}"
+            startTeamChannelFeed()
+            return
+        }
+        if (teamChannelChannelsCache.isEmpty()) return // 列表还没拉到，不定性
+        prefs.edit().remove("pending_channel_id").apply()
+        val hexOk = target.length == 32 && target.all { it in '0'..'9' || it in 'a'..'f' }
+        if (!hexOk) {
+            teamChannelNotice = "链接无效：频道 ID 格式不正确。"
+            return
+        }
+        try {
+            teamChannelTransport(host).fetchMessages(target, limit = 1)
+            teamChannelNotice = "无法打开该频道：它不在你的频道列表里。"
+        } catch (e: Exception) {
+            val raw = e.message.orEmpty()
+            teamChannelNotice = when {
+                raw.contains("member") || raw.contains("成员") ||
+                    raw.contains("permission") || raw.contains("权限") ->
+                    "无权限：你不是该频道成员。"
+                raw.contains("not found") || raw.contains("不存在") ||
+                    raw.contains("deleted") || raw.contains("删除") ->
+                    "频道不存在或已删除。"
+                raw.isBlank() -> "无法打开该频道。"
+                else -> raw.take(200)
+            }
+        }
+    }
+
     private fun refreshTeamChannel() {
         if (!::teamChannelController.isInitialized) return
         if (teamChannelRefreshRunning) {
@@ -6522,6 +6638,11 @@ class MainActivity : AppCompatActivity() {
                 if (endpoint != null) {
                     teamChannelChannelsCache = teamChannelTransport(endpoint.first).listChannels()
                 }
+            } catch (_: Exception) {
+            }
+            // 218 深链：列表就绪后消费待打开频道（切换在快照组装前生效）。
+            try {
+                consumePendingChannelLink()
             } catch (_: Exception) {
             }
             val snapshot = try {
@@ -7218,21 +7339,6 @@ class MainActivity : AppCompatActivity() {
      * 探针拉 51 条：超过 50 条即记 capped（界面文案是“50+ 条未读”）。
      * 在频道刷新线程调（已是后台线程），直接 runBlocking。
      */
-    private fun serverTeamChannelUnread(host: String, channelId: String): Pair<Int, Boolean>? {
-        return try {
-            val transport = PlatformChannelMcpTransport(
-                tokenProvider = { platformCredentialStore.loadPlatformToken() },
-                endpoint = PlatformAgent.mcpEndpoint(host),
-            )
-            val unread = runBlocking {
-                transport.pollMessages(channelId, null, 51, onlyUnread = true)
-            }
-            minOf(unread.size, 50) to (unread.size > 50)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     /**
      * 频道刷新后把服务端已读标记推到最新一条（后台线程；失败静默，
      * 下次刷新或手动“标为已读”再推）。只调 pollMessages 的 markRead

@@ -89,6 +89,11 @@ data class TeamChannelSnapshot(
     val canManageHistory: Boolean = false,
     /** 是否显示历史开关行（仅普通频道显示，私聊不显示）。 */
     val showHistoryToggle: Boolean = false,
+    /** 218 分段二（消息/文件/任务，与 iOS 同位）：0 消息 1 文件 2 任务。 */
+    val sectionTab: Int = 0,
+    /** 文件分段数据：服务端 kind=file/image/link 过滤拉取（合并去重）。 */
+    val channelFiles: List<PlatformChannelMessage> = emptyList(),
+    val filesLoaded: Boolean = false,
 )
 
 /**
@@ -161,6 +166,8 @@ class TeamChannelController(
     private val onOpenAttachmentRef: (String) -> Unit = {},
     private val onRequestAttachmentRef: () -> Unit = {},
     private val onSelectTopicThread: (rootMessageId: String?) -> Unit = {},
+    /** 218 分段二切换（消息/文件/任务）。 */
+    private val onSectionTabChange: (Int) -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -185,13 +192,6 @@ class TeamChannelController(
     private val connectionLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val noticeLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
-    /** 发送方式说明行（对话框铬的一部分）：未配时随整套铬一起藏掉。 */
-    private val explanationLine: TextView = UiKit.text(
-        context,
-        "仅讨论会发送频道消息；作为任务发送会打开创建表单，确认后进入任务列表。",
-        11f,
-        R.color.text_tertiary,
-    ).apply { setPadding(dp(16), 0, dp(16), dp(6)) }
     /** 重连/刷新行与底部输入栏（对话框铬）：未配时藏掉，配好后回来。 */
     private lateinit var connectionActions: LinearLayout
     private lateinit var inputBar: LinearLayout
@@ -211,8 +211,7 @@ class TeamChannelController(
      */
     private val composer: ChatComposerView =
         ChatComposerView(context, ChatComposerView.Arrangement.INLINE).apply {
-            caption = "频道消息 · 所有成员可见，可用 @名字 提醒成员"
-            input.hint = "给频道发一条消息（≤4000 字），@名字 提醒成员…"
+            input.hint = "给频道发一条短消息（≤4000 字），@名字 叫一位 Agent…"
             onSendRequest = { sendMessage() }
         }
 
@@ -310,7 +309,6 @@ class TeamChannelController(
             },
         )
         root.addView(titleRow)
-        root.addView(explanationLine)
         connectionLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(connectionLine)
         connectionActions = UiKit.horizontal(context).apply {
@@ -362,7 +360,6 @@ class TeamChannelController(
      */
     private fun setDialogChromeVisible(visible: Boolean, hasDiagnostic: Boolean) {
         val v = if (visible) View.VISIBLE else View.GONE
-        explanationLine.visibility = v
         connectionLine.visibility = v
         connectionActions.visibility = v
         diagnosticToggle.visibility =
@@ -381,14 +378,14 @@ class TeamChannelController(
         if (onCreateTask != null) {
             val modes = RadioGroup(context).apply { orientation = LinearLayout.HORIZONTAL }
             val discussion = RadioButton(context).apply { id = View.generateViewId(); text = "仅讨论"; minHeight = dp(48) }
-            val task = RadioButton(context).apply { id = View.generateViewId(); text = "作为任务发送"; minHeight = dp(48) }
+            val task = RadioButton(context).apply { id = View.generateViewId(); text = "转为正式任务"; minHeight = dp(48) }
             modes.addView(discussion)
             modes.addView(task)
             modes.check(discussion.id)
             modes.setOnCheckedChangeListener { _, id ->
                 asTask = id == task.id
                 composer.sendLabel?.text = if (asTask) "创建任务" else "发送"
-                composer.input.hint = if (asTask) "任务目标与验收要求…" else "发送消息，或 @ 一位成员…"
+                composer.input.hint = if (asTask) "任务目标与验收要求…" else "给频道发一条短消息（≤4000 字），@名字 叫一位 Agent…"
             }
             bar.addView(modes)
         }
@@ -493,10 +490,11 @@ class TeamChannelController(
             }
         diagnosticLine.text = diagnostic.orEmpty()
         diagnosticToggle.text = "查看连接诊断"
+        // 218：去掉「第 X/3 轮」计数呈现（与 iOS 统一）；到顶提示保留。
         roundLine.text = if (snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS) {
             "已到 ${TeamChatLimits.MAX_ROUNDS} 轮上限，点“开始新一轮”继续"
         } else {
-            "第 ${snapshot.roundsUsed + 1}/${TeamChatLimits.MAX_ROUNDS} 轮"
+            ""
         }
         // 临时提示：同一条通知只在首次出现后的 TTL 内显示，过期自动
         // 隐去（延迟回调负责无新快照时也清行）；新通知重新计时。
@@ -542,7 +540,20 @@ class TeamChannelController(
             return
         }
         bodyContainer.addView(segmentRow(snapshot))
+        if (!snapshot.dmMode) {
+            bodyContainer.addView(sectionTabsRow(snapshot))
+        }
         bodyContainer.addView(membersRow(snapshot))
+        if (!snapshot.dmMode && snapshot.sectionTab == 1) {
+            bodyContainer.addView(filesSection(snapshot))
+            setDialogChromeVisible(true, diagnostic != null)
+            return
+        }
+        if (!snapshot.dmMode && snapshot.sectionTab == 2) {
+            bodyContainer.addView(tasksSection(snapshot))
+            setDialogChromeVisible(true, diagnostic != null)
+            return
+        }
         if (snapshot.dmMode) {
             bodyContainer.addView(dmListSection(snapshot))
         } else {
@@ -552,7 +563,11 @@ class TeamChannelController(
             bodyContainer.addView(searchRow(snapshot))
             bodyContainer.addView(filterRow(snapshot))
             bodyContainer.addView(toolsRow(snapshot))
-            snapshot.messageCenter?.let { bodyContainer.addView(messageCenterSection(it)) }
+            snapshot.messageCenter?.let {
+                bodyContainer.addView(
+                    messageCenterSection(it, ChannelExtras.pinnedMessages(snapshot.messages).size),
+                )
+            }
         }
         if (snapshot.unreadCount > 0) {
             bodyContainer.addView(unreadRow(snapshot))
@@ -636,7 +651,7 @@ class TeamChannelController(
             }
         }
         bodyContainer.addView(newRoundRow())
-        if (snapshot.taskCards.isNotEmpty()) {
+        if (snapshot.taskCards.isNotEmpty() && snapshot.sectionTab != 2) {
             bodyContainer.addView(taskCardsSection(snapshot.taskCards))
         }
         // 配好后对话框铬整套回来（含诊断钮按有无诊断显隐）。
@@ -1097,17 +1112,80 @@ class TeamChannelController(
         }
     }
 
-    /** 消息中心（聚合 @我 与未读；点条目不跳转，只呈现，频道补全三期）。 */
-    private fun messageCenterSection(center: MessageCenter): LinearLayout {
+    /** 218 分段二（与 iOS 的消息/文件/任务分段同位同名）。 */
+    private fun sectionTabsRow(snapshot: TeamChannelSnapshot): LinearLayout {
+        val row = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(8)) }
+        val labels = listOf("消息", "文件", "任务")
+        labels.forEachIndexed { index, label ->
+            val active = snapshot.sectionTab == index
+            row.addView(
+                UiKit.text(context, label, 12f, R.color.text_primary, bold = active).apply {
+                    setBackgroundResource(if (active) R.drawable.bg_chip_accent else R.drawable.bg_chip)
+                    setPadding(dp(14), dp(6), dp(14), dp(6))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { if (index > 0) leftMargin = dp(8) }
+                    setOnClickListener { onSectionTabChange(index) }
+                },
+            )
+        }
+        return row
+    }
+
+    /** 文件分段：服务端 kind 过滤拉回的文件类消息（引用制呈现同消息行）。 */
+    private fun filesSection(snapshot: TeamChannelSnapshot): LinearLayout {
+        val col = UiKit.vertical(context)
+        if (!snapshot.filesLoaded) {
+            col.addView(note("正在加载频道文件…"))
+        } else if (snapshot.channelFiles.isEmpty()) {
+            col.addView(note("本频道暂无文件类消息（图片 / 文件 / 链接）。"))
+        } else {
+            snapshot.channelFiles.forEach { raw ->
+                col.addView(
+                    messageRow(
+                        teamMessageFromChannel(raw, snapshot.trustedAttributionPosterIds),
+                        ChannelExtras.replyQuote(snapshot.channelFiles, raw),
+                        isOwn = raw.agentId in snapshot.selfAgentIds,
+                    ),
+                )
+            }
+        }
+        return col
+    }
+
+    /**
+     * 任务分段（缺口如实记录，218）：服务端没有按频道的任务接口，
+     * 这里只显示本机从本频道派发的任务卡（本会话回显，与 iOS 读本机
+     * 任务同口径）；频道历史任务无法从服务端拉取，不占位冒充。
+     */
+    private fun tasksSection(snapshot: TeamChannelSnapshot): LinearLayout {
+        val col = UiKit.vertical(context)
+        col.addView(note("服务端暂无按频道的任务接口：此处只显示本机从本频道派发的任务，频道历史任务无法从服务端拉取，完整任务请到任务列表查看。"))
+        if (snapshot.taskCards.isEmpty()) {
+            col.addView(note("本会话还没有从本频道派发的任务。用输入栏「转为正式任务」发送即在此留卡。"))
+        } else {
+            col.addView(taskCardsSection(snapshot.taskCards))
+        }
+        return col
+    }
+
+    /** 消息中心（聚合 @我 与未读；点条目不跳转，只呈现，频道补全三期）。
+     *  218 计数口径 B（与 iOS 同定义同注记）：置顶并入本行；三项均为
+     *  当前已加载消息内统计，行下明示范围，不冒充全局数。 */
+    private fun messageCenterSection(center: MessageCenter, pinnedCount: Int): LinearLayout {
         val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(8)) }
         col.addView(
             UiKit.text(
                 context,
-                "消息中心 · 未读 ${center.unreadCount} · @我未读 ${center.unreadMentionCount}",
+                "消息中心 · 未读 ${center.unreadCount} · @我未读 ${center.unreadMentionCount} · 置顶 $pinnedCount",
                 12f,
                 R.color.text_primary,
                 bold = true,
             ),
+        )
+        col.addView(
+            UiKit.text(context, "计数按当前已加载消息统计", 10f, R.color.text_tertiary),
         )
         center.mentionMessages.takeLast(5).forEach { m ->
             col.addView(
