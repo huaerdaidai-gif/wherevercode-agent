@@ -3854,6 +3854,11 @@ public struct ChannelDetailWorkspaceView: View {
             .filter { !$0.isEmpty })
         let mentionCount = unreadSlice.filter { msg in
             guard !isOwnSender(msg.senderId) else { return false }
+            // 生效的 @所有人（仅 owner/协调者所发）也算 @我，与安卓
+            // buildMessageCenter 的 allMentionLive 同口径。
+            if ChannelExtras.mentionsAllText(msg.text), canMentionAll(senderID: msg.senderId) {
+                return true
+            }
             return selfNames.contains { name in
                 msg.text.contains("@\(name) ")
                     || msg.text.contains("@\(name)\n")

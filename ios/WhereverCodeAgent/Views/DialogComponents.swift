@@ -403,3 +403,34 @@ enum AgentUI {
     static let accent = Color(red: 123/255, green: 92/255, blue: 1)
     static let userBubble = adaptive(0x2E63E8, 0x2E63E8)
 }
+
+/// The trailing @token of `text` when the @ starts a word (start of
+/// text or after whitespace) and the token has no whitespace yet;
+/// nil otherwise (e.g. an email address, or the mention is done).
+/// （218：原在已删除的 ChannelChatView.swift，单测 ChannelParsingTests
+/// 仍在用，迁入本共享文件保存。）
+func mentionToken(in text: String) -> String? {
+    guard let at = text.lastIndex(of: "@") else { return nil }
+    let before = text[..<at]
+    if let last = before.last, last != " ", last != "\n" { return nil }
+    let token = text[text.index(after: at)...]
+    if token.contains(" ") || token.contains("\n") { return nil }
+    return String(token)
+}
+
+/// Members matching the trailing @token (at most 8).
+func mentionMatches(in text: String, memberNames: [String]) -> [String] {
+    guard let token = mentionToken(in: text) else { return [] }
+    return Array(
+        memberNames.filter {
+            $0.localizedCaseInsensitiveContains(token) &&
+                $0.caseInsensitiveCompare(token) != .orderedSame
+        }.prefix(8)
+    )
+}
+
+/// Replace the trailing @token with `@<name> `.
+func applyingMention(_ name: String, to text: String) -> String {
+    guard let at = text.lastIndex(of: "@"), mentionToken(in: text) != nil else { return text }
+    return String(text[..<at]) + "@" + name + " "
+}
