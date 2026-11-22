@@ -2441,6 +2441,16 @@ public struct V5ChannelMember: Identifiable, Codable, Equatable, Hashable, Senda
 
 }
 
+/// Channel role → Chinese label (raw values stay on the wire).
+public func channelRoleLabel(_ role: String) -> String {
+    switch role {
+    case "owner": return "创建者"
+    case "coordinator": return "协调员"
+    case "member": return "成员"
+    default: return role
+    }
+}
+
 public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
     public let id: String
     public var senderId: String
@@ -5218,10 +5228,24 @@ public struct ChannelSettingsSheet: View {
             }
         }
     }
+    /// My own role in this channel (platform truth via is_self).
+    private var myRole: String? {
+        appState.availableChannels.first(where: { $0.id == channelId })?
+            .participantDetails.first { $0.isSelf }?.role
+    }
+
     @ViewBuilder private func memberRow(_ member: V5ChannelMember) -> some View {
         HStack {
-            VStack(alignment: .leading) { Text(member.name); Text(member.role).font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading) { Text(member.name); Text(channelRoleLabel(member.role)).font(.caption).foregroundStyle(.secondary) }
             Spacer()
+            if myRole == "owner", let agentID = member.agentRecordId {
+                Menu("改角色") {
+                    Button("设为创建者") { Task { await setRole(agentID: agentID, role: "owner") } }
+                    Button("设为协调员") { Task { await setRole(agentID: agentID, role: "coordinator") } }
+                    Button("设为成员") { Task { await setRole(agentID: agentID, role: "member") } }
+                }
+                .disabled(isWorking)
+            }
             if isProtectedMember(member) { Text("不可移除").font(.caption).foregroundStyle(.secondary) }
             else if member.agentRecordId != nil {
                 Button("移除", role: .destructive) {
@@ -5230,6 +5254,11 @@ public struct ChannelSettingsSheet: View {
                 }.disabled(isWorking)
             }
         }
+    }
+
+    @MainActor private func setRole(agentID: String, role: String) async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        await perform { try await transport.setMemberRole(channelID: channelId, memberID: agentID, role: role) }
     }
     private var managementDialogs: some View {
         Color.clear

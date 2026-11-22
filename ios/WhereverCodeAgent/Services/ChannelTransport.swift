@@ -117,6 +117,15 @@ public struct ChannelTransport {
     /// New-member history visibility switch (№12). Only the channel
     /// owner / a coordinator may flip it; the server's real error
     /// surfaces untouched when it refuses.
+    /// Set a member's channel role (owner / coordinator / member);
+    /// only the channel owner may call this — enforced server-side,
+    /// including the last-owner demotion guard.
+    public func setMemberRole(channelID: String, memberID: String, role: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_set_member_role",
+            arguments: ["channel_id": channelID, "member_id": memberID, "role": role])
+    }
+
     public func setHistoryVisible(channelID: String, visible: Bool) async throws -> [String: Any] {
         try await client.callTool(
             name: "agent_channel_set_history_visible",
