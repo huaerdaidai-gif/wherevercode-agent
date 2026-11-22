@@ -870,21 +870,14 @@ public struct ProjectsHomeView: View {
     }
 
     private func createProject() {
-        let clean = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
-        let proj = Project(
-            name: clean,
+        // 与聊天新建项目共用同一建项目口径（createProjectFromGitForm）。
+        _ = createProjectFromGitForm(
+            name: newProjectName,
             repoUrl: newProjectRepo.isEmpty ? nil : newProjectRepo,
-            defaultBranch: newProjectBranch,
-            origin: "LOCAL_SANDBOX"
+            branch: newProjectBranch,
+            path: newProjectPath,
+            data: LocalData.shared
         )
-        try? LocalData.shared.projects.saveProject(proj)
-        let loc = ProjectLocation(
-            projectId: proj.projectId,
-            hostId: "iphone-local",
-            workspacePath: newProjectPath.isEmpty ? "Documents/\(clean)" : newProjectPath
-        )
-        _ = try? LocalData.shared.projects.addLocation(loc)
         newProjectName = ""
         newProjectRepo = ""
         newProjectPath = ""
