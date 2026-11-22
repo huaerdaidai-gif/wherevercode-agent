@@ -2267,7 +2267,14 @@ public struct ChatComposerBar: View {
         case .localModel: return "本机"
         case .device:
             if let deviceId = agent.deviceId {
-                return model.data.devices.device(id: deviceId)?.displayName ?? "远程设备"
+                if deviceId == "iphone-local" { return "本机" }
+                // 设备显示名与 ChatProjectDisplay.providerTitle 同来源：
+                // 在 Agent 名单里找该设备的宿主 Agent 取其显示名。
+                if let host = (try? model.data.agents.listAgents())?
+                    .first(where: { $0.deviceId == deviceId }) {
+                    return host.displayName
+                }
+                return "远程设备"
             }
             return agent.brainKind == "AGENT_RUNTIME" ? "本机" : nil
         }

@@ -83,10 +83,15 @@ class BrainCapsuleVisibilityTest {
             "Agent 会话不应显示大脑胶囊",
             waitForCapsuleVisibility(activity, View.GONE),
         )
-        assertEquals(
-            "Agent 会话里 Agent 下拉仍应显示对话方",
-            "Antigravity (agy) ⌄",
-            activity.findViewById<TextView>(R.id.buttonAgentSelect).text.toString(),
+        // 选择器标签新口径（2026-11-22）：「名字 · 所在位置」——该
+        // Agent 是本机 CLI（DEVICE + AGENT_RUNTIME、无 deviceId），
+        // 位置记「本机」；未接入时其后还缀「（未接入）」。
+        val selectorText =
+            activity.findViewById<TextView>(R.id.buttonAgentSelect).text.toString()
+        assertTrue(
+            "Agent 会话里选择器应显示「名字 · 本机」，实际：$selectorText",
+            selectorText.startsWith("Antigravity (agy) · 本机") &&
+                selectorText.endsWith(" ⌄"),
         )
 
         // 切回新对话：胶囊仍隐藏，选择器回到未选态文案。
