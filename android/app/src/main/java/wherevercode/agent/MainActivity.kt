@@ -534,8 +534,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var brainStatus: TextView
     private lateinit var brainDisplayNameView: TextView
-    /** 阶段 A：聊天顶部“当前设备 · 对话方”横幅（screen_chat.xml）。 */
-    private lateinit var chatRouteBanner: TextView
+    /** 直连 Agent 开关 chip（项目 chip 下方，仅远程设备 Agent 对话出现）。 */
+    private lateinit var buttonDirectMode: TextView
     private lateinit var buttonSignInChatGpt: Button
     private lateinit var buttonSignOut: Button
     private lateinit var cloudflareStatus: TextView
@@ -2406,7 +2406,16 @@ class MainActivity : AppCompatActivity() {
         chatComposer = screenChat.findViewById(R.id.inputBox)
         inputPrompt = screenChat.findViewById(R.id.inputPrompt)
         approvalBanner = screenChat.findViewById(R.id.approvalBanner)
-        chatRouteBanner = screenChat.findViewById(R.id.chatRouteBanner)
+        buttonDirectMode = screenChat.findViewById(R.id.buttonDirectMode)
+        buttonDirectMode.setOnClickListener {
+            // 直连开关：关了就是真的关了（大脑不再拦截该对话的
+            // 消息）；开了就只跟该 Agent 说话。切换后立刻刷新，
+            // 状态马上可见。
+            if (::chatViewModel.isInitialized) {
+                chatViewModel.setDirectAgentMode(!chatViewModel.isDirectAgentMode())
+                updateChatRouteBanner()
+            }
+        }
         chatControls = screenChat.findViewById(R.id.chatControls)
         buttonChatPause = screenChat.findViewById(R.id.buttonChatPause)
         buttonChatStop = screenChat.findViewById(R.id.buttonChatStop)
@@ -10550,12 +10559,10 @@ class MainActivity : AppCompatActivity() {
      * 与大脑名无关。空白输入恢复默认（删键，见 [BrainDisplayName]）。
      */
     /**
-     * 阶段 A（V5 紧急开发）：聊天顶部显示当前设备与对话方。
-     * 默认会话：“当前设备：本机 · 对话方：<大脑显示名>”；
-     * Agent 会话：“当前设备：<云端/本机（CLI）/远程设备（未接入）> ·
-     * 对话方：<Agent 名>”，未接入的目标缀“（未接入）”。
-     * 每次聊天渲染都刷新（切换会话/新对话/改名都会经过 renderChat
-     * 或 refreshBrainStatus），绝不让顶部显示与实际路由脱节。
+     * 项目 chip 刷新：每次聊天渲染都经过（切换会话/新对话/改名
+     * 都会经过 renderChat 或 refreshBrainStatus），绝不让 chip
+     * 显示与当前对话的实际绑定脱节。对话方与平台状态的显示去向
+     * 见 updateChatRouteBanner 的注释（横幅已撤，2026-11-22）。
      */
     private fun updateContextPill() {
         if (!::contextPill.isInitialized) return
@@ -10613,101 +10620,55 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 对话状态行使用与设置页相同的 App 级地址来源，不声称实时连通。 */
-    private fun platformStatusLabel(): String {
-        val configured = resolvedPlatformHost().isNotBlank()
-        return if (configured) "平台已配置" else "平台未配置（本地优先）"
+    /**
+     * 对话方选择器短标签：名字 · 所在位置（跨设备信息压缩进选择器，
+     * 2026-11-22 定，与 iOS partnerLabel 同口径）——云端 Agent 记
+     * 「云端」，本地模型记「本机」，设备 Agent 记设备显示名；名字
+     * 里已带该位置时不重复加。未接入的 Agent 缀「（未接入）」。
+     */
+    private fun partnerSelectorLabel(agent: AgentRecord): String {
+        val place = when (agent.kind) {
+            AgentKind.CLOUD -> "云端"
+            AgentKind.LOCAL_MODEL -> "本机"
+            AgentKind.DEVICE -> agent.deviceId?.let { deviceDisplayName(it) }
+                ?: if (agent.brainKind == BrainKind.AGENT_RUNTIME) "本机" else null
+        }
+        var label = agent.displayName
+        if (place != null && !label.contains(place)) {
+            label += " · $place"
+        }
+        val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
+        if (route is AgentChatRoute.NotRoutable) {
+            label += "（未接入）"
+        }
+        return label
     }
 
+    /**
+     * 对话页顶部信息刷新（2026-11-22 双端统一）：原「当前设备 ·
+     * 对话方 · 平台状态」状态横幅整行撤除（Codex/Claude 式极简，
+     * 平台连接状态看控制页与设置）——对话方与跨设备位置看输入框
+     * 里的选择器标签，项目看上方 chip。直连 Agent 开关（大脑/
+     * Agent 边界，maintainer 2026-11-12：只在远程设备 Agent 对话
+     * 里出现、状态看得见、点得到、按会话记）迁到项目 chip 下方
+     * 的独立 chip，语义不变。
+     */
     private fun updateChatRouteBanner() {
-        if (!::chatRouteBanner.isInitialized || !::chatViewModel.isInitialized) return
+        if (!::chatViewModel.isInitialized) return
         val agent = chatViewModel.selectedAgent
-        // GitHub 闭环（2026-11-11）：横幅显示当前聊天项目（打开哪个项目，
-        // 对话就关联哪个项目；GitHub 家会标出仓库名）。
-        // 聊天选项目（2026-11-11）：横幅里的项目部分可点，点开选项目列表
-        // 切换绑定（下划线提示可点；没绑项目时没有项目部分，走 "+" 菜单）。
-        val projectSuffix = chatProjectBinding.projectId?.let { id ->
-            val name = try {
-                projectStore.getProject(id)?.name
-            } catch (_: Exception) {
-                null
-            } ?: id
-            val home = try {
-                projectStore.getActiveHome(id)
-            } catch (_: Exception) {
-                null
-            }
-            val homeLabel = when {
-                home == null -> "未指定家"
-                home.gitHost() != null -> "${home.gitHost()?.displayName} · ${home.workspacePath}"
-                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · ${home.workspacePath}"
-                else -> "设备 · ${deviceDisplayName(home.hostId)}"
-            }
-            " · 项目：$name（$homeLabel）"
-        }.orEmpty()
-        // 大脑/Agent 边界（maintainer 2026-11-12 修订）：直连 Agent 开关只在
-        // 远端设备 Agent 对话里出现——点按切换，状态看得见（开/关写在
-        // 横幅上）、点得到（整段可点）。默认开：消息直接发给该 Agent，
-        // 大脑不拦截、不派活、不插话；关 = 该对话改走大脑幕后派活
-        // （任务型指令建派活任务行、走泵）。开关是显式选择，按会话记。
-        val directSuffix = if (agent != null && agent.deviceId != null) {
-            if (chatViewModel.isDirectAgentMode()) " · 直连 Agent：开" else " · 直连 Agent：关"
-        } else {
-            ""
-        }
-        val text = if (agent == null) {
-            "当前设备：本机 · 对话方：${brainDisplayName()} · ${platformStatusLabel()}$projectSuffix"
-        } else {
-            val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
-            val suffix = if (route is AgentChatRoute.NotRoutable) "（未接入）" else ""
-            "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix · ${platformStatusLabel()}$projectSuffix$directSuffix"
-        }
-        val spannable = SpannableStringBuilder(text)
-        val baseEnd = text.length - directSuffix.length
-        if (projectSuffix.isNotEmpty()) {
-            val start = baseEnd - projectSuffix.length
-            spannable.setSpan(
-                object : ClickableSpan() {
-                    override fun onClick(widget: View) {
-                        showChatProjectPicker()
-                    }
-
-                    override fun updateDrawState(ds: TextPaint) {
-                        ds.isUnderlineText = true
-                    }
-                },
-                start,
-                baseEnd,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
-            )
-        }
-        if (directSuffix.isNotEmpty()) {
-            spannable.setSpan(
-                object : ClickableSpan() {
-                    override fun onClick(widget: View) {
-                        // 直连开关：关了就是真的关了（大脑不再拦截该对话
-                        // 的消息）；开了就只跟该 Agent 说话。横幅经
-                        // publish → renderChat 立刻刷新，状态马上可见。
-                        chatViewModel.setDirectAgentMode(!chatViewModel.isDirectAgentMode())
-                        updateChatRouteBanner()
-                    }
-
-                    override fun updateDrawState(ds: TextPaint) {
-                        ds.isUnderlineText = true
-                    }
-                },
-                baseEnd,
-                text.length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
-            )
-        }
-        chatRouteBanner.text = spannable
-        chatRouteBanner.movementMethod = LinkMovementMethod.getInstance()
-        chatRouteBanner.visibility = View.VISIBLE
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
                 "选择对话方 ⌄"
             } else {
-                "${agent.displayName} ⌄"
+                "${partnerSelectorLabel(agent)} ⌄"
+            }
+        }
+        if (::buttonDirectMode.isInitialized) {
+            val showDirect = agent != null && agent.deviceId != null
+            buttonDirectMode.visibility = if (showDirect) View.VISIBLE else View.GONE
+            if (showDirect) {
+                buttonDirectMode.text =
+                    if (chatViewModel.isDirectAgentMode()) "直连 Agent：开" else "直连 Agent：关"
             }
         }
         updateContextPill()
@@ -10768,8 +10729,8 @@ class MainActivity : AppCompatActivity() {
      * 取自真实配置，绝不编造；行首用大脑显示名（默认 WhereverCode）。
      */
     private fun refreshBrainStatus() {
-        // 阶段 A：大脑改名/切换后聊天顶部横幅同步（默认会话显示大脑名）。
-        if (::chatRouteBanner.isInitialized) updateChatRouteBanner()
+        // 大脑改名/切换后对话方选择器标签同步。
+        if (::chatViewModel.isInitialized) updateChatRouteBanner()
         refreshWorkspaceSection()
         // 设置清理 2（2026-11-11，Claude 标准）：聊天输入框里的当前大脑
         // 胶囊与大脑状态同刷；未加载/未连接时显示“未连接”。跟 Agent 对话

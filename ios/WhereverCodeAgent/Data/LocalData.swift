@@ -1145,27 +1145,6 @@ public struct LocalChatHomeView: View {
         self.onSelectRoute = { _ in }
     }
 
-    // 照片走查批 B：状态行字段与安卓统一为 [当前设备 · 对话方 · 平台状态]——
-    // 删「模式：模型对话」，对话方取与作曲区选择器同一来源（见 partnerLabel）。
-    private var statusPartnerName: String {
-        if let ag = model.selectedAgent { return ag.displayName }
-        let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
-        if let cfg { return cfg.model.isEmpty ? cfg.label : cfg.model }
-        return "WhereverCode"
-    }
-
-    private var connectionSummaryText: String {
-        let platformLabel: String
-        switch appState.connectionStatus {
-        case .connected(let detail): platformLabel = "平台已连接 (\(detail))"
-        case .checking: platformLabel = "平台连接检查中…"
-        case .notConfigured: platformLabel = "平台未配置（本地优先）"
-        case .failed: platformLabel = "平台未连接（离线/本地模式）"
-        case .unknown: platformLabel = "平台未检查"
-        }
-        return "当前设备：本机 · 对话方：\(statusPartnerName) · \(platformLabel)"
-    }
-
     private var filteredHistory: [Conversation] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return model.history }
@@ -1235,16 +1214,6 @@ public struct LocalChatHomeView: View {
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 8)
-
-            Text(connectionSummaryText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 16)
-                .accessibilityIdentifier("chat.connectionSummary")
 
             // 主体消息流或 Claude 风格极简留白问候区
             // 对话组件收敛：列表脚手架与频道页共用 DialogMessageListView
@@ -2276,11 +2245,32 @@ public struct ChatComposerBar: View {
 
     private var partnerLabel: String {
         if let ag = model.selectedAgent {
-            return ag.displayName + (ag.dispatchable ? "" : "（仅对话）")
+            // 跨设备信息压缩进选择器标签（2026-11-22 定）：名字后跟
+            // 「· 设备名 / 云端 / 本机」，与项目 chip 的「提供方 ·
+            // 项目名」同模式；名字里已带该设备名时不重复加。
+            var label = ag.displayName
+            if let place = partnerPlaceLabel(ag), !label.contains(place) {
+                label += " · " + place
+            }
+            return label + (ag.dispatchable ? "" : "（仅对话）")
         }
         let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
         guard let cfg else { return "选择对话方" }
         return cfg.model.isEmpty ? cfg.label : cfg.model
+    }
+
+    /// 对话方所在位置的短标签：云端 Agent 记「云端」，本地模型记
+    /// 「本机」，设备 Agent 记设备显示名（查不到记「远程设备」）。
+    private func partnerPlaceLabel(_ agent: AgentRecord) -> String? {
+        switch agent.kind {
+        case .cloud: return "云端"
+        case .localModel: return "本机"
+        case .device:
+            if let deviceId = agent.deviceId {
+                return model.data.devices.device(id: deviceId)?.displayName ?? "远程设备"
+            }
+            return agent.brainKind == "AGENT_RUNTIME" ? "本机" : nil
+        }
     }
 
     public var body: some View {

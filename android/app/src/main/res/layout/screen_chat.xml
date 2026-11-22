@@ -23,23 +23,6 @@
         android:textSize="12sp"
         android:visibility="gone" />
 
-    <!-- 阶段 A（V5 紧急开发）：聊天顶部“当前设备 · 对话方”横幅。
-         选了 Agent 却不知道消息发给谁就是本次 bug 的表象；横幅由
-         MainActivity.updateChatRouteBanner() 每次渲染时刷新。
-         内标题行已删（C2 双顶栏），这行是状态显示，不是标题。 -->
-    <TextView
-        android:id="@+id/chatRouteBanner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="14dp"
-        android:layout_marginEnd="14dp"
-        android:layout_marginTop="4dp"
-        android:background="@drawable/bg_chip_home"
-        android:padding="10dp"
-        android:textColor="@color/home_text"
-        android:textSize="12sp"
-        android:visibility="gone" />
-
     <TextView
         android:id="@+id/modelConnectionBanner"
         android:layout_width="match_parent"
@@ -198,6 +181,25 @@
             android:textColor="@color/home_text"
             android:textSize="13sp"
             android:contentDescription="当前项目上下文" />
+
+        <!-- 直连 Agent 开关（2026-11-22 自顶部横幅迁来）：只在远程
+             设备 Agent 对话里出现，与项目 chip 同行列排布；状态
+             看得见、点得到（maintainer 2026-11-12 口径不变）。 -->
+        <TextView
+            android:id="@+id/buttonDirectMode"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginStart="2dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/bg_chip_home"
+            android:gravity="center_vertical"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="直连 Agent：开"
+            android:textColor="@color/home_text"
+            android:textSize="12sp"
+            android:visibility="gone"
+            android:contentDescription="直连 Agent 开关" />
 
         <!-- 对话组件收敛（2026-11-20）：输入区骨架与频道页共用
              ChatComposerView（STACKED 排布：输入框 + 下层控制行 +
