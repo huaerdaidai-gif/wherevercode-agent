@@ -223,6 +223,23 @@ class ListDialogTest {
         assertFalse(dialog.isShowing)
     }
 
+    @Test
+    fun `card dialog marks the selected row with a checkmark`() {
+        val dialog = ListDialog.showCardWithDescriptions(
+            context,
+            "选择项目",
+            "选一个项目作为当前对话的项目。",
+            listOf(
+                "App 沙盒（无项目）" to "本机 · 只读对话",
+                "wherevercode-agent" to "本机 · wherevercode-agent",
+            ),
+            selectedIndex = 1,
+        ) {}
+        val text = collectText(dialog.window?.decorView ?: throw AssertionError("卡片对话框没有 decorView"))
+        assertTrue(text.contains("✓ wherevercode-agent"))
+        assertFalse(text.contains("✓ App 沙盒"))
+    }
+
     private fun showingDialog(): AlertDialog? =
         ShadowDialog.getShownDialogs().lastOrNull { it.isShowing } as? AlertDialog
 

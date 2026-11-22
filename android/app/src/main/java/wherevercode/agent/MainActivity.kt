@@ -276,7 +276,6 @@ import wherevercode.agent.core.task.TaskType
 import wherevercode.agent.core.task.TriageRouter
 import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.transport.LanTransport
-import wherevercode.agent.ui.ChatProjectPickerDialog
 import wherevercode.agent.ui.SessionListController
 import wherevercode.agent.ui.PipelineAction
 import wherevercode.agent.ui.TaskDetailArtifacts
@@ -3831,6 +3830,10 @@ class MainActivity : AppCompatActivity() {
         }
         toast("项目已添加：$displayName（${deviceDisplayName(deviceId)} · $folder）")
         projectController.refresh()
+        if (bindChatToNextCreatedProject) {
+            bindChatToNextCreatedProject = false
+            setChatProject(slug)
+        }
         syncProjectFolderAuthorization(deviceId, folder, displayName)
     }
 
@@ -4101,6 +4104,10 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             assignGitHostHome(existing.copy(repoUrl = url))
+            if (bindChatToNextCreatedProject) {
+                bindChatToNextCreatedProject = false
+                setChatProject(existing.projectId)
+            }
             return
         }
         val slug = uniqueProjectSlug(parsed.repoName)
@@ -4123,6 +4130,10 @@ class MainActivity : AppCompatActivity() {
         toast("项目已添加：$displayName（${parsed.host.displayName} · ${parsed.namespacePath}）")
         linkExistingCheckout(Project(projectId = slug, name = displayName, repoUrl = url), parsed.repoName)
         projectController.refresh()
+        if (bindChatToNextCreatedProject) {
+            bindChatToNextCreatedProject = false
+            setChatProject(slug)
+        }
     }
 
     /**
@@ -4363,6 +4374,10 @@ class MainActivity : AppCompatActivity() {
         }
         toast("项目已添加：$displayName（本机 · $relativePath）")
         projectController.refresh()
+        if (bindChatToNextCreatedProject) {
+            bindChatToNextCreatedProject = false
+            setChatProject(slug)
+        }
     }
 
     /**
@@ -4470,8 +4485,12 @@ class MainActivity : AppCompatActivity() {
         chatProjectBinding.projectId
     }
 
+    /** 聊天选项目里点「新建项目」后置起：下一个新建成功的项目自动绑到聊天（建好自动切过去）。 */
+    private var bindChatToNextCreatedProject = false
+
     /** 切换聊天项目（点项目行 / 聊天选项目入口都走这里）：立即生效，横幅即时更新。 */
     private fun setChatProject(projectId: String?) {
+        bindChatToNextCreatedProject = false
         chatProjectBinding.setProject(projectId)
         updateChatRouteBanner()
     }
@@ -4515,10 +4534,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 聊天选项目（2026-11-11，maintainer：新对话清空绑定后聊天里选不了项目）。
-     * 弹出已注册项目列表，点即切换聊天绑定（[setChatProject]，横幅立即
-     * 更新）；无项目时不编假条目，给“去项目页添加”入口。项目页入口仍在
-     * 对话框的“打开项目页”按钮里（"+" 菜单 → 项目原来是进项目页）。
+     * 聊天选项目（2026-11-22 双端统一，对齐 GPT/Claude 项目模式）：
+     * 聊天层只选项目——卡片名单 = 沙盒（无项目）+ 已建项目（当前
+     * 打勾）+「新建项目」；点即切换聊天绑定（[setChatProject]，横幅
+     * 立即更新）。来源（本机 / 设备 / git）只在新建项目时选：
+     * 「新建项目」当场打开统一的「打开文件夹」来源对话框，建好
+     * 自动切过去（[bindChatToNextCreatedProject]）。无项目时不编
+     * 假条目，名单里只有沙盒与新建项目两行。
      */
     private fun showChatProjectPicker() {
         val projects = try {
@@ -4526,21 +4548,43 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             emptyList()
         }
-        ChatProjectPickerDialog.show(
-            context = this,
-            projects = projects,
-            homeLabel = ::projectHomeLabel,
-            onPick = { projectId ->
-                setChatProject(projectId)
-                val name = try {
-                    projectStore.getProject(projectId)?.name
-                } catch (_: Exception) {
-                    null
-                } ?: projectId
-                toast("聊天已切换到项目：$name")
+        val currentId = chatProjectBinding.projectId
+        val rows = mutableListOf<Pair<String, String>>()
+        rows += "App 沙盒（无项目）" to "本机 · 只读对话"
+        projects.forEach { project -> rows += project.name to projectHomeLabel(project) }
+        rows += "＋ 新建项目" to "从本机、已配对设备或 git 仓库添加"
+        val selectedIndex = if (currentId == null) {
+            0
+        } else {
+            projects.indexOfFirst { it.projectId == currentId } + 1
+        }
+        ListDialog.showCardWithDescriptions(
+            this,
+            "选择项目",
+            if (projects.isEmpty()) {
+                "还没有建好的项目。先聊也行，建好后自动切过去。"
+            } else {
+                "选一个项目作为当前对话的项目。"
             },
-            onOpenProjects = { showEntry(DrawerController.ID_PROJECTS) },
-        )
+            rows,
+            selectedIndex = selectedIndex,
+        ) { which ->
+            when {
+                which == 0 -> {
+                    setChatProject(null)
+                    toast("聊天已切换到：App 沙盒（无项目）")
+                }
+                which == rows.lastIndex -> {
+                    bindChatToNextCreatedProject = true
+                    showOpenFolderEntry()
+                }
+                else -> {
+                    val project = projects[which - 1]
+                    setChatProject(project.projectId)
+                    toast("聊天已切换到项目：${project.name}")
+                }
+            }
+        }
     }
 
     /** 选项目列表 / 横幅里的家标签：当前家的标签（不是家的列表第一项）。 */

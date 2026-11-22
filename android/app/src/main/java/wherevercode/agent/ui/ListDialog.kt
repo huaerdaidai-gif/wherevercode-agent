@@ -157,13 +157,16 @@ object ListDialog {
      * 同形态）：居中圆角卡片（20dp），标题与副标题都在卡片内，
      * 选项行是「名（半粗）+ 说明（小字）」无边框行，「取消」是
      * 卡片内右下角的纯文字，点卡片外关闭。目前用于「打开文件夹」
-     * 来源单子；其余列表对话框仍走 show / showWithDescriptions。
+     * 来源单子与聊天选项目名单；其余列表对话框仍走
+     * show / showWithDescriptions。selectedIndex 非空时，该行名首
+     * 加「✓」标出当前项（与 show 的选中态同口径）。
      */
     fun showCardWithDescriptions(
         context: Context,
         title: String,
         message: String?,
         items: List<Pair<String, String>>,
+        selectedIndex: Int? = null,
         onPick: (Int) -> Unit,
     ): Dialog {
         val card = UiKit.vertical(context).apply {
@@ -199,7 +202,15 @@ object ListDialog {
                     onPick(index)
                 }
             }
-            row.addView(UiKit.text(context, name, 15f, R.color.text_primary, bold = true))
+            row.addView(
+                UiKit.text(
+                    context,
+                    if (index == selectedIndex) "✓ $name" else name,
+                    15f,
+                    R.color.text_primary,
+                    bold = true,
+                ),
+            )
             row.addView(
                 UiKit.text(context, description, 13f, R.color.text_secondary).apply {
                     setPadding(0, UiKit.dp(context, 2), 0, 0)

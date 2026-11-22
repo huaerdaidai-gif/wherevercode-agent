@@ -442,8 +442,10 @@ public final class LocalChatModel: ObservableObject {
         conversationID = nil
         data.chatPrefs.currentSessionId = nil
         draft = ""
-        projectSource = .localDefault
-        permissionMode = .readOnly
+        // 新对话继承当前对话的项目绑定（2026-11-22 定，对齐
+        // GPT/Claude 项目模式：从项目里开新对话就属于该项目），
+        // 不再重置为沙盒。新对话建立后，绑定随其会话配置落盘，
+        // 每条对话各自保留自己的绑定。
         if let defAid = defaultAgentId, !defAid.isEmpty, let ag = try? data.agents.getAgent(agentId: defAid) {
             selectedAgent = ag
             selectedBrain = defaultBrainId
@@ -1816,16 +1818,68 @@ public enum ChatAttachmentStore {
 // MARK: - Codex-style composer (P0)
 
 
+/// 聊天项目显示口径（2026-11-22 双端统一，对齐 GPT/Claude 项目
+/// 模式）：聊天只认项目——chip 与选择器都按「提供方 · 项目名」
+/// 显示，提供方取项目当前家的位置种类（本机 / 设备名 / Git 托管名）。
+public enum ChatProjectDisplay {
+    /// 经本机来源绑到某个项目时返回该项目；沙盒与设备来源返回 nil。
+    public static func boundProject(for binding: ProjectSourceBinding, data: LocalData) -> ProjectWithHomes? {
+        guard binding.providerId == "local", let tid = binding.targetId, tid != "sandbox" else { return nil }
+        return (try? data.projects.listProjects())?.first { $0.project.projectId == tid }
+    }
+
+    public static func providerTitle(for home: ProjectLocation?, data: LocalData) -> String {
+        switch home?.homeKind {
+        case "LOCAL": return "本机"
+        case "GITHUB": return "GitHub"
+        case "GITLAB": return "GitLab"
+        case "GITEE": return "Gitee"
+        case "DEVICE":
+            if let hostId = home?.hostId,
+               let agent = (try? data.agents.listAgents())?.first(where: { $0.deviceId == hostId }) {
+                return agent.displayName
+            }
+            return "设备"
+        default: return "本机"
+        }
+    }
+
+    public static func icon(for home: ProjectLocation?) -> String {
+        switch home?.homeKind {
+        case "LOCAL": return "iphone"
+        case "DEVICE": return "desktopcomputer"
+        case "GITHUB", "GITLAB", "GITEE": return "chevron.left.forwardslash.chevron.right"
+        default: return "folder"
+        }
+    }
+
+    public static func homeLabel(for project: ProjectWithHomes, data: LocalData) -> String {
+        guard let home = project.activeHome else { return "未指定家" }
+        return "\(providerTitle(for: home, data: data)) · \(home.workspacePath)"
+    }
+}
+
 public struct ProjectSourceChip: View {
     @ObservedObject var model: LocalChatModel
     @State private var showPicker = false
 
-    public var body: some View {
+    private var display: (icon: String, text: String) {
+        if let project = ChatProjectDisplay.boundProject(for: model.projectSource, data: model.data) {
+            let home = project.activeHome
+            return (ChatProjectDisplay.icon(for: home),
+                    "\(ChatProjectDisplay.providerTitle(for: home, data: model.data)) · \(project.project.name)")
+        }
         let provider = ProjectSourceRegistry.shared.provider(id: model.projectSource.providerId, data: model.data)
+        return (provider?.icon ?? "questionmark.folder",
+                provider.map { "\($0.title) · \(model.projectSource.chipLabel)" } ?? "来源不可用")
+    }
+
+    public var body: some View {
+        let display = display
         Button { showPicker = true } label: {
             HStack(spacing: 5) {
-                Image(systemName: provider?.icon ?? "questionmark.folder")
-                Text(provider.map { "\($0.title) · \(model.projectSource.chipLabel)" } ?? "来源不可用")
+                Image(systemName: display.icon)
+                Text(display.text)
                     .lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
             }
@@ -1838,125 +1892,102 @@ public struct ProjectSourceChip: View {
         }
         .accessibilityIdentifier("chat.projectSource")
         .sheet(isPresented: $showPicker) {
-            ProjectSourcePickerSheet(model: model)
+            ProjectPickerSheet(model: model)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
     }
 }
 
-/// 选择来源 → 连接或授权 → 选择设备/账号 → 选择项目或路径 → 确认
-public struct ProjectSourcePickerSheet: View {
+/// 聊天选项目（2026-11-22 双端统一，对齐 GPT/Claude 项目模式）：
+/// 聊天层只选项目——沙盒（无项目）+ 已建项目名单 + 新建项目入口。
+/// 来源（本机 / 设备 / git）只在新建项目时选，入口在项目页
+/// （「新建项目」跳项目页，那里是统一的「打开文件夹」对话框）。
+public struct ProjectPickerSheet: View {
     @ObservedObject var model: LocalChatModel
     @Environment(\.dismiss) private var dismiss
-    @State private var customTitle = ""
-    @State private var customEndpoint = ""
-    @State private var refresh = 0
+
+    private var projects: [ProjectWithHomes] {
+        (try? model.data.projects.listProjects()) ?? []
+    }
+
+    private var isSandbox: Bool {
+        model.projectSource.providerId == "local"
+            && (model.projectSource.targetId ?? "sandbox") == "sandbox"
+    }
+
+    private func isCurrent(_ project: ProjectWithHomes) -> Bool {
+        model.projectSource.providerId == "local"
+            && model.projectSource.targetId == project.project.projectId
+    }
 
     public var body: some View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(ProjectSourceRegistry.shared.all(data: model.data), id: \.id) { p in
-                        NavigationLink {
-                            ProjectSourceTargetList(model: model, provider: p) { dismiss() }
+                    Button {
+                        model.projectSource = .localDefault
+                        model.permissionMode = .readOnly
+                        model.persistSessionConfig()
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: "iphone").frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("App 沙盒（无项目）").foregroundStyle(.primary)
+                                Text("本机 · 只读对话").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isSandbox {
+                                Image(systemName: "checkmark").foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                    ForEach(projects) { project in
+                        Button {
+                            model.projectSource = ProjectSourceBinding(
+                                providerId: "local", targetId: project.project.projectId,
+                                targetTitle: project.project.name,
+                                path: project.activeHome?.workspacePath)
+                            model.permissionMode = .readOnly
+                            model.persistSessionConfig()
+                            dismiss()
                         } label: {
                             HStack {
-                                Image(systemName: p.icon).frame(width: 24)
+                                Image(systemName: ChatProjectDisplay.icon(for: project.activeHome)).frame(width: 24)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(p.title)
-                                    Text(p.status(data: model.data).text)
-                                        .font(.caption)
-                                        .foregroundStyle(p.status(data: model.data).isReady ? Color.secondary : Color.orange)
+                                    Text(project.project.name).foregroundStyle(.primary)
+                                    Text(ChatProjectDisplay.homeLabel(for: project, data: model.data))
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if model.projectSource.providerId == p.id {
+                                if isCurrent(project) {
                                     Image(systemName: "checkmark").foregroundStyle(.blue)
                                 }
                             }
                         }
                     }
-                    .id(refresh)
-                } header: { Text("选择来源").textCase(nil) }
-                Section {
-                    TextField("名称（如 公司 WebDAV）", text: $customTitle)
-                    TextField("地址（https:// / ssh:// …）", text: $customEndpoint)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("添加自定义来源") {
-                        ProjectSourceRegistry.shared.addCustom(title: customTitle, endpoint: customEndpoint, data: model.data)
-                        customTitle = ""; customEndpoint = ""; refresh += 1
+                    if projects.isEmpty {
+                        Text("还没有建好的项目。先聊也行，建好后回到这里选它。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .disabled(customTitle.isEmpty || customEndpoint.isEmpty)
-                } header: { Text("扩展来源").textCase(nil) } footer: {
-                    Text("来源可扩展：新增类型以接入模块注册，未接入的来源会如实显示状态。选择任何来源都不会自动获得命令执行权限。")
+                } header: { Text("项目").textCase(nil) }
+                Section {
+                    Button {
+                        dismiss()
+                        model.appState.onSelectRoute?("projects")
+                    } label: {
+                        HStack {
+                            Image(systemName: "plus").frame(width: 24).foregroundStyle(.blue)
+                            Text("新建项目").foregroundStyle(.blue)
+                        }
+                    }
                 }
             }
-            .navigationTitle("项目来源")
+            .navigationTitle("选择项目")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
         }
-    }
-}
-
-private struct ProjectSourceTargetList: View {
-    @ObservedObject var model: LocalChatModel
-    let provider: ProjectSourceProvider
-    let onDone: () -> Void
-    @State private var selected: ProjectSourceTarget?
-    @State private var path = ""
-
-    var body: some View {
-        let status = provider.status(data: model.data)
-        let targets = provider.targets(data: model.data)
-        List {
-            Section {
-                Label(status.text, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.circle")
-                    .foregroundStyle(status.isReady ? Color.green : Color.orange)
-                if !status.isReady, provider.id == "lan" || provider.id == "remote" || provider.id == "vps" {
-                    Button("去添加 / 配对设备") { model.appState.onSelectRoute?("devices"); onDone() }
-                }
-            } header: { Text("连接状态").textCase(nil) }
-            if status.isReady {
-                Section {
-                    if targets.isEmpty { Text("没有可选项").foregroundStyle(.secondary) }
-                    ForEach(targets) { t in
-                        Button {
-                            selected = t
-                            path = t.path ?? ""
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.title).foregroundStyle(.primary)
-                                    if !t.subtitle.isEmpty { Text(t.subtitle).font(.caption).foregroundStyle(.secondary) }
-                                }
-                                Spacer()
-                                if selected?.id == t.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                            }
-                        }
-                    }
-                } header: { Text("选择设备 / 项目").textCase(nil) }
-                if selected != nil {
-                    Section {
-                        TextField("路径", text: $path)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    } header: { Text("工作路径").textCase(nil) }
-                    Section {
-                        Button("确认") {
-                            model.projectSource = ProjectSourceBinding(
-                                providerId: provider.id, targetId: selected?.id,
-                                targetTitle: selected?.title, path: path.isEmpty ? nil : path)
-                            if !provider.canExecute { model.permissionMode = .readOnly }
-                            model.persistSessionConfig()
-                            onDone()
-                        }
-                        .bold()
-                    }
-                }
-            }
-        }
-        .navigationTitle(provider.title)
     }
 }
 
