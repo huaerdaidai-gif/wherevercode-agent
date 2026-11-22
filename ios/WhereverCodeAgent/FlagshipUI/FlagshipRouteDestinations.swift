@@ -2613,6 +2613,8 @@ public struct ChannelsHomeView: View {
     @State private var showManagementSheet = false
     @State private var showPolicyAlert = false
     @State private var policyAlertMessage = ""
+    // 218 深链：带 channelId 跳转失败时的定性提示（无效/无权限/不存在）
+    @State private var channelLinkError: String? = nil
 
     // 频道数据与选中
     @State private var channels: [V5ChannelItem] = []
@@ -2664,11 +2666,19 @@ public struct ChannelsHomeView: View {
         VStack(spacing: 0) {
             topNavBar
 
+            // 218 统一版式分段一：频道／私聊直接放在页面上（与安卓
+            // 同位），不再只藏在切换面板里；面板内分段与此共用状态。
+            if appState.hasToken {
+                partitionPicker
+            }
+
             // 对话框直达（批D）：打开即当前频道的对话框（消息流+状态+
-            // 发送区）；搜索/分段/频道列表收进切换面板（点频道名开）。
+            // 发送区）；搜索/频道列表收进切换面板（点频道名开）。
             if !appState.hasToken {
                 unconfiguredTokenView
-            } else if let dm = activeWorkspaceDM {
+            } else if selectedPartition == .directMessages, activeWorkspaceDM == nil {
+                directMessagesListView
+            } else if let dm = activeWorkspaceDM, selectedPartition == .directMessages {
                 ChannelDetailWorkspaceView(
                     appState: appState,
                     channelItem: nil,
@@ -2696,6 +2706,9 @@ public struct ChannelsHomeView: View {
         .onAppear(perform: loadData)
         .task {
             await refreshChannels()
+            // 冷启动/登录恢复：pending 可能在本页出现前就已恢复，
+            // 不等 onChange，出现后主动消费一次。
+            await consumePendingChannelLink()
         }
         .sheet(isPresented: $showSwitchPanel) {
             switchPanel
@@ -2723,6 +2736,68 @@ public struct ChannelsHomeView: View {
             Button("我知道了", role: .cancel) {}
         } message: {
             Text(policyAlertMessage)
+        }
+        .alert("无法打开频道", isPresented: Binding(
+            get: { channelLinkError != nil },
+            set: { if !$0 { channelLinkError = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(channelLinkError ?? "")
+        }
+        .onChange(of: appState.pendingChannelID) { _ in
+            Task { await consumePendingChannelLink() }
+        }
+        .onChange(of: appState.hasToken) { _ in
+            Task { await consumePendingChannelLink() }
+        }
+    }
+
+    /// 218 深链消费：pendingChannelID 落到指定频道。列表里有就直达；
+    /// 没有则按三类异常定性——ID 格式不对 = 链接无效；探针读消息被
+    /// 服务端以成员/权限类错误拒绝 = 无权限；不存在类错误 = 频道
+    /// 已删除/不存在。消费成功或定性后都清掉 pending（含持久化份，
+    /// 冷启动/登录恢复靠它续上）。
+    private func consumePendingChannelLink() async {
+        guard let target = appState.pendingChannelID, appState.hasToken else { return }
+        await appState.loadChannels()
+        loadData()
+        if let ch = channels.first(where: { $0.id == target }) {
+            activeWorkspaceChannel = ch
+            activeWorkspaceDM = nil
+            selectedPartition = .channels
+            showSwitchPanel = false
+            appState.clearPendingChannelLink()
+            return
+        }
+        if let dm = directMessages.first(where: { $0.id == target }) {
+            activeWorkspaceDM = dm
+            selectedPartition = .directMessages
+            showSwitchPanel = false
+            appState.clearPendingChannelLink()
+            return
+        }
+        let hexOK = target.count == 32 && target.allSatisfy { $0.isHexDigit }
+        if !hexOK {
+            channelLinkError = "链接无效：频道 ID 格式不正确。"
+            appState.clearPendingChannelLink()
+            return
+        }
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            _ = try await transport.pollMessages(channelID: target, limit: 1)
+            channelLinkError = "无法打开该频道：它不在你的频道列表里。"
+            appState.clearPendingChannelLink()
+        } catch {
+            let raw = (error as? McpError)?.message ?? ""
+            if raw.contains("member") || raw.contains("成员") || raw.contains("permission") || raw.contains("权限") {
+                channelLinkError = "无权限：你不是该频道成员。"
+            } else if raw.contains("not found") || raw.contains("不存在") || raw.contains("deleted") || raw.contains("删除") {
+                channelLinkError = "频道不存在或已删除。"
+            } else {
+                channelLinkError = raw.isEmpty ? "无法打开该频道。" : raw
+            }
+            appState.clearPendingChannelLink()
         }
     }
 
@@ -2941,6 +3016,7 @@ public struct ChannelsHomeView: View {
                         Button {
                             activeWorkspaceChannel = ch
                             activeWorkspaceDM = nil
+                            selectedPartition = .channels
                             showSwitchPanel = false
                         } label: {
                             channelRow(ch)
@@ -3059,6 +3135,7 @@ public struct ChannelsHomeView: View {
                     ForEach(filteredDMs) { dm in
                         Button {
                             activeWorkspaceDM = dm
+                            selectedPartition = .directMessages
                             showSwitchPanel = false
                         } label: {
                             directMessageRow(dm)
@@ -3278,6 +3355,19 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var activeTopicThreadRootId: String? = nil
     @State private var showTopicThreadsSheet = false
     @State private var typingSenderName: String? = nil
+    // №12 工具行状态（218 自 ChannelChatView 搬入本页，原页面删除）：
+    // 搜索/过滤走服务端 pollMessages 参数，跳到日期进入历史浏览态，
+    // 历史开关走 setHistoryVisible（仅 owner/协调者，服务端裁决）。
+    @State private var searchText = ""
+    @State private var searchSender: String?
+    @State private var searchRangeIndex = 0 // 0 全部时间 1 今天 2 近7天 3 近30天
+    @State private var searchKind: String?
+    @State private var isShowingSearchResults = false
+    @State private var isBrowsing = false
+    @State private var browseHasOlder = false
+    @State private var showingDatePicker = false
+    @State private var jumpDate = Date()
+    @State private var historyVisibleOverride: Bool?
     @Environment(\.dismiss) private var dismiss
 
     private var currentChannelId: String {
@@ -3321,16 +3411,6 @@ public struct ChannelDetailWorkspaceView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topWorkspaceHeader
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button("任务详情") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered)
-                    Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
-                    Button("转为正式任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
-                }
-                .font(.caption2)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-            }
             tabPicker
 
             switch selectedTab {
@@ -3343,7 +3423,9 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
-        .navigationTitle(displayName)
+        // 218 标题一层：嵌入旗舰壳时导航标题留空，频道名只在页内
+        // 标题行（切换面板入口）出现一次；独立打开时仍用频道名。
+        .navigationTitle(embedded ? "" : displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !embedded {
@@ -3360,15 +3442,6 @@ public struct ChannelDetailWorkspaceView: View {
                     }
                     .accessibilityIdentifier("channel.backButton")
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showChannelSettingsSheet = true
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                }
-                .accessibilityIdentifier("channel.settingsButton")
             }
         }
         .onAppear {
@@ -3395,6 +3468,26 @@ public struct ChannelDetailWorkspaceView: View {
                     }
                 }
             )
+        }
+        .sheet(isPresented: $showingDatePicker) {
+            NavigationStack {
+                Form {
+                    DatePicker("跳到哪一天", selection: $jumpDate, displayedComponents: .date)
+                }
+                .navigationTitle("跳到日期")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showingDatePicker = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("跳转") {
+                            showingDatePicker = false
+                            Task { await jumpToDate(Calendar.current.startOfDay(for: jumpDate)) }
+                        }
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showChannelSettingsSheet) {
             ChannelSettingsSheet(appState: appState, channel: channelItem, dm: dmItem)
@@ -3611,6 +3704,21 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
             Spacer()
+            // 218：频道设置入口从导航栏 toolbar 搬进页内标题行。
+            // 此前 toolbar 的 ⋯ 在旗舰壳嵌入时渲染得出但点击无响应
+            // （216/217 实机复现），页内按钮与「＋新建」同一层级，
+            // 点击路径已实机验证可靠。
+            Button {
+                showChannelSettingsSheet = true
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .frame(width: 38, height: 38)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("channel.settingsButton")
+            .accessibilityLabel("频道设置")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -3650,6 +3758,13 @@ public struct ChannelDetailWorkspaceView: View {
 
     private var messagesTab: some View {
         VStack(spacing: 0) {
+            if channelItem != nil {
+                membersStrip
+                searchBar
+                filterBar
+                toolsBar
+                if isBrowsing { browseBar }
+            }
             messageCenterStrip
             if !scheduledForChannel.isEmpty {
                 scheduledStrip
@@ -3659,10 +3774,10 @@ public struct ChannelDetailWorkspaceView: View {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary.opacity(0.6))
-                    Text("暂无频道消息")
+                    Text(isShowingSearchResults ? "没有找到匹配的消息" : "暂无频道消息")
                         .font(.headline)
                         .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                    Text("在下方输入框发送消息开始协同讨论")
+                    Text(isShowingSearchResults ? "换个关键词或清除搜索条件再试" : "在下方输入框发送消息开始协同讨论")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -3711,47 +3826,75 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
-    /// 消息中心条：未读（按本机已读游标）与置顶数。@我聚合需先学会
-    /// 本机名字（推送整改线的 learnedSelfNames，不在本分支），此处
-    /// 不报 @我数，只报能如实算出的两项。口径与 ChannelExtras
-    /// .buildMessageCenter 一致：无游标计 0，游标不在列表里计全部。
+    /// 消息中心条（218 计数口径 B，与安卓同一定义）：未读按本机
+    /// 已读游标之后计（无游标计 0、游标不在列表计全部）；@我未读 =
+    /// 未读中 @ 到本人名字集合的消息（本人 = 成员表里 isSelf 或
+    /// 本机发送者 ID 对应条目，排除本人所发）；置顶、话题在当前
+    /// 已加载消息内计（话题 = 有回复的根消息数，与安卓同规则）。
+    /// 三项都是当前已加载窗口内统计、不是全局数，条内明示范围；
+    /// 去重由 feed/刷新按消息 id 保证（startFeed /
+    /// refreshChannelMessages）。
     private var messageCenterStrip: some View {
         let lastSeen = (try? LocalData.shared.cursors.lastSeenMessageId(channelId: currentChannelId)) ?? nil
         let unread: Int
+        let unreadSlice: [V5ChannelMessage]
         if lastSeen == nil {
             unread = 0
+            unreadSlice = []
         } else if let idx = messages.firstIndex(where: { $0.id == lastSeen }) {
             unread = messages.count - idx - 1
+            unreadSlice = Array(messages.suffix(from: idx + 1))
         } else {
             unread = messages.count
+            unreadSlice = messages
         }
+        let selfNames = Set(channelParticipants
+            .filter { $0.isSelf || $0.id == appState.channelSenderID }
+            .map { $0.name }
+            .filter { !$0.isEmpty })
+        let mentionCount = unreadSlice.filter { msg in
+            guard !isOwnSender(msg.senderId) else { return false }
+            return selfNames.contains { name in
+                msg.text.contains("@\(name) ")
+                    || msg.text.contains("@\(name)\n")
+                    || msg.text.hasSuffix("@\(name)")
+            }
+        }.count
         let notifyMode = UserDefaults.standard.string(forKey: "channel.notify_mode.\(currentChannelId)") ?? "全部消息"
         let effectiveUnread = ChannelExtras.effectiveUnreadCount(
             unreadCount: unread,
-            unreadMentionCount: 0,
+            unreadMentionCount: mentionCount,
             notifyMode: notifyMode
         )
         let pinnedCount = messages.filter { $0.pinned && !$0.recalled }.count
         let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
         let topicCount = groupTopicThreads(messages: rawMsgs).count
-        return HStack(spacing: 12) {
-            Text("消息中心")
-                .font(.caption)
-                .fontWeight(.semibold)
-            Text("未读 \(effectiveUnread)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("置顶 \(pinnedCount)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button {
-                showTopicThreadsSheet = true
-            } label: {
-                Text(topicCount > 0 ? "话题 (\(topicCount))" : "话题")
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+                Text("消息中心")
                     .font(.caption)
-                    .foregroundStyle(.blue)
+                    .fontWeight(.semibold)
+                Text("未读 \(effectiveUnread)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("@我未读 \(mentionCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("置顶 \(pinnedCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    showTopicThreadsSheet = true
+                } label: {
+                    Text(topicCount > 0 ? "话题 (\(topicCount))" : "话题")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+                Spacer()
             }
-            Spacer()
+            Text("计数按当前已加载消息统计")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
@@ -3777,6 +3920,257 @@ public struct ChannelDetailWorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - 成员行（218 统一版式第 6 段：成员 chips＋通知 chip）
+    private var membersStrip: some View {
+        let notifyMode = UserDefaults.standard.string(forKey: "channel.notify_mode.\(currentChannelId)") ?? "全部消息"
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(members) { member in
+                    Text(member.role.isEmpty || member.role == "平台参与者"
+                         ? member.name
+                         : "\(member.name) · \(channelRoleLabel(member.role))")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white, in: Capsule())
+                        .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                }
+                Spacer(minLength: 8)
+                Button {
+                    showChannelSettingsSheet = true
+                } label: {
+                    Text("通知：\(notifyMode)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - №12 工具行（218 自 ChannelChatView 搬入：搜索/过滤/工具/浏览）
+
+    private var memberNames: [String] {
+        channelParticipants.map(\.name).filter { !$0.isEmpty }
+    }
+
+    private var currentChannelInfo: ChannelInfo? {
+        otherChannels.first(where: { $0.id == currentChannelId })
+    }
+
+    private var historyVisibleNow: Bool {
+        historyVisibleOverride ?? currentChannelInfo?.historyVisible ?? true
+    }
+
+    private var canManageHistory: Bool {
+        channelParticipants.first {
+            $0.isSelf || $0.id == appState.channelSenderID
+        }?.canMentionAll ?? false
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            TextField("搜本频道消息…", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+            if isShowingSearchResults {
+                Button("清除") { clearSearch() }
+                    .font(.caption)
+            } else {
+                Button("搜索") { Task { await runSearch() } }
+                    .font(.caption)
+                    .disabled(!searchCanRun)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 3)
+    }
+
+    private var searchCanRun: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            searchSender != nil || searchRangeIndex != 0 || searchKind != nil
+    }
+
+    private static let rangeLabels = ["全部时间", "今天", "近7天", "近30天"]
+    private static let kindValues: [String?] = [nil, "image", "file", "link"]
+    private static let kindNames = ["全部", "图片", "文件", "链接"]
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Menu {
+                    Button("全部成员") { searchSender = nil; rerunSearchIfPossible() }
+                    ForEach(memberNames, id: \.self) { name in
+                        Button(name) { searchSender = name; rerunSearchIfPossible() }
+                    }
+                } label: {
+                    Text("成员：\(searchSender ?? "全部")").font(.caption)
+                }
+                Menu {
+                    ForEach(Self.rangeLabels.indices, id: \.self) { index in
+                        Button(Self.rangeLabels[index]) {
+                            searchRangeIndex = index
+                            rerunSearchIfPossible()
+                        }
+                    }
+                } label: {
+                    Text("时间：\(Self.rangeLabels[searchRangeIndex])").font(.caption)
+                }
+                Menu {
+                    ForEach(Self.kindValues.indices, id: \.self) { index in
+                        Button(Self.kindNames[index]) {
+                            searchKind = Self.kindValues[index]
+                            rerunSearchIfPossible()
+                        }
+                    }
+                } label: {
+                    Text("分类：\(Self.kindNames[Self.kindValues.firstIndex { $0 == searchKind } ?? 0])")
+                        .font(.caption)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var toolsBar: some View {
+        HStack(spacing: 12) {
+            Button("跳到日期") { showingDatePicker = true }
+                .font(.caption)
+            Spacer()
+            if canManageHistory {
+                Button("新成员看历史：\(historyVisibleNow ? "开" : "关")") {
+                    Task { await setHistoryVisible(!historyVisibleNow) }
+                }
+                .font(.caption)
+            } else {
+                Text("新成员看历史：\(historyVisibleNow ? "开" : "关")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+    }
+
+    private var browseBar: some View {
+        HStack(spacing: 12) {
+            if browseHasOlder {
+                Button("加载更早") { Task { await browseLoadOlder() } }.font(.caption)
+            }
+            Spacer()
+            Text("正在查看历史").font(.caption).foregroundStyle(.secondary)
+            Button("回到最新") { exitBrowse() }.font(.caption).fontWeight(.semibold)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.08))
+    }
+
+    private func rerunSearchIfPossible() {
+        if searchCanRun { Task { await runSearch() } }
+    }
+
+    private func searchWindow() -> (from: Int?, to: Int?) {
+        let now = Int(Date().timeIntervalSince1970)
+        switch searchRangeIndex {
+        case 1: return (Int(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970), nil)
+        case 2: return (now - 7 * 86400, nil)
+        case 3: return (now - 30 * 86400, nil)
+        default: return (nil, nil)
+        }
+    }
+
+    /// 搜索：停 feed 后用服务端过滤参数取结果替换列表（与原
+    /// ChannelChatView 同语义）；清除则重载实时列表。
+    private func runSearch() async {
+        guard let transport = appState.makeChannelTransport(), searchCanRun else { return }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        stopFeed()
+        isBrowsing = false
+        do {
+            let window = searchWindow()
+            let results = try await transport.pollMessages(
+                channelID: currentChannelId, limit: 100,
+                query: query.isEmpty ? nil : query,
+                sender: searchSender,
+                fromTs: window.from, toTs: window.to,
+                kind: searchKind)
+            messages = results.map { toV5Message($0) }
+                .sorted { $0.fullDateTime < $1.fullDateTime }
+            isShowingSearchResults = true
+        } catch {
+            actionError = (error as? McpError)?.message ?? "搜索失败。"
+        }
+    }
+
+    private func clearSearch() {
+        searchText = ""
+        searchSender = nil
+        searchRangeIndex = 0
+        searchKind = nil
+        isShowingSearchResults = false
+        messages = []
+        loadWorkspaceData()
+    }
+
+    /// 跳到日期：取该日（含）之后的消息进入历史浏览态；空日不换列表。
+    private func jumpToDate(_ day: Date) async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            let page = try await transport.pollMessages(
+                channelID: currentChannelId, limit: 100,
+                fromTs: Int(day.timeIntervalSince1970))
+            if page.isEmpty {
+                actionError = "该日期之后暂无消息。"
+            } else {
+                stopFeed()
+                messages = page.map { toV5Message($0) }
+                    .sorted { $0.fullDateTime < $1.fullDateTime }
+                browseHasOlder = true
+                isShowingSearchResults = false
+                isBrowsing = true
+            }
+        } catch {
+            actionError = (error as? McpError)?.message ?? "跳到日期失败。"
+        }
+    }
+
+    private func browseLoadOlder() async {
+        guard let transport = appState.makeChannelTransport(),
+              let first = messages.first else { return }
+        do {
+            let older = try await transport.pollMessages(
+                channelID: currentChannelId, beforeID: first.id, limit: 50)
+            let converted = older.map { toV5Message($0) }
+            var seen = Set(messages.map { $0.id })
+            messages = converted.filter { seen.insert($0.id).inserted } + messages
+            browseHasOlder = older.count >= 50
+        } catch {
+            actionError = (error as? McpError)?.message ?? "加载更早失败。"
+        }
+    }
+
+    private func exitBrowse() {
+        isBrowsing = false
+        browseHasOlder = false
+        messages = []
+        loadWorkspaceData()
+    }
+
+    private func setHistoryVisible(_ visible: Bool) async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            _ = try await transport.setHistoryVisible(channelID: currentChannelId, visible: visible)
+            historyVisibleOverride = visible
+        } catch {
+            actionError = (error as? McpError)?.message ?? "改历史开关失败。"
+        }
     }
 
     private func messageRow(_ msg: V5ChannelMessage) -> some View {

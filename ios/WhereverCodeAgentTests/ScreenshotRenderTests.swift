@@ -43,32 +43,6 @@ final class ScreenshotRenderTests: XCTestCase {
 
     // MARK: - Pages
 
-    func testScreenshotChannelList() async {
-        let image = await snapshot(
-            NavigationStack {
-                ChannelListContentView(channels: sampleChannels, loadError: nil, onRetry: {}, onRefresh: {})
-                    .navigationTitle("对话")
-            }
-        )
-        attach(image, name: "page-01-channel-list")
-    }
-
-    func testScreenshotChannelChat() async {
-        let image = await snapshot(
-            ChannelContentView(
-                messages: sampleMessages,
-                connectionState: .live,
-                connectionError: nil,
-                isLoadingHistory: false,
-                composerText: .constant(""),
-                isSending: false,
-                onSend: {},
-                onRefresh: {}
-            )
-        )
-        attach(image, name: "page-02-channel-chat")
-    }
-
     func testScreenshotTaskList() async {
         let image = await snapshot(
             NavigationStack {
@@ -131,28 +105,6 @@ final class ScreenshotRenderTests: XCTestCase {
             ModelAndAgentSheet(model: state.chat, onManageAgents: {})
         )
         attach(image, name: "page-08-selector-agent-only")
-    }
-
-    func testScreenshotHomeNotConnected() async {
-        // The restructured home in its platform-not-connected
-        // state: still the app's home page — a 平台连接 card, the
-        // team-channel setup hint (Android's wording for the same
-        // state) and the reserved conversation rows. Not a gate.
-        let image = await snapshot(
-            NavigationStack {
-                ConversationHomeContentView(
-                    platformConnected: false,
-                    channels: [],
-                    loadError: nil,
-                    isLoading: false,
-                    onRetry: {},
-                    onRefresh: {},
-                    onGoSettings: {}
-                )
-                .navigationTitle("对话")
-            }
-        )
-        attach(image, name: "page-08-home-not-connected")
     }
 
     func testScreenshotTasksNotConnected() async {

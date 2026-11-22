@@ -13,6 +13,7 @@
 // transport）。组件只管结构与状态呈现，不碰发送语义。
 
 import SwiftUI
+import UIKit
 
 extension View {
     /// 条件式无障碍标识：nil 时不设置（保持系统默认）。
@@ -356,4 +357,49 @@ public struct DialogComposerView<Above: View, Leading: View, Accessory: View, Be
                 .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
         }
     }
+}
+
+
+// MARK: - 218 搬家：原 ChatListView.swift 内的共享件
+// ChatListView 与 ChannelChatView 已于 218 删除（频道页收敛到
+// ChannelDetailWorkspaceView）；这两件被 TasksView / DevicesView
+// 继续使用，随此文件保留。
+
+struct PlatformConnectionCardSection: View {
+    let onGoSettings: () -> Void
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("平台未连接", systemImage: "wifi.slash")
+                    .font(.headline)
+                Text("团队频道与平台任务需要先连接平台。平台只是本 App 的一个连接项，在「设置」里完成：地址已预填；平台凭证由你的平台管理员签发后填入，或用已有 owner 凭证在设置里生成。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button("去设置") { onGoSettings() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.vertical, 4)
+        } header: { Text("平台连接").textCase(nil) }
+    }
+}
+
+enum AgentUI {
+    private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                green: CGFloat((value >> 8) & 255) / 255,
+                blue: CGFloat(value & 255) / 255, alpha: 1)
+        })
+    }
+    static let background = adaptive(0xFAF8F5, 0x0B0E1D)
+    static let card = adaptive(0xFFFFFF, 0x171B31)
+    static let ink = adaptive(0x15181E, 0xF2F4FF)
+    static let secondary = adaptive(0x5A6270, 0x9AA3C7)
+    static let border = adaptive(0xE6E1D8, 0x2E3560)
+    static let warning = adaptive(0xA86200, 0xF5A524)
+    static let warningBackground = adaptive(0xFFF1D8, 0x3A2C14)
+    static let accent = Color(red: 123/255, green: 92/255, blue: 1)
+    static let userBubble = adaptive(0x2E63E8, 0x2E63E8)
 }

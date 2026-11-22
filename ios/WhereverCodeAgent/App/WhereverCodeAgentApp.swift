@@ -43,6 +43,13 @@ struct WhereverCodeAgentApp: App {
         WindowGroup {
             FlagshipShellView(appState: appState, chatModel: appState.chat)
                 .environmentObject(appState)
+                .onOpenURL { url in
+                    // 218 深链：wherevercode://channel/<channelId>
+                    if url.scheme == "wherevercode", url.host == "channel" {
+                        let id = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                        if !id.isEmpty { appState.requestOpenChannel(id) }
+                    }
+                }
                 .task {
                     await appState.refreshConnectionStatus()
                 }
@@ -262,6 +269,32 @@ public final class AppState: ObservableObject {
 
     public func selectChannel(_ channelID: String) {
         settings.channelID = channelID
+    }
+
+    // MARK: - 频道深链（218：路由带 channelId）
+
+    /// 待打开的频道 ID：由深链 URL、App 内跳转或冷启动恢复写入，
+    /// 频道页（ChannelsHomeView）在列表就绪后消费。同步持久化，
+    /// 使冷启动、后台恢复、登录恢复后仍能续上这次跳转。
+    @Published public var pendingChannelID: String?
+
+    public func requestOpenChannel(_ channelID: String) {
+        let id = channelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        pendingChannelID = id
+        UserDefaults.standard.set(id, forKey: "channel.pendingLinkID")
+    }
+
+    public func restorePendingChannelLink() {
+        guard pendingChannelID == nil,
+              let id = UserDefaults.standard.string(forKey: "channel.pendingLinkID"),
+              !id.isEmpty else { return }
+        pendingChannelID = id
+    }
+
+    public func clearPendingChannelLink() {
+        pendingChannelID = nil
+        UserDefaults.standard.removeObject(forKey: "channel.pendingLinkID")
     }
 
     public func generateAndSaveToken(agentId: String, name: String) async -> IssueTokenResult {
