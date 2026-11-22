@@ -271,4 +271,32 @@ final class ChannelParsingTests: XCTestCase {
         XCTAssertNil(parseChannelTypingWsEvent(#"{"type":"message","message":{"id":"x"}}"#))
         XCTAssertNil(parseChannelTypingWsEvent("invalid json"))
     }
+
+    func testChannelListDecodingReadsHistoryVisible() {
+        // №12: history_visible parses from the wire; absent = visible.
+        let dict: [String: Any] = [
+            "channels": [
+                ["id": "ch-1", "name": "Closed", "history_visible": false] as [String: Any],
+                ["id": "ch-2", "name": "Open"] as [String: Any],
+            ]
+        ]
+        let channels = ChannelInfo.list(from: dict)
+        XCTAssertEqual(channels.count, 2)
+        XCTAssertFalse(channels[0].historyVisible)
+        XCTAssertTrue(channels[1].historyVisible)
+    }
+
+    func testMentionHelpers() {
+        XCTAssertEqual(mentionToken(in: "hello @Al"), "Al")
+        XCTAssertEqual(mentionToken(in: "@"), "")
+        XCTAssertNil(mentionToken(in: "mail a@b"))
+        XCTAssertNil(mentionToken(in: "done @Alice "))
+        XCTAssertNil(mentionToken(in: "no mention"))
+        XCTAssertEqual(
+            mentionMatches(in: "hi @al", memberNames: ["Alice", "Bob", "alina"]),
+            ["Alice", "alina"])
+        XCTAssertEqual(mentionMatches(in: "hi @Bob", memberNames: ["Bob"]), [])
+        XCTAssertEqual(applyingMention("Alice", to: "hi @Al"), "hi @Alice ")
+        XCTAssertEqual(applyingMention("Alice", to: "no token"), "no token")
+    }
 }
