@@ -594,6 +594,20 @@ class PlatformChannelTransportTest {
     }
 
     @Test
+    fun `set member role sends tool name member and role`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_set_member_role" to envelope("""{"ok":true}""")),
+        )
+        transport(http).setChannelMemberRole("chan-1", "gemini", "coordinator")
+        val params = JSONObject(http.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_set_member_role", params.getString("name"))
+        val args = params.getJSONObject("arguments")
+        assertEquals("chan-1", args.getString("channel_id"))
+        assertEquals("gemini", args.getString("member_id"))
+        assertEquals("coordinator", args.getString("role"))
+    }
+
+    @Test
     fun `set history visible sends the new tool and parses list flag`() {
         val http = ScriptedHttp(
             mapOf(

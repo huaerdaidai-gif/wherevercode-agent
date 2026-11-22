@@ -183,6 +183,19 @@ final class ChannelCollaborationTests: XCTestCase {
         XCTAssertTrue(messages.isEmpty)
     }
 
+    func testSetMemberRoleSendsTool() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_set_member_role")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            XCTAssertEqual(arguments["member_id"] as? String, "gemini")
+            XCTAssertEqual(arguments["role"] as? String, "coordinator")
+            return (200, #"{"channel_id":"ch-1","member_id":"gemini","role":"coordinator"}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        _ = try await transport.setMemberRole(channelID: "ch-1", memberID: "gemini", role: "coordinator")
+    }
+
     func testSetHistoryVisibleSendsNewTool() async throws {
         let transport = makeTransport { name, arguments in
             XCTAssertEqual(name, "agent_channel_set_history_visible")

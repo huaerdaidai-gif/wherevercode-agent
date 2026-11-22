@@ -233,6 +233,27 @@ class TeamChannelTest {
     }
 
     @Test
+    fun `mergePlatformChannelMembers carries platform roles`() {
+        // 角色管理口径：成员角色以平台为准——本地已有成员回写平台
+        // 角色，平台补进的成员带角色进来，标签函数给徽标用。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val merged = mergePlatformChannelMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA", role = "coordinator"),
+                ChannelParticipant(agentId = "codex", agentName = "Codex", role = "owner"),
+                ChannelParticipant(agentId = "gemini", agentName = "Gemini"),
+            ),
+        )
+        assertEquals("coordinator", merged.first { it.agentId == "app-qa" }.role)
+        assertEquals("owner", merged.first { it.agentId == "codex" }.role)
+        assertEquals("member", merged.first { it.agentId == "gemini" }.role)
+        assertEquals("创建者", channelRoleLabel("owner"))
+        assertEquals("协调员", channelRoleLabel("coordinator"))
+        assertEquals("", channelRoleLabel("member"))
+    }
+
+    @Test
     fun `dmCandidates drops local app and self but keeps platform app member`() {
         // 验收实证口径：频道 9 名成员里，私聊名单 = 全体减本机自己；
         // agentId=app（另一台设备的 App 身份）必须在名单里。
