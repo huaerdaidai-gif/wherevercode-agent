@@ -537,4 +537,84 @@ class PlatformChannelTransportTest {
             .optJSONObject("params")?.optJSONObject("arguments")
         assertEquals("a9", dmArgs?.optString("agent_id"))
     }
+
+    @Test
+    fun `fetch messages sends all no12 filter arguments`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")),
+        )
+        val t = transport(http)
+        t.fetchMessages(
+            "chan-1", limit = 25, beforeId = "m9", afterId = "m3",
+            query = "词", sender = "alice", fromTs = 100L, toTs = 200L, kind = "image",
+        )
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("chan-1", args?.optString("channel_id"))
+        assertEquals(25, args?.optInt("limit"))
+        assertEquals("m9", args?.optString("before_id"))
+        assertEquals("m3", args?.optString("after_id"))
+        assertEquals("词", args?.optString("q"))
+        assertEquals("alice", args?.optString("sender"))
+        assertEquals(100L, args?.optLong("from_ts"))
+        assertEquals(200L, args?.optLong("to_ts"))
+        assertEquals("image", args?.optString("kind"))
+    }
+
+    @Test
+    fun `fetch messages omits blank filters`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")),
+        )
+        transport(http).fetchMessages("chan-1")
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(false, args?.has("before_id"))
+        assertEquals(false, args?.has("q"))
+        assertEquals(false, args?.has("sender"))
+        assertEquals(false, args?.has("from_ts"))
+        assertEquals(false, args?.has("kind"))
+    }
+
+    @Test
+    fun `search with filters passes sender window and kind`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")),
+        )
+        transport(http).searchMessages(
+            "chan-1", "", sender = "bob", fromTs = 7L, toTs = 9L, kind = "link",
+        )
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(false, args?.has("q"))
+        assertEquals("bob", args?.optString("sender"))
+        assertEquals(7L, args?.optLong("from_ts"))
+        assertEquals(9L, args?.optLong("to_ts"))
+        assertEquals("link", args?.optString("kind"))
+    }
+
+    @Test
+    fun `set history visible sends the new tool and parses list flag`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_set_history_visible" to envelope("""{"id":"c1","history_visible":false}"""),
+                "agent_channel_list" to envelope(
+                    """{"channels":[{"id":"c1","name":"大厅","kind":"channel","history_visible":false,"participants":[]},{"id":"c2","name":"旧厅","kind":"channel","participants":[]}]}""",
+                ),
+            ),
+        )
+        val t = transport(http)
+        t.setHistoryVisible("c1", false)
+        val body = JSONObject(http.calls[0].bodyJson)
+        assertEquals(
+            "agent_channel_set_history_visible",
+            body.optJSONObject("params")?.optString("name"),
+        )
+        val args = body.optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("c1", args?.optString("channel_id"))
+        assertEquals(false, args?.optBoolean("visible", true))
+        val channels = t.listChannels()
+        assertEquals(false, channels[0].historyVisible)
+        assertEquals(true, channels[1].historyVisible) // 缺字段默认可见
+    }
 }
