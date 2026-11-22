@@ -244,7 +244,9 @@ public struct ChannelTransport {
     public func createChannelWebhook(channelID: String) async throws -> [String: Any] {
         try await client.callTool(
             name: "agent_channel_create_webhook",
-            arguments: ["channel_id": channelID])
+            // The server requires a name (a missing one is rejected);
+            // the app uses one fixed label instead of asking the user.
+            arguments: ["channel_id": channelID, "name": "WhereverCode App"])
     }
 
     /// List a channel's inbound webhooks (no secrets — the server

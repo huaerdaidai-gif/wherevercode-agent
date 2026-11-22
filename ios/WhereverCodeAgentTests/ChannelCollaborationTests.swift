@@ -184,6 +184,14 @@ final class ChannelCollaborationTests: XCTestCase {
     }
 
     func testListAndDeleteChannelWebhooksSendTools() async throws {
+        let createTransport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_create_webhook")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            XCTAssertEqual(arguments["name"] as? String, "WhereverCode App")
+            return (200, #"{"webhook_id":"whk_1"}"#)
+        }
+        _ = try await createTransport.createChannelWebhook(channelID: "ch-1")
+
         let listTransport = makeTransport { name, arguments in
             XCTAssertEqual(name, "agent_channel_list_webhooks")
             XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")

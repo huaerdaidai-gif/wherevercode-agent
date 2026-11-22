@@ -558,7 +558,12 @@ class PlatformChannelMcpTransport(
     /** 给频道建一个入帖 Webhook（令牌只在本次返回里出现一次，用户自管）。 */
     fun createChannelWebhook(channelId: String): JSONObject = toolsCall(
         "agent_channel_create_webhook",
-        JSONObject().apply { put("channel_id", channelId) },
+        JSONObject().apply {
+            put("channel_id", channelId)
+            // 服务端创建接口必填 name（实测缺了回 409）；App 不向用户
+            // 索取名字，统一用固定名，用户可在列表里按创建时间区分。
+            put("name", "WhereverCode App")
+        },
     )
 
     // ---- 频道管理（频道补全一期）----

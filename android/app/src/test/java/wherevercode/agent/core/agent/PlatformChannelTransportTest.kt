@@ -594,6 +594,19 @@ class PlatformChannelTransportTest {
     }
 
     @Test
+    fun `create channel webhook sends required name`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_create_webhook" to envelope("""{"webhook_id":"whk_1"}""")),
+        )
+        transport(http).createChannelWebhook("chan-1")
+        val params = JSONObject(http.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_create_webhook", params.getString("name"))
+        val args = params.getJSONObject("arguments")
+        assertEquals("chan-1", args.getString("channel_id"))
+        assertEquals("WhereverCode App", args.getString("name"))
+    }
+
+    @Test
     fun `list and delete channel webhooks send tool names and ids`() {
         val listHttp = ScriptedHttp(
             mapOf("agent_channel_list_webhooks" to envelope("""{"webhooks":[]}""")),
