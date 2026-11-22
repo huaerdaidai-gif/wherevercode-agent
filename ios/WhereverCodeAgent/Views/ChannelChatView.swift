@@ -303,6 +303,10 @@ struct ChannelChatView: View {
     @State private var showingDatePicker = false
     @State private var jumpDate = Date()
     @State private var historyVisibleOverride: Bool?
+    // Transient error: the banner shows an error only briefly
+    // (2026-11-22 定版： 状态只在异常时短暂出现), then it clears.
+    @State private var transientError: String?
+    @State private var transientErrorGeneration = 0
     @Environment(\.scenePhase) private var scenePhase
 
     private var memberNames: [String] {
@@ -327,7 +331,7 @@ struct ChannelChatView: View {
             ChannelContentView(
                 messages: messages,
                 connectionState: connectionState,
-                connectionError: connectionError,
+                connectionError: transientError,
                 isLoadingHistory: isLoadingHistory,
                 composerText: $composerText,
                 isSending: isSending,
@@ -345,8 +349,20 @@ struct ChannelChatView: View {
         .toolbar {
             Button("重新加载") { reload() }
         }
-        .onAppear { startFeed() }
+        .onAppear {
+            startFeed()
+            updateTransientError(connectionError)
+        }
         .onDisappear { stopFeed() }
+        #if compiler(>=6.0)
+        .onChange(of: connectionError) { _, newValue in
+            updateTransientError(newValue)
+        }
+        #else
+        .onChange(of: connectionError) { newValue in
+            updateTransientError(newValue)
+        }
+        #endif
         #if compiler(>=6.0)
         .onChange(of: scenePhase) { _, phase in
             // №12: back in the foreground — retry the WebSocket now
@@ -689,6 +705,22 @@ struct ChannelChatView: View {
         isBrowsing = false
         browseHighlightID = nil
         reload()
+    }
+
+    /// Show the latest error briefly: a new error replaces the old
+    /// one and restarts the 5-second clock; an unchanged generation
+    /// clears it when the clock runs out.
+    private func updateTransientError(_ text: String?) {
+        transientErrorGeneration += 1
+        let generation = transientErrorGeneration
+        transientError = text
+        guard text != nil else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if transientErrorGeneration == generation {
+                transientError = nil
+            }
+        }
     }
 
     private func setHistoryVisible(_ visible: Bool) async {
