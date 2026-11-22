@@ -5128,6 +5128,13 @@ public struct TopicThreadsSheet: View {
     }
 }
 
+public struct ChannelWebhookRow: Identifiable {
+    public let id: String
+    public let name: String
+    public let createdAt: String
+    public let urlPath: String
+}
+
 public struct ChannelSettingsSheet: View {
     @ObservedObject public var appState: AppState
     public let channel: V5ChannelItem?
@@ -5156,6 +5163,7 @@ public struct ChannelSettingsSheet: View {
                 channelInformationSection
                 directMessageInformationSections
                 notificationSettingsSection
+                channelWebhooksSection
                 channelMembersSection
                 if let errorText { Section { Text(errorText).foregroundStyle(.red).textSelection(.enabled) } }
             }
@@ -5170,6 +5178,7 @@ public struct ChannelSettingsSheet: View {
                 agents = (try? LocalData.shared.agents.listAgents()) ?? []
                 members = appState.availableChannels.first(where: { $0.id == channelId })?
                     .participantDetails.map(V5ChannelMember.init) ?? []
+                Task { await loadWebhooks() }
             }
         }
     }
@@ -5220,6 +5229,82 @@ public struct ChannelSettingsSheet: View {
         default: return "接收所有新消息通知与未读计数"
         }
     }
+    @State private var webhookRows: [ChannelWebhookRow] = []
+    @State private var createdWebhookText: String?
+
+    @ViewBuilder private var channelWebhooksSection: some View {
+        if channel != nil {
+            Section("入帖 Webhook") {
+                ForEach(webhookRows) { hook in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(hook.name.isEmpty ? hook.id : hook.name)
+                            Text(hook.urlPath).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                            if !hook.createdAt.isEmpty {
+                                Text("建于 \(hook.createdAt)").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("删除", role: .destructive) { Task { await deleteWebhook(hook) } }
+                    }
+                }
+                Button("创建入帖 Webhook") { Task { await createWebhook() } }
+                if let createdWebhookText {
+                    Text(createdWebhookText).font(.caption).textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @MainActor private func loadWebhooks() async {
+        guard channel != nil, let transport = appState.makeChannelTransport() else { return }
+        do {
+            let result = try await transport.listChannelWebhooks(channelID: channelId)
+            let raw = result["webhooks"] as? [[String: Any]] ?? []
+            webhookRows = raw.compactMap { item in
+                guard let id = item["webhook_id"] as? String, !id.isEmpty else { return nil }
+                var created = ""
+                if let ts = item["created_at"] as? Double {
+                    created = DateFormatter.localizedString(
+                        from: Date(timeIntervalSince1970: ts), dateStyle: .short, timeStyle: .short)
+                }
+                return ChannelWebhookRow(
+                    id: id,
+                    name: item["name"] as? String ?? "",
+                    createdAt: created,
+                    urlPath: item["url_path"] as? String ?? "")
+            }
+        } catch {
+            errorText = (error as? McpError)?.message ?? error.localizedDescription
+        }
+    }
+
+    @MainActor private func createWebhook() async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        do {
+            // Real server fields: url_path (plural channel-webhooks) +
+            // secret (shown exactly once) + signature instructions.
+            let result = try await transport.createChannelWebhook(channelID: channelId)
+            let urlPath = result["url_path"] as? String ?? ""
+            let secret = result["secret"] as? String ?? ""
+            let signature = result["signature"] as? String ?? ""
+            createdWebhookText = "入帖地址路径：\(urlPath)\n密钥（只显示这一次，请自行保存）：\(secret)\n\(signature)\n外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能删掉重建。"
+            await loadWebhooks()
+        } catch {
+            errorText = (error as? McpError)?.message ?? error.localizedDescription
+        }
+    }
+
+    @MainActor private func deleteWebhook(_ hook: ChannelWebhookRow) async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        do {
+            _ = try await transport.deleteChannelWebhook(channelID: channelId, webhookID: hook.id)
+            await loadWebhooks()
+        } catch {
+            errorText = (error as? McpError)?.message ?? error.localizedDescription
+        }
+    }
+
     private var channelMembersSection: some View {
         Section("频道成员") {
             ForEach(members) { member in memberRow(member) }

@@ -239,11 +239,25 @@ public struct ChannelTransport {
             arguments: ["agent_id": agentID])
     }
 
-    /// Create an inbound webhook for a channel; the token is returned
-    /// exactly once and is user-managed.
-    public func createChannelWebhook(channelID: String) async throws -> [String: Any] {
+    /// Create an inbound webhook for a channel; the secret is returned
+    /// exactly once and is user-managed. The server requires a name.
+    public func createChannelWebhook(channelID: String, name: String = "WhereverCode App") async throws -> [String: Any] {
         try await client.callTool(
             name: "agent_channel_create_webhook",
+            arguments: ["channel_id": channelID, "name": name])
+    }
+
+    /// List a channel's inbound webhooks (metadata only, no secrets).
+    public func listChannelWebhooks(channelID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_list_webhooks",
             arguments: ["channel_id": channelID])
+    }
+
+    /// Delete one of a channel's inbound webhooks (server-side delete).
+    public func deleteChannelWebhook(channelID: String, webhookID: String) async throws -> [String: Any] {
+        try await client.callTool(
+            name: "agent_channel_delete_webhook",
+            arguments: ["channel_id": channelID, "webhook_id": webhookID])
     }
 }
