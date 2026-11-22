@@ -624,6 +624,16 @@ class PlatformChannelMcpTransport(
         },
     )
 
+    /** 设置成员角色（owner / coordinator / member；仅频道 owner 可用，服务端校验）。 */
+    fun setChannelMemberRole(channelId: String, memberId: String, role: String): JSONObject = toolsCall(
+        "agent_channel_set_member_role",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("member_id", memberId)
+            put("role", role)
+        },
+    )
+
     /**
      * 一次通用的 MCP `tools/call`（供平台令牌签发等不走频道消息的
      * 调用用，见 [PlatformTokenIssuer]）。返回工具的 JSON；传输失败、
