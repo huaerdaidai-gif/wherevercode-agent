@@ -6332,13 +6332,13 @@ class MainActivity : AppCompatActivity() {
 
     /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     private fun showChannelCreateMenu() {
-        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊", "创建入帖 Webhook", "打开消息中心")
+        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "设置成员角色", "删除频道", "发起私聊", "创建入帖 Webhook", "打开消息中心")
         ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
-            if (which == 8) {
+            if (which == 9) {
                 showEntry(DrawerRouter.ID_MESSAGE_CENTER)
                 return@show
             }
-            if (which == 6) {
+            if (which == 7) {
                 // 频道补全二期：发起私聊切到私聊分段（方案 A）；新私聊
                 // 从频道成员发起（控制器 onStartDm），不在此凭空建。
                 teamChannelDmMode = true
@@ -6352,7 +6352,7 @@ class MainActivity : AppCompatActivity() {
                 toast("频道未连接；未执行管理操作。")
                 return@show
             }
-            if (which == 7) {
+            if (which == 8) {
                 // 频道补全二期：创建入帖 Webhook（第七节五项之一）。
                 Thread {
                     try {
@@ -6398,6 +6398,27 @@ class MainActivity : AppCompatActivity() {
                         }.show()
                 }
             } else if (which == 5) {
+                // 角色管理：服务端只许频道 owner 改角色；非 owner 点了
+                // 会拿到真实拒绝原因（与移除/删除同一诚实口径）。
+                val members = mergedTeamChannelMembers().filterNot { it.isLocalApp }
+                if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return@show }
+                val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
+                ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { m ->
+                    m.displayName + "（当前：" + (roleNames.firstOrNull { it.first == m.role }?.second ?: m.role) + "）"
+                }) { index ->
+                    val member = members[index]
+                    ListDialog.show(this, "设置 ${member.displayName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
+                        val newRole = roleNames[roleIndex].first
+                        if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
+                        AlertDialog.Builder(this).setTitle("更改成员角色？")
+                            .setMessage("把 ${member.displayName} 的角色改为${roleNames[roleIndex].second}。")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("更改") { _, _ ->
+                                performChannelManagement { it.setChannelMemberRole(channelId!!, member.agentId, newRole) }
+                            }.show()
+                    }
+                }
+            } else if (which == 6) {
                 AlertDialog.Builder(this).setTitle("删除频道？")
                     .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
                     .setNegativeButton("取消", null)

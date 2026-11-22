@@ -22,6 +22,7 @@ import wherevercode.agent.core.team.ChannelTaskCard
 import wherevercode.agent.core.team.MessageCenter
 import wherevercode.agent.core.team.ScheduledChannelPost
 import wherevercode.agent.core.team.TeamChannelMember
+import wherevercode.agent.core.team.channelRoleLabel
 import wherevercode.agent.core.team.channelTaskGoal
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
@@ -639,7 +640,8 @@ class TeamChannelController(
             chips.addView(
                 UiKit.text(
                     context,
-                    (if (member.isLocalApp) "本机 App" else member.displayName),
+                    (if (member.isLocalApp) "本机 App" else member.displayName) +
+                        channelRoleLabel(member.role).let { if (it.isEmpty()) "" else " · $it" },
                     12f,
                     R.color.text_primary,
                 ).apply {

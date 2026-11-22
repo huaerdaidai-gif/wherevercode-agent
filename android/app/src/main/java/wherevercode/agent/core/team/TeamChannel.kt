@@ -91,7 +91,16 @@ data class TeamChannelMember(
     val isPlatformAgent: Boolean = false,
     /** 平台口径的「本机自己」（participants 的 is_self）：本机凭证在频道里的身份。 */
     val isSelf: Boolean = false,
+    /** 平台口径的频道角色（owner / coordinator / member）；本地合成行默认 member。 */
+    val role: String = "member",
 )
+
+/** 频道角色的中文标签；成员档不加后缀返回空串。 */
+fun channelRoleLabel(role: String): String = when (role) {
+    "owner" -> "创建者"
+    "coordinator" -> "协调员"
+    else -> ""
+}
 
 /** 只读扇出的候选 Agent（由调用方从 Agent 记录解析出 RemoteTarget 再传进来）。 */
 data class FanoutCandidate(
@@ -235,9 +244,16 @@ fun mergePlatformChannelMembers(
             // 平台 is_self 是「本机在平台上的身份」的真值信号：本地同 id
             // 条目保留在前、显示名不被覆盖，但 self 标记必须回写——否则
             // 私聊名单排不掉自己（2026-11-21 验收实证：名单混进 app-qa）。
-            if (participant.isSelf && !merged[idx].isSelf) {
-                merged[idx] = merged[idx].copy(isSelf = true)
+            // 角色同样以平台为准回写（角色管理 UI 与徽标都读它）。
+            var entry = merged[idx]
+            if (participant.isSelf && !entry.isSelf) {
+                entry = entry.copy(isSelf = true)
             }
+            val platformRole = participant.role?.takeIf { it.isNotBlank() }
+            if (platformRole != null && entry.role != platformRole) {
+                entry = entry.copy(role = platformRole)
+            }
+            merged[idx] = entry
             continue
         }
         indexById[participant.agentId] = merged.size
@@ -247,6 +263,7 @@ fun mergePlatformChannelMembers(
             isLocalApp = false,
             isPlatformAgent = true,
             isSelf = participant.isSelf,
+            role = participant.role?.takeIf { it.isNotBlank() } ?: "member",
         )
     }
     return merged
