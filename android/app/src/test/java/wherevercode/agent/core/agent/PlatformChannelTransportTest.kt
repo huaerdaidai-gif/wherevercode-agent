@@ -594,6 +594,27 @@ class PlatformChannelTransportTest {
     }
 
     @Test
+    fun `list and delete channel webhooks send tool names and ids`() {
+        val listHttp = ScriptedHttp(
+            mapOf("agent_channel_list_webhooks" to envelope("""{"webhooks":[]}""")),
+        )
+        transport(listHttp).listChannelWebhooks("chan-1")
+        val listParams = JSONObject(listHttp.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_list_webhooks", listParams.getString("name"))
+        assertEquals("chan-1", listParams.getJSONObject("arguments").getString("channel_id"))
+
+        val deleteHttp = ScriptedHttp(
+            mapOf("agent_channel_delete_webhook" to envelope("""{"ok":true}""")),
+        )
+        transport(deleteHttp).deleteChannelWebhook("chan-1", "whk_1")
+        val deleteParams = JSONObject(deleteHttp.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_delete_webhook", deleteParams.getString("name"))
+        val deleteArgs = deleteParams.getJSONObject("arguments")
+        assertEquals("chan-1", deleteArgs.getString("channel_id"))
+        assertEquals("whk_1", deleteArgs.getString("webhook_id"))
+    }
+
+    @Test
     fun `set member role sends tool name member and role`() {
         val http = ScriptedHttp(
             mapOf("agent_channel_set_member_role" to envelope("""{"ok":true}""")),
