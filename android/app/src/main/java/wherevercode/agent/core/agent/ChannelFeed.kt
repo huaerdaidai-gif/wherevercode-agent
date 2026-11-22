@@ -139,6 +139,17 @@ class ChannelFeed(
         setState(ChannelConnectionState.STOPPED, null)
     }
 
+    /**
+     * 回前台立即重连（№12 WS 修复）：正在轮询兜底时打断等待，让主
+     * 循环马上重试 WS，而不是等满 45 秒。未启动时无操作。
+     */
+    fun reconnectNow() {
+        if (!running) return
+        if (connectionState == ChannelConnectionState.POLLING) {
+            worker?.interrupt()
+        }
+    }
+
     private fun loop() {
         pollOnce()
         while (running) {

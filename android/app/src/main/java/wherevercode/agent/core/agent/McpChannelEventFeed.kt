@@ -88,6 +88,9 @@ class McpChannelEventFeed(
     /** 停止订阅（工作线程退出，WS 关闭）。 */
     fun stop() = feed.stop()
 
+    /** 回前台立即重连：透传内层 feed（轮询兜底时立刻重试 WS）。 */
+    fun reconnectNow() = feed.reconnectNow()
+
     /**
      * 把一条频道消息以 MCP 通知形式交给已连客户端。
      * 通知方法名带 channel，与服务端 MCP 通知区分，不冒充。

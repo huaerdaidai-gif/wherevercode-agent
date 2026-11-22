@@ -53,6 +53,8 @@ data class ChannelSummary(
     val name: String,
     val kind: String = "channel",
     val archived: Boolean = false,
+    /** 新成员可看全部历史（№12；平台 history_visible，缺失时默认可见）。 */
+    val historyVisible: Boolean = true,
     val participantIds: List<String> = emptyList(),
     /** 参与者明细（平台为准的频道成员名单，与 iOS ChannelParticipant 同口径）。 */
     val participantDetails: List<ChannelParticipant> = emptyList(),
@@ -146,6 +148,7 @@ fun parseChannelSummary(obj: JSONObject): ChannelSummary {
         name = obj.optString("name", ""),
         kind = obj.optString("kind", "channel").ifBlank { "channel" },
         archived = obj.optBoolean("archived", false),
+        historyVisible = obj.optBoolean("history_visible", true),
         participantIds = details.map { it.agentId },
         participantDetails = details,
     )
@@ -404,11 +407,47 @@ class PlatformChannelMcpTransport(
     }
 
     /** 频道内搜索（平台 q 透传，频道补全一期补齐安卓侧）。 */
-    fun searchMessages(channelId: String, query: String, limit: Int = 50): List<PlatformChannelMessage> {
+    fun searchMessages(
+        channelId: String,
+        query: String,
+        limit: Int = 50,
+        sender: String? = null,
+        fromTs: Long? = null,
+        toTs: Long? = null,
+        kind: String? = null,
+    ): List<PlatformChannelMessage> = fetchMessages(
+        channelId, limit = limit, query = query,
+        sender = sender, fromTs = fromTs, toTs = toTs, kind = kind,
+    )
+
+    /**
+     * 通用过滤读（№12 历史标配）：参数原样透传服务端
+     * `agent_channel_messages`——[beforeId] 往前翻旧页、[afterId]
+     * 往后翻新页、[query] 关键词、[sender] 发言人（成员编号或
+     * 显示名精确匹配）、[fromTs]/[toTs] 时间窗（Unix 秒，from
+     * 含、to 不含）、[kind] 分类（image / file / link）。
+     */
+    fun fetchMessages(
+        channelId: String,
+        limit: Int = 50,
+        beforeId: String? = null,
+        afterId: String? = null,
+        query: String? = null,
+        sender: String? = null,
+        fromTs: Long? = null,
+        toTs: Long? = null,
+        kind: String? = null,
+    ): List<PlatformChannelMessage> {
         val args = JSONObject().apply {
             put("channel_id", channelId)
             put("limit", limit)
-            put("q", query)
+            if (!beforeId.isNullOrBlank()) put("before_id", beforeId)
+            if (!afterId.isNullOrBlank()) put("after_id", afterId)
+            if (!query.isNullOrBlank()) put("q", query)
+            if (!sender.isNullOrBlank()) put("sender", sender)
+            if (fromTs != null) put("from_ts", fromTs)
+            if (toTs != null) put("to_ts", toTs)
+            if (!kind.isNullOrBlank()) put("kind", kind)
         }
         return parseMessageList(toolsCall("agent_channel_messages", args))
     }
@@ -540,6 +579,15 @@ class PlatformChannelMcpTransport(
         JSONObject().apply {
             put("channel_id", channelId)
             put("name", name)
+        },
+    )
+
+    /** 新成员历史可见开关（№12；仅 owner/协调员，服务端校验并原样报错）。 */
+    fun setHistoryVisible(channelId: String, visible: Boolean): JSONObject = toolsCall(
+        "agent_channel_set_history_visible",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("visible", visible)
         },
     )
 
