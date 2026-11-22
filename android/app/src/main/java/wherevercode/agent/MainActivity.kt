@@ -475,6 +475,11 @@ class MainActivity : AppCompatActivity() {
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
     private var teamChannelSearchQuery = ""
     private var teamChannelSearchResults: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
+    /** №12 历史浏览窗口（搜索跳原文/日期跳转；null = 实时消息）。 */
+    private var teamChannelBrowseMessages: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
+    private var teamChannelBrowseHighlightId: String? = null
+    private var teamChannelBrowseHasOlder = false
+    private var teamChannelBrowseHasNewer = false
     /** 输入中信令：正在输入成员名称（零 token）。 */
     private var teamChannelTypingSender: String? = null
     /** 激活的自由话题根消息 id（非空时仅聚焦该话题串）。 */
@@ -1731,6 +1736,8 @@ class MainActivity : AppCompatActivity() {
                 teamChannelActiveId = channelId
                 if (!teamChannelDmMode) saveActiveChannelId(channelId)
                 teamChannelSearchResults = null
+                teamChannelBrowseMessages = null
+                teamChannelBrowseHighlightId = null
                 // 推送跟看的频道走：重订 WS（阻塞①修法），再刷新。
                 startTeamChannelFeed()
                 refreshTeamChannel()
@@ -1767,9 +1774,24 @@ class MainActivity : AppCompatActivity() {
                 refreshTeamChannel()
             },
             onSearch = { query -> searchTeamChannel(query) },
+            onSearchFiltered = { query, sender, fromTs, toTs, kind ->
+                searchTeamChannel(query, sender, fromTs, toTs, kind)
+            },
+            onJumpToMessage = { message -> jumpToTeamChannelMessage(message) },
+            onBrowseLoadOlder = { browseTeamChannelOlder() },
+            onBrowseLoadNewer = { browseTeamChannelNewer() },
+            onExitBrowse = {
+                teamChannelBrowseMessages = null
+                teamChannelBrowseHighlightId = null
+                refreshTeamChannel()
+            },
+            onJumpToDate = { fromTs -> jumpToTeamChannelDate(fromTs) },
+            onHistoryVisibleChange = { visible -> setTeamChannelHistoryVisible(visible) },
             onClearSearch = {
                 teamChannelSearchQuery = ""
                 teamChannelSearchResults = null
+                teamChannelBrowseMessages = null
+                teamChannelBrowseHighlightId = null
                 refreshTeamChannel()
             },
             onOpenAttachmentRef = { ref -> openAttachmentRef(ref) },
@@ -6241,6 +6263,10 @@ class MainActivity : AppCompatActivity() {
                 count to false
             }
         }
+        val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeId }
+        val selfIdsForRole = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() }
+        val myHistoryRole = activeSummary?.participantDetails
+            ?.firstOrNull { it.isSelf || it.agentId in selfIdsForRole }?.role
         return TeamChannelSnapshot(
             configured = true,
             setupHint = "",
@@ -6279,6 +6305,13 @@ class MainActivity : AppCompatActivity() {
             searchResults = teamChannelSearchResults,
             typingSenderName = teamChannelTypingSender,
             activeTopicThreadRootId = teamChannelActiveTopicRootId,
+            browseMessages = teamChannelBrowseMessages,
+            browseHighlightId = teamChannelBrowseHighlightId,
+            browseHasOlder = teamChannelBrowseHasOlder,
+            browseHasNewer = teamChannelBrowseHasNewer,
+            historyVisible = activeSummary?.historyVisible ?: true,
+            canManageHistory = myHistoryRole == "owner" || myHistoryRole == "coordinator",
+            showHistoryToggle = activeSummary != null && activeSummary.kind == "channel",
         )
     }
 
@@ -6930,8 +6963,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 频道内搜索（平台 q）：结果回填快照，列表切到搜索结果。 */
-    private fun searchTeamChannel(query: String) {
-        if (query.isBlank()) {
+    private fun searchTeamChannel(query: String) =
+        searchTeamChannel(query, null, null, null, null)
+
+    /**
+     * №12 带过滤的频道搜索：关键词 + 发言人 + 时间窗 + 分类，参数
+     * 原样透传服务端。关键词为空但带了任一过滤时照样搜（分类索引
+     * 就是 kind 单独成搜）；全空则退出搜索。
+     */
+    private fun searchTeamChannel(
+        query: String,
+        sender: String?,
+        fromTs: Long?,
+        toTs: Long?,
+        kind: String?,
+    ) {
+        if (query.isBlank() && sender == null && fromTs == null && toTs == null && kind == null) {
             teamChannelSearchResults = null
             refreshTeamChannel()
             return
@@ -6940,12 +6987,126 @@ class MainActivity : AppCompatActivity() {
         val channelId = activeTeamChannelId()
         Thread {
             try {
-                teamChannelSearchResults = teamChannelTransport(host).searchMessages(channelId, query)
+                teamChannelSearchResults = teamChannelTransport(host).searchMessages(
+                    channelId, query, sender = sender, fromTs = fromTs, toTs = toTs, kind = kind,
+                )
                 teamChannelSearchQuery = query
                 teamChannelNotice = null
             } catch (e: Exception) {
                 teamChannelNotice =
                     "搜索失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 跳到原文：以目标消息为中心取前后各 25 条，进历史浏览窗口。 */
+    private fun jumpToTeamChannelMessage(target: wherevercode.agent.core.agent.PlatformChannelMessage) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val transport = teamChannelTransport(host)
+                val before = transport.fetchMessages(channelId, limit = 25, beforeId = target.id)
+                val after = transport.fetchMessages(channelId, limit = 25, afterId = target.id)
+                teamChannelBrowseMessages = before + target + after
+                teamChannelBrowseHighlightId = target.id
+                teamChannelBrowseHasOlder = before.size >= 25
+                teamChannelBrowseHasNewer = after.size >= 25
+                teamChannelSearchResults = null
+                teamChannelNotice = null
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "跳到原文失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 跳到日期：从该日 00:00 起的第一页消息进浏览窗口。 */
+    private fun jumpToTeamChannelDate(fromTs: Long) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val page = teamChannelTransport(host)
+                    .fetchMessages(channelId, limit = 100, fromTs = fromTs)
+                if (page.isEmpty()) {
+                    teamChannelNotice = "该日期之后暂无消息。"
+                } else {
+                    teamChannelBrowseMessages = page
+                    teamChannelBrowseHighlightId = page.first().id
+                    teamChannelBrowseHasOlder = true
+                    teamChannelBrowseHasNewer = page.size >= 100
+                    teamChannelSearchResults = null
+                    teamChannelNotice = null
+                }
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "跳到日期失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 浏览窗口往前翻一页（更早）。 */
+    private fun browseTeamChannelOlder() {
+        val current = teamChannelBrowseMessages ?: return
+        val first = current.firstOrNull() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val older = teamChannelTransport(host)
+                    .fetchMessages(channelId, limit = 50, beforeId = first.id)
+                teamChannelBrowseMessages = older + current
+                teamChannelBrowseHasOlder = older.size >= 50
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "加载更早失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 浏览窗口往后翻一页（更新）。 */
+    private fun browseTeamChannelNewer() {
+        val current = teamChannelBrowseMessages ?: return
+        val last = current.lastOrNull() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val newer = teamChannelTransport(host)
+                    .fetchMessages(channelId, limit = 50, afterId = last.id)
+                teamChannelBrowseMessages = current + newer
+                teamChannelBrowseHasNewer = newer.size >= 50
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "加载更新失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 新成员历史可见开关：服务端校验角色，失败如实提示。 */
+    private fun setTeamChannelHistoryVisible(visible: Boolean) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                teamChannelTransport(host).setHistoryVisible(channelId, visible)
+                teamChannelChannelsCache = teamChannelChannelsCache.map {
+                    if (it.id == channelId) it.copy(historyVisible = visible) else it
+                }
+                teamChannelNotice = if (visible) {
+                    "已开启：新成员可看全部历史。"
+                } else {
+                    "已关闭：新成员只能看入群之后的消息。"
+                }
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "改历史开关失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
             }
             runOnUiThread { refreshTeamChannel() }
         }.start()
@@ -13669,6 +13830,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // 阶段 3（U4）：回前台时补一次审批 ticker（审批可能在后台到达）。
         pokeApprovalTicker()
+        // №12 WS 修复：回前台时频道 feed 若在轮询兜底，立刻重试 WS，
+        // 不等 45 秒重连点；断档消息由轮询游标静默补读。
+        teamChannelFeed?.reconnectNow()
     }
 
     override fun onDestroy() {
