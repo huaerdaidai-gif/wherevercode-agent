@@ -1835,6 +1835,7 @@ public enum ChatProjectDisplay {
         case "GITLAB": return "GitLab"
         case "GITEE": return "Gitee"
         case "DEVICE":
+            if home?.hostId == "iphone-local" { return "本机" }
             if let hostId = home?.hostId,
                let agent = (try? data.agents.listAgents())?.first(where: { $0.deviceId == hostId }) {
                 return agent.displayName
@@ -1847,7 +1848,7 @@ public enum ChatProjectDisplay {
     public static func icon(for home: ProjectLocation?) -> String {
         switch home?.homeKind {
         case "LOCAL": return "iphone"
-        case "DEVICE": return "desktopcomputer"
+        case "DEVICE": return home?.hostId == "iphone-local" ? "iphone" : "desktopcomputer"
         case "GITHUB", "GITLAB", "GITEE": return "chevron.left.forwardslash.chevron.right"
         default: return "folder"
         }
@@ -1901,8 +1902,10 @@ public struct ProjectSourceChip: View {
 
 /// 聊天选项目（2026-11-22 双端统一，对齐 GPT/Claude 项目模式）：
 /// 聊天层只选项目——沙盒（无项目）+ 已建项目名单 + 新建项目入口。
-/// 来源（本机 / 设备 / git）只在新建项目时选，入口在项目页
-/// （「新建项目」跳项目页，那里是统一的「打开文件夹」对话框）。
+/// 来源（本机 / 设备 / git）只在新建项目时选：「新建项目」在单内
+/// 进来源步（与项目页「打开文件夹」对话框同三项同文案），git
+/// 一项当场登记、建好自动绑到当前对话；本机 / 远程两项与项目页
+/// 同去向（文件页 / 设备页）。
 public struct ProjectPickerSheet: View {
     @ObservedObject var model: LocalChatModel
     @Environment(\.dismiss) private var dismiss
@@ -1973,9 +1976,8 @@ public struct ProjectPickerSheet: View {
                     }
                 } header: { Text("项目").textCase(nil) }
                 Section {
-                    Button {
-                        dismiss()
-                        model.appState.onSelectRoute?("projects")
+                    NavigationLink {
+                        ProjectSourceStepView(model: model)
                     } label: {
                         HStack {
                             Image(systemName: "plus").frame(width: 24).foregroundStyle(.blue)
@@ -1989,6 +1991,124 @@ public struct ProjectPickerSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
         }
     }
+}
+
+/// 新建项目·选来源（与项目页「打开文件夹」对话框同三项同文案）：
+/// 来源只在新建项目时选。本机 / 远程两项与项目页同去向（文件页 /
+/// 设备页）；git 一项在本单内完成登记，建好自动绑到当前对话。
+public struct ProjectSourceStepView: View {
+    @ObservedObject var model: LocalChatModel
+    @Environment(\.dismiss) private var dismiss
+
+    public var body: some View {
+        List {
+            Section {
+                Button {
+                    dismiss()
+                    model.appState.onSelectRoute?("files")
+                } label: {
+                    sourceRow("本机文件夹", detail: "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。")
+                }
+                Button {
+                    dismiss()
+                    model.appState.onSelectRoute?("devices")
+                } label: {
+                    sourceRow("远程设备上的文件夹", detail: "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。")
+                }
+                NavigationLink {
+                    GitProjectFormView(model: model)
+                } label: {
+                    sourceRow("git 仓库地址", detail: "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。")
+                }
+            } header: { Text("打开文件夹").textCase(nil) } footer: {
+                Text("选一个位置打开它作为项目之家。")
+            }
+        }
+        .navigationTitle("新建项目")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func sourceRow(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+            Text(detail).font(.footnote).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+}
+
+/// 新建项目·git 登记表单（与项目页新建表单同字段同口径，共用
+/// createProjectFromGitForm）：建好自动绑到当前对话并关单。
+public struct GitProjectFormView: View {
+    @ObservedObject var model: LocalChatModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var repo = ""
+    @State private var branch = "main"
+    @State private var path = ""
+
+    public var body: some View {
+        Form {
+            Section {
+                TextField("项目名称（如 wherevercode-agent）", text: $name)
+                TextField("Git 仓库地址（可选）", text: $repo)
+                TextField("默认分支", text: $branch)
+                TextField("工作区路径（如 Documents/workspace）", text: $path)
+            } header: { Text("项目基本信息").textCase(nil) }
+        }
+        .navigationTitle("新建项目")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("创建") {
+                    if let created = createProjectFromGitForm(
+                        name: name,
+                        repoUrl: repo.isEmpty ? nil : repo,
+                        branch: branch,
+                        path: path,
+                        data: model.data
+                    ) {
+                        model.projectSource = ProjectSourceBinding(
+                            providerId: "local", targetId: created.project.projectId,
+                            targetTitle: created.project.name,
+                            path: created.activeHome?.workspacePath)
+                        model.permissionMode = .readOnly
+                        model.persistSessionConfig()
+                    }
+                    dismiss()
+                }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+}
+
+/// git 登记表单建项目（项目页与聊天新建项目共用）：建项目本体 +
+/// 本机位置（hostId iphone-local），返回建好的项目；名为空或
+/// 保存失败返回 nil。
+public func createProjectFromGitForm(name: String, repoUrl: String?, branch: String, path: String, data: LocalData) -> ProjectWithHomes? {
+    let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !clean.isEmpty else { return nil }
+    let proj = Project(
+        name: clean,
+        repoUrl: repoUrl,
+        defaultBranch: branch,
+        origin: "LOCAL_SANDBOX"
+    )
+    do {
+        try data.projects.saveProject(proj)
+    } catch {
+        return nil
+    }
+    let loc = ProjectLocation(
+        projectId: proj.projectId,
+        hostId: "iphone-local",
+        workspacePath: path.isEmpty ? "Documents/\(clean)" : path
+    )
+    _ = try? data.projects.addLocation(loc)
+    return (try? data.projects.listProjects())?.first { $0.project.projectId == proj.projectId }
+        ?? ProjectWithHomes(project: proj, homes: [loc], activeHome: loc)
 }
 
 /// 对话方选择器（严格遵循定版规范：仅列出可选 Agent，整节移除已配置模型，单选规则仅提 Agent）
