@@ -102,6 +102,22 @@ fun channelRoleLabel(role: String): String = when (role) {
     else -> ""
 }
 
+/** 临时提示的默认停留时长（毫秒）。 */
+const val TRANSIENT_NOTICE_TTL_MS: Long = 5_000
+
+/**
+ * 临时提示可见性（2026-11-22 定版口径：状态只在异常时短暂出现）：
+ * 通知自首次出现起 [ttlMs] 内可见，过期即隐；同一条通知持续刷新
+ * 不续时（firstSeen 不变），新通知以自己的 firstSeen 重新计时。
+ */
+fun transientNoticeVisible(
+    text: String?,
+    firstSeenAtMs: Long,
+    nowMs: Long,
+    ttlMs: Long = TRANSIENT_NOTICE_TTL_MS,
+): Boolean =
+    !text.isNullOrBlank() && firstSeenAtMs > 0 && nowMs - firstSeenAtMs in 0 until ttlMs
+
 /** 只读扇出的候选 Agent（由调用方从 Agent 记录解析出 RemoteTarget 再传进来）。 */
 data class FanoutCandidate(
     val agentId: String,

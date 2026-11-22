@@ -23,6 +23,8 @@ import wherevercode.agent.core.team.MessageCenter
 import wherevercode.agent.core.team.ScheduledChannelPost
 import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.channelRoleLabel
+import wherevercode.agent.core.team.TRANSIENT_NOTICE_TTL_MS
+import wherevercode.agent.core.team.transientNoticeVisible
 import wherevercode.agent.core.team.channelTaskGoal
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
@@ -222,6 +224,12 @@ class TeamChannelController(
 
     /** 待随下一条消息发出的附件引用（引用制；只存引用字符串）。 */
     private var pendingAttachmentRef: String? = null
+    // 临时提示计时（快照通知只短暂出现，见 transientNoticeVisible）。
+    private var lastNoticeText: String? = null
+    private var lastNoticeAtMs: Long = 0
+    private val clearNoticeRunnable = Runnable {
+        if (noticeLine.text.toString() == lastNoticeText) noticeLine.text = ""
+    }
 
     private val replyBanner: TextView = UiKit.text(context, "", 11f, R.color.accent).apply {
         visibility = View.GONE
@@ -490,7 +498,23 @@ class TeamChannelController(
         } else {
             "第 ${snapshot.roundsUsed + 1}/${TeamChatLimits.MAX_ROUNDS} 轮"
         }
-        noticeLine.text = snapshot.notice.orEmpty()
+        // 临时提示：同一条通知只在首次出现后的 TTL 内显示，过期自动
+        // 隐去（延迟回调负责无新快照时也清行）；新通知重新计时。
+        if (snapshot.notice != lastNoticeText) {
+            lastNoticeText = snapshot.notice
+            lastNoticeAtMs = System.currentTimeMillis()
+            noticeLine.removeCallbacks(clearNoticeRunnable)
+            if (!snapshot.notice.isNullOrBlank()) {
+                noticeLine.postDelayed(clearNoticeRunnable, TRANSIENT_NOTICE_TTL_MS + 50)
+            }
+        }
+        noticeLine.text = if (
+            transientNoticeVisible(lastNoticeText, lastNoticeAtMs, System.currentTimeMillis())
+        ) {
+            lastNoticeText.orEmpty()
+        } else {
+            ""
+        }
         if (snapshot.typingSenderName != null) {
             typingBanner.text = "${snapshot.typingSenderName} 正在输入…"
             typingBanner.visibility = View.VISIBLE
