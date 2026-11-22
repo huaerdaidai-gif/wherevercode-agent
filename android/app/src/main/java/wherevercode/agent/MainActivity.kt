@@ -6558,8 +6558,8 @@ class MainActivity : AppCompatActivity() {
         if (id.isEmpty()) return
         getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
             .edit().putString("pending_channel_id", id).apply()
-        consumePendingChannelLink()
-        // 若频道页还没建好或端点未配，pending 留待刷新链消费。
+        // 消费在 refreshTeamChannel 的后台线程里做（列表刷新之后）：
+        // 未命中时要发探针请求，不能在主线程跑。
         refreshTeamChannel()
     }
 
@@ -6592,6 +6592,9 @@ class MainActivity : AppCompatActivity() {
             teamChannelBrowseMessages = null
             teamChannelNotice = "已打开频道：${summary.name}"
             startTeamChannelFeed()
+            // 深链的落点必须是频道页本身（与消息中心条目打开频道的
+            // openMessageCenterEntry 同一条导航路）。
+            runOnUiThread { showEntry(DrawerController.ID_TEAM_CHANNEL) }
             return
         }
         if (teamChannelChannelsCache.isEmpty()) return // 列表还没拉到，不定性
@@ -6599,6 +6602,7 @@ class MainActivity : AppCompatActivity() {
         val hexOk = target.length == 32 && target.all { it in '0'..'9' || it in 'a'..'f' }
         if (!hexOk) {
             teamChannelNotice = "链接无效：频道 ID 格式不正确。"
+            runOnUiThread { showEntry(DrawerController.ID_TEAM_CHANNEL) }
             return
         }
         try {
@@ -6616,6 +6620,7 @@ class MainActivity : AppCompatActivity() {
                 raw.isBlank() -> "无法打开该频道。"
                 else -> raw.take(200)
             }
+            runOnUiThread { showEntry(DrawerController.ID_TEAM_CHANNEL) }
         }
     }
 
