@@ -195,7 +195,6 @@ class TeamChannelTest {
     }
 
     @Test
-    @Test
     fun `channelRosterMembers drops local entries when self is not a channel member`() {
         // 223 小修：非成员频道的成员行只能是平台参与者——本机 App 与
         // 本地注册 Agent 不许冒充成员（219 实测旧疾）。
