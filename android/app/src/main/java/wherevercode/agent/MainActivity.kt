@@ -1762,7 +1762,9 @@ class MainActivity : AppCompatActivity() {
             },
             onStartDm = { agentId -> startTeamChannelDm(agentId) },
             onMessageRecall = { messageId -> runTeamChannelAction("撤回") { t, ch -> t.recallMessage(ch, messageId) } },
-            onMessageDelete = { messageId -> runTeamChannelAction("删除") { t, ch -> t.deleteMessage(ch, messageId) } },
+            onMessageDelete = { messageId ->
+                runTeamChannelAction("删除", evictMessageId = messageId) { t, ch -> t.deleteMessage(ch, messageId) }
+            },
             onTogglePin = { messageId, pinned ->
                 runTeamChannelAction(if (pinned) "置顶" else "取消置顶") { t, ch ->
                     t.setMessagePinned(ch, messageId, pinned)
@@ -6986,6 +6988,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun runTeamChannelAction(
         label: String,
+        evictMessageId: String? = null,
         block: (PlatformChannelMcpTransport, String) -> Unit,
     ) {
         val (host, _) = teamChannelEndpoint() ?: run {
@@ -6995,12 +6998,27 @@ class MainActivity : AppCompatActivity() {
         }
         val channelId = activeTeamChannelId()
         Thread {
+            var succeeded = false
             try {
                 block(teamChannelTransport(host), channelId)
                 teamChannelNotice = null
+                succeeded = true
             } catch (e: Exception) {
                 teamChannelNotice =
                     "$label 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            if (succeeded) {
+                // 删除：条目从本机缓冲直接移除（重拉整页也不会再带它回来，
+                // 但 upsert 不删旧条目，必须先摘掉）。
+                if (evictMessageId != null) {
+                    synchronized(teamChannelMessages) {
+                        teamChannelMessages.removeAll { it.id == evictMessageId }
+                    }
+                }
+                // 置顶/反应/撤回等状态变化：增量 feed 永远不会把旧消息的
+                // 新状态带回来，动作成功后整页重同步一次（223 修复：
+                // 此前动作完要退出重进频道页才看得到效果）。
+                teamChannelFeed?.resync()
             }
             runOnUiThread { refreshTeamChannel() }
         }.start()

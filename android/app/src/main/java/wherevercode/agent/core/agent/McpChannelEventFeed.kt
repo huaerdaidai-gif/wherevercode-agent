@@ -91,6 +91,9 @@ class McpChannelEventFeed(
     /** 回前台立即重连：透传内层 feed（轮询兜底时立刻重试 WS）。 */
     fun reconnectNow() = feed.reconnectNow()
 
+    /** 整页重同步：透传内层 feed（动作成功后刷新已见消息的最新状态）。 */
+    fun resync() = feed.resync()
+
     /**
      * 把一条频道消息以 MCP 通知形式交给已连客户端。
      * 通知方法名带 channel，与服务端 MCP 通知区分，不冒充。
