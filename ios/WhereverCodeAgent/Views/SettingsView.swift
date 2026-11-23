@@ -45,6 +45,7 @@
 //   server's / transport's real error text.
 
 import SwiftUI
+import UIKit
 
 /// The tappable channel rows of the Settings picker. Split out so
 /// the layout is renderable/testable without a live platform.
@@ -103,6 +104,12 @@ struct SettingsView: View {
     @State private var showGenerateConfirm = false
     @State private var saveMessage: String?
     @State private var errorMessage: String?
+    // 内网频道服务（频道三层二期）
+    @State private var lanRunning = false
+    @State private var lanTokenNameText = ""
+    @State private var lanEntries: [LanTokenRegistry.Entry] = []
+    @State private var issuedLanEntry: LanTokenRegistry.Entry?
+    @State private var revokeLanCandidate: LanTokenRegistry.Entry?
 
     var body: some View {
         NavigationStack {
@@ -115,7 +122,7 @@ struct SettingsView: View {
                         .onSubmit { focusedField = nil }
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("没有预置地址：填你自己的平台主机名或完整端点。只接受 https；不信任自签证书，不关闭 ATS。不填也不影响本地使用。")
+                    Text("没有预置地址：填你自己的平台主机名或完整端点。公网只接受 https；内网地址（192.168.x.x 等）可用 http。不填也不影响本地使用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     switch appState.settings.validation {
@@ -174,6 +181,42 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 } header: { Text("平台连接").textCase(nil) }
+                Section {
+                    LabeledContent("服务状态", value: lanRunning ? "运行中" : "未开启")
+                    if lanRunning {
+                        LabeledContent("本机地址", value: lanServiceAddressText)
+                    }
+                    Text("开启后，同一局域网的设备可用成员令牌连入本机频道（全功能，不依赖公网）。iOS 仅前台可用：App 退到后台系统会暂停，服务随之不可达。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(lanRunning ? "关闭内网服务" : "开启内网服务") {
+                        toggleLanService()
+                    }
+                    .accessibilityIdentifier("settings.toggleLanService")
+                    TextField("成员显示名（如 Mac、备用手机）", text: $lanTokenNameText)
+                        .autocorrectionDisabled()
+                    Button("签发成员令牌") {
+                        issueLanToken()
+                    }
+                    .accessibilityIdentifier("settings.issueLanToken")
+                    if lanEntries.isEmpty {
+                        Text("暂无成员令牌")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(lanEntries, id: \.token) { entry in
+                            HStack {
+                                Text("\(entry.agentName) · \(entry.agentId) · ****\(String(entry.token.suffix(4)))")
+                                    .font(.caption)
+                                Spacer()
+                                Button("撤销", role: .destructive) {
+                                    revokeLanCandidate = entry
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+                } header: { Text("内网频道服务").textCase(nil) }
                 Section {
                     Text(tokenSectionStatus)
                         .font(.subheadline)
@@ -266,6 +309,7 @@ struct SettingsView: View {
             .onAppear {
                 baseURLText = appState.settings.platformBaseURLString
                 channelIDText = appState.settings.channelID
+                refreshLanState()
             }
             .task {
                 // First visit with a complete setup: check once so the
@@ -289,6 +333,39 @@ struct SettingsView: View {
                 Button("好", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .alert("成员令牌（只显示一次）", isPresented: Binding(
+                get: { issuedLanEntry != nil },
+                set: { if !$0 { issuedLanEntry = nil } }
+            )) {
+                Button("复制令牌") {
+                    if let entry = issuedLanEntry {
+                        UIPasteboard.general.string = entry.token
+                    }
+                    issuedLanEntry = nil
+                }
+                Button("完成", role: .cancel) { issuedLanEntry = nil }
+            } message: {
+                if let entry = issuedLanEntry {
+                    Text("成员：\(entry.agentName)（\(entry.agentId)）\n令牌：\(entry.token)\n对方在平台地址填本机地址、凭证填这枚令牌即可连入。关闭本弹窗后无法再查看完整令牌。")
+                }
+            }
+            .confirmationDialog("撤销这枚成员令牌？", isPresented: Binding(
+                get: { revokeLanCandidate != nil },
+                set: { if !$0 { revokeLanCandidate = nil } }
+            )) {
+                Button("撤销", role: .destructive) {
+                    if let entry = revokeLanCandidate {
+                        LocalPlatform.lanRegistryOrNull()?.revoke(token: entry.token)
+                        refreshLanState()
+                    }
+                    revokeLanCandidate = nil
+                }
+                Button("取消", role: .cancel) { revokeLanCandidate = nil }
+            } message: {
+                if let entry = revokeLanCandidate {
+                    Text("撤销后 \(entry.agentName) 立即无法再连入本机频道。")
+                }
             }
         }
     }
@@ -377,6 +454,71 @@ struct SettingsView: View {
     }
 
     // MARK: - Actions
+
+    // ---- 内网频道服务（频道三层二期） ---------------------------------------
+
+    private var lanServiceAddressText: String {
+        if let ip = Self.lanIpv4Address() {
+            return "\(ip):\(LanPlatformServer.defaultPort)"
+        }
+        return "本机地址读取失败"
+    }
+
+    private func refreshLanState() {
+        lanRunning = LocalPlatform.lanServerRunning()
+        lanEntries = LocalPlatform.lanRegistryOrNull()?.list() ?? []
+    }
+
+    private func toggleLanService() {
+        if lanRunning {
+            LocalPlatform.stopLanServer()
+            UserDefaults.standard.set(false, forKey: LocalPlatform.lanServiceEnabledKey)
+        } else {
+            if LocalPlatform.startLanServer() {
+                UserDefaults.standard.set(true, forKey: LocalPlatform.lanServiceEnabledKey)
+            } else {
+                errorMessage = "内网服务启动失败。"
+            }
+        }
+        refreshLanState()
+    }
+
+    private func issueLanToken() {
+        guard let registry = LocalPlatform.lanRegistryOrNull() else {
+            errorMessage = "本地平台服务未启动，无法签发。"
+            return
+        }
+        let entry = registry.issue(agentName: lanTokenNameText)
+        lanTokenNameText = ""
+        issuedLanEntry = entry
+        refreshLanState()
+    }
+
+    /// 本机首选 IPv4（与安卓同口径：私有段优先，尾网 100. 次选）。
+    private static func lanIpv4Address() -> String? {
+        var fallback: String?
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0, let first = interfaces else { return nil }
+        defer { freeifaddrs(interfaces) }
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+        while let iface = current {
+            defer { current = iface.pointee.ifa_next }
+            guard let addr = iface.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let result = getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+            guard result == 0 else { continue }
+            let ip = String(cString: host)
+            if ip.hasPrefix("127.") { continue }
+            if LanAddress.isLanAddress(ip) {
+                if ip.hasPrefix("100.") {
+                    if fallback == nil { fallback = ip }
+                } else {
+                    return ip
+                }
+            }
+        }
+        return fallback
+    }
 
     private func saveSettings() {
         var settings = appState.settings

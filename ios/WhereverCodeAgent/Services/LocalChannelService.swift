@@ -189,6 +189,12 @@ public final class LocalChannelService {
         return channels[channelId] != nil
     }
 
+    /// 某 Agent 是否某频道成员（内网层 WS 订阅门禁用，与安卓同口径）。
+    public func isChannelMember(channelId: String, agentId: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return memberOf(channelId, agentId) != nil
+    }
+
     private func ensureSeed() {
         registerAgentLocked(agentId: LocalPlatform.appAgentID, agentName: LocalPlatform.appAgentName)
         if storedDefaultChannelId.isEmpty || channels[storedDefaultChannelId] == nil {
