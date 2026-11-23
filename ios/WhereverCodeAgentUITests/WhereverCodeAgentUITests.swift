@@ -98,17 +98,28 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        // 批D 对话框直达后的频道页契约：未配凭证时直接显示未连接空态
-        // （全文提示 + 「前往 Agent 管理」钮）；频道/私聊分段与列表收进
-        // 频道切换面板，不再常驻页头（旧列表先行形态的断言随形态退役）。
+        // 频道三层一期·本地层契约（supersede 批D 未配凭证空态断言）：
+        // 未配平台凭证时频道页走 App 内嵌本地平台，直接打开本地频道
+        // 的对话框（标题＋消息输入框在位），不再落「频道还没法连」
+        // 未配置死页——下载即用，不先要地址/凭证（2026-11-13 定版）。
         let channelHint = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "频道还没法连")
         ).firstMatch
-        XCTAssertTrue(
-            channelHint.waitForExistence(timeout: 10),
-            "Channels page must show the unconfigured hint in dialog-first form"
+        XCTAssertFalse(
+            channelHint.exists,
+            "Channels page must not fall back to the unconfigured hint; the local platform serves it"
         )
-        XCTAssertTrue(app.buttons["前往 Agent 管理"].firstMatch.exists)
+        let localChannelTitle = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "本地频道")
+        ).firstMatch
+        XCTAssertTrue(
+            localChannelTitle.waitForExistence(timeout: 10),
+            "Channels page must open the local channel in dialog-first form without platform configuration"
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["channel.composer.input"].waitForExistence(timeout: 10),
+            "Local channel dialog must show the message composer"
+        )
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")
