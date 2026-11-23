@@ -263,7 +263,7 @@ class TeamChannelTest {
         assertEquals("member", merged.first { it.agentId == "gemini" }.role)
         assertEquals("创建者", channelRoleLabel("owner"))
         assertEquals("协调员", channelRoleLabel("coordinator"))
-        assertEquals("", channelRoleLabel("member"))
+        assertEquals("成员", channelRoleLabel("member"))
     }
 
     @Test

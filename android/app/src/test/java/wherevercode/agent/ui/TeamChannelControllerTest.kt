@@ -81,12 +81,11 @@ class TeamChannelControllerTest {
     }
 
     @Test
-    fun `polling keeps TLS failure safe and folds raw diagnostic behind recovery controls`() {
-        var reconnects = 0
+    fun `polling keeps TLS failure safe and folds raw diagnostic behind the diagnostic toggle`() {
         val controller = TeamChannelController(
             RuntimeEnvironment.getApplication(),
             onOpenChatWithAgent = {}, onPost = {}, onMarkRead = {}, onNewRound = {},
-            onRefresh = {}, onReconnect = { reconnects++ },
+            onRefresh = {},
         )
         controller.root.visibility = View.VISIBLE
         val raw = "javax.net.ssl.SSLHandshakeException: CertPathValidatorException: Trust anchor for certification path not found"
@@ -106,8 +105,6 @@ class TeamChannelControllerTest {
         assertTrue(texts.any { it.contains("轮询兜底") && it.contains("安全连接未建立") })
         assertTrue(texts.contains("查看连接诊断"))
         assertFalse(texts.any { it.contains("Trust anchor") })
-        visibleTexts(controller.root).first { it.text == "重新连接" }.performClick()
-        assertTrue(reconnects == 1)
         visibleTexts(controller.root).first { it.text == "查看连接诊断" }.performClick()
         assertTrue(visibleTexts(controller.root).any { it.text.contains("Trust anchor") })
     }
