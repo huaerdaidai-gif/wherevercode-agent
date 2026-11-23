@@ -51,6 +51,12 @@ public enum LocalPlatform {
 
     private static let lock = NSLock()
     private static var service: LocalChannelService?
+    private static var lanRegistry: LanTokenRegistry?
+    private static var lanServer: LanPlatformServer?
+
+    /// 内网服务开关的持久化键（与安卓 lanPrefs 同口径：开过就记住，
+    /// App 重启自动恢复监听；iOS 宿主仅前台，后台系统暂停即不可达）。
+    public static let lanServiceEnabledKey = "lan_platform.service_enabled"
 
     /// 安装本地服务（幂等；已装直接返回）。须在任何频道调用之前完成。
     public static func install() {
@@ -58,6 +64,13 @@ public enum LocalPlatform {
         if service != nil { return }
         let file = storageFileURL()
         service = LocalChannelService(persistence: FileLocalChannelPersistence(fileURL: file))
+        let tokenFile = file.deletingLastPathComponent()
+            .appendingPathComponent("lan_platform_tokens.json")
+        let persistence = FileLocalChannelPersistence(fileURL: tokenFile)
+        lanRegistry = LanTokenRegistry(load: { persistence.load() }, save: { persistence.save($0) })
+        if UserDefaults.standard.bool(forKey: lanServiceEnabledKey) {
+            startLanServerLocked()
+        }
     }
 
     /// 测试专用：直接装入一个服务实例。
@@ -104,6 +117,44 @@ public enum LocalPlatform {
             ?? manager.temporaryDirectory
         try? manager.createDirectory(at: base, withIntermediateDirectories: true)
         return base.appendingPathComponent("local_platform_channels.json")
+    }
+
+    // ---- 内网层（频道三层二期）：局域网门面 --------------------------------
+
+    /// 内网成员令牌注册表（install 后可用；设置界面签发/撤销走它）。
+    public static func lanRegistryOrNull() -> LanTokenRegistry? {
+        lock.lock(); defer { lock.unlock() }
+        return lanRegistry
+    }
+
+    public static func lanServerRunning() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return lanServer?.isRunning ?? false
+    }
+
+    /// 开启内网服务（幂等）。须先 install。
+    @discardableResult
+    public static func startLanServer() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return startLanServerLocked()
+    }
+
+    private static func startLanServerLocked() -> Bool {
+        guard let registry = lanRegistry else { return false }
+        if lanServer == nil {
+            lanServer = LanPlatformServer(
+                serviceProvider: { LocalPlatform.serviceOrNull() },
+                registry: registry
+            )
+        }
+        return lanServer?.start() ?? false
+    }
+
+    /// 关闭内网服务（幂等）。
+    public static func stopLanServer() {
+        lock.lock(); defer { lock.unlock() }
+        lanServer?.stop()
+        lanServer = nil
     }
 
     // ---- 本地优先路由（McpClient 的进程内处理器） --------------------------
