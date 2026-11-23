@@ -76,10 +76,11 @@ class DrawerViewTest {
     }
 
     @Test
-    fun `badges show counts for control`() {
+    fun `control parent row shows no badge`() {
+        // 221 与 iOS 对齐：抽屉「控制」行不带角标（计数只归各自入口）。
         val drawerView = view()
         drawerView.setBadges(DrawerBadges(runningTasks = 3, pendingApprovals = 1))
-        assertEquals(4, drawerView.renderedRowBadge("nav_control"))
+        assertNull(drawerView.renderedRowBadge("nav_control"))
     }
 
     @Test

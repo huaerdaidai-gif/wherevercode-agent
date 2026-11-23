@@ -1738,6 +1738,7 @@ class MainActivity : AppCompatActivity() {
             },
             onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onCreateNew = { showChannelCreateMenu() },
+            onOpenDrawer = { openDrawer() },
             onSwitchChannel = { channelId ->
                 teamChannelActiveId = channelId
                 if (!teamChannelDmMode) saveActiveChannelId(channelId)
@@ -1990,9 +1991,13 @@ class MainActivity : AppCompatActivity() {
         screenProjects.visibility = if (screen == EntryScreen.PROJECTS) View.VISIBLE else View.GONE
         // 项目页统一设计（Funk 2026-11-22 定，双端完全一致）：项目页自带页眉
         // （☰＋项目＋新建项目，与 iOS 同式），进项目页时藏掉全局顶栏，
-        // 离开恢复；页内 ☰ 仍开同一个抽屉。
+        // 离开恢复；页内 ☰ 仍开同一个抽屉。221 起频道页同式（☰＋频道＋＋新建）。
         findViewById<View>(R.id.topBar).visibility =
-            if (screen == EntryScreen.PROJECTS) View.GONE else View.VISIBLE
+            if (screen == EntryScreen.PROJECTS || screen == EntryScreen.TEAM_CHANNEL) {
+                View.GONE
+            } else {
+                View.VISIBLE
+            }
         screenTasks.visibility = if (screen == EntryScreen.TASKS) View.VISIBLE else View.GONE
         screenAgents.visibility =
             if (screen == EntryScreen.AGENTS || screen == EntryScreen.DEVICES) View.VISIBLE else View.GONE
