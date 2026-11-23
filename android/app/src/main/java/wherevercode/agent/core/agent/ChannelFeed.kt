@@ -150,6 +150,24 @@ class ChannelFeed(
         }
     }
 
+    /**
+     * 整页重同步（置顶/反应/撤回等动作成功后由上层调用）：清游标与
+     * 去重集后重拉最新一页，让已见消息带着最新状态再次下发——增量
+     * 游标与去重本来永远不会把旧消息的状态变化带回来。调用方按 id
+     * upsert；删除类动作的条目移除由调用方自己处理。
+     */
+    fun resync() {
+        if (!running) return
+        Thread({
+            synchronized(seenIds) { seenIds.clear() }
+            lastSeenId = null
+            pollOnce()
+        }, "channel-feed-resync-$channelId").also {
+            it.isDaemon = true
+            it.start()
+        }
+    }
+
     private fun loop() {
         pollOnce()
         while (running) {

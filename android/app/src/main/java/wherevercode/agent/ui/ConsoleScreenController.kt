@@ -7,6 +7,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import wherevercode.agent.R
+import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.task.TaskRecord
 import wherevercode.agent.ui.ConsoleSnapshot.ConsoleModule
 import wherevercode.agent.ui.ConsoleSnapshot.ConsoleSection
@@ -1171,25 +1172,33 @@ class ConsoleScreenController(
         private const val KEY_HIDDEN = "hidden_modules"
 
         /**
-         * 总览卡上的根地址：只要 `https://host` 或 `https://host:port`。
+         * 总览卡上的根地址：只要 `<协议>://host` 或 `<协议>://host:port`。
          * 去掉协议重复、路径（如 `/api/open/v1/mcp`）、查询和末尾斜杠。
+         * 协议与端点同口径（[PlatformAgent.isLanAddress]）：内网地址
+         * 显示 http、公网显示 https，不把内网地址粉饰成 https。
          * 平台地址不预置任何默认值：空白或解析失败时返回空串，
          * 总览卡按空串显示「未配置」，不拿任何写死的主机冒充已配置。
          */
         fun normalizedPlatformRoot(raw: String?): String {
             val trimmed = raw?.trim()?.trimEnd('/').orEmpty()
             if (trimmed.isBlank()) return ""
-            val withScheme = when {
-                trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+            val bare = when {
+                trimmed.startsWith("https://", ignoreCase = true) ->
+                    trimmed.substring("https://".length)
                 trimmed.startsWith("http://", ignoreCase = true) ->
-                    "https://" + trimmed.substring("http://".length)
-                else -> "https://$trimmed"
+                    trimmed.substring("http://".length)
+                else -> trimmed
             }
             return try {
-                val uri = java.net.URI(withScheme)
+                val uri = java.net.URI("https://$bare")
                 val host = uri.host?.trim().orEmpty()
-                if (host.isEmpty()) ""
-                else if (uri.port > 0) "https://$host:${uri.port}" else "https://$host"
+                if (host.isEmpty()) {
+                    ""
+                } else {
+                    val hostPort = if (uri.port > 0) "$host:${uri.port}" else host
+                    val scheme = if (PlatformAgent.isLanAddress(hostPort)) "http" else "https"
+                    "$scheme://$hostPort"
+                }
             } catch (_: Exception) {
                 ""
             }

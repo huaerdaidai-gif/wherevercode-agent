@@ -14,6 +14,7 @@ import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocketFactory
 import org.json.JSONArray
 import org.json.JSONObject
+import wherevercode.agent.core.platform.LocalFirstPlatformHttpClient
 
 /**
  * 从平台频道读回的一条消息。
@@ -352,7 +353,7 @@ class UrlConnectionPlatformHttpClient(
  */
 class PlatformChannelMcpTransport(
     private val tokenProvider: () -> String?,
-    private val httpClient: PlatformHttpClient = UrlConnectionPlatformHttpClient(),
+    private val httpClient: PlatformHttpClient = LocalFirstPlatformHttpClient(),
     private val endpoint: String = PlatformAgent.mcpEndpoint(null),
 ) : PlatformChannelTransport {
 

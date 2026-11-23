@@ -11,7 +11,7 @@
 		0CA4DA9504A66A2AACFD3AA9 = {isa = XCBuildConfiguration; buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 226;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -37,7 +37,7 @@
 		1D1884016C4723C9F758A1A1 = {isa = XCBuildConfiguration; buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 226;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -80,6 +80,10 @@
 			DA000000000000000000F301,
 			DA000000000000000000F50F,
 			1C0DE00000000000000000A5,
+			DA0000000000000000000C05,
+				DA0000000000000000000D07,
+				DA0000000000000000000D09,
+				DA0000000000000000000D11,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
 		212B3758D9A02E43B3111A45 = {isa = PBXGroup; children = (
@@ -109,7 +113,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "WhereverCodeAgent/WhereverCodeAgent.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 226;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -183,6 +187,11 @@
 			DA000000000000000000CACF,
 			1E69D22CB70873DDBFF041B3,
 			BB35B5B26176D7E09841F13F,
+			DA0000000000000000000C02,
+			DA0000000000000000000C04,
+				DA0000000000000000000D02,
+				DA0000000000000000000D04,
+				DA0000000000000000000D06,
 			41158D5AB6FD801A75FC1903,
 			5D93AC07A45BF27D2FEF38A9,
 			828B51501A8E088E7BC25411,
@@ -247,7 +256,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "WhereverCodeAgent/WhereverCodeAgent.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 226;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -312,6 +321,10 @@
 			DA000000000000000000E502,
 			DA000000000000000000F302,
 			DA000000000000000000F510,
+			DA0000000000000000000C06,
+				DA0000000000000000000D08,
+				DA0000000000000000000D10,
+				DA0000000000000000000D12,
 		); runOnlyForDeploymentPostprocessing = 0; };
 		AF29026DEB46CEBD6478E0B0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		B6346D3B3FFCEA4422AAA296 = {isa = PBXGroup; children = (
@@ -327,6 +340,11 @@
 			DA000000000000000000D101,
 			DA000000000000000000D201,
 			1C0DE00000000000000000A1,
+			DA0000000000000000000C01,
+			DA0000000000000000000C03,
+				DA0000000000000000000D01,
+				DA0000000000000000000D03,
+				DA0000000000000000000D05,
 		); name = Services; path = Services; sourceTree = "<group>"; };
 		BB35B5B26176D7E09841F13F = {isa = PBXBuildFile; fileRef = 2FAFA8646A910CE4490E1BBD; };
 		BEB0DA9A7B8738232918BE47 = {isa = PBXGroup; children = (
@@ -441,7 +459,7 @@
 		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		A1B2C3D4E5F600000000001A = {isa = XCBuildConfiguration; buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 226;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -454,7 +472,7 @@
 			}; name = Debug; };
 		A1B2C3D4E5F600000000001B = {isa = XCBuildConfiguration; buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 226;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -500,6 +518,24 @@
 		); name = Data; path = Data; sourceTree = "<group>"; };
 		DA000000000000000000CACE = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelListCache.swift; sourceTree = "<group>"; };
 		DA000000000000000000CACF = {isa = PBXBuildFile; fileRef = DA000000000000000000CACE; };
+		DA0000000000000000000C01 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChannelService.swift; sourceTree = "<group>"; };
+		DA0000000000000000000C02 = {isa = PBXBuildFile; fileRef = DA0000000000000000000C01; };
+		DA0000000000000000000C03 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPlatform.swift; sourceTree = "<group>"; };
+		DA0000000000000000000D01 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanAddress.swift; sourceTree = "<group>"; };
+		DA0000000000000000000D03 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanTokenRegistry.swift; sourceTree = "<group>"; };
+		DA0000000000000000000D05 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanPlatformServer.swift; sourceTree = "<group>"; };
+		DA0000000000000000000D07 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanTokenRegistryTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000D09 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanPlatformServerTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000D11 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanAddressTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000C04 = {isa = PBXBuildFile; fileRef = DA0000000000000000000C03; };
+		DA0000000000000000000D02 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D01; };
+		DA0000000000000000000D04 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D03; };
+		DA0000000000000000000D06 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D05; };
+		DA0000000000000000000D08 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D07; };
+		DA0000000000000000000D10 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D09; };
+		DA0000000000000000000D12 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D11; };
+		DA0000000000000000000C05 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChannelServiceTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000C06 = {isa = PBXBuildFile; fileRef = DA0000000000000000000C05; };
 		DA0000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainTypes.swift; sourceTree = "<group>"; };
 		DA0000000000000000000022 = {isa = PBXBuildFile; fileRef = DA0000000000000000000021; };
 		DA0000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainConfig.swift; sourceTree = "<group>"; };

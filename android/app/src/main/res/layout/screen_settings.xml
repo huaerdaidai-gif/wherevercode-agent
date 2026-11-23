@@ -1421,7 +1421,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:background="@drawable/bg_input"
-            android:hint="https://平台域名"
+            android:hint="平台域名或内网地址（如 192.168.1.7:18744）"
             android:inputType="textUri"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
@@ -1572,6 +1572,117 @@
             android:text="保存手动频道 ID"
             android:textAllCaps="false"
             android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <!-- 内网频道服务（频道三层二期）：把本机频道开放给同网设备。
+             服务只活在 App 进程里，界面文案如实标注，不冒充常驻服务器。
+             成员令牌签发时完整显示一次，之后只列尾号；撤销立即生效。 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="内网频道服务"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="把本机频道开放给同一局域网/尾网的设备：对方在平台地址里填下面的本机地址、用你签发的成员令牌作凭证即可连入。服务只在 App 运行期间可用，App 被关闭或被系统回收即停止。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/lanServiceStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="服务状态　未开启"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/lanServiceAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="本机地址　—"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonToggleLanService"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip_accent"
+            android:text="开启内网服务"
+            android:textAllCaps="false"
+            android:textColor="@color/accent"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="成员令牌"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="给要连入的设备签发令牌；令牌只在签发时完整显示一次，之后只显示尾号。撤销立即生效。"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10sp" />
+
+        <EditText
+            android:id="@+id/lanTokenName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="成员名称（如 小米 12）"
+            android:inputType="text"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/buttonIssueLanToken"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip_accent"
+            android:text="签发成员令牌"
+            android:textAllCaps="false"
+            android:textColor="@color/accent"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/lanTokenList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="暂无成员令牌"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonRevokeLanToken"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:text="撤销成员令牌"
+            android:textAllCaps="false"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
         <!-- 平台令牌（2026-11-12，maintainer：App 没有 token 生成按钮）：

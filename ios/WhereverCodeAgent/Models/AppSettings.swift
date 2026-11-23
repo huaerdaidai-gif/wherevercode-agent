@@ -68,7 +68,7 @@ public struct AppSettings: Equatable {
         let trimmed = platformBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .missingBaseURL }
         guard let url = validatedBaseURL else {
-            return .invalidBaseURL("平台地址无效：请输入 https:// 开头的完整地址。")
+            return .invalidBaseURL("平台地址无效：请输入 https:// 开头的完整地址（内网地址可用 http://）。")
         }
         _ = url
         if channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -78,8 +78,11 @@ public struct AppSettings: Equatable {
     }
 
     /// Strictly validated base URL, or nil.
-    /// - Requires the `https` scheme (App Transport Security stays on;
-    ///   self-signed certificates are never trusted — see McpClient).
+    /// - Requires the `https` scheme for public addresses (App
+    ///   Transport Security stays on; self-signed certificates are
+    ///   never trusted — see McpClient). `http` is accepted only for
+    ///   LAN addresses (频道三层二期·内网层，与安卓同口径：协议由
+    ///   地址决定，公网一律 https；Info.plist 只放行本地网络明文）。
     /// - Rejects embedded userinfo (`user:pass@host`) so a token can
     ///   never hide inside the address.
     /// - Trailing slashes and paths are stripped: only scheme + host
@@ -89,8 +92,13 @@ public struct AppSettings: Equatable {
     public var validatedBaseURL: URL? {
         let trimmed = platformBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed) else { return nil }
-        guard components.scheme?.lowercased() == "https" else { return nil }
         guard let host = components.host, !host.isEmpty else { return nil }
+        let scheme = components.scheme?.lowercased() ?? ""
+        if scheme == "http" {
+            guard LanAddress.isLanAddress(host) else { return nil }
+        } else if scheme != "https" {
+            return nil
+        }
         guard components.user == nil, components.password == nil else { return nil }
         components.path = ""
         components.query = nil
@@ -104,13 +112,14 @@ public struct AppSettings: Equatable {
     }
 
     /// Channel WebSocket URL derived from the validated base URL.
-    /// `https` becomes `wss`; the channel id goes in the query string.
+    /// `https` becomes `wss`, `http` becomes `ws` (内网层); the
+    /// channel id goes in the query string.
     public func channelWebSocketURL(channelID: String) -> URL? {
         guard let base = validatedBaseURL,
               var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
             return nil
         }
-        components.scheme = "wss"
+        components.scheme = (components.scheme?.lowercased() == "http") ? "ws" : "wss"
         components.path = "/api/open/v1/channel/ws"
         components.queryItems = [URLQueryItem(name: "channel_id", value: channelID)]
         return components.url

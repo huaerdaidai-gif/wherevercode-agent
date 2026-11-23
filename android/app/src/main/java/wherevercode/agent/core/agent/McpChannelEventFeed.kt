@@ -1,5 +1,7 @@
 package wherevercode.agent.core.agent
 
+import java.net.InetSocketAddress
+import java.net.Socket
 import org.json.JSONObject
 import wherevercode.agent.core.extension.mcp.McpClient
 import wherevercode.agent.core.extension.mcp.McpJsonRpc.McpNotification
@@ -91,6 +93,9 @@ class McpChannelEventFeed(
     /** 回前台立即重连：透传内层 feed（轮询兜底时立刻重试 WS）。 */
     fun reconnectNow() = feed.reconnectNow()
 
+    /** 整页重同步：透传内层 feed（动作成功后刷新已见消息的最新状态）。 */
+    fun resync() = feed.resync()
+
     /**
      * 把一条频道消息以 MCP 通知形式交给已连客户端。
      * 通知方法名带 channel，与服务端 MCP 通知区分，不冒充。
@@ -141,12 +146,28 @@ class McpChannelEventFeed(
                 channelId = channelId,
                 transport = transport,
                 wsFactory = { _, onClosed ->
-                    ChannelWsClient(
-                        host = host,
-                        port = 443,
-                        channelId = channelId,
-                        tokenProvider = tokenProvider,
-                    ).also { it.onClosed = onClosed }
+                    if (endpoint.startsWith("http://")) {
+                        // 内网层（频道三层二期）：同网设备上的 App 内网服务
+                        // 没有 TLS，WS 走明文套接字＋地址里的端口；公网仍
+                        // 是下面的 443 + TLS 默认工厂，口径不放松。
+                        val (wsHost, wsPort) = PlatformAgent.lanWsTarget(host)
+                        ChannelWsClient(
+                            host = wsHost,
+                            port = wsPort,
+                            channelId = channelId,
+                            tokenProvider = tokenProvider,
+                            socketFactory = { h, p ->
+                                Socket().apply { connect(InetSocketAddress(h, p), 15_000) }
+                            },
+                        ).also { it.onClosed = onClosed }
+                    } else {
+                        ChannelWsClient(
+                            host = host,
+                            port = 443,
+                            channelId = channelId,
+                            tokenProvider = tokenProvider,
+                        ).also { it.onClosed = onClosed }
+                    }
                 },
                 mcpClient = mcpClient,
             )
