@@ -433,6 +433,39 @@ public final class LocalChatModel: ObservableObject {
         reload()
     }
 
+    // MARK: - 新建项目待绑定（本机 / 远程来源离开聊天去建项目时）
+
+    private var pendingProjectBindKey: String { "chat.pendingProjectBindIds" }
+
+    /// 离开聊天去建项目（文件页 / 设备页）前记下当前项目 id 集合；
+    /// 回到聊天时若有新项目出现，自动绑最新建的那个（与安卓
+    /// 「建好自动切过去」同口径，见 consumePendingProjectBindIfNeeded）。
+    public func markPendingProjectBind() {
+        let ids = ((try? data.projects.listProjects()) ?? []).map { $0.project.projectId }
+        try? data.kv.setJSON(pendingProjectBindKey, ids)
+    }
+
+    /// 显式选定项目（名单点选 / git 当场建好）时清掉待绑定标记，
+    /// 防它日后误绑无关的新项目。
+    public func clearPendingProjectBind() {
+        try? data.kv.setJSON(pendingProjectBindKey, nil as [String]?)
+    }
+
+    /// 聊天页出现时消费待绑定标记：有新建项目则绑最新一个并清
+    /// 标记；还没有新项目则保留标记（可能还没建完）。
+    public func consumePendingProjectBindIfNeeded() {
+        guard let known = (try? data.kv.getJSON(pendingProjectBindKey, as: [String].self)) ?? nil else { return }
+        let projects = (try? data.projects.listProjects()) ?? []
+        let fresh = projects.filter { !known.contains($0.project.projectId) }
+        guard let newest = fresh.max(by: { $0.project.createdAtEpochSeconds < $1.project.createdAtEpochSeconds }) else { return }
+        clearPendingProjectBind()
+        projectSource = ProjectSourceBinding(
+            providerId: "local", targetId: newest.project.projectId,
+            targetTitle: newest.project.name, path: newest.activeHome?.workspacePath)
+        permissionMode = .readOnly
+        persistSessionConfig()
+    }
+
     public func newConversation() {
         guard !isSending else {
             error = "请等待当前回复完成后新建对话"
@@ -442,8 +475,10 @@ public final class LocalChatModel: ObservableObject {
         conversationID = nil
         data.chatPrefs.currentSessionId = nil
         draft = ""
-        projectSource = .localDefault
-        permissionMode = .readOnly
+        // 新对话继承当前对话的项目绑定（2026-11-22 定，对齐
+        // GPT/Claude 项目模式：从项目里开新对话就属于该项目），
+        // 不再重置为沙盒。新对话建立后，绑定随其会话配置落盘，
+        // 每条对话各自保留自己的绑定。
         if let defAid = defaultAgentId, !defAid.isEmpty, let ag = try? data.agents.getAgent(agentId: defAid) {
             selectedAgent = ag
             selectedBrain = defaultBrainId
@@ -1110,27 +1145,6 @@ public struct LocalChatHomeView: View {
         self.onSelectRoute = { _ in }
     }
 
-    // 照片走查批 B：状态行字段与安卓统一为 [当前设备 · 对话方 · 平台状态]——
-    // 删「模式：模型对话」，对话方取与作曲区选择器同一来源（见 partnerLabel）。
-    private var statusPartnerName: String {
-        if let ag = model.selectedAgent { return ag.displayName }
-        let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
-        if let cfg { return cfg.model.isEmpty ? cfg.label : cfg.model }
-        return "WhereverCode"
-    }
-
-    private var connectionSummaryText: String {
-        let platformLabel: String
-        switch appState.connectionStatus {
-        case .connected(let detail): platformLabel = "平台已连接 (\(detail))"
-        case .checking: platformLabel = "平台连接检查中…"
-        case .notConfigured: platformLabel = "平台未配置（本地优先）"
-        case .failed: platformLabel = "平台未连接（离线/本地模式）"
-        case .unknown: platformLabel = "平台未检查"
-        }
-        return "当前设备：本机 · 对话方：\(statusPartnerName) · \(platformLabel)"
-    }
-
     private var filteredHistory: [Conversation] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return model.history }
@@ -1200,16 +1214,6 @@ public struct LocalChatHomeView: View {
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 8)
-
-            Text(connectionSummaryText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 16)
-                .accessibilityIdentifier("chat.connectionSummary")
 
             // 主体消息流或 Claude 风格极简留白问候区
             // 对话组件收敛：列表脚手架与频道页共用 DialogMessageListView
@@ -1314,6 +1318,7 @@ public struct LocalChatHomeView: View {
             ChatComposerBar(model: model, focused: $inputFocused, onSelectRoute: onSelectRoute)
         }
         .background(Color(red: 0.98, green: 0.976, blue: 0.968).ignoresSafeArea())
+        .onAppear { model.consumePendingProjectBindIfNeeded() }
         .sheet(isPresented: $model.showHistory) {
             NavigationStack {
                 List {
@@ -1816,16 +1821,69 @@ public enum ChatAttachmentStore {
 // MARK: - Codex-style composer (P0)
 
 
+/// 聊天项目显示口径（2026-11-22 双端统一，对齐 GPT/Claude 项目
+/// 模式）：聊天只认项目——chip 与选择器都按「提供方 · 项目名」
+/// 显示，提供方取项目当前家的位置种类（本机 / 设备名 / Git 托管名）。
+public enum ChatProjectDisplay {
+    /// 经本机来源绑到某个项目时返回该项目；沙盒与设备来源返回 nil。
+    public static func boundProject(for binding: ProjectSourceBinding, data: LocalData) -> ProjectWithHomes? {
+        guard binding.providerId == "local", let tid = binding.targetId, tid != "sandbox" else { return nil }
+        return (try? data.projects.listProjects())?.first { $0.project.projectId == tid }
+    }
+
+    public static func providerTitle(for home: ProjectLocation?, data: LocalData) -> String {
+        switch home?.homeKind {
+        case "LOCAL": return "本机"
+        case "GITHUB": return "GitHub"
+        case "GITLAB": return "GitLab"
+        case "GITEE": return "Gitee"
+        case "DEVICE":
+            if home?.hostId == "iphone-local" { return "本机" }
+            if let hostId = home?.hostId,
+               let agent = (try? data.agents.listAgents())?.first(where: { $0.deviceId == hostId }) {
+                return agent.displayName
+            }
+            return "设备"
+        default: return "本机"
+        }
+    }
+
+    public static func icon(for home: ProjectLocation?) -> String {
+        switch home?.homeKind {
+        case "LOCAL": return "iphone"
+        case "DEVICE": return home?.hostId == "iphone-local" ? "iphone" : "desktopcomputer"
+        case "GITHUB", "GITLAB", "GITEE": return "chevron.left.forwardslash.chevron.right"
+        default: return "folder"
+        }
+    }
+
+    public static func homeLabel(for project: ProjectWithHomes, data: LocalData) -> String {
+        guard let home = project.activeHome else { return "未指定家" }
+        return "\(providerTitle(for: home, data: data)) · \(home.workspacePath)"
+    }
+}
+
 public struct ProjectSourceChip: View {
     @ObservedObject var model: LocalChatModel
     @State private var showPicker = false
 
-    public var body: some View {
+    private var display: (icon: String, text: String) {
+        if let project = ChatProjectDisplay.boundProject(for: model.projectSource, data: model.data) {
+            let home = project.activeHome
+            return (ChatProjectDisplay.icon(for: home),
+                    "\(ChatProjectDisplay.providerTitle(for: home, data: model.data)) · \(project.project.name)")
+        }
         let provider = ProjectSourceRegistry.shared.provider(id: model.projectSource.providerId, data: model.data)
+        return (provider?.icon ?? "questionmark.folder",
+                provider.map { "\($0.title) · \(model.projectSource.chipLabel)" } ?? "来源不可用")
+    }
+
+    public var body: some View {
+        let display = display
         Button { showPicker = true } label: {
             HStack(spacing: 5) {
-                Image(systemName: provider?.icon ?? "questionmark.folder")
-                Text(provider.map { "\($0.title) · \(model.projectSource.chipLabel)" } ?? "来源不可用")
+                Image(systemName: display.icon)
+                Text(display.text)
                     .lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
             }
@@ -1838,126 +1896,241 @@ public struct ProjectSourceChip: View {
         }
         .accessibilityIdentifier("chat.projectSource")
         .sheet(isPresented: $showPicker) {
-            ProjectSourcePickerSheet(model: model)
+            ProjectPickerSheet(model: model)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
     }
 }
 
-/// 选择来源 → 连接或授权 → 选择设备/账号 → 选择项目或路径 → 确认
-public struct ProjectSourcePickerSheet: View {
+/// 聊天选项目（2026-11-22 双端统一，对齐 GPT/Claude 项目模式）：
+/// 聊天层只选项目——沙盒（无项目）+ 已建项目名单 + 新建项目入口。
+/// 来源（本机 / 设备 / git）只在新建项目时选：「新建项目」在单内
+/// 进来源步（与项目页「打开文件夹」对话框同三项同文案），git
+/// 一项当场登记、建好自动绑到当前对话；本机 / 远程两项与项目页
+/// 同去向（文件页 / 设备页）。
+public struct ProjectPickerSheet: View {
     @ObservedObject var model: LocalChatModel
     @Environment(\.dismiss) private var dismiss
-    @State private var customTitle = ""
-    @State private var customEndpoint = ""
-    @State private var refresh = 0
+
+    private var projects: [ProjectWithHomes] {
+        (try? model.data.projects.listProjects()) ?? []
+    }
+
+    private var isSandbox: Bool {
+        model.projectSource.providerId == "local"
+            && (model.projectSource.targetId ?? "sandbox") == "sandbox"
+    }
+
+    private func isCurrent(_ project: ProjectWithHomes) -> Bool {
+        model.projectSource.providerId == "local"
+            && model.projectSource.targetId == project.project.projectId
+    }
 
     public var body: some View {
         NavigationStack {
-            List {
+            VStack(spacing: 0) {
+                // 顶部说明与安卓卡片对话框同文案（2026-11-22 顶部文字双端统一）。
+                Text(projects.isEmpty
+                    ? "还没有建好的项目。先聊也行，建好后自动切过去。"
+                    : "选一个项目作为当前对话的项目。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                List {
                 Section {
-                    ForEach(ProjectSourceRegistry.shared.all(data: model.data), id: \.id) { p in
-                        NavigationLink {
-                            ProjectSourceTargetList(model: model, provider: p) { dismiss() }
+                    Button {
+                        model.clearPendingProjectBind()
+                        model.projectSource = .localDefault
+                        model.permissionMode = .readOnly
+                        model.persistSessionConfig()
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: "iphone").frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("App 沙盒（无项目）").foregroundStyle(.primary)
+                                Text("本机 · 只读对话").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isSandbox {
+                                Image(systemName: "checkmark").foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                    ForEach(projects) { project in
+                        Button {
+                            model.clearPendingProjectBind()
+                            model.projectSource = ProjectSourceBinding(
+                                providerId: "local", targetId: project.project.projectId,
+                                targetTitle: project.project.name,
+                                path: project.activeHome?.workspacePath)
+                            model.permissionMode = .readOnly
+                            model.persistSessionConfig()
+                            dismiss()
                         } label: {
                             HStack {
-                                Image(systemName: p.icon).frame(width: 24)
+                                Image(systemName: ChatProjectDisplay.icon(for: project.activeHome)).frame(width: 24)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(p.title)
-                                    Text(p.status(data: model.data).text)
-                                        .font(.caption)
-                                        .foregroundStyle(p.status(data: model.data).isReady ? Color.secondary : Color.orange)
+                                    Text(project.project.name).foregroundStyle(.primary)
+                                    Text(ChatProjectDisplay.homeLabel(for: project, data: model.data))
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if model.projectSource.providerId == p.id {
+                                if isCurrent(project) {
                                     Image(systemName: "checkmark").foregroundStyle(.blue)
                                 }
                             }
                         }
                     }
-                    .id(refresh)
-                } header: { Text("选择来源").textCase(nil) }
+                }
                 Section {
-                    TextField("名称（如 公司 WebDAV）", text: $customTitle)
-                    TextField("地址（https:// / ssh:// …）", text: $customEndpoint)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("添加自定义来源") {
-                        ProjectSourceRegistry.shared.addCustom(title: customTitle, endpoint: customEndpoint, data: model.data)
-                        customTitle = ""; customEndpoint = ""; refresh += 1
+                    NavigationLink {
+                        ProjectSourceStepView(model: model)
+                    } label: {
+                        HStack {
+                            Image(systemName: "plus").frame(width: 24).foregroundStyle(.blue)
+                            Text("新建项目").foregroundStyle(.blue)
+                        }
                     }
-                    .disabled(customTitle.isEmpty || customEndpoint.isEmpty)
-                } header: { Text("扩展来源").textCase(nil) } footer: {
-                    Text("来源可扩展：新增类型以接入模块注册，未接入的来源会如实显示状态。选择任何来源都不会自动获得命令执行权限。")
+                }
                 }
             }
-            .navigationTitle("项目来源")
+            .navigationTitle("选择项目")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
         }
     }
 }
 
-private struct ProjectSourceTargetList: View {
+/// 新建项目·选来源（与项目页「打开文件夹」对话框同三项同文案）：
+/// 来源只在新建项目时选。本机 / 远程两项与项目页同去向（文件页 /
+/// 设备页）；git 一项在本单内完成登记，建好自动绑到当前对话。
+public struct ProjectSourceStepView: View {
     @ObservedObject var model: LocalChatModel
-    let provider: ProjectSourceProvider
-    let onDone: () -> Void
-    @State private var selected: ProjectSourceTarget?
-    @State private var path = ""
+    @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
-        let status = provider.status(data: model.data)
-        let targets = provider.targets(data: model.data)
-        List {
-            Section {
-                Label(status.text, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.circle")
-                    .foregroundStyle(status.isReady ? Color.green : Color.orange)
-                if !status.isReady, provider.id == "lan" || provider.id == "remote" || provider.id == "vps" {
-                    Button("去添加 / 配对设备") { model.appState.onSelectRoute?("devices"); onDone() }
-                }
-            } header: { Text("连接状态").textCase(nil) }
-            if status.isReady {
+    public var body: some View {
+        VStack(spacing: 0) {
+            // 顶部说明与安卓卡片对话框同文案、同位置（标题之下）。
+            Text("选一个位置打开它作为项目之家。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+            List {
                 Section {
-                    if targets.isEmpty { Text("没有可选项").foregroundStyle(.secondary) }
-                    ForEach(targets) { t in
-                        Button {
-                            selected = t
-                            path = t.path ?? ""
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.title).foregroundStyle(.primary)
-                                    if !t.subtitle.isEmpty { Text(t.subtitle).font(.caption).foregroundStyle(.secondary) }
-                                }
-                                Spacer()
-                                if selected?.id == t.id { Image(systemName: "checkmark").foregroundStyle(.blue) }
-                            }
-                        }
+                    Button {
+                        model.markPendingProjectBind()
+                        dismiss()
+                        model.appState.onSelectRoute?("files")
+                    } label: {
+                        sourceRow("本机文件夹", detail: "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。")
                     }
-                } header: { Text("选择设备 / 项目").textCase(nil) }
-                if selected != nil {
-                    Section {
-                        TextField("路径", text: $path)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    } header: { Text("工作路径").textCase(nil) }
-                    Section {
-                        Button("确认") {
-                            model.projectSource = ProjectSourceBinding(
-                                providerId: provider.id, targetId: selected?.id,
-                                targetTitle: selected?.title, path: path.isEmpty ? nil : path)
-                            if !provider.canExecute { model.permissionMode = .readOnly }
-                            model.persistSessionConfig()
-                            onDone()
-                        }
-                        .bold()
+                    Button {
+                        model.markPendingProjectBind()
+                        dismiss()
+                        model.appState.onSelectRoute?("devices")
+                    } label: {
+                        sourceRow("远程设备上的文件夹", detail: "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。")
                     }
-                }
+                    NavigationLink {
+                        GitProjectFormView(model: model)
+                    } label: {
+                        sourceRow("git 仓库地址", detail: "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。")
+                    }
+                } header: { Text("打开文件夹").textCase(nil) }
             }
         }
-        .navigationTitle(provider.title)
+        .navigationTitle("新建项目")
+        .navigationBarTitleDisplayMode(.inline)
     }
+
+    private func sourceRow(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+            Text(detail).font(.footnote).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+}
+
+/// 新建项目·git 登记表单（与项目页新建表单同字段同口径，共用
+/// createProjectFromGitForm）：建好自动绑到当前对话并关单。
+public struct GitProjectFormView: View {
+    @ObservedObject var model: LocalChatModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var repo = ""
+    @State private var branch = "main"
+    @State private var path = ""
+
+    public var body: some View {
+        Form {
+            Section {
+                TextField("项目名称（如 wherevercode-agent）", text: $name)
+                TextField("Git 仓库地址（可选）", text: $repo)
+                TextField("默认分支", text: $branch)
+                TextField("工作区路径（如 Documents/workspace）", text: $path)
+            } header: { Text("项目基本信息").textCase(nil) }
+        }
+        .navigationTitle("新建项目")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("创建") {
+                    if let created = createProjectFromGitForm(
+                        name: name,
+                        repoUrl: repo.isEmpty ? nil : repo,
+                        branch: branch,
+                        path: path,
+                        data: model.data
+                    ) {
+                        model.clearPendingProjectBind()
+                        model.projectSource = ProjectSourceBinding(
+                            providerId: "local", targetId: created.project.projectId,
+                            targetTitle: created.project.name,
+                            path: created.activeHome?.workspacePath)
+                        model.permissionMode = .readOnly
+                        model.persistSessionConfig()
+                    }
+                    dismiss()
+                }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+}
+
+/// git 登记表单建项目（项目页与聊天新建项目共用）：建项目本体 +
+/// 本机位置（hostId iphone-local），返回建好的项目；名为空或
+/// 保存失败返回 nil。
+public func createProjectFromGitForm(name: String, repoUrl: String?, branch: String, path: String, data: LocalData) -> ProjectWithHomes? {
+    let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !clean.isEmpty else { return nil }
+    let proj = Project(
+        name: clean,
+        repoUrl: repoUrl,
+        defaultBranch: branch,
+        origin: "LOCAL_SANDBOX"
+    )
+    do {
+        try data.projects.saveProject(proj)
+    } catch {
+        return nil
+    }
+    let loc = ProjectLocation(
+        projectId: proj.projectId,
+        hostId: "iphone-local",
+        workspacePath: path.isEmpty ? "Documents/\(clean)" : path
+    )
+    _ = try? data.projects.addLocation(loc)
+    return (try? data.projects.listProjects())?.first { $0.project.projectId == proj.projectId }
+        ?? ProjectWithHomes(project: proj, homes: [loc], activeHome: loc)
 }
 
 /// 对话方选择器（严格遵循定版规范：仅列出可选 Agent，整节移除已配置模型，单选规则仅提 Agent）
@@ -2072,11 +2245,39 @@ public struct ChatComposerBar: View {
 
     private var partnerLabel: String {
         if let ag = model.selectedAgent {
-            return ag.displayName + (ag.dispatchable ? "" : "（仅对话）")
+            // 跨设备信息压缩进选择器标签（2026-11-22 定）：名字后跟
+            // 「· 设备名 / 云端 / 本机」，与项目 chip 的「提供方 ·
+            // 项目名」同模式；名字里已带该设备名时不重复加。
+            var label = ag.displayName
+            if let place = partnerPlaceLabel(ag), !label.contains(place) {
+                label += " · " + place
+            }
+            return label + (ag.dispatchable ? "" : "（仅对话）")
         }
         let cfg = model.appState.compositeBrainConfigStore.getConfig(brainId: model.selectedBrain)
         guard let cfg else { return "选择对话方" }
         return cfg.model.isEmpty ? cfg.label : cfg.model
+    }
+
+    /// 对话方所在位置的短标签：云端 Agent 记「云端」，本地模型记
+    /// 「本机」，设备 Agent 记设备显示名（查不到记「远程设备」）。
+    private func partnerPlaceLabel(_ agent: AgentRecord) -> String? {
+        switch agent.kind {
+        case .cloud: return "云端"
+        case .localModel: return "本机"
+        case .device:
+            if let deviceId = agent.deviceId {
+                if deviceId == "iphone-local" { return "本机" }
+                // 设备显示名与 ChatProjectDisplay.providerTitle 同来源：
+                // 在 Agent 名单里找该设备的宿主 Agent 取其显示名。
+                if let host = (try? model.data.agents.listAgents())?
+                    .first(where: { $0.deviceId == deviceId }) {
+                    return host.displayName
+                }
+                return "远程设备"
+            }
+            return agent.brainKind == "AGENT_RUNTIME" ? "本机" : nil
+        }
     }
 
     public var body: some View {

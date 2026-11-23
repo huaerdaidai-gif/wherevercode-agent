@@ -201,8 +201,10 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
     public let isArchived: Bool
     /// Channel kind (phase-3): "channel" or "dm" (direct message).
     public let kind: String
+    /// New members can see full history (№12); absent on the wire = true.
+    public let historyVisible: Bool
 
-    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel", participantDetails: [ChannelParticipant] = []) {
+    public init(id: String, name: String, participants: [String] = [], lastMessageText: String? = nil, isArchived: Bool = false, kind: String = "channel", participantDetails: [ChannelParticipant] = [], historyVisible: Bool = true) {
         self.id = id
         self.name = name
         self.participants = participants
@@ -210,16 +212,18 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
         self.lastMessageText = lastMessageText
         self.isArchived = isArchived
         self.kind = kind
+        self.historyVisible = historyVisible
     }
 
     /// True for direct-message channels (phase-3 DM, scheme A segment).
     public var isDM: Bool { kind == "dm" }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, participants, participantDetails, lastMessageText, isArchived, kind
+        case id, name, participants, participantDetails, lastMessageText, isArchived, kind, historyVisible
     }
 
-    /// Tolerant decoding: caches written before phase-3 lack `kind`.
+    /// Tolerant decoding: caches written before phase-3 lack `kind`;
+    /// caches before №12 lack `historyVisible` (defaults to true).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -229,6 +233,7 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
         lastMessageText = try c.decodeIfPresent(String.self, forKey: .lastMessageText)
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "channel"
+        historyVisible = try c.decodeIfPresent(Bool.self, forKey: .historyVisible) ?? true
     }
 
     public var displayName: String { name.isEmpty ? id : name }
@@ -266,7 +271,8 @@ public struct ChannelInfo: Identifiable, Equatable, Hashable, Codable, Sendable 
             lastMessageText: last,
             isArchived: (dict["archived"] as? Bool) ?? (dict["is_archived"] as? Bool) ?? false,
             kind: stringField(dict, keys: ["kind"]) ?? "channel",
-            participantDetails: details
+            participantDetails: details,
+            historyVisible: (dict["history_visible"] as? Bool) ?? true
         )
     }
 
@@ -627,6 +633,30 @@ public enum ChannelExtras {
         guard !postedID.isEmpty else { return items }
         return items.filter { $0.id != itemID }
     }
+
+    /// Effective unread count considering per-channel notification mode (phase-3 orphan).
+    public static func effectiveUnreadCount(
+        unreadCount: Int,
+        unreadMentionCount: Int,
+        notifyMode: String
+    ) -> Int {
+        switch notifyMode {
+        case "静音", "免打扰":
+            return 0
+        case "仅@我":
+            return unreadMentionCount
+        default:
+            return unreadCount
+        }
+    }
+
+    /// Safe markdown rendering with foolproof plain-text fallback (phase-3 orphan).
+    public static func safeMarkdownAttributedString(_ text: String) -> AttributedString {
+        if let attr = try? AttributedString(markdown: text, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            return attr
+        }
+        return AttributedString(text)
+    }
 }
 
 /// Message-center aggregate (phase-3).
@@ -663,5 +693,129 @@ public struct ScheduledChannelPost: Identifiable, Equatable, Codable, Sendable {
         self.effectKey = effectKey
         self.attachmentRef = attachmentRef
         self.replyToId = replyToId
+    }
+}
+
+/// Channel notification level (phase-3 orphan align).
+public enum ChannelNotifyMode: String, CaseIterable, Sendable {
+    case all = "全部消息"
+    case mentionsOnly = "仅@我"
+    case muted = "静音"
+
+    public var prompt: String {
+        switch self {
+        case .all: return "接收所有新消息通知与未读计数"
+        case .mentionsOnly: return "仅接收提及我的消息通知与未读提醒"
+        case .muted: return "不接收通知，不计入未读提醒"
+        }
+    }
+}
+
+/// Team thread model (phase-3 orphan align, dual-client unified).
+public struct TeamThread: Identifiable, Equatable, Hashable, Sendable {
+    public var id: String { rootMessageId ?? taskId ?? "general" }
+    public let taskId: String?
+    public let taskTitle: String?
+    public let rootMessageId: String?
+    public let topicTitle: String?
+    public let messages: [ChannelMessage]
+
+    public init(
+        taskId: String? = nil,
+        taskTitle: String? = nil,
+        rootMessageId: String? = nil,
+        topicTitle: String? = nil,
+        messages: [ChannelMessage] = []
+    ) {
+        self.taskId = taskId
+        self.taskTitle = taskTitle
+        self.rootMessageId = rootMessageId
+        self.topicTitle = topicTitle
+        self.messages = messages
+    }
+
+    public var isTopicThread: Bool {
+        rootMessageId != nil
+    }
+}
+
+public func groupTopicThreads(messages: [ChannelMessage]) -> [TeamThread] {
+    if messages.isEmpty { return [] }
+    let msgMap = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    var rootIds: [String] = []
+    for m in messages {
+        guard let replyId = m.replyTo, !replyId.isEmpty, msgMap[replyId] != nil else { continue }
+        var curr: String? = replyId
+        var depth = 0
+        while let c = curr, depth < 20 {
+            if let parent = msgMap[c], let pReply = parent.replyTo, !pReply.isEmpty, msgMap[pReply] != nil, pReply != c {
+                curr = pReply
+                depth += 1
+            } else {
+                break
+            }
+        }
+        if let root = curr, !rootIds.contains(root) {
+            rootIds.append(root)
+        }
+    }
+
+    var threads: [TeamThread] = []
+    for rootId in rootIds {
+        guard let rootMsg = msgMap[rootId] else { continue }
+        var threadMsgs: [ChannelMessage] = [rootMsg]
+        for m in messages {
+            if m.id == rootId { continue }
+            var p = m.replyTo
+            var depth = 0
+            while let currentP = p, currentP != rootId, depth < 20 {
+                p = msgMap[currentP]?.replyTo
+                depth += 1
+            }
+            if p == rootId {
+                threadMsgs.append(m)
+            }
+        }
+        let sorted = threadMsgs.sorted { $0.createdAtSeconds < $1.createdAtSeconds }
+        let title = String(rootMsg.text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(30))
+            .replacingOccurrences(of: "\n", with: " ")
+        threads.append(
+            TeamThread(
+                taskId: nil,
+                taskTitle: nil,
+                rootMessageId: rootId,
+                topicTitle: title.isEmpty ? "话题讨论" : title,
+                messages: sorted
+            )
+        )
+    }
+    return threads.sorted { ($0.messages.last?.createdAtSeconds ?? 0) > ($1.messages.last?.createdAtSeconds ?? 0) }
+}
+
+public func teamThreadTitle(thread: TeamThread) -> String {
+    if let topic = thread.topicTitle, !topic.isEmpty {
+        return "话题 · \(topic)"
+    }
+    if let taskId = thread.taskId, !taskId.isEmpty {
+        if let title = thread.taskTitle, !title.isEmpty {
+            return "任务 \(String(taskId.prefix(8))) · \(title)"
+        }
+        return "任务 \(String(taskId.prefix(8)))"
+    }
+    return "综合讨论"
+}
+
+/// Typing signaling event frame (zero token, no model call).
+public struct ChannelTypingEvent: Equatable, Sendable {
+    public let channelId: String
+    public let senderId: String
+    public let senderName: String
+    public let isTyping: Bool
+
+    public init(channelId: String, senderId: String, senderName: String, isTyping: Bool = true) {
+        self.channelId = channelId
+        self.senderId = senderId
+        self.senderName = senderName
+        self.isTyping = isTyping
     }
 }

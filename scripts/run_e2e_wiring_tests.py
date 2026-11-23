@@ -154,9 +154,11 @@ class TestiOSV15WiringAndPersistence(unittest.TestCase):
             ct = f.read()
         for tool in ["agent_channel_list", "agent_channel_join", "agent_channel_post", "agent_channel_messages"]:
             self.assertIn(tool, ct)
-        with open(os.path.join(APP_DIR, "Views", "ChannelChatView.swift"), encoding="utf-8") as f:
+        # 218：频道页收敛到 ChannelDetailWorkspaceView（原 ChannelChatView 已删），
+        # 转正式任务闭环在该页的 createTaskFromComposer。
+        with open(os.path.join(APP_DIR, "FlagshipUI", "FlagshipRouteDestinations.swift"), encoding="utf-8") as f:
             ccv = f.read()
-        self.assertIn("promoteToTask", ccv)
+        self.assertIn("createTaskFromComposer", ccv)
         self.assertIn("LocalData.shared.tasks.createTask", ccv)
 
     def test_05_task_lifecycle_and_server_blocker_honesty(self):

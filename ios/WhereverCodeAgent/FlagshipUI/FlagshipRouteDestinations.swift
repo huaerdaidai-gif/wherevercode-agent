@@ -110,7 +110,7 @@ public struct FlagshipRouteDestinationView: View {
         case "skills":
             SkillsManagementScreen(routeId: "skills", appState: appState, onNavigateRoute: onNavigateRoute)
         case "connections":
-            SettingsView(appState: appState, onNavigateRoute: onNavigateRoute)
+            ConnectionManagementView(appState: appState)
         case "agentimport", "network", "routes":
             ConnectionExtendedScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
 
@@ -121,7 +121,10 @@ public struct FlagshipRouteDestinationView: View {
             AccountSettingsView(appState: appState, chatModel: chatModel, capabilities: capabilities, onNavigateRoute: onNavigateRoute, onDismiss: {})
         case "onboarding":
             OnboardingLocalFirstScreen(appState: appState, onNavigateRoute: onNavigateRoute)
-        case "activity", "notifications", "audit", "usage", "sync", "recovery", "baseline":
+        // 消息中心复用既有 notifications 路由。
+        case "notifications":
+            MessageCenterView(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
+        case "activity", "audit", "usage", "sync", "recovery", "baseline":
             ConsoleSystemSubScreen(route: route, appState: appState, onNavigateRoute: onNavigateRoute)
         case "autoloop", "loopguard", "templates", "automation", "automaker", "triggers", "wakepolicy":
             ConsoleAutomationSubScreen(route: route, appState: appState, chatModel: chatModel, onNavigateRoute: onNavigateRoute)
@@ -566,6 +569,7 @@ public struct ProjectsHomeView: View {
     @State private var searchQuery = ""
     @State private var selectedFilter: ProjectFilter = .all
     @State private var showNewProjectSheet = false
+    @State private var showProjectSources = false
     @State private var newProjectName = ""
     @State private var newProjectRepo = ""
     @State private var newProjectBranch = "main"
@@ -574,8 +578,7 @@ public struct ProjectsHomeView: View {
 
     public enum ProjectFilter: String, CaseIterable, Identifiable {
         case all = "全部"
-        case active = "活跃"
-        case sandbox = "本地沙盒"
+        case local = "本机"
         case remote = "远端设备"
 
         public var id: String { rawValue }
@@ -601,13 +604,77 @@ public struct ProjectsHomeView: View {
             }
         }
         switch selectedFilter {
-        case .all, .active:
+        case .all:
             return list
-        case .sandbox:
+        case .local:
             return list.filter { $0.project.origin.contains("LOCAL") || $0.project.origin.contains("SANDBOX") }
         case .remote:
             return list.filter { $0.project.origin.contains("REMOTE") }
         }
+    }
+
+    private var projectSourceDialog: some View {
+        ZStack {
+            Color.black.opacity(0.32)
+                .ignoresSafeArea()
+                .onTapGesture { showProjectSources = false }
+                .accessibilityHidden(true)
+
+            ViewThatFits(in: .vertical) {
+                projectSourceDialogContent
+                ScrollView { projectSourceDialogContent }
+            }
+            .frame(maxWidth: 360)
+            .background(.background, in: RoundedRectangle(cornerRadius: 20))
+            .padding(24)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { showProjectSources = false }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var projectSourceDialogContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("打开文件夹")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Text("选一个位置打开它作为项目之家。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+
+            projectSourceRow("本机文件夹", detail: "本机工作区里的文件夹；挂载、网盘同步下来的也是文件夹。") {
+                onNavigateRoute("files")
+            }
+            projectSourceRow("远程设备上的文件夹", detail: "连一台已配对设备（局域网、远程都一样），再打开上面的文件夹。") {
+                onNavigateRoute("devices")
+            }
+            projectSourceRow("git 仓库地址", detail: "粘 GitHub / GitLab / Gitee / Hugging Face / Git URL 登记位置，经 API 读，不拉代码。") {
+                showNewProjectSheet = true
+            }
+
+            Button("取消") { showProjectSources = false }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 8)
+        }
+        .padding(24)
+    }
+
+    private func projectSourceRow(_ title: String, detail: String, action: @escaping () -> Void) -> some View {
+        Button {
+            showProjectSources = false
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     public var body: some View {
@@ -631,8 +698,12 @@ public struct ProjectsHomeView: View {
 
                 Spacer()
 
+                // 创建入口只留一个（Funk 2026-11-22 定）：页眉「新建项目」，
+                // 点开走「打开文件夹」对话框（iOS 原先弹旧表单，已统一）；
+                // 空态不再另放按钮，旧表单只是对话框里 git 一项的下级
+                // 登记流程。
                 Button {
-                    showNewProjectSheet = true
+                    showProjectSources = true
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "plus")
@@ -705,35 +776,29 @@ public struct ProjectsHomeView: View {
             Divider()
 
             // 项目列表
-            ScrollView {
+            if filteredProjects.isEmpty {
+                // 空态居中（项目页统一设计，Funk 2026-11-22 定）：图标 + 标题 +
+                // 说明在剩余空间正中；「导入与开发工具」区已删除——来源只在
+                // 「新建项目」的打开文件夹对话框里出现一次，其余功能各回各页。
                 VStack(spacing: 12) {
-                    if filteredProjects.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "shippingbox")
-                                .font(.system(size: 44))
-                                .foregroundStyle(.secondary.opacity(0.6))
-                                .padding(.top, 40)
-                            Text(projects.isEmpty ? "还没有创建任何项目" : "未找到匹配的项目")
-                                .font(.headline)
-                                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                            Text("项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
-                            Button {
-                                showNewProjectSheet = true
-                            } label: {
-                                Text("立即创建项目")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 10)
-                                    .background(Color(red: 0.82, green: 0.49, blue: 0.35), in: Capsule())
-                            }
-                            .padding(.top, 8)
-                        }
-                    } else {
+                    Spacer()
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                    Text(projects.isEmpty ? "还没有创建任何项目" : "未找到匹配的项目")
+                        .font(.headline)
+                        .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                    Text("项目支持统一管理任务、文件、代码、Artifacts、执行与审批交付")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 12) {
                         ForEach(filteredProjects) { item in
                             ProjectCardView(
                                 project: item,
@@ -744,34 +809,18 @@ public struct ProjectsHomeView: View {
                             )
                         }
                     }
-
-                    // 导入方式与开发全流程快捷按钮
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("导入与开发工具")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                Button("选择本地文件夹") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                                Button("导入 Git 仓库") { showNewProjectSheet = true }.buttonStyle(.bordered)
-                                Button("连接设备项目") { onNavigateRoute("devices") }.buttonStyle(.bordered)
-                                Button("浏览文件") { onNavigateRoute("files") }.buttonStyle(.bordered)
-                                Button("开始对话") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
-                                Button("Git 工作树") { onNavigateRoute("git") }.buttonStyle(.bordered)
-                                Button("预览") { onNavigateRoute("preview") }.buttonStyle(.bordered)
-                            }
-                            .font(.caption)
-                        }
-                    }
-                    .padding(14)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.89, green: 0.88, blue: 0.85), lineWidth: 1))
+                    .padding(16)
                 }
-                .padding(16)
             }
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
         .onAppear(perform: loadProjects)
+        .accessibilityHidden(showProjectSources)
+        .overlay {
+            if showProjectSources {
+                projectSourceDialog
+            }
+        }
         .sheet(isPresented: $showNewProjectSheet) {
             NavigationStack {
                 Form {
@@ -821,21 +870,14 @@ public struct ProjectsHomeView: View {
     }
 
     private func createProject() {
-        let clean = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
-        let proj = Project(
-            name: clean,
+        // 与聊天新建项目共用同一建项目口径（createProjectFromGitForm）。
+        _ = createProjectFromGitForm(
+            name: newProjectName,
             repoUrl: newProjectRepo.isEmpty ? nil : newProjectRepo,
-            defaultBranch: newProjectBranch,
-            origin: "LOCAL_SANDBOX"
+            branch: newProjectBranch,
+            path: newProjectPath,
+            data: LocalData.shared
         )
-        try? LocalData.shared.projects.saveProject(proj)
-        let loc = ProjectLocation(
-            projectId: proj.projectId,
-            hostId: "iphone-local",
-            workspacePath: newProjectPath.isEmpty ? "Documents/\(clean)" : newProjectPath
-        )
-        _ = try? LocalData.shared.projects.addLocation(loc)
         newProjectName = ""
         newProjectRepo = ""
         newProjectPath = ""
@@ -2399,6 +2441,16 @@ public struct V5ChannelMember: Identifiable, Codable, Equatable, Hashable, Senda
 
 }
 
+/// Channel role → Chinese label (raw values stay on the wire).
+public func channelRoleLabel(_ role: String) -> String {
+    switch role {
+    case "owner": return "创建者"
+    case "coordinator": return "协调员"
+    case "member": return "成员"
+    default: return role
+    }
+}
+
 public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
     public let id: String
     public var senderId: String
@@ -2561,6 +2613,8 @@ public struct ChannelsHomeView: View {
     @State private var showManagementSheet = false
     @State private var showPolicyAlert = false
     @State private var policyAlertMessage = ""
+    // 218 深链：带 channelId 跳转失败时的定性提示（无效/无权限/不存在）
+    @State private var channelLinkError: String? = nil
 
     // 频道数据与选中
     @State private var channels: [V5ChannelItem] = []
@@ -2612,11 +2666,19 @@ public struct ChannelsHomeView: View {
         VStack(spacing: 0) {
             topNavBar
 
+            // 218 统一版式分段一：频道／私聊直接放在页面上（与安卓
+            // 同位），不再只藏在切换面板里；面板内分段与此共用状态。
+            if appState.hasToken {
+                partitionPicker
+            }
+
             // 对话框直达（批D）：打开即当前频道的对话框（消息流+状态+
-            // 发送区）；搜索/分段/频道列表收进切换面板（点频道名开）。
+            // 发送区）；搜索/频道列表收进切换面板（点频道名开）。
             if !appState.hasToken {
                 unconfiguredTokenView
-            } else if let dm = activeWorkspaceDM {
+            } else if selectedPartition == .directMessages, activeWorkspaceDM == nil {
+                directMessagesListView
+            } else if let dm = activeWorkspaceDM, selectedPartition == .directMessages {
                 ChannelDetailWorkspaceView(
                     appState: appState,
                     channelItem: nil,
@@ -2644,12 +2706,18 @@ public struct ChannelsHomeView: View {
         .onAppear(perform: loadData)
         .task {
             await refreshChannels()
+            // 冷启动/登录恢复：pending 可能在本页出现前就已恢复，
+            // 不等 onChange，出现后主动消费一次。
+            await consumePendingChannelLink()
         }
         .sheet(isPresented: $showSwitchPanel) {
             switchPanel
         }
         .sheet(isPresented: $showCreateDMSheet) {
-            CreateDirectMessageSheet(appState: appState) { newDM in
+            CreateDirectMessageSheet(
+                appState: appState,
+                currentChannelID: activeWorkspaceChannel?.id ?? appState.settings.channelID
+            ) { newDM in
                 directMessages.insert(newDM, at: 0)
                 activeWorkspaceDM = newDM
             }
@@ -2668,6 +2736,68 @@ public struct ChannelsHomeView: View {
             Button("我知道了", role: .cancel) {}
         } message: {
             Text(policyAlertMessage)
+        }
+        .alert("无法打开频道", isPresented: Binding(
+            get: { channelLinkError != nil },
+            set: { if !$0 { channelLinkError = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(channelLinkError ?? "")
+        }
+        .onChange(of: appState.pendingChannelID) { _ in
+            Task { await consumePendingChannelLink() }
+        }
+        .onChange(of: appState.hasToken) { _ in
+            Task { await consumePendingChannelLink() }
+        }
+    }
+
+    /// 218 深链消费：pendingChannelID 落到指定频道。列表里有就直达；
+    /// 没有则按三类异常定性——ID 格式不对 = 链接无效；探针读消息被
+    /// 服务端以成员/权限类错误拒绝 = 无权限；不存在类错误 = 频道
+    /// 已删除/不存在。消费成功或定性后都清掉 pending（含持久化份，
+    /// 冷启动/登录恢复靠它续上）。
+    private func consumePendingChannelLink() async {
+        guard let target = appState.pendingChannelID, appState.hasToken else { return }
+        await appState.loadChannels()
+        loadData()
+        if let ch = channels.first(where: { $0.id == target }) {
+            activeWorkspaceChannel = ch
+            activeWorkspaceDM = nil
+            selectedPartition = .channels
+            showSwitchPanel = false
+            appState.clearPendingChannelLink()
+            return
+        }
+        if let dm = directMessages.first(where: { $0.id == target }) {
+            activeWorkspaceDM = dm
+            selectedPartition = .directMessages
+            showSwitchPanel = false
+            appState.clearPendingChannelLink()
+            return
+        }
+        let hexOK = target.count == 32 && target.allSatisfy { $0.isHexDigit }
+        if !hexOK {
+            channelLinkError = "链接无效：频道 ID 格式不正确。"
+            appState.clearPendingChannelLink()
+            return
+        }
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            _ = try await transport.pollMessages(channelID: target, limit: 1)
+            channelLinkError = "无法打开该频道：它不在你的频道列表里。"
+            appState.clearPendingChannelLink()
+        } catch {
+            let raw = (error as? McpError)?.message ?? ""
+            if raw.contains("member") || raw.contains("成员") || raw.contains("permission") || raw.contains("权限") {
+                channelLinkError = "无权限：你不是该频道成员。"
+            } else if raw.contains("not found") || raw.contains("不存在") || raw.contains("deleted") || raw.contains("删除") {
+                channelLinkError = "频道不存在或已删除。"
+            } else {
+                channelLinkError = raw.isEmpty ? "无法打开该频道。" : raw
+            }
+            appState.clearPendingChannelLink()
         }
     }
 
@@ -2754,6 +2884,15 @@ public struct ChannelsHomeView: View {
                     Label("发起私聊", systemImage: "person.2")
                 }
                 .accessibilityIdentifier("channels.action.createDM")
+
+                // P3-MSG：直达消息中心（注册表 feature_message_center 保持
+                // TODO，翻转留到组装步；入口先走频道页顶栏，可达可测）。
+                Button {
+                    onNavigateRoute("notifications")
+                } label: {
+                    Label("打开消息中心", systemImage: "tray.full")
+                }
+                .accessibilityIdentifier("channels.action.messageCenter")
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
@@ -2877,6 +3016,7 @@ public struct ChannelsHomeView: View {
                         Button {
                             activeWorkspaceChannel = ch
                             activeWorkspaceDM = nil
+                            selectedPartition = .channels
                             showSwitchPanel = false
                         } label: {
                             channelRow(ch)
@@ -2995,6 +3135,7 @@ public struct ChannelsHomeView: View {
                     ForEach(filteredDMs) { dm in
                         Button {
                             activeWorkspaceDM = dm
+                            selectedPartition = .directMessages
                             showSwitchPanel = false
                         } label: {
                             directMessageRow(dm)
@@ -3123,39 +3264,33 @@ public struct ChannelsHomeView: View {
             return
         }
 
-        if !appState.availableChannels.isEmpty {
-            channels = appState.availableChannels.map { c in
-                V5ChannelItem(
-                    id: c.id,
-                    name: c.displayName,
-                    topic: "团队频道",
-                    isPrivate: false,
-                    memberCount: c.participants.count,
-                    lastMessageText: c.lastMessageText ?? "",
-                    unreadCount: 0,
-                    isArchived: c.isArchived
-                )
-            }
-        } else {
-            let cached = ChannelListCache().load()
-            if !cached.isEmpty {
-                channels = cached.map { c in
-                    V5ChannelItem(
-                        id: c.id,
-                        name: c.displayName,
-                        topic: "团队频道",
-                        isPrivate: false,
-                        memberCount: c.participants.count,
-                        lastMessageText: c.lastMessageText ?? "",
-                        unreadCount: 0
-                    )
-                }
-            }
+        let source = appState.availableChannels.isEmpty
+            ? ChannelListCache().load()
+            : appState.availableChannels
+        channels = source.filter { !$0.isDM }.map { c in
+            V5ChannelItem(
+                id: c.id,
+                name: c.displayName,
+                topic: "团队频道",
+                isPrivate: false,
+                memberCount: c.participants.count,
+                lastMessageText: c.lastMessageText ?? "",
+                unreadCount: 0,
+                isArchived: c.isArchived
+            )
         }
-
-        // 诚实空态：私聊已开通（新建 → 发起私聊），但严禁注入虚假种子
-        // 私聊会话；无私聊时列表就是空。
-        directMessages = []
+        directMessages = source.filter(\.isDM).map { c in
+            let peer = c.participantDetails.first(where: { !$0.isSelf })
+            return V5DirectMessageItem(
+                id: c.id,
+                targetId: peer?.id ?? c.participants.first ?? c.id,
+                targetName: peer?.name ?? c.name,
+                isAgent: peer?.isAgent ?? true,
+                targetRole: peer?.role ?? "私聊",
+                lastMessageText: c.lastMessageText ?? "",
+                lastMessageTime: ""
+            )
+        }
 
         // 对话框直达（批D）：默认选中第一个频道；选中项已不在列表
         // 时回落到第一个。
@@ -3163,6 +3298,9 @@ public struct ChannelsHomeView: View {
             // 保持当前选中
         } else {
             activeWorkspaceChannel = channels.first
+        }
+        if let activeDM = activeWorkspaceDM {
+            activeWorkspaceDM = directMessages.first(where: { $0.id == activeDM.id })
         }
     }
 }
@@ -3214,6 +3352,22 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var readersText: String? = nil
     @State private var forwardSource: V5ChannelMessage? = nil
     private var otherChannels: [ChannelInfo] { appState.availableChannels }
+    @State private var activeTopicThreadRootId: String? = nil
+    @State private var showTopicThreadsSheet = false
+    @State private var typingSenderName: String? = nil
+    // №12 工具行状态（218 自 ChannelChatView 搬入本页，原页面删除）：
+    // 搜索/过滤走服务端 pollMessages 参数，跳到日期进入历史浏览态，
+    // 历史开关走 setHistoryVisible（仅 owner/协调者，服务端裁决）。
+    @State private var searchText = ""
+    @State private var searchSender: String?
+    @State private var searchRangeIndex = 0 // 0 全部时间 1 今天 2 近7天 3 近30天
+    @State private var searchKind: String?
+    @State private var isShowingSearchResults = false
+    @State private var isBrowsing = false
+    @State private var browseHasOlder = false
+    @State private var showingDatePicker = false
+    @State private var jumpDate = Date()
+    @State private var historyVisibleOverride: Bool?
     @Environment(\.dismiss) private var dismiss
 
     private var currentChannelId: String {
@@ -3257,16 +3411,6 @@ public struct ChannelDetailWorkspaceView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topWorkspaceHeader
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button("任务详情") { onNavigateRoute("taskdetail") }.buttonStyle(.bordered)
-                    Button("执行流") { onNavigateRoute("conversation") }.buttonStyle(.bordered)
-                    Button("转为正式任务") { onNavigateRoute("compose") }.buttonStyle(.bordered)
-                }
-                .font(.caption2)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-            }
             tabPicker
 
             switch selectedTab {
@@ -3279,7 +3423,9 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
-        .navigationTitle(displayName)
+        // 218 标题一层：嵌入旗舰壳时导航标题留空，频道名只在页内
+        // 标题行（切换面板入口）出现一次；独立打开时仍用频道名。
+        .navigationTitle(embedded ? "" : displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !embedded {
@@ -3297,15 +3443,6 @@ public struct ChannelDetailWorkspaceView: View {
                     .accessibilityIdentifier("channel.backButton")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showChannelSettingsSheet = true
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
-                }
-                .accessibilityIdentifier("channel.settingsButton")
-            }
         }
         .onAppear {
             loadWorkspaceData()
@@ -3320,6 +3457,37 @@ public struct ChannelDetailWorkspaceView: View {
         }
         .sheet(item: $selectedAgentProfile) { msg in
             AgentProfileSheet(message: msg)
+        }
+        .sheet(isPresented: $showTopicThreadsSheet) {
+            TopicThreadsSheet(
+                threads: groupTopicThreads(messages: messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }),
+                onSelect: { rootId in
+                    activeTopicThreadRootId = rootId
+                    if let root = messages.first(where: { $0.id == rootId }) {
+                        replyingTo = root
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $showingDatePicker) {
+            NavigationStack {
+                Form {
+                    DatePicker("跳到哪一天", selection: $jumpDate, displayedComponents: .date)
+                }
+                .navigationTitle("跳到日期")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showingDatePicker = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("跳转") {
+                            showingDatePicker = false
+                            Task { await jumpToDate(Calendar.current.startOfDay(for: jumpDate)) }
+                        }
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showChannelSettingsSheet) {
             ChannelSettingsSheet(appState: appState, channel: channelItem, dm: dmItem)
@@ -3536,6 +3704,21 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
             Spacer()
+            // 218：频道设置入口从导航栏 toolbar 搬进页内标题行。
+            // 此前 toolbar 的 ⋯ 在旗舰壳嵌入时渲染得出但点击无响应
+            // （216/217 实机复现），页内按钮与「＋新建」同一层级，
+            // 点击路径已实机验证可靠。
+            Button {
+                showChannelSettingsSheet = true
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    .frame(width: 38, height: 38)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("channel.settingsButton")
+            .accessibilityLabel("频道设置")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -3553,8 +3736,35 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     // MARK: - 消息分区
+    private var displayedMessages: [V5ChannelMessage] {
+        guard let rootId = activeTopicThreadRootId else { return messages }
+        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
+        let topics = groupTopicThreads(messages: rawMsgs)
+        if let topic = topics.first(where: { $0.rootMessageId == rootId }) {
+            let topicIds = Set(topic.messages.map { $0.id })
+            return messages.filter { topicIds.contains($0.id) }
+        }
+        return messages.filter { $0.id == rootId || $0.replyToId == rootId }
+    }
+
+    private var activeTopicTitle: String {
+        guard let activeRootId = activeTopicThreadRootId,
+              let rootMsg = messages.first(where: { $0.id == activeRootId }) else {
+            return "话题讨论"
+        }
+        let trimmed = rootMsg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(trimmed.prefix(20))
+    }
+
     private var messagesTab: some View {
         VStack(spacing: 0) {
+            if channelItem != nil {
+                membersStrip
+                searchBar
+                filterBar
+                toolsBar
+                if isBrowsing { browseBar }
+            }
             messageCenterStrip
             if !scheduledForChannel.isEmpty {
                 scheduledStrip
@@ -3564,16 +3774,35 @@ public struct ChannelDetailWorkspaceView: View {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary.opacity(0.6))
-                    Text("暂无频道消息")
+                    Text(isShowingSearchResults ? "没有找到匹配的消息" : "暂无频道消息")
                         .font(.headline)
                         .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                    Text("在下方输入框发送消息开始协同讨论")
+                    Text(isShowingSearchResults ? "换个关键词或清除搜索条件再试" : "在下方输入框发送消息开始协同讨论")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.vertical, 60)
             } else {
+                if activeTopicThreadRootId != nil {
+                    HStack {
+                        Text("当前话题：\(activeTopicTitle)")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                        Spacer()
+                        Button("返回全部") {
+                            if replyingTo?.id == activeTopicThreadRootId {
+                                replyingTo = nil
+                            }
+                            activeTopicThreadRootId = nil
+                        }
+                        .font(.caption)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                }
                 // 对话组件收敛：列表脚手架与单聊共用 DialogMessageListView
                 // （LazyVStack、不主动滚底，与原 ScrollViewReader 现状一致）。
                 DialogMessageListView(
@@ -3582,9 +3811,9 @@ public struct ChannelDetailWorkspaceView: View {
                     horizontalPadding: 16,
                     topPadding: 12,
                     bottomPadding: 12,
-                    scrollTrigger: messages.count
+                    scrollTrigger: displayedMessages.count
                 ) {
-                    ForEach(messages) { msg in
+                    ForEach(displayedMessages) { msg in
                         messageRow(msg)
                             .id(msg.id)
                     }
@@ -3597,32 +3826,80 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
-    /// 消息中心条：未读（按本机已读游标）与置顶数。@我聚合需先学会
-    /// 本机名字（推送整改线的 learnedSelfNames，不在本分支），此处
-    /// 不报 @我数，只报能如实算出的两项。口径与 ChannelExtras
-    /// .buildMessageCenter 一致：无游标计 0，游标不在列表里计全部。
+    /// 消息中心条（218 计数口径 B，与安卓同一定义）：未读按本机
+    /// 已读游标之后计（无游标计 0、游标不在列表计全部）；@我未读 =
+    /// 未读中 @ 到本人名字集合的消息（本人 = 成员表里 isSelf 或
+    /// 本机发送者 ID 对应条目，排除本人所发）；置顶、话题在当前
+    /// 已加载消息内计（话题 = 有回复的根消息数，与安卓同规则）。
+    /// 三项都是当前已加载窗口内统计、不是全局数，条内明示范围；
+    /// 去重由 feed/刷新按消息 id 保证（startFeed /
+    /// refreshChannelMessages）。
     private var messageCenterStrip: some View {
         let lastSeen = (try? LocalData.shared.cursors.lastSeenMessageId(channelId: currentChannelId)) ?? nil
         let unread: Int
+        let unreadSlice: [V5ChannelMessage]
         if lastSeen == nil {
             unread = 0
+            unreadSlice = []
         } else if let idx = messages.firstIndex(where: { $0.id == lastSeen }) {
             unread = messages.count - idx - 1
+            unreadSlice = Array(messages.suffix(from: idx + 1))
         } else {
             unread = messages.count
+            unreadSlice = messages
         }
+        let selfNames = Set(channelParticipants
+            .filter { $0.isSelf || $0.id == appState.channelSenderID }
+            .map { $0.name }
+            .filter { !$0.isEmpty })
+        let mentionCount = unreadSlice.filter { msg in
+            guard !isOwnSender(msg.senderId) else { return false }
+            // 生效的 @所有人（仅 owner/协调者所发）也算 @我，与安卓
+            // buildMessageCenter 的 allMentionLive 同口径。
+            if ChannelExtras.mentionsAllText(msg.text), canMentionAll(senderID: msg.senderId) {
+                return true
+            }
+            return selfNames.contains { name in
+                msg.text.contains("@\(name) ")
+                    || msg.text.contains("@\(name)\n")
+                    || msg.text.hasSuffix("@\(name)")
+            }
+        }.count
+        let notifyMode = UserDefaults.standard.string(forKey: "channel.notify_mode.\(currentChannelId)") ?? "全部消息"
+        let effectiveUnread = ChannelExtras.effectiveUnreadCount(
+            unreadCount: unread,
+            unreadMentionCount: mentionCount,
+            notifyMode: notifyMode
+        )
         let pinnedCount = messages.filter { $0.pinned && !$0.recalled }.count
-        return HStack(spacing: 12) {
-            Text("消息中心")
-                .font(.caption)
-                .fontWeight(.semibold)
-            Text("未读 \(unread)")
-                .font(.caption)
+        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
+        let topicCount = groupTopicThreads(messages: rawMsgs).count
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+                Text("消息中心")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text("未读 \(effectiveUnread)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("@我未读 \(mentionCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("置顶 \(pinnedCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    showTopicThreadsSheet = true
+                } label: {
+                    Text(topicCount > 0 ? "话题 (\(topicCount))" : "话题")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+                Spacer()
+            }
+            Text("计数按当前已加载消息统计")
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Text("置顶 \(pinnedCount)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
@@ -3648,6 +3925,257 @@ public struct ChannelDetailWorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - 成员行（218 统一版式第 6 段：成员 chips＋通知 chip）
+    private var membersStrip: some View {
+        let notifyMode = UserDefaults.standard.string(forKey: "channel.notify_mode.\(currentChannelId)") ?? "全部消息"
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(members) { member in
+                    Text(member.role.isEmpty || member.role == "平台参与者"
+                         ? member.name
+                         : "\(member.name) · \(channelRoleLabel(member.role))")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white, in: Capsule())
+                        .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                }
+                Spacer(minLength: 8)
+                Button {
+                    showChannelSettingsSheet = true
+                } label: {
+                    Text("通知：\(notifyMode)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - №12 工具行（218 自 ChannelChatView 搬入：搜索/过滤/工具/浏览）
+
+    private var memberNames: [String] {
+        channelParticipants.map(\.name).filter { !$0.isEmpty }
+    }
+
+    private var currentChannelInfo: ChannelInfo? {
+        otherChannels.first(where: { $0.id == currentChannelId })
+    }
+
+    private var historyVisibleNow: Bool {
+        historyVisibleOverride ?? currentChannelInfo?.historyVisible ?? true
+    }
+
+    private var canManageHistory: Bool {
+        channelParticipants.first {
+            $0.isSelf || $0.id == appState.channelSenderID
+        }?.canMentionAll ?? false
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            TextField("搜本频道消息…", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+            if isShowingSearchResults {
+                Button("清除") { clearSearch() }
+                    .font(.caption)
+            } else {
+                Button("搜索") { Task { await runSearch() } }
+                    .font(.caption)
+                    .disabled(!searchCanRun)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 3)
+    }
+
+    private var searchCanRun: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            searchSender != nil || searchRangeIndex != 0 || searchKind != nil
+    }
+
+    private static let rangeLabels = ["全部时间", "今天", "近7天", "近30天"]
+    private static let kindValues: [String?] = [nil, "image", "file", "link"]
+    private static let kindNames = ["全部", "图片", "文件", "链接"]
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Menu {
+                    Button("全部成员") { searchSender = nil; rerunSearchIfPossible() }
+                    ForEach(memberNames, id: \.self) { name in
+                        Button(name) { searchSender = name; rerunSearchIfPossible() }
+                    }
+                } label: {
+                    Text("成员：\(searchSender ?? "全部")").font(.caption)
+                }
+                Menu {
+                    ForEach(Self.rangeLabels.indices, id: \.self) { index in
+                        Button(Self.rangeLabels[index]) {
+                            searchRangeIndex = index
+                            rerunSearchIfPossible()
+                        }
+                    }
+                } label: {
+                    Text("时间：\(Self.rangeLabels[searchRangeIndex])").font(.caption)
+                }
+                Menu {
+                    ForEach(Self.kindValues.indices, id: \.self) { index in
+                        Button(Self.kindNames[index]) {
+                            searchKind = Self.kindValues[index]
+                            rerunSearchIfPossible()
+                        }
+                    }
+                } label: {
+                    Text("分类：\(Self.kindNames[Self.kindValues.firstIndex { $0 == searchKind } ?? 0])")
+                        .font(.caption)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var toolsBar: some View {
+        HStack(spacing: 12) {
+            Button("跳到日期") { showingDatePicker = true }
+                .font(.caption)
+            Spacer()
+            if canManageHistory {
+                Button("新成员看历史：\(historyVisibleNow ? "开" : "关")") {
+                    Task { await setHistoryVisible(!historyVisibleNow) }
+                }
+                .font(.caption)
+            } else {
+                Text("新成员看历史：\(historyVisibleNow ? "开" : "关")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+    }
+
+    private var browseBar: some View {
+        HStack(spacing: 12) {
+            if browseHasOlder {
+                Button("加载更早") { Task { await browseLoadOlder() } }.font(.caption)
+            }
+            Spacer()
+            Text("正在查看历史").font(.caption).foregroundStyle(.secondary)
+            Button("回到最新") { exitBrowse() }.font(.caption).fontWeight(.semibold)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.08))
+    }
+
+    private func rerunSearchIfPossible() {
+        if searchCanRun { Task { await runSearch() } }
+    }
+
+    private func searchWindow() -> (from: Int?, to: Int?) {
+        let now = Int(Date().timeIntervalSince1970)
+        switch searchRangeIndex {
+        case 1: return (Int(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970), nil)
+        case 2: return (now - 7 * 86400, nil)
+        case 3: return (now - 30 * 86400, nil)
+        default: return (nil, nil)
+        }
+    }
+
+    /// 搜索：停 feed 后用服务端过滤参数取结果替换列表（与原
+    /// ChannelChatView 同语义）；清除则重载实时列表。
+    private func runSearch() async {
+        guard let transport = appState.makeChannelTransport(), searchCanRun else { return }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        stopFeed()
+        isBrowsing = false
+        do {
+            let window = searchWindow()
+            let results = try await transport.pollMessages(
+                channelID: currentChannelId, limit: 100,
+                query: query.isEmpty ? nil : query,
+                sender: searchSender,
+                fromTs: window.from, toTs: window.to,
+                kind: searchKind)
+            messages = results.map { toV5Message($0) }
+                .sorted { $0.fullDateTime < $1.fullDateTime }
+            isShowingSearchResults = true
+        } catch {
+            actionError = (error as? McpError)?.message ?? "搜索失败。"
+        }
+    }
+
+    private func clearSearch() {
+        searchText = ""
+        searchSender = nil
+        searchRangeIndex = 0
+        searchKind = nil
+        isShowingSearchResults = false
+        messages = []
+        loadWorkspaceData()
+    }
+
+    /// 跳到日期：取该日（含）之后的消息进入历史浏览态；空日不换列表。
+    private func jumpToDate(_ day: Date) async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            let page = try await transport.pollMessages(
+                channelID: currentChannelId, limit: 100,
+                fromTs: Int(day.timeIntervalSince1970))
+            if page.isEmpty {
+                actionError = "该日期之后暂无消息。"
+            } else {
+                stopFeed()
+                messages = page.map { toV5Message($0) }
+                    .sorted { $0.fullDateTime < $1.fullDateTime }
+                browseHasOlder = true
+                isShowingSearchResults = false
+                isBrowsing = true
+            }
+        } catch {
+            actionError = (error as? McpError)?.message ?? "跳到日期失败。"
+        }
+    }
+
+    private func browseLoadOlder() async {
+        guard let transport = appState.makeChannelTransport(),
+              let first = messages.first else { return }
+        do {
+            let older = try await transport.pollMessages(
+                channelID: currentChannelId, beforeID: first.id, limit: 50)
+            let converted = older.map { toV5Message($0) }
+            var seen = Set(messages.map { $0.id })
+            messages = converted.filter { seen.insert($0.id).inserted } + messages
+            browseHasOlder = older.count >= 50
+        } catch {
+            actionError = (error as? McpError)?.message ?? "加载更早失败。"
+        }
+    }
+
+    private func exitBrowse() {
+        isBrowsing = false
+        browseHasOlder = false
+        messages = []
+        loadWorkspaceData()
+    }
+
+    private func setHistoryVisible(_ visible: Bool) async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            _ = try await transport.setHistoryVisible(channelID: currentChannelId, visible: visible)
+            historyVisibleOverride = visible
+        } catch {
+            actionError = (error as? McpError)?.message ?? "改历史开关失败。"
+        }
     }
 
     private func messageRow(_ msg: V5ChannelMessage) -> some View {
@@ -3721,8 +4249,8 @@ public struct ChannelDetailWorkspaceView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // 撤回的消息只留占位，不展示正文。
-                    Text(msg.recalled ? ChannelExtras.recalledPlaceholder : msg.text)
+                    // 撤回的消息只留占位，不展示正文；未撤回的使用 Markdown 渲染（失败回退纯文本）。
+                    Text(ChannelExtras.safeMarkdownAttributedString(msg.recalled ? ChannelExtras.recalledPlaceholder : msg.text))
                         .font(.system(size: 14))
                         .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.16))
                         .textSelection(.enabled)
@@ -3786,6 +4314,12 @@ public struct ChannelDetailWorkspaceView: View {
                     replyingTo = msg
                 } label: {
                     Label("回复", systemImage: "arrowshape.turn.up.left")
+                }
+                Button {
+                    activeTopicThreadRootId = msg.id
+                    replyingTo = msg
+                } label: {
+                    Label("发起话题", systemImage: "bubble.left.and.bubble.right")
                 }
                 Button {
                     Task { await runAction { transport in
@@ -3891,6 +4425,17 @@ public struct ChannelDetailWorkspaceView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
+            }
+
+            if let typing = typingSenderName {
+                HStack(spacing: 6) {
+                    Text("\(typing) 正在输入…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
             }
 
             if let att = selectedAttachment {
@@ -4255,7 +4800,7 @@ public struct ChannelDetailWorkspaceView: View {
             postText += (postText.isEmpty ? "" : "\n") + "（附件：\(att.fileName)）"
         }
         if postText.isEmpty { postText = "分享了附件" }
-        let replyTo = replyingTo?.id
+        let replyTo = replyingTo?.id ?? activeTopicThreadRootId
         let attachmentRef = pendingAttachmentRef
         let channelID = currentChannelId
         // 幂等（阻塞⑤修法）：一次发送意图只铸一次 effect_key，
@@ -4630,6 +5175,12 @@ public struct ChannelDetailWorkspaceView: View {
                 self.connectionError = err
             }
         }
+        newFeed.onTyping = { [weak newFeed] typing in
+            Task { @MainActor in
+                guard let newFeed, self.feed === newFeed else { return }
+                self.typingSenderName = typing.isTyping ? typing.senderName : nil
+            }
+        }
         self.feed = newFeed
         newFeed.start()
         self.connectionState = newFeed.connectionState
@@ -4678,7 +5229,9 @@ public struct ChannelDetailWorkspaceView: View {
         feed = nil
         oldFeed?.onMessages = nil
         oldFeed?.onStateChange = nil
+        oldFeed?.onTyping = nil
         oldFeed?.stop()
+        typingSenderName = nil
         connectionState = .stopped
         connectionError = nil
     }
@@ -4697,64 +5250,42 @@ public struct ChannelDetailWorkspaceView: View {
 
 public struct CreateDirectMessageSheet: View {
     @ObservedObject public var appState: AppState
+    public var currentChannelID: String?
     public var onCreated: (V5DirectMessageItem) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    @State private var recipientType: RecipientType = .agent
-    @State private var selectedAgent = "Codex"
-    @State private var targetUsername = ""
-    @State private var initiatorIsAgent = false
-    @State private var targetIsAgent = true
+    @State private var selectedMemberID = ""
+    @State private var isOpening = false
     @State private var errorText: String? = nil
 
-    public enum RecipientType: String, CaseIterable, Identifiable {
-        case agent = "平台 Agent"
-        case user = "团队成员"
-
-        public var id: String { rawValue }
+    private var currentChannelMembers: [ChannelParticipant] {
+        let channelID = currentChannelID ?? appState.settings.channelID
+        return appState.availableChannels
+            .first(where: { $0.id == channelID })?
+            .participantDetails
+            // 服务端 participants 不带 is_self（实查），单靠 isSelf 排不掉
+            // 本机；再按本机频道发送者 ID 排除，与 isOwnSender 同一口径。
+            .filter { !$0.isSelf && $0.id != appState.channelSenderID } ?? []
     }
 
     public var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("对象类型", selection: $recipientType) {
-                        ForEach(RecipientType.allCases) { t in
-                            Text(t.rawValue).tag(t)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: recipientType) { _, val in
-                        targetIsAgent = (val == .agent)
-                        errorText = nil
-                    }
-
-                    if recipientType == .agent {
-                        Picker("选择 Agent", selection: $selectedAgent) {
-                            Text("Codex (设备 Agent)").tag("Codex")
-                            Text("Claude Code (云端 Agent)").tag("Claude Code")
-                            Text("CodeBuddy (协作 Agent)").tag("CodeBuddy")
-                            Text("Example Agent").tag("Example Agent")
-                        }
+                    if currentChannelMembers.isEmpty {
+                        Text("当前频道没有可发起私聊的成员。")
+                            .foregroundStyle(.secondary)
                     } else {
-                        TextField("输入成员账号或姓名", text: $targetUsername)
+                        Picker("选择成员", selection: $selectedMemberID) {
+                            ForEach(currentChannelMembers, id: \.id) { member in
+                                Text(member.name).tag(member.id)
+                            }
+                        }
                     }
-                } header: { Text("私聊对象").textCase(nil) }
-
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("✓ 允许：用户 ↔ 用户 私聊")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("✓ 允许：用户 ↔ Agent 私聊")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("✕ 严格禁止：Agent ↔ Agent 直连私聊")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.red)
-                    }
-                } header: { Text("平台安全规则校验").textCase(nil) }
+                    Text("名单来自当前频道，已排除本机成员。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: { Text("当前频道成员").textCase(nil) }
 
                 if let err = errorText {
                     Section {
@@ -4766,34 +5297,65 @@ public struct CreateDirectMessageSheet: View {
             }
             .navigationTitle("发起私聊")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if selectedMemberID.isEmpty {
+                    selectedMemberID = currentChannelMembers.first?.id ?? ""
+                }
+            }
+            .onChange(of: currentChannelMembers.map(\.id)) { _, ids in
+                if !ids.contains(selectedMemberID) { selectedMemberID = ids.first ?? "" }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("确定") {
-                        do {
-                            try PrivateChatPolicyValidator.validate(
-                                initiatorIsAgent: initiatorIsAgent,
-                                targetIsAgent: targetIsAgent
-                            )
-                            let targetName = (recipientType == .agent) ? selectedAgent : (targetUsername.isEmpty ? "团队成员" : targetUsername)
-                            let newDM = V5DirectMessageItem(
-                                id: "dm-\(UUID().uuidString.prefix(6))",
-                                targetId: "target-\(UUID().uuidString.prefix(4))",
-                                targetName: targetName,
-                                isAgent: (recipientType == .agent),
-                                targetRole: (recipientType == .agent) ? "平台 Agent · 1:1 私聊" : "团队成员",
-                                lastMessageText: "私聊会话已建立",
-                                lastMessageTime: "刚刚"
-                            )
-                            onCreated(newDM)
-                            dismiss()
-                        } catch {
-                            errorText = error.localizedDescription
-                        }
+                        openSelectedMemberDM()
                     }
+                    .disabled(isOpening || selectedMember == nil)
                 }
+            }
+        }
+    }
+
+    private var selectedMember: ChannelParticipant? {
+        currentChannelMembers.first(where: { $0.id == selectedMemberID })
+    }
+
+    private func openSelectedMemberDM() {
+        guard let member = selectedMember else {
+            errorText = "请选择当前频道中的成员。"
+            return
+        }
+        guard let transport = appState.makeChannelTransport() else {
+            errorText = "无法连接频道服务。"
+            return
+        }
+        errorText = nil
+        isOpening = true
+        Task {
+            defer { isOpening = false }
+            do {
+                let result = try await transport.openDm(agentID: member.id)
+                guard let channelID = (result["id"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !channelID.isEmpty else {
+                    errorText = "平台未返回私聊频道 ID。"
+                    return
+                }
+                onCreated(V5DirectMessageItem(
+                    id: channelID,
+                    targetId: member.id,
+                    targetName: member.name,
+                    isAgent: member.isAgent ?? true,
+                    targetRole: member.role ?? "私聊",
+                    lastMessageText: "",
+                    lastMessageTime: ""
+                ))
+                dismiss()
+            } catch {
+                errorText = (error as? McpError)?.message ?? error.localizedDescription
             }
         }
     }
@@ -4907,6 +5469,71 @@ public struct ChannelManagementListSheet: View {
     }
 }
 
+public struct TopicThreadsSheet: View {
+    public let threads: [TeamThread]
+    public let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    public init(threads: [TeamThread], onSelect: @escaping (String) -> Void) {
+        self.threads = threads
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                if threads.isEmpty {
+                    Text("当前频道暂无自由话题。\n点击任意消息长按菜单中的「发起话题」即可发起。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(threads) { thread in
+                        Button {
+                            if let rootId = thread.rootMessageId {
+                                onSelect(rootId)
+                                dismiss()
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(thread.topicTitle ?? "话题讨论")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                                    Spacer()
+                                    Text("\(thread.messages.count) 条消息")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let first = thread.messages.first {
+                                    Text("\(first.displaySender): \(first.text)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("自由话题列表")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+public struct ChannelWebhookRow: Identifiable {
+    public let id: String
+    public let name: String
+    public let createdAt: String
+    public let urlPath: String
+}
+
 public struct ChannelSettingsSheet: View {
     @ObservedObject public var appState: AppState
     public let channel: V5ChannelItem?
@@ -4924,6 +5551,7 @@ public struct ChannelSettingsSheet: View {
     @State private var showCreatorRemovalAlert = false
     @State private var isMuted = false
     @State private var ignoresUnread = false
+    @State private var notifyMode = "全部消息"
     private var channelId: String { channel?.id ?? dm?.id ?? "ch-general" }
     public init(appState: AppState, channel: V5ChannelItem?, dm: V5DirectMessageItem?, onMembersChanged: (([V5ChannelMember]) -> Void)? = nil) {
         self.appState = appState; self.channel = channel; self.dm = dm; self.onMembersChanged = onMembersChanged
@@ -4933,6 +5561,8 @@ public struct ChannelSettingsSheet: View {
             Form {
                 channelInformationSection
                 directMessageInformationSections
+                notificationSettingsSection
+                channelWebhooksSection
                 channelMembersSection
                 if let errorText { Section { Text(errorText).foregroundStyle(.red).textSelection(.enabled) } }
             }
@@ -4941,9 +5571,13 @@ public struct ChannelSettingsSheet: View {
             .background(managementDialogs)
             .onAppear {
                 editedName = channel?.name ?? ""
+                let modeKey = "channel.notify_mode.\(channelId)"
+                notifyMode = UserDefaults.standard.string(forKey: modeKey) ?? (channel?.isMuted == true || dm?.isMuted == true ? "静音" : "全部消息")
+                isMuted = (notifyMode == "静音")
                 agents = (try? LocalData.shared.agents.listAgents()) ?? []
                 members = appState.availableChannels.first(where: { $0.id == channelId })?
                     .participantDetails.map(V5ChannelMember.init) ?? []
+                Task { await loadWebhooks() }
             }
         }
     }
@@ -4968,12 +5602,108 @@ public struct ChannelSettingsSheet: View {
                 LabeledContent("身份类型", value: d.isAgent ? "平台 Agent" : "团队成员")
                 LabeledContent("归属角色", value: d.targetRole)
             }
-            Section("通知与权限") {
-                Toggle("消息免打扰", isOn: $isMuted)
-                Toggle("忽略未读提示", isOn: $ignoresUnread)
+        }
+    }
+    @ViewBuilder private var notificationSettingsSection: some View {
+        Section("通知设置") {
+            Picker("通知级别", selection: $notifyMode) {
+                Text("全部消息").tag("全部消息")
+                Text("仅@我").tag("仅@我")
+                Text("静音").tag("静音")
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: notifyMode) { _, newMode in
+                UserDefaults.standard.set(newMode, forKey: "channel.notify_mode.\(channelId)")
+                isMuted = (newMode == "静音")
+            }
+            Text(notifyModePrompt(notifyMode))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+    private func notifyModePrompt(_ mode: String) -> String {
+        switch mode {
+        case "仅@我": return "仅接收提及我的消息通知与未读提醒"
+        case "静音": return "不接收通知，不计入未读提醒"
+        default: return "接收所有新消息通知与未读计数"
+        }
+    }
+    @State private var webhookRows: [ChannelWebhookRow] = []
+    @State private var createdWebhookText: String?
+
+    @ViewBuilder private var channelWebhooksSection: some View {
+        if channel != nil {
+            Section("入帖 Webhook") {
+                ForEach(webhookRows) { hook in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(hook.name.isEmpty ? hook.id : hook.name)
+                            Text(hook.urlPath).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                            if !hook.createdAt.isEmpty {
+                                Text("建于 \(hook.createdAt)").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("删除", role: .destructive) { Task { await deleteWebhook(hook) } }
+                    }
+                }
+                Button("创建入帖 Webhook") { Task { await createWebhook() } }
+                if let createdWebhookText {
+                    Text(createdWebhookText).font(.caption).textSelection(.enabled)
+                }
             }
         }
     }
+
+    @MainActor private func loadWebhooks() async {
+        guard channel != nil, let transport = appState.makeChannelTransport() else { return }
+        do {
+            let result = try await transport.listChannelWebhooks(channelID: channelId)
+            let raw = result["webhooks"] as? [[String: Any]] ?? []
+            webhookRows = raw.compactMap { item in
+                guard let id = item["webhook_id"] as? String, !id.isEmpty else { return nil }
+                var created = ""
+                if let ts = item["created_at"] as? Double {
+                    created = DateFormatter.localizedString(
+                        from: Date(timeIntervalSince1970: ts), dateStyle: .short, timeStyle: .short)
+                }
+                return ChannelWebhookRow(
+                    id: id,
+                    name: item["name"] as? String ?? "",
+                    createdAt: created,
+                    urlPath: item["url_path"] as? String ?? "")
+            }
+        } catch {
+            errorText = (error as? McpError)?.message ?? error.localizedDescription
+        }
+    }
+
+    @MainActor private func createWebhook() async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        do {
+            // Real server fields: url_path (plural channel-webhooks) +
+            // secret (shown exactly once) + signature instructions.
+            let result = try await transport.createChannelWebhook(channelID: channelId)
+            let urlPath = result["url_path"] as? String ?? ""
+            let secret = result["secret"] as? String ?? ""
+            let signature = result["signature"] as? String ?? ""
+            createdWebhookText = "入帖地址路径：\(urlPath)\n密钥（只显示这一次，请自行保存）：\(secret)\n\(signature)\n外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能删掉重建。"
+            await loadWebhooks()
+        } catch {
+            errorText = (error as? McpError)?.message ?? error.localizedDescription
+        }
+    }
+
+    @MainActor private func deleteWebhook(_ hook: ChannelWebhookRow) async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        do {
+            _ = try await transport.deleteChannelWebhook(channelID: channelId, webhookID: hook.id)
+            await loadWebhooks()
+        } catch {
+            errorText = (error as? McpError)?.message ?? error.localizedDescription
+        }
+    }
+
     private var channelMembersSection: some View {
         Section("频道成员") {
             ForEach(members) { member in memberRow(member) }
@@ -4982,10 +5712,24 @@ public struct ChannelSettingsSheet: View {
             }
         }
     }
+    /// My own role in this channel (platform truth via is_self).
+    private var myRole: String? {
+        appState.availableChannels.first(where: { $0.id == channelId })?
+            .participantDetails.first { $0.isSelf }?.role
+    }
+
     @ViewBuilder private func memberRow(_ member: V5ChannelMember) -> some View {
         HStack {
-            VStack(alignment: .leading) { Text(member.name); Text(member.role).font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading) { Text(member.name); Text(channelRoleLabel(member.role)).font(.caption).foregroundStyle(.secondary) }
             Spacer()
+            if myRole == "owner", let agentID = member.agentRecordId {
+                Menu("改角色") {
+                    Button("设为创建者") { Task { await setRole(agentID: agentID, role: "owner") } }
+                    Button("设为协调员") { Task { await setRole(agentID: agentID, role: "coordinator") } }
+                    Button("设为成员") { Task { await setRole(agentID: agentID, role: "member") } }
+                }
+                .disabled(isWorking)
+            }
             if isProtectedMember(member) { Text("不可移除").font(.caption).foregroundStyle(.secondary) }
             else if member.agentRecordId != nil {
                 Button("移除", role: .destructive) {
@@ -4994,6 +5738,11 @@ public struct ChannelSettingsSheet: View {
                 }.disabled(isWorking)
             }
         }
+    }
+
+    @MainActor private func setRole(agentID: String, role: String) async {
+        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        await perform { try await transport.setMemberRole(channelID: channelId, memberID: agentID, role: role) }
     }
     private var managementDialogs: some View {
         Color.clear
@@ -5725,6 +6474,12 @@ public struct AccountSettingsView: View {
                 .foregroundStyle(.primary)
 
                 NavigationLink {
+                    RepoAuthorizationView()
+                } label: {
+                    Label("仓库授权", systemImage: "lock.rectangle")
+                }
+
+                NavigationLink {
                     PrivacyAndSecurityScreen()
                 } label: {
                     Label("隐私与安全", systemImage: "lock.shield")
@@ -5808,6 +6563,12 @@ public struct AccountSettingsView: View {
                 }
                 .foregroundStyle(.primary)
 
+                NavigationLink {
+                    WorkspaceSettingsView()
+                } label: {
+                    Label("工作区", systemImage: "folder")
+                }
+
                 Button {
                     onNavigateRoute("personas")
                 } label: {
@@ -5833,6 +6594,12 @@ public struct AccountSettingsView: View {
                 }
                 .foregroundStyle(.primary)
 
+                NavigationLink {
+                    AutonomySettingsView()
+                } label: {
+                    Label("自主度", systemImage: "slider.horizontal.3")
+                }
+
                 // 大脑入口（已砍下放角落：主设置留一行安静入口，进现成 BrainSettingsView，页面内容不动）
                 NavigationLink {
                     BrainSettingsView(model: appState.brainSettingsModel)
@@ -5854,6 +6621,14 @@ public struct AccountSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier("settings.developerDiagnostics")
+
+                NavigationLink {
+                    AboutSettingsView()
+                } label: {
+                    Label("关于", systemImage: "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("设置")

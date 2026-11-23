@@ -2,6 +2,7 @@ package wherevercode.agent.core.team
 
 import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.core.agent.AgentRecord
+import wherevercode.agent.core.agent.ChannelParticipant
 
 /**
  * P3 团队频道（2026-11-11）：只读扇出 + 有界团队聊天的规则与模型。
@@ -88,7 +89,34 @@ data class TeamChannelMember(
     val isLocalApp: Boolean = false,
     /** 平台 Agent（端点直连成员，消息直达，不走代理中转）。 */
     val isPlatformAgent: Boolean = false,
+    /** 平台口径的「本机自己」（participants 的 is_self）：本机凭证在频道里的身份。 */
+    val isSelf: Boolean = false,
+    /** 平台口径的频道角色（owner / coordinator / member）；本地合成行默认 member。 */
+    val role: String = "member",
 )
+
+/** 频道角色的中文标签；成员档不加后缀返回空串。 */
+fun channelRoleLabel(role: String): String = when (role) {
+    "owner" -> "创建者"
+    "coordinator" -> "协调员"
+    else -> ""
+}
+
+/** 临时提示的默认停留时长（毫秒）。 */
+const val TRANSIENT_NOTICE_TTL_MS: Long = 5_000
+
+/**
+ * 临时提示可见性（2026-11-22 定版口径：状态只在异常时短暂出现）：
+ * 通知自首次出现起 [ttlMs] 内可见，过期即隐；同一条通知持续刷新
+ * 不续时（firstSeen 不变），新通知以自己的 firstSeen 重新计时。
+ */
+fun transientNoticeVisible(
+    text: String?,
+    firstSeenAtMs: Long,
+    nowMs: Long,
+    ttlMs: Long = TRANSIENT_NOTICE_TTL_MS,
+): Boolean =
+    !text.isNullOrBlank() && firstSeenAtMs > 0 && nowMs - firstSeenAtMs in 0 until ttlMs
 
 /** 只读扇出的候选 Agent（由调用方从 Agent 记录解析出 RemoteTarget 再传进来）。 */
 data class FanoutCandidate(
@@ -209,6 +237,68 @@ fun buildChannelMembers(agents: List<AgentRecord>): List<TeamChannelMember> {
     return members
 }
 
+/**
+ * 把平台口径的频道成员并进本地成员表（统一口径：私聊只给频道成员，
+ * 名单 = 频道全体成员）。
+ *
+ * [participants] 是平台 `agent_channel_list` 给当前频道的参与者名单
+ * （平台为准，与 iOS 的 participantDetails 同源）：本地已有的按
+ * agentId 保留本地条目（本机 App 行、本地显示名优先），平台独有的
+ * 按平台顺序追加在后、标 [TeamChannelMember.isPlatformAgent]（端点
+ * 直连成员）。纯函数：去重、保序都在这里，调用方只管传两份名单。
+ */
+fun mergePlatformChannelMembers(
+    local: List<TeamChannelMember>,
+    participants: List<ChannelParticipant>,
+): List<TeamChannelMember> {
+    val merged = local.toMutableList()
+    val indexById = HashMap<String, Int>()
+    merged.forEachIndexed { i, member -> indexById.putIfAbsent(member.agentId, i) }
+    for (participant in participants) {
+        val idx = indexById[participant.agentId]
+        if (idx != null) {
+            // 平台 is_self 是「本机在平台上的身份」的真值信号：本地同 id
+            // 条目保留在前、显示名不被覆盖，但 self 标记必须回写——否则
+            // 私聊名单排不掉自己（2026-11-21 验收实证：名单混进 app-qa）。
+            // 角色同样以平台为准回写（角色管理 UI 与徽标都读它）。
+            var entry = merged[idx]
+            if (participant.isSelf && !entry.isSelf) {
+                entry = entry.copy(isSelf = true)
+            }
+            val platformRole = participant.role?.takeIf { it.isNotBlank() }
+            if (platformRole != null && entry.role != platformRole) {
+                entry = entry.copy(role = platformRole)
+            }
+            merged[idx] = entry
+            continue
+        }
+        indexById[participant.agentId] = merged.size
+        merged += TeamChannelMember(
+            agentId = participant.agentId,
+            displayName = participant.agentName,
+            isLocalApp = false,
+            isPlatformAgent = true,
+            isSelf = participant.isSelf,
+            role = participant.role?.takeIf { it.isNotBlank() } ?: "member",
+        )
+    }
+    return merged
+}
+
+/**
+ * 私聊发起名单：频道全体成员减去本机自己——本机 App 行与平台
+ * is_self 身份都不进名单。注意不要套成员行的可见性过滤
+ * （visibleTeamChannelMembers 隐藏 agentId=app）：app 是另一台
+ * 设备的 App 在平台上的身份，是正当私聊对象（2026-11-21 验收实证）。
+ */
+fun dmCandidates(
+    members: List<TeamChannelMember>,
+    selfIds: Set<String> = emptySet(),
+): List<TeamChannelMember> =
+    // 服务端 participants 实测不带 is_self（2026-11-22 实查），isSelf 常为 false；
+    // 本机平台身份以 selfIds 为准绳兜底排除（调用方传本机口径的身份集合）。
+    members.filterNot { it.isLocalApp || it.isSelf || it.agentId in selfIds }
+
 // ---------------------------------------------------------------------------
 // 团队对话按任务分串 + 发言权（2026-11-12，回复归属修复的团队部分）。
 //
@@ -264,12 +354,17 @@ data class TeamThreadMessage(
     val forwardOf: String? = null,
 )
 
-/** 一个任务的讨论串：同一任务的消息成组，串内按时间排。 */
+/** 一个任务或自由话题的讨论串：同一任务或话题的消息成组，串内按时间排。 */
 data class TeamThread(
-    val taskId: String?,
-    val taskTitle: String?,
-    val messages: List<TeamThreadMessage>,
-)
+    val taskId: String? = null,
+    val taskTitle: String? = null,
+    val messages: List<TeamThreadMessage> = emptyList(),
+    val rootMessageId: String? = null,
+    val topicTitle: String? = null,
+) {
+    val isTopicThread: Boolean
+        get() = rootMessageId != null
+}
 
 /** 归属头解析结果：发送者 + 任务（短 id）+ 标题；无头返回 null。 */
 data class TeamAttribution(
@@ -354,12 +449,74 @@ fun groupTeamMessages(messages: List<TeamThreadMessage>): List<TeamThread> {
     return threads.sortedBy { it.messages.firstOrNull()?.createdAtSeconds ?: 0.0 }
 }
 
-/** 串头标题：有任务写“任务 <短id> · <标题>”（无标题只写编号），无任务写“综合讨论”。 */
+/** 串头标题：自由话题写“话题 · <标题>”；有任务写“任务 <短id> · <标题>”（无标题只写编号），无任务写“综合讨论”。 */
 fun teamThreadTitle(thread: TeamThread): String {
+    if (thread.rootMessageId != null) {
+        val topic = thread.topicTitle?.trim()?.takeIf { it.isNotBlank() } ?: "话题讨论"
+        return "话题 · $topic"
+    }
     val taskId = thread.taskId
     if (taskId.isNullOrBlank()) return "综合讨论"
     val title = thread.taskTitle?.trim()?.takeIf { it.isNotBlank() }
     return if (title != null) "任务 ${taskId.take(8)} · $title" else "任务 ${taskId.take(8)}"
+}
+
+/**
+ * 自由话题成串（频道孤儿项补全三期）：从任意消息可发起自由话题。
+ * 根消息与其回复链（replyToId 溯源到根消息）聚合成一个自由话题线程。
+ * 返回该频道内的全部自由话题列表，按话题最新回复时间倒序排。
+ */
+fun groupTopicThreads(messages: List<TeamThreadMessage>): List<TeamThread> {
+    if (messages.isEmpty()) return emptyList()
+    val msgMap = messages.associateBy { it.messageId }
+    val rootIds = linkedSetOf<String>()
+    for (m in messages) {
+        val replyId = m.replyToId
+        if (!replyId.isNullOrBlank() && msgMap.containsKey(replyId)) {
+            var curr: String? = replyId
+            var depth = 0
+            while (curr != null && depth < 20) {
+                val parent = msgMap[curr] ?: break
+                if (parent.replyToId.isNullOrBlank() || parent.replyToId == curr || !msgMap.containsKey(parent.replyToId)) {
+                    break
+                }
+                curr = parent.replyToId
+                depth++
+            }
+            if (curr != null) rootIds.add(curr)
+        }
+    }
+
+    val threads = mutableListOf<TeamThread>()
+    for (rootId in rootIds) {
+        val rootMsg = msgMap[rootId] ?: continue
+        val threadMsgs = mutableListOf<TeamThreadMessage>()
+        threadMsgs.add(rootMsg)
+        for (m in messages) {
+            if (m.messageId == rootId) continue
+            var p = m.replyToId
+            var depth = 0
+            while (p != null && p != rootId && depth < 20) {
+                p = msgMap[p]?.replyToId
+                depth++
+            }
+            if (p == rootId) {
+                threadMsgs.add(m)
+            }
+        }
+        val sorted = threadMsgs.distinctBy { it.messageId }.sortedBy { it.createdAtSeconds }
+        val title = rootMsg.text.trim().take(30).replace("\n", " ").ifBlank { "话题讨论" }
+        threads.add(
+            TeamThread(
+                taskId = rootMsg.taskId,
+                taskTitle = rootMsg.taskTitle,
+                rootMessageId = rootId,
+                topicTitle = title,
+                messages = sorted,
+            )
+        )
+    }
+    return threads.sortedByDescending { it.messages.lastOrNull()?.createdAtSeconds ?: 0.0 }
 }
 
 /**

@@ -11,7 +11,7 @@
 		0CA4DA9504A66A2AACFD3AA9 = {isa = XCBuildConfiguration; buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 219;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -37,7 +37,7 @@
 		1D1884016C4723C9F758A1A1 = {isa = XCBuildConfiguration; buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 219;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -79,17 +79,22 @@
 			DA000000000000000000E501,
 			DA000000000000000000F301,
 			DA000000000000000000F50F,
+			1C0DE00000000000000000A5,
 		); name = WhereverCodeAgentTests; path = WhereverCodeAgentTests; sourceTree = "<group>"; };
-		1D42142C90798881BB34AD0B = {isa = PBXBuildFile; fileRef = 6D2652F5D197BA7CCF479CE7; };
 		1E69D22CB70873DDBFF041B3 = {isa = PBXBuildFile; fileRef = 1979B6204A28ED3B41351A82; };
 		212B3758D9A02E43B3111A45 = {isa = PBXGroup; children = (
 			91067B38E1192DA78C1A0C00,
 		); name = App; path = App; sourceTree = "<group>"; };
-		29351C8E854D96368B36E5CB = {isa = PBXBuildFile; fileRef = A8FBCDEA5E707EC35BAF1DE6; };
 		DC0D1A100000000000000002 = {isa = PBXBuildFile; fileRef = DC0D1A100000000000000001; };
 		F17729830897440A9E54F002 = {isa = PBXBuildFile; fileRef = F17729830897440A9E54F001; };
 		2A3B9E2C913ADDDB16F1CD99 = {isa = PBXBuildFile; fileRef = 892AEB362C95AAE0B8B13531; };
 		2FAFA8646A910CE4490E1BBD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
+		1C0DE00000000000000000A1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCenterRules.swift; sourceTree = "<group>"; };
+		1C0DE00000000000000000A3 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCenterView.swift; sourceTree = "<group>"; };
+		1C0DE00000000000000000A5 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCenterTests.swift; sourceTree = "<group>"; };
+		1C0DE00000000000000000A2 = {isa = PBXBuildFile; fileRef = 1C0DE00000000000000000A1; };
+		1C0DE00000000000000000A4 = {isa = PBXBuildFile; fileRef = 1C0DE00000000000000000A3; };
+		1C0DE00000000000000000A6 = {isa = PBXBuildFile; fileRef = 1C0DE00000000000000000A5; };
 		3AB2292BD206EE84BF0DEB19 = {isa = XCConfigurationList; buildConfigurations = (
 			1D1884016C4723C9F758A1A1,
 			0CA4DA9504A66A2AACFD3AA9,
@@ -104,7 +109,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "WhereverCodeAgent/WhereverCodeAgent.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 219;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -155,6 +160,8 @@
 		61F1002C04C602A200A9C2E1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		623D5A4E16C91488EB97E424 = {isa = PBXBuildFile; fileRef = FAE5B2E37F68D6FF5711A9D2; };
 		624CBBBAADC0F2E4F66F1DBB = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+				1C0DE00000000000000000A2,
+				1C0DE00000000000000000A4,
 			DC0D1A100000000000000002,
 			9CCD70432011961B094C8FCE,
 			DA0000000000000000000074,
@@ -178,8 +185,6 @@
 			BB35B5B26176D7E09841F13F,
 			41158D5AB6FD801A75FC1903,
 			5D93AC07A45BF27D2FEF38A9,
-			29351C8E854D96368B36E5CB,
-			1D42142C90798881BB34AD0B,
 			828B51501A8E088E7BC25411,
 			DD5FF8DD89D9D8B920AF7867,
 			FABAA829E2C95B619B4A5E94,
@@ -224,6 +229,7 @@
 			DA000000000000000000E402,
 			DA000000000000000000F102,
 			DA000000000000000000F202,
+			DA000000000000000000F402,
 			DA000000000000000000F502,
 			DA000000000000000000F504,
 			DA000000000000000000F506,
@@ -232,7 +238,6 @@
 			DA000000000000000000F50C,
 			DA000000000000000000F50E,
 		); runOnlyForDeploymentPostprocessing = 0; };
-		6D2652F5D197BA7CCF479CE7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatView.swift; sourceTree = "<group>"; };
 		6E49E94E4D6DA0B155C63BBD = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
 			DA0000000000000000000015,
 		); runOnlyForDeploymentPostprocessing = 0; };
@@ -242,7 +247,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "WhereverCodeAgent/WhereverCodeAgent.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 219;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -281,9 +286,9 @@
 		); name = WhereverCodeAgentTests; productName = WhereverCodeAgentTests; productReference = E14659535277E988EECDDE93; productType = "com.apple.product-type.bundle.unit-test"; };
 		98E3434F859B0C281501C824 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhereverCodeAgent.entitlements; sourceTree = "<group>"; };
 		9CCD70432011961B094C8FCE = {isa = PBXBuildFile; fileRef = 91067B38E1192DA78C1A0C00; };
-		A8FBCDEA5E707EC35BAF1DE6 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
 		DC0D1A100000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogComponents.swift; sourceTree = "<group>"; };
 		ABD4D6AD9705B560B2E73A9F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+				1C0DE00000000000000000A6,
 			A1B2C3D4E5F6000000000002,
 			A1B2C3D4E5F6000000000042,
 			A1B2C3D4E5F6000000000022,
@@ -321,6 +326,7 @@
 			C938E01FDB5D371FF097BED0,
 			DA000000000000000000D101,
 			DA000000000000000000D201,
+			1C0DE00000000000000000A1,
 		); name = Services; path = Services; sourceTree = "<group>"; };
 		BB35B5B26176D7E09841F13F = {isa = PBXBuildFile; fileRef = 2FAFA8646A910CE4490E1BBD; };
 		BEB0DA9A7B8738232918BE47 = {isa = PBXGroup; children = (
@@ -335,15 +341,15 @@
 			DA0000000000000000000077,
 		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
-			A8FBCDEA5E707EC35BAF1DE6,
 			DC0D1A100000000000000001,
-			6D2652F5D197BA7CCF479CE7,
 			918CC59A2183C5FAA462994B,
 			0EC43C27AE6A9F51433ABA31,
 			F61BE8AE8EDB3888F3137986,
 			DA000000000000000000006F,
 			DA000000000000000000F201,
+			DA000000000000000000F401,
 			DA000000000000000000F50D,
+			1C0DE00000000000000000A3,
 		); name = Views; path = Views; sourceTree = "<group>"; };
 		DA0000000000000000000077 = {isa = PBXGroup; children = (
 			DA0000000000000000000073,
@@ -407,6 +413,8 @@
 		DA000000000000000000F102 = {isa = PBXBuildFile; fileRef = DA000000000000000000F101; };
 		DA000000000000000000F201 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		DA000000000000000000F202 = {isa = PBXBuildFile; fileRef = DA000000000000000000F201; };
+		DA000000000000000000F401 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionsViews.swift; sourceTree = "<group>"; };
+		DA000000000000000000F402 = {isa = PBXBuildFile; fileRef = DA000000000000000000F401; };
 		DA000000000000000000F301 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecoupleTests.swift; sourceTree = "<group>"; };
 		DA000000000000000000F302 = {isa = PBXBuildFile; fileRef = DA000000000000000000F301; };
 		A1B2C3D4E5F6000000000010 = {isa = PBXGroup; children = (
@@ -433,7 +441,7 @@
 		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		A1B2C3D4E5F600000000001A = {isa = XCBuildConfiguration; buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 219;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;
@@ -446,7 +454,7 @@
 			}; name = Debug; };
 		A1B2C3D4E5F600000000001B = {isa = XCBuildConfiguration; buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 219;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5;

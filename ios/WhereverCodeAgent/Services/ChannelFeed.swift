@@ -30,6 +30,22 @@ public func parseChannelWsEvent(_ text: String) -> ChannelMessage? {
     return ChannelMessage.from(dict: message)
 }
 
+/// Parse one WS event frame for typing signals (zero token, phase-3 orphan).
+public func parseChannelTypingWsEvent(_ text: String) -> ChannelTypingEvent? {
+    guard let data = text.data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data),
+          let obj = json as? [String: Any],
+          obj["type"] as? String == "typing" else {
+        return nil
+    }
+    let senderId = (obj["sender_id"] as? String) ?? (obj["agent_id"] as? String) ?? ""
+    guard !senderId.isEmpty else { return nil }
+    let senderName = (obj["sender_name"] as? String) ?? (obj["agent_name"] as? String) ?? senderId
+    let channelId = (obj["channel_id"] as? String) ?? ""
+    let isTyping = (obj["is_typing"] as? Bool) ?? true
+    return ChannelTypingEvent(channelId: channelId, senderId: senderId, senderName: senderName, isTyping: isTyping)
+}
+
 /// Id-based dedup for the feed. Pure value type, unit-tested.
 public struct MessageDeduper {
     public static let maxSeenIDs = 1000
@@ -114,9 +130,12 @@ public final class ChannelFeed {
     private var webSocketTask: URLSessionWebSocketTask?
     private var runTask: Task<Void, Never>?
     private var running = false
+    /// Set by `reconnectNow()` to cut the polling fallback short.
+    private var fallbackDeadlineOverride: Date?
 
     public var onMessages: (([ChannelMessage]) -> Void)?
     public var onStateChange: ((ChannelConnectionState, String?) -> Void)?
+    public var onTyping: ((ChannelTypingEvent) -> Void)?
     /// Fired exactly once, after the first history poll completes:
     /// nil on success, the real error text on failure. Lets the UI
     /// stop its "loading history" indicator and surface poll errors.
@@ -157,6 +176,17 @@ public final class ChannelFeed {
         setState(.stopped)
     }
 
+    /// Foreground reconnect (№12): while polling fallback is waiting
+    /// out its 45-second deadline, pull the deadline to now so the
+    /// loop retries the WebSocket immediately, and poll once right
+    /// away so anything missed shows up without waiting. No-op when
+    /// the feed is not running.
+    public func reconnectNow() {
+        guard running else { return }
+        fallbackDeadlineOverride = Date()
+        Task { [weak self] in await self?.pollOnce() }
+    }
+
     // MARK: - Loop
 
     private func loop() async {
@@ -179,12 +209,23 @@ public final class ChannelFeed {
     }
 
     /// Poll until the reconnect deadline, then return so the WS is retried.
+    /// The sleep runs in half-second slices so `reconnectNow()` (which
+    /// pulls the deadline to now) takes effect at once.
     private func pollFallback() async {
         let deadline = Date().addingTimeInterval(Self.reconnectAfterSeconds)
-        while running && !Task.isCancelled && Date() < deadline {
+        while running && !Task.isCancelled {
+            let effective = fallbackDeadlineOverride ?? deadline
+            if Date() >= effective { break }
             await pollOnce()
-            try? await Task.sleep(nanoseconds: UInt64(Self.pollIntervalSeconds * 1_000_000_000))
+            var waited: TimeInterval = 0
+            while running && !Task.isCancelled && waited < Self.pollIntervalSeconds {
+                let current = fallbackDeadlineOverride ?? deadline
+                if Date() >= current { break }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                waited += 0.5
+            }
         }
+        fallbackDeadlineOverride = nil
     }
 
     /// One poll. Returns nil on success, the real error text on failure.
@@ -236,7 +277,9 @@ public final class ChannelFeed {
                 switch message {
                 case .string(let text):
                     if stateMachine.state != .live { setState(.wsOpened) }
-                    if let parsed = parseChannelWsEvent(text) {
+                    if let typing = parseChannelTypingWsEvent(text) {
+                        onTyping?(typing)
+                    } else if let parsed = parseChannelWsEvent(text) {
                         deliver([parsed])
                     }
                 case .data:

@@ -76,11 +76,19 @@ object ChannelExtras {
         return "$channel · $sender"
     }
 
-    /** 这条消息是否 @ 了给定名字之一（正文含 “@名字”）。 */
+    /**
+     * 这条消息是否 @ 了给定名字之一。218 口径 B 与 iOS 同一定义：
+     * 平台约定 “@名字＋空格”（或换行/文末）才算提及，避免名字是
+     * 更长词前缀时误报。
+     */
     fun mentionsAny(message: PlatformChannelMessage, names: Collection<String>): Boolean {
         if (message.recalled) return false
         return names.any { name ->
-            name.isNotBlank() && message.text.contains("@$name")
+            name.isNotBlank() && (
+                message.text.contains("@$name ") ||
+                    message.text.contains("@$name\n") ||
+                    message.text.endsWith("@$name")
+                )
         }
     }
 

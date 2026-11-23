@@ -123,12 +123,14 @@ import wherevercode.agent.core.agent.ManusChatBridge
 import wherevercode.agent.core.agent.ManusChatPort
 import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
+import wherevercode.agent.core.agent.channelConnectionStateLabel
 import wherevercode.agent.core.agent.ChannelSummary
 import wherevercode.agent.core.agent.channelFeedRebindNeeded
 import wherevercode.agent.core.agent.McpChannelEventFeed
 import wherevercode.agent.core.agent.PlatformAgent
 import wherevercode.agent.core.agent.PlatformAgentChatBridge
 import wherevercode.agent.core.agent.PlatformAgentCredentialStore
+import wherevercode.agent.core.agent.PlatformConnectionStore
 import wherevercode.agent.core.agent.PlatformAgentForm
 import wherevercode.agent.core.agent.PlatformChannelMessage
 import wherevercode.agent.core.agent.PlatformChannelMcpTransport
@@ -213,6 +215,8 @@ import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.buildChannelMembers
+import wherevercode.agent.core.team.mergePlatformChannelMembers
+import wherevercode.agent.core.team.dmCandidates
 import wherevercode.agent.core.team.visibleTeamChannelMembers
 import wherevercode.agent.core.dispatch.McpDispatchRuntime
 import wherevercode.agent.core.team.loadPairingRecord
@@ -272,7 +276,6 @@ import wherevercode.agent.core.task.TaskType
 import wherevercode.agent.core.task.TriageRouter
 import wherevercode.agent.core.transport.DiscoveredPeer
 import wherevercode.agent.core.transport.LanTransport
-import wherevercode.agent.ui.ChatProjectPickerDialog
 import wherevercode.agent.ui.SessionListController
 import wherevercode.agent.ui.PipelineAction
 import wherevercode.agent.ui.TaskDetailArtifacts
@@ -307,6 +310,11 @@ import wherevercode.agent.ui.SettingsHomeController
 import wherevercode.agent.ui.SettingsSections
 import wherevercode.agent.ui.TeamChannelController
 import wherevercode.agent.ui.TeamChannelSnapshot
+import wherevercode.agent.ui.MessageCenterController
+import wherevercode.agent.core.message.MessageCenterChannelSource
+import wherevercode.agent.core.message.MessageCenterEntry
+import wherevercode.agent.core.message.MessageCenterLoader
+import wherevercode.agent.core.message.MessageCenterSnapshot
 import wherevercode.agent.ui.ConsoleSnapshot
 import wherevercode.agent.ui.ConsoleWsFeed
 import wherevercode.agent.ui.EventGroupViews
@@ -420,6 +428,13 @@ class MainActivity : AppCompatActivity() {
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天。 */
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
+
+    /** P3-MSG 三期（2026-11-20）：消息中心（@我 / 未读 / 任务回执聚合，只读）。 */
+    private lateinit var screenMessageCenter: View
+    private lateinit var messageCenterController: MessageCenterController
+    /** 正在进行的消息中心刷新（后台线程）；进行中时新刷新跳过。 */
+    @Volatile
+    private var messageCenterRefreshRunning = false
     private var teamChannelFeed: McpChannelEventFeed? = null
     /**
      * 当前 feed 实际订阅的频道 id（推送主模式整改，2026-11-20）：feed 绑
@@ -437,6 +452,13 @@ class MainActivity : AppCompatActivity() {
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val teamChannelSelfAgentIds =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** 频道 feed 最近一次上报的连接状态（按频道记；设置摘要与频道页共用同一口径）。 */
+    @Volatile
+    private var teamChannelLastConnectionState: ChannelConnectionState? = null
+
+    @Volatile
+    private var teamChannelLastConnectionChannelId: String? = null
     /** 本会话已发轮次（发一条消息计一轮；上限见 TeamChatLimits.MAX_ROUNDS）。 */
     private var teamChannelRoundsUsed = 0
     /** 频道补全一期：本会话从频道显式派发的任务卡（回显用，任务本体在任务列表）。 */
@@ -453,6 +475,20 @@ class MainActivity : AppCompatActivity() {
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
     private var teamChannelSearchQuery = ""
     private var teamChannelSearchResults: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
+    /** №12 历史浏览窗口（搜索跳原文/日期跳转；null = 实时消息）。 */
+    private var teamChannelBrowseMessages: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
+    private var teamChannelBrowseHighlightId: String? = null
+    private var teamChannelBrowseHasOlder = false
+    private var teamChannelBrowseHasNewer = false
+    /** 输入中信令：正在输入成员名称（零 token）。 */
+    private var teamChannelTypingSender: String? = null
+    /** 激活的自由话题根消息 id（非空时仅聚焦该话题串）。 */
+    private var teamChannelActiveTopicRootId: String? = null
+    /** 218 分段二（0 消息 1 文件 2 任务）与文件分段缓存（按频道 id）。 */
+    private var teamChannelSectionTab = 0
+    private var teamChannelFiles: List<wherevercode.agent.core.agent.PlatformChannelMessage> = emptyList()
+    private var teamChannelFilesChannelId: String? = null
+    private var teamChannelFilesLoaded = false
     /** 频道刷新在后台运行，期间收到的刷新请求合并为下一轮。 */
     private var teamChannelRefreshRunning = false
     private var teamChannelRefreshPending = false
@@ -469,6 +505,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inputPrompt: EditText
     /** V5 Phase B C2（批 2）：发送按钮与 + 号按钮（输入状态驱动发送）。 */
     private lateinit var buttonSend: View
+    private val dictateDraft = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val words = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!words.isNullOrBlank()) inputPrompt.append(words)
+        }
+    }
+
     private lateinit var buttonPlus: View
     /** V5 按主流改（maintainer 2026-11-11）：“+”菜单附件——待发送的附件与输入框上方条带。 */
     private val pendingAttachments = mutableListOf<ChatAttachment>()
@@ -501,8 +544,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var brainStatus: TextView
     private lateinit var brainDisplayNameView: TextView
-    /** 阶段 A：聊天顶部“当前设备 · 对话方”横幅（screen_chat.xml）。 */
-    private lateinit var chatRouteBanner: TextView
+    /** 直连 Agent 开关 chip（项目 chip 下方，仅远程设备 Agent 对话出现）。 */
+    private lateinit var buttonDirectMode: TextView
     private lateinit var buttonSignInChatGpt: Button
     private lateinit var buttonSignOut: Button
     private lateinit var cloudflareStatus: TextView
@@ -545,6 +588,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var platformTokenStatus: TextView
     private lateinit var platformTokenAgentId: EditText
     private lateinit var platformTokenName: EditText
+    private lateinit var platformConnectionAddressField: EditText
+    private lateinit var platformConnectionAddressState: TextView
+    private lateinit var platformConnectionCredentialInput: EditText
+    private lateinit var platformConnectionCredentialState: TextView
+    private lateinit var platformConnectionChannelState: TextView
+    private lateinit var platformManualChannelId: EditText
+    private lateinit var platformConnectionSummaryAddress: TextView
+    private lateinit var platformConnectionSummaryAddressState: TextView
+    private lateinit var platformConnectionSummaryPlatformState: TextView
+    private lateinit var platformConnectionSummaryConnectionState: TextView
+    private lateinit var platformConnectionSummaryCredentialState: TextView
 
     // V5 C3-C：设置页大脑多模式登陆（统一列表 / SIWC 模型选择 /
     // 通用 MODEL_API 表单 / CLI 行 / 换号·取消）。
@@ -654,6 +708,7 @@ class MainActivity : AppCompatActivity() {
      * 已删除，不留两种状态源（方案 §1.2）。
      */
     private var currentEntry: String = DrawerController.ID_NEW_CONVERSATION
+    private var consoleSubpageBackTarget: String? = null
     private var lastEntry: String = DrawerController.ID_NEW_CONVERSATION
     /** 阶段 3（U3/批 3a）：任务详情浮层（复用设置浮层的宿主模式）。 */
     private var taskDetailVisible = false
@@ -849,6 +904,9 @@ class MainActivity : AppCompatActivity() {
      */
     private val platformCredentialStore: PlatformAgentCredentialStore by lazy {
         PlatformAgentCredentialStore.create(applicationContext)
+    }
+    private val platformConnectionStore: PlatformConnectionStore by lazy {
+        PlatformConnectionStore(applicationContext)
     }
 
     /** 云端 Agent 凭证存储（V5，2026-11-11）：每云端 Agent 一把随机 Bearer 钥匙，只存本机 Keystore。 */
@@ -1115,6 +1173,7 @@ class MainActivity : AppCompatActivity() {
         // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
         // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
         window.decorView.post { handleFlagshipEntryIntent(intent) }
+        window.decorView.post { handleChannelDeepLink(intent) }
         // V5 按主流改（maintainer 2026-11-11）：“+”菜单附件选择器与相机权限。
         // 必须在 onCreate 里注册（Activity 结果回调的注册点）。
         registerAttachmentLaunchers()
@@ -1245,12 +1304,11 @@ class MainActivity : AppCompatActivity() {
             onEntrySelected = { id -> onDrawerEntrySelected(id) },
             onPrefsChanged = { saveDrawerPrefs() },
             activeTargetProvider = { currentEntry },
-            userLabelProvider = { drawerUserLabel() },
+            userLabelProvider = { "开发者" },
             themeLabelProvider = { currentThemeLabel() },
             recentSessionsProvider = { cachedRecentSessions },
             onDeleteSession = { sessionId -> confirmDeleteSession(sessionId, "") },
             onNewConversation = { newConversationAndShow() },
-            onOpenFeatureCenter = { showFeatureCenterDialog() },
         ).also { view ->
             drawerContainer.addView(view.root)
         }
@@ -1567,6 +1625,7 @@ class MainActivity : AppCompatActivity() {
             onOpenScreen = { entryId -> showEntry(entryId) },
             onCycleTheme = { cycleTheme() },
             onTodo = { title -> toast("【待开发】$title 尚未开发") },
+            platformAddress = ::normalizedConsolePlatformRoot,
             platformStatus = {
                 if (platformCredentialStore.loadPlatformToken() != null) "平台已配置（凭证已存本机）"
                 else "平台未配置（本地优先）"
@@ -1609,9 +1668,9 @@ class MainActivity : AppCompatActivity() {
             onOpenTask = { taskId -> openTaskDetail(taskId) },
             onOpenFile = { path -> openDetailFile(path) },
             onOpenChat = { showEntry(DrawerController.ID_NEW_CONVERSATION) },
-            onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
-            onOpenAgents = { showEntry(DrawerController.ID_AGENTS_TEAM) },
-            onOpenModels = { showEntry(DrawerController.ID_MODELS) },
+            onOpenDevices = { openConsoleSubpage(DrawerController.ID_DEVICES) },
+            onOpenAgents = { openConsoleSubpage(DrawerController.ID_AGENTS_TEAM) },
+            onOpenModels = { openConsoleSubpage(DrawerController.ID_MODELS) },
             modelsCount = {
                 // 差异 9（B3）：角标只数独立模型存储中模型页会显示的
                 // 条目（与 refreshModelList 同一份 buildRows 可见性
@@ -1626,8 +1685,8 @@ class MainActivity : AppCompatActivity() {
                 ).size
             },
             onRefresh = { refreshConsole() },
-            onOpenTasks = { showEntry(DrawerController.ID_TASKS) },
-            onOpenMcp = { showEntry(DrawerController.ID_MCP_PLUGINS) },
+            onOpenTasks = { openConsoleSubpage(DrawerController.ID_TASKS) },
+            onOpenMcp = { openConsoleSubpage(DrawerController.ID_MCP_PLUGINS) },
             onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
             onToast = { msg -> toast(msg) },
             platformRoot = { normalizedConsolePlatformRoot() },
@@ -1681,7 +1740,10 @@ class MainActivity : AppCompatActivity() {
             onCreateNew = { showChannelCreateMenu() },
             onSwitchChannel = { channelId ->
                 teamChannelActiveId = channelId
+                if (!teamChannelDmMode) saveActiveChannelId(channelId)
                 teamChannelSearchResults = null
+                teamChannelBrowseMessages = null
+                teamChannelBrowseHighlightId = null
                 // 推送跟看的频道走：重订 WS（阻塞①修法），再刷新。
                 startTeamChannelFeed()
                 refreshTeamChannel()
@@ -1718,17 +1780,52 @@ class MainActivity : AppCompatActivity() {
                 refreshTeamChannel()
             },
             onSearch = { query -> searchTeamChannel(query) },
+            onSearchFiltered = { query, sender, fromTs, toTs, kind ->
+                searchTeamChannel(query, sender, fromTs, toTs, kind)
+            },
+            onJumpToMessage = { message -> jumpToTeamChannelMessage(message) },
+            onBrowseLoadOlder = { browseTeamChannelOlder() },
+            onBrowseLoadNewer = { browseTeamChannelNewer() },
+            onExitBrowse = {
+                teamChannelBrowseMessages = null
+                teamChannelBrowseHighlightId = null
+                refreshTeamChannel()
+            },
+            onJumpToDate = { fromTs -> jumpToTeamChannelDate(fromTs) },
+            onHistoryVisibleChange = { visible -> setTeamChannelHistoryVisible(visible) },
+            onSectionTabChange = { tab ->
+                teamChannelSectionTab = tab
+                if (tab == 1) ensureChannelFilesLoaded()
+                refreshTeamChannel()
+            },
             onClearSearch = {
                 teamChannelSearchQuery = ""
                 teamChannelSearchResults = null
+                teamChannelBrowseMessages = null
+                teamChannelBrowseHighlightId = null
                 refreshTeamChannel()
             },
             onOpenAttachmentRef = { ref -> openAttachmentRef(ref) },
             onRequestAttachmentRef = { showAttachmentRefInput() },
+            onSelectTopicThread = { rootId ->
+                teamChannelActiveTopicRootId = rootId
+                refreshTeamChannel()
+            },
         )
         screenTeamChannel = teamChannelController.root
         container.addView(screenTeamChannel)
         screenTeamChannel.visibility = View.GONE
+        // P3-MSG：消息中心屏（只读聚合；注册表 feature_message_center 仍
+        // TODO，翻转留到组装步；入口走频道页“＋ 新建”菜单与字面 id 路由）。
+        messageCenterController = MessageCenterController(
+            this,
+            onRefresh = { refreshMessageCenter() },
+            onOpenEntry = { entry -> openMessageCenterEntry(entry) },
+            onClose = { showEntry(DrawerController.ID_TEAM_CHANNEL) },
+        )
+        screenMessageCenter = messageCenterController.root
+        container.addView(screenMessageCenter)
+        screenMessageCenter.visibility = View.GONE
         screenChat.visibility = View.VISIBLE
         screenProjects.visibility = View.GONE
         screenTasks.visibility = View.GONE
@@ -1884,11 +1981,18 @@ class MainActivity : AppCompatActivity() {
             EntryScreen.CONSOLE -> DrawerController.ID_CONSOLE
             EntryScreen.MCP_PLUGINS -> DrawerController.ID_MCP_PLUGINS
             EntryScreen.TEAM_CHANNEL -> DrawerController.ID_TEAM_CHANNEL
+            EntryScreen.MESSAGE_CENTER -> DrawerRouter.ID_MESSAGE_CENTER
         }
+        if (entry != consoleSubpageBackTarget) consoleSubpageBackTarget = null
         if (!isSettingsEntry(entry)) lastEntry = entry
         currentEntry = entry
         screenChat.visibility = if (screen == EntryScreen.HOME) View.VISIBLE else View.GONE
         screenProjects.visibility = if (screen == EntryScreen.PROJECTS) View.VISIBLE else View.GONE
+        // 项目页统一设计（Funk 2026-11-22 定，双端完全一致）：项目页自带页眉
+        // （☰＋项目＋新建项目，与 iOS 同式），进项目页时藏掉全局顶栏，
+        // 离开恢复；页内 ☰ 仍开同一个抽屉。
+        findViewById<View>(R.id.topBar).visibility =
+            if (screen == EntryScreen.PROJECTS) View.GONE else View.VISIBLE
         screenTasks.visibility = if (screen == EntryScreen.TASKS) View.VISIBLE else View.GONE
         screenAgents.visibility =
             if (screen == EntryScreen.AGENTS || screen == EntryScreen.DEVICES) View.VISIBLE else View.GONE
@@ -1905,6 +2009,7 @@ class MainActivity : AppCompatActivity() {
         screenConsole.visibility = if (screen == EntryScreen.CONSOLE) View.VISIBLE else View.GONE
         screenMcpPlugins.visibility = if (screen == EntryScreen.MCP_PLUGINS) View.VISIBLE else View.GONE
         screenTeamChannel.visibility = if (screen == EntryScreen.TEAM_CHANNEL) View.VISIBLE else View.GONE
+        screenMessageCenter.visibility = if (screen == EntryScreen.MESSAGE_CENTER) View.VISIBLE else View.GONE
         // 离开控制台即停自动刷新（不空转耗电）；进入时由 CONSOLE 分支起 ticker。
         if (screen != EntryScreen.CONSOLE) stopConsoleTicker()
         // 离开频道即停 WS 订阅与兜底轮询（不空转耗电）；进入时由 TEAM_CHANNEL 分支重起。
@@ -1952,7 +2057,22 @@ class MainActivity : AppCompatActivity() {
                 refreshTeamChannel()
                 startTeamChannelFeed()
             }
+            EntryScreen.MESSAGE_CENTER -> refreshMessageCenter()
         }
+    }
+
+    private fun openConsoleSubpage(entryId: String) {
+        val supported = setOf(
+            DrawerController.ID_DEVICES,
+            DrawerController.ID_AGENTS_TEAM,
+            DrawerController.ID_MODELS,
+            DrawerController.ID_MCP_PLUGINS,
+            DrawerController.ID_TASKS,
+        )
+        consoleSubpageBackTarget = entryId.takeIf {
+            currentEntry == DrawerController.ID_CONSOLE && it in supported
+        }
+        showEntry(entryId)
     }
 
     /** 设置页与“工具与连接”入口共用同一屏；返回键与 lastEntry 按设置处理。
@@ -1979,6 +2099,8 @@ class MainActivity : AppCompatActivity() {
         settingsHomeController.root.visibility = View.GONE
         SettingsSections.apply(settingsRootLayout(), section)
         setSettingsHeaderTitle(section.title)
+        if (section == SettingsSections.Section.CONNECTIONS) refreshPlatformConnectionSummary()
+        if (section == SettingsSections.Section.TOKEN) refreshPlatformConnectionForm()
         (screenSettings as ScrollView).scrollTo(0, 0)
     }
 
@@ -2317,7 +2439,16 @@ class MainActivity : AppCompatActivity() {
         chatComposer = screenChat.findViewById(R.id.inputBox)
         inputPrompt = screenChat.findViewById(R.id.inputPrompt)
         approvalBanner = screenChat.findViewById(R.id.approvalBanner)
-        chatRouteBanner = screenChat.findViewById(R.id.chatRouteBanner)
+        buttonDirectMode = screenChat.findViewById(R.id.buttonDirectMode)
+        buttonDirectMode.setOnClickListener {
+            // 直连开关：关了就是真的关了（大脑不再拦截该对话的
+            // 消息）；开了就只跟该 Agent 说话。切换后立刻刷新，
+            // 状态马上可见。
+            if (::chatViewModel.isInitialized) {
+                chatViewModel.setDirectAgentMode(!chatViewModel.isDirectAgentMode())
+                updateChatRouteBanner()
+            }
+        }
         chatControls = screenChat.findViewById(R.id.chatControls)
         buttonChatPause = screenChat.findViewById(R.id.buttonChatPause)
         buttonChatStop = screenChat.findViewById(R.id.buttonChatStop)
@@ -2337,6 +2468,18 @@ class MainActivity : AppCompatActivity() {
         buttonPlus = screenChat.findViewById(R.id.buttonPlus)
         buttonSend.setOnClickListener { sendPrompt() }
         buttonPlus.setOnClickListener { showPlusMenu() }
+        screenChat.findViewById<View>(R.id.buttonDictateDraft).setOnClickListener {
+            val speech = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            try {
+                dictateDraft.launch(speech)
+            } catch (_: android.content.ActivityNotFoundException) {
+                toast("本机未安装语音识别服务")
+            }
+        }
+        screenChat.findViewById<View>(R.id.buttonVoiceWaveform).setOnClickListener {
+            toast("语音模式暂未开放")
+        }
         // V5 C2（批 2）：输入框状态驱动发送按钮（HomeScreenController）。
         inputPrompt.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(
@@ -2424,6 +2567,10 @@ class MainActivity : AppCompatActivity() {
         val canSend = homeScreenController.canSend(allowEmptyText = pendingAttachments.isNotEmpty())
         // 对话组件收敛：发送状态呈现走共用输入区组件（enabled + alpha）。
         chatComposer.setSendEnabled(canSend)
+        val showWaveform = inputPrompt.text.isNullOrBlank() && pendingAttachments.isEmpty()
+        screenChat.findViewById<View>(R.id.buttonVoiceWaveform).visibility =
+            if (showWaveform) View.VISIBLE else View.GONE
+        buttonSend.visibility = if (showWaveform) View.GONE else View.VISIBLE
     }
 
     /** V5-UI：+ 号菜单是底部抽屉“添加到对话”（Claude 参照），只放真实可用的操作。 */
@@ -3725,6 +3872,10 @@ class MainActivity : AppCompatActivity() {
         }
         toast("项目已添加：$displayName（${deviceDisplayName(deviceId)} · $folder）")
         projectController.refresh()
+        if (bindChatToNextCreatedProject) {
+            bindChatToNextCreatedProject = false
+            setChatProject(slug)
+        }
         syncProjectFolderAuthorization(deviceId, folder, displayName)
     }
 
@@ -3995,6 +4146,10 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             assignGitHostHome(existing.copy(repoUrl = url))
+            if (bindChatToNextCreatedProject) {
+                bindChatToNextCreatedProject = false
+                setChatProject(existing.projectId)
+            }
             return
         }
         val slug = uniqueProjectSlug(parsed.repoName)
@@ -4017,6 +4172,10 @@ class MainActivity : AppCompatActivity() {
         toast("项目已添加：$displayName（${parsed.host.displayName} · ${parsed.namespacePath}）")
         linkExistingCheckout(Project(projectId = slug, name = displayName, repoUrl = url), parsed.repoName)
         projectController.refresh()
+        if (bindChatToNextCreatedProject) {
+            bindChatToNextCreatedProject = false
+            setChatProject(slug)
+        }
     }
 
     /**
@@ -4102,7 +4261,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showOpenFolderEntry(forProjectId: String? = null) {
         val options = openFolderEntryOptions()
-        ListDialog.showWithDescriptions(
+        ListDialog.showCardWithDescriptions(
             this,
             "打开文件夹",
             "选一个位置打开它作为项目之家。",
@@ -4257,6 +4416,10 @@ class MainActivity : AppCompatActivity() {
         }
         toast("项目已添加：$displayName（本机 · $relativePath）")
         projectController.refresh()
+        if (bindChatToNextCreatedProject) {
+            bindChatToNextCreatedProject = false
+            setChatProject(slug)
+        }
     }
 
     /**
@@ -4364,8 +4527,12 @@ class MainActivity : AppCompatActivity() {
         chatProjectBinding.projectId
     }
 
+    /** 聊天选项目里点「新建项目」后置起：下一个新建成功的项目自动绑到聊天（建好自动切过去）。 */
+    private var bindChatToNextCreatedProject = false
+
     /** 切换聊天项目（点项目行 / 聊天选项目入口都走这里）：立即生效，横幅即时更新。 */
     private fun setChatProject(projectId: String?) {
+        bindChatToNextCreatedProject = false
         chatProjectBinding.setProject(projectId)
         updateChatRouteBanner()
     }
@@ -4409,10 +4576,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 聊天选项目（2026-11-11，maintainer：新对话清空绑定后聊天里选不了项目）。
-     * 弹出已注册项目列表，点即切换聊天绑定（[setChatProject]，横幅立即
-     * 更新）；无项目时不编假条目，给“去项目页添加”入口。项目页入口仍在
-     * 对话框的“打开项目页”按钮里（"+" 菜单 → 项目原来是进项目页）。
+     * 聊天选项目（2026-11-22 双端统一，对齐 GPT/Claude 项目模式）：
+     * 聊天层只选项目——卡片名单 = 沙盒（无项目）+ 已建项目（当前
+     * 打勾）+「新建项目」；点即切换聊天绑定（[setChatProject]，横幅
+     * 立即更新）。来源（本机 / 设备 / git）只在新建项目时选：
+     * 「新建项目」当场打开统一的「打开文件夹」来源对话框，建好
+     * 自动切过去（[bindChatToNextCreatedProject]）。无项目时不编
+     * 假条目，名单里只有沙盒与新建项目两行。
      */
     private fun showChatProjectPicker() {
         val projects = try {
@@ -4420,21 +4590,43 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             emptyList()
         }
-        ChatProjectPickerDialog.show(
-            context = this,
-            projects = projects,
-            homeLabel = ::projectHomeLabel,
-            onPick = { projectId ->
-                setChatProject(projectId)
-                val name = try {
-                    projectStore.getProject(projectId)?.name
-                } catch (_: Exception) {
-                    null
-                } ?: projectId
-                toast("聊天已切换到项目：$name")
+        val currentId = chatProjectBinding.projectId
+        val rows = mutableListOf<Pair<String, String>>()
+        rows += "App 沙盒（无项目）" to "本机 · 只读对话"
+        projects.forEach { project -> rows += project.name to projectHomeLabel(project) }
+        rows += "＋ 新建项目" to "从本机、已配对设备或 git 仓库添加"
+        val selectedIndex = if (currentId == null) {
+            0
+        } else {
+            projects.indexOfFirst { it.projectId == currentId } + 1
+        }
+        ListDialog.showCardWithDescriptions(
+            this,
+            "选择项目",
+            if (projects.isEmpty()) {
+                "还没有建好的项目。先聊也行，建好后自动切过去。"
+            } else {
+                "选一个项目作为当前对话的项目。"
             },
-            onOpenProjects = { showEntry(DrawerController.ID_PROJECTS) },
-        )
+            rows,
+            selectedIndex = selectedIndex,
+        ) { which ->
+            when {
+                which == 0 -> {
+                    setChatProject(null)
+                    toast("聊天已切换到：App 沙盒（无项目）")
+                }
+                which == rows.lastIndex -> {
+                    bindChatToNextCreatedProject = true
+                    showOpenFolderEntry()
+                }
+                else -> {
+                    val project = projects[which - 1]
+                    setChatProject(project.projectId)
+                    toast("聊天已切换到项目：${project.name}")
+                }
+            }
+        }
     }
 
     /** 选项目列表 / 横幅里的家标签：当前家的标签（不是家的列表第一项）。 */
@@ -4966,6 +5158,11 @@ class MainActivity : AppCompatActivity() {
                 turnRevisions[turn.id] = turn.revision
             }
         }
+        messageList.gravity = if (state.turns.isEmpty()) {
+            android.view.Gravity.CENTER_VERTICAL
+        } else {
+            android.view.Gravity.TOP
+        }
         if (state.turns.isEmpty()) {
             // V5 C2（批 2）：问候只在“未手动关闭、且尚未开始聊天”时出现。
             if (homeScreenController.greetingVisible()) {
@@ -5106,6 +5303,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         window.decorView.post { handleFlagshipEntryIntent(intent) }
+        window.decorView.post { handleChannelDeepLink(intent) }
     }
 
     private fun handleFlagshipEntryIntent(intent: Intent?) {
@@ -5182,16 +5380,6 @@ class MainActivity : AppCompatActivity() {
             projectList = screenProjects.findViewById(R.id.projectList),
             projectListEmpty = screenProjects.findViewById(R.id.projectListEmpty),
             filterRow = screenProjects.findViewById(R.id.projectFilterRow),
-            buttonImportLocal = screenProjects.findViewById(R.id.buttonImportLocal),
-            buttonImportGit = screenProjects.findViewById(R.id.buttonImportGit),
-            buttonImportDevice = screenProjects.findViewById(R.id.buttonImportDevice),
-            // 照片走查批 C：导入行后四项（与 iOS 同序同文案）。
-            buttonBrowseFiles = screenProjects.findViewById(R.id.buttonBrowseFiles),
-            buttonStartChat = screenProjects.findViewById(R.id.buttonStartChat),
-            buttonGitTree = screenProjects.findViewById(R.id.buttonGitTree),
-            buttonPreview = screenProjects.findViewById(R.id.buttonPreview),
-            onOpenDevices = { showEntry(DrawerController.ID_DEVICES) },
-            onStartConversation = { showEntry(DrawerController.ID_NEW_CONVERSATION) },
             projectStore = projectStore,
             deviceDisplayName = { deviceId -> deviceDisplayName(deviceId) },
             // “打开文件夹”是唯一入口（2026-11-12，maintainer：项目来源收成一个）：
@@ -5215,8 +5403,14 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
+        // 创建入口只留一个（Funk 2026-11-22 定）：页眉「新建项目」，
+        // 点开走「打开文件夹」，与 iOS 一致；空态不再另放按钮。
         screenProjects.findViewById<View>(R.id.buttonNewProject)?.setOnClickListener {
             showOpenFolderEntry()
+        }
+        // 项目页页内 ☰（统一设计）：与顶栏 ☰ 同一个抽屉。
+        screenProjects.findViewById<View>(R.id.buttonProjectsMenu)?.setOnClickListener {
+            openDrawer()
         }
         // 照片走查批 C：右上角刷新钮已删（iOS 项目页没有），刷新走列表重画。
         screenProjects.findViewById<View>(R.id.buttonCodeBack).setOnClickListener {
@@ -5976,20 +6170,19 @@ class MainActivity : AppCompatActivity() {
     // V5 团队频道（P3，2026-11-11）：有界团队聊天。
     // ------------------------------------------------------------------
 
-    /**
-     * 频道端点（host，channelId）：取第一条地址和频道均已配置的平台
-     * Agent 记录。公开构建没有预置这些值；未配置时频道页显示配置指引。
-     */
+    /** 频道端点（host，channelId）：使用 App 级地址、Keystore 凭证和当前频道。 */
     private fun teamChannelEndpoint(): Pair<String, String>? {
-        if (platformCredentialStore.loadPlatformToken().isNullOrBlank()) return null
-        val records = try {
-            agentStore.listAgents()
+        val hasCredential = try {
+            !platformCredentialStore.loadPlatformToken().isNullOrBlank()
         } catch (_: Exception) {
-            emptyList()
-        }.filter { PlatformAgent.isPlatformAgentRecord(it) }
-        val record = records.firstOrNull { !it.platformHost.isNullOrBlank() } ?: return null
-        val host = record.platformHost!!.trim()
-        val channelId = record.platformChannelId?.trim().takeIf { !it.isNullOrBlank() }
+            false
+        }
+        if (!hasCredential) return null
+        val host = resolvedPlatformHost()
+        if (host.isBlank()) return null
+        val record = firstPlatformAgentRecord()
+        val channelId = savedActiveChannelId()
+            ?: record?.platformChannelId?.trim()?.takeIf { it.isNotBlank() }
             ?: PlatformAgent.V5_CHANNEL_ID
         if (channelId.isBlank()) return null
         return host to channelId
@@ -5999,14 +6192,36 @@ class MainActivity : AppCompatActivity() {
      * 频道成员（maintainer 2026-11-11 22:19：全部 Agent 拉入频道）：本机 App
      * 打头 + 注册表里的全部 Agent（[buildChannelMembers]，注册表顺序，
      * 按 agentId 去重）。平台 Agent 标出来——它是端点直连成员。
+     *
+     * 再并入平台口径的当前频道成员（[mergePlatformChannelMembers]）：
+     * 频道列表缓存在每次刷新时先于快照更新，当前频道的 participants
+     * 就是平台为准的全体成员——只在本机加过的 Agent 不等于频道成员，
+     * 私聊名单（私聊只给频道成员）与成员行都以这份合并表为准。
      */
-    private fun teamChannelMembers(): List<TeamChannelMember> {
+    private fun teamChannelMembers(): List<TeamChannelMember> =
+        visibleTeamChannelMembers(mergedTeamChannelMembers())
+
+    /** 合并表（未套成员行可见性过滤）：本地成员 + 平台当前频道 participants。 */
+    private fun mergedTeamChannelMembers(): List<TeamChannelMember> {
         val agents = try {
             agentStore.listAgents()
         } catch (_: Exception) {
             emptyList()
         }
-        return visibleTeamChannelMembers(buildChannelMembers(agents))
+        val participants = teamChannelChannelsCache
+            .firstOrNull { it.id == activeTeamChannelId() }
+            ?.participantDetails
+            .orEmpty()
+        return mergePlatformChannelMembers(buildChannelMembers(agents), participants)
+    }
+
+    /** 私聊发起名单（频道全体成员减本机自己；不套 app 隐藏，理由见 dmCandidates）。 */
+    private fun teamChannelDmCandidates(): List<TeamChannelMember> {
+        // 本机平台身份：已学到的 selfAgentIds + 频道端点用的第一条平台 Agent 记录的
+        // agentId（服务端 participants 不带 is_self，只能靠本机口径排自己）。
+        val selfIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } +
+            listOfNotNull(firstPlatformAgentRecord()?.agentId?.trim()?.takeIf { it.isNotBlank() })
+        return dmCandidates(mergedTeamChannelMembers(), selfIds)
     }
 
     /** 已读标记（本机持久化，键按频道分；服务端标记由 markTeamChannelRead 同步推）。 */
@@ -6032,9 +6247,7 @@ class MainActivity : AppCompatActivity() {
         if (endpoint == null) {
             return TeamChannelSnapshot(
                 configured = false,
-                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
-                    "并在表单的平台凭证栏填入 App 的平台凭证" +
-                    "（由你的平台管理员签发）。",
+                setupHint = "频道还没法连：请到设置里的“平台连接与令牌签发”填写平台地址、保存凭证并选择频道。",
                 channelId = PlatformAgent.V5_CHANNEL_ID,
                 connectionState = ChannelConnectionState.STOPPED,
                 connectionError = null,
@@ -6050,18 +6263,23 @@ class MainActivity : AppCompatActivity() {
         val activeId = teamChannelActiveId ?: channelId
         val (messages, feed) = teamChannelFeedSnapshot(activeId)
         val lastReadId = teamChannelLastReadId(activeId)
+        // 218 计数口径 B（与 iOS 同一定义）：未读只按本机已读游标在
+        // 当前已加载消息内计——无游标计 0 并把游标推到最新、游标
+        // 不在列表计全部。不再优先服务端口径，保证两端同数同义；
+        // 服务端已读标记仍照常推（pushTeamChannelReadMark），只是
+        // 不拿它的计数当本页显示值。
         val (unreadCount, unreadCapped) = if (lastReadId == null) {
             messages.lastOrNull()?.let { saveTeamChannelLastReadId(activeId, it.id) }
             0 to false
         } else {
-            // 未读数改走服务端口径（onlyUnread 原样透传）：已读过的不再
-            // 计入，别处不再重复通知；服务端问不到时回落本地口径。
-            serverTeamChannelUnread(host, activeId) ?: run {
-                val index = messages.indexOfFirst { it.id == lastReadId }
-                val count = if (index < 0) messages.size else messages.size - index - 1
-                count to false
-            }
+            val index = messages.indexOfFirst { it.id == lastReadId }
+            val count = if (index < 0) messages.size else messages.size - index - 1
+            count to false
         }
+        val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeId }
+        val selfIdsForRole = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() }
+        val myHistoryRole = activeSummary?.participantDetails
+            ?.firstOrNull { it.isSelf || it.agentId in selfIdsForRole }?.role
         return TeamChannelSnapshot(
             configured = true,
             setupHint = "",
@@ -6070,6 +6288,7 @@ class MainActivity : AppCompatActivity() {
                 ?: ChannelConnectionState.STOPPED,
             connectionError = feed?.lastError,
             members = teamChannelMembers(),
+            dmCandidates = teamChannelDmCandidates(),
             messages = messages,
             unreadCount = unreadCount,
             unreadCapped = unreadCapped,
@@ -6097,6 +6316,18 @@ class MainActivity : AppCompatActivity() {
                 .getString("notify_$activeId", "全部") ?: "全部",
             searchQuery = teamChannelSearchQuery,
             searchResults = teamChannelSearchResults,
+            typingSenderName = teamChannelTypingSender,
+            activeTopicThreadRootId = teamChannelActiveTopicRootId,
+            browseMessages = teamChannelBrowseMessages,
+            browseHighlightId = teamChannelBrowseHighlightId,
+            browseHasOlder = teamChannelBrowseHasOlder,
+            browseHasNewer = teamChannelBrowseHasNewer,
+            historyVisible = activeSummary?.historyVisible ?: true,
+            canManageHistory = myHistoryRole == "owner" || myHistoryRole == "coordinator",
+            showHistoryToggle = activeSummary != null && activeSummary.kind == "channel",
+            sectionTab = teamChannelSectionTab,
+            channelFiles = if (teamChannelFilesChannelId == activeId) teamChannelFiles else emptyList(),
+            filesLoaded = teamChannelFilesChannelId == activeId && teamChannelFilesLoaded,
         )
     }
 
@@ -6117,9 +6348,13 @@ class MainActivity : AppCompatActivity() {
 
     /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     private fun showChannelCreateMenu() {
-        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "删除频道", "发起私聊", "创建入帖 Webhook")
+        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "设置成员角色", "删除频道", "发起私聊", "创建入帖 Webhook", "管理 Webhook", "打开消息中心")
         ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
-            if (which == 6) {
+            if (which == 10) {
+                showEntry(DrawerRouter.ID_MESSAGE_CENTER)
+                return@show
+            }
+            if (which == 7) {
                 // 频道补全二期：发起私聊切到私聊分段（方案 A）；新私聊
                 // 从频道成员发起（控制器 onStartDm），不在此凭空建。
                 teamChannelDmMode = true
@@ -6133,18 +6368,24 @@ class MainActivity : AppCompatActivity() {
                 toast("频道未连接；未执行管理操作。")
                 return@show
             }
-            if (which == 7) {
+            if (which == 8) {
                 // 频道补全二期：创建入帖 Webhook（第七节五项之一）。
                 Thread {
                     try {
                         val result = teamChannelTransport(host!!).createChannelWebhook(channelId!!)
-                        val token = result.optString("token", "")
+                        // 服务端真实返回：url_path（复数 channel-webhooks）＋
+                        // secret（只此一次）＋签名说明；没有 token 字段。
+                        val urlPath = result.optString("url_path", "")
+                        val secret = result.optString("secret", "")
+                        val signature = result.optString("signature", "")
                         runOnUiThread {
                             AlertDialog.Builder(this)
                                 .setTitle("频道 Webhook 已创建")
                                 .setMessage(
-                                    "入帖地址路径：/api/open/v1/channel-webhook/$token\n" +
-                                        "令牌只显示这一次，请自行保存；外部系统 POST {\"text\": \"…\"} 即可入帖。",
+                                    "入帖地址路径：$urlPath\n" +
+                                        "密钥（只显示这一次，请自行保存）：$secret\n" +
+                                        signature + "\n" +
+                                        "外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能在「管理 Webhook」里删掉重建。",
                                 )
                                 .setPositiveButton("好", null)
                                 .show()
@@ -6152,6 +6393,46 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         teamChannelNotice =
                             "建 Webhook 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+                        runOnUiThread { refreshTeamChannel() }
+                    }
+                }.start()
+                return@show
+            }
+            if (which == 9) {
+                // 管理 Webhook：列表＋删除（服务端 list/delete 工具现成；
+                // secret 不回显——库里只存哈希，丢了删掉重建）。
+                Thread {
+                    try {
+                        val result = teamChannelTransport(host!!).listChannelWebhooks(channelId!!)
+                        val hooks = result.optJSONArray("webhooks")
+                        val items = mutableListOf<Pair<String, String>>()
+                        if (hooks != null) {
+                            for (i in 0 until hooks.length()) {
+                                val h = hooks.optJSONObject(i) ?: continue
+                                val id = h.optString("webhook_id", "")
+                                if (id.isBlank()) continue
+                                val name = h.optString("name", "").ifBlank { id }
+                                items += id to "$name（建于 ${h.optString("created_at", "")}）"
+                            }
+                        }
+                        runOnUiThread {
+                            if (items.isEmpty()) {
+                                toast("本频道还没有 Webhook。")
+                                return@runOnUiThread
+                            }
+                            ListDialog.show(this, "管理 Webhook", "点一个可删除；删除后原地址立即失效。", items.map { it.second }) { index ->
+                                val (hookId, label) = items[index]
+                                AlertDialog.Builder(this).setTitle("删除这个 Webhook？")
+                                    .setMessage(label)
+                                    .setNegativeButton("取消", null)
+                                    .setPositiveButton("删除") { _, _ ->
+                                        performChannelManagement { it.deleteChannelWebhook(channelId!!, hookId) }
+                                    }.show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        teamChannelNotice =
+                            "取 Webhook 列表失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
                         runOnUiThread { refreshTeamChannel() }
                     }
                 }.start()
@@ -6179,6 +6460,27 @@ class MainActivity : AppCompatActivity() {
                         }.show()
                 }
             } else if (which == 5) {
+                // 角色管理：服务端只许频道 owner 改角色；非 owner 点了
+                // 会拿到真实拒绝原因（与移除/删除同一诚实口径）。
+                val members = mergedTeamChannelMembers().filterNot { it.isLocalApp }
+                if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return@show }
+                val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
+                ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { m ->
+                    m.displayName + "（当前：" + (roleNames.firstOrNull { it.first == m.role }?.second ?: m.role) + "）"
+                }) { index ->
+                    val member = members[index]
+                    ListDialog.show(this, "设置 ${member.displayName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
+                        val newRole = roleNames[roleIndex].first
+                        if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
+                        AlertDialog.Builder(this).setTitle("更改成员角色？")
+                            .setMessage("把 ${member.displayName} 的角色改为${roleNames[roleIndex].second}。")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("更改") { _, _ ->
+                                performChannelManagement { it.setChannelMemberRole(channelId!!, member.agentId, newRole) }
+                            }.show()
+                    }
+                }
+            } else if (which == 6) {
                 AlertDialog.Builder(this).setTitle("删除频道？")
                     .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
                     .setNegativeButton("取消", null)
@@ -6217,6 +6519,111 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { teamChannelNotice = result; toast(result); refreshTeamChannel() }
         }.start()
     }
+    /** 218 文件分段：kind=file/image/link 三次过滤拉取合并去重（后台线程）。 */
+    private fun ensureChannelFilesLoaded() {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        if (teamChannelFilesChannelId == channelId && teamChannelFilesLoaded) return
+        teamChannelFilesChannelId = channelId
+        teamChannelFilesLoaded = false
+        Thread {
+            try {
+                val transport = teamChannelTransport(host)
+                val merged = listOf("file", "image", "link")
+                    .flatMap { kind -> transport.fetchMessages(channelId, limit = 50, kind = kind) }
+                    .distinctBy { it.id }
+                    .sortedBy { it.createdAtSeconds }
+                if (teamChannelFilesChannelId == channelId) {
+                    teamChannelFiles = merged
+                    teamChannelFilesLoaded = true
+                    refreshTeamChannel()
+                }
+            } catch (e: Exception) {
+                if (teamChannelFilesChannelId == channelId) {
+                    teamChannelFilesLoaded = true
+                    teamChannelNotice = "频道文件加载失败：${(e.message ?: e.javaClass.simpleName).take(160)}"
+                    refreshTeamChannel()
+                }
+            }
+        }.start()
+    }
+
+    // ---- 218 深链（路由带 channelId，与 iOS 同语义）----
+    // 入口：wherevercode://channel/<id> 的 VIEW intent（冷启动走
+    // onCreate、后台走 onNewIntent）与 App 内调用 requestOpenChannel。
+    // pending 存 SharedPreferences，登录/连接恢复后由刷新链消费。
+
+    private fun requestOpenChannel(channelId: String) {
+        val id = channelId.trim()
+        if (id.isEmpty()) return
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit().putString("pending_channel_id", id).apply()
+        // 消费在 refreshTeamChannel 的后台线程里做（列表刷新之后）：
+        // 未命中时要发探针请求，不能在主线程跑。
+        refreshTeamChannel()
+    }
+
+    private fun handleChannelDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "wherevercode" && data.host == "channel") {
+            val id = data.pathSegments.firstOrNull().orEmpty()
+            if (id.isNotEmpty()) requestOpenChannel(id)
+        }
+    }
+
+    /**
+     * 消费 pending 频道跳转（在 refreshTeamChannel 的后台线程、频道
+     * 列表缓存刷新之后调用）：列表里有就直达（频道/私聊按 kind）；
+     * 没有按三类异常定性并以提示行告知——格式不对 = 链接无效；
+     * 探针被成员/权限类错误拒绝 = 无权限；不存在类错误 = 已删除。
+     */
+    private fun consumePendingChannelLink() {
+        val prefs = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+        val target = prefs.getString("pending_channel_id", null)?.trim().orEmpty()
+        if (target.isEmpty()) return
+        val (host, _) = teamChannelEndpoint() ?: return // 未配端点：留待配好后消费
+        val summary = teamChannelChannelsCache.firstOrNull { it.id == target }
+        if (summary != null) {
+            prefs.edit().remove("pending_channel_id").apply()
+            teamChannelDmMode = summary.kind == "dm"
+            teamChannelActiveId = target
+            if (!teamChannelDmMode) saveActiveChannelId(target)
+            teamChannelSearchResults = null
+            teamChannelBrowseMessages = null
+            teamChannelNotice = "已打开频道：${summary.name}"
+            startTeamChannelFeed()
+            // 深链的落点必须是频道页本身（与消息中心条目打开频道的
+            // openMessageCenterEntry 同一条导航路）。
+            runOnUiThread { showEntry(DrawerController.ID_TEAM_CHANNEL) }
+            return
+        }
+        if (teamChannelChannelsCache.isEmpty()) return // 列表还没拉到，不定性
+        prefs.edit().remove("pending_channel_id").apply()
+        val hexOk = target.length == 32 && target.all { it in '0'..'9' || it in 'a'..'f' }
+        if (!hexOk) {
+            teamChannelNotice = "链接无效：频道 ID 格式不正确。"
+            runOnUiThread { showEntry(DrawerController.ID_TEAM_CHANNEL) }
+            return
+        }
+        try {
+            teamChannelTransport(host).fetchMessages(target, limit = 1)
+            teamChannelNotice = "无法打开该频道：它不在你的频道列表里。"
+        } catch (e: Exception) {
+            val raw = e.message.orEmpty()
+            teamChannelNotice = when {
+                raw.contains("member") || raw.contains("成员") ||
+                    raw.contains("permission") || raw.contains("权限") ->
+                    "无权限：你不是该频道成员。"
+                raw.contains("not found") || raw.contains("不存在") ||
+                    raw.contains("deleted") || raw.contains("删除") ->
+                    "频道不存在或已删除。"
+                raw.isBlank() -> "无法打开该频道。"
+                else -> raw.take(200)
+            }
+            runOnUiThread { showEntry(DrawerController.ID_TEAM_CHANNEL) }
+        }
+    }
+
     private fun refreshTeamChannel() {
         if (!::teamChannelController.isInitialized) return
         if (teamChannelRefreshRunning) {
@@ -6236,6 +6643,11 @@ class MainActivity : AppCompatActivity() {
                 if (endpoint != null) {
                     teamChannelChannelsCache = teamChannelTransport(endpoint.first).listChannels()
                 }
+            } catch (_: Exception) {
+            }
+            // 218 深链：列表就绪后消费待打开频道（切换在快照组装前生效）。
+            try {
+                consumePendingChannelLink()
             } catch (_: Exception) {
             }
             val snapshot = try {
@@ -6272,6 +6684,78 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /**
+     * P3-MSG：拉取并渲染消息中心（只读聚合）。
+     *
+     * 已读语义（与桩传输测试一起读）：数据经 [MessageCenterLoader] 只用
+     * 既有读接口 pollMessages 拉回——@我/任务回执取普通最新一页
+     * (onlyUnread=false)，未读取 only_unread=true 一页；全程
+     * markRead=false，绝不推进服务端已读标记，频道页的未读状态（探针
+     * 与 mark_read 推送都只属于频道页自己）不会被消息中心误消费。
+     * 拉取失败如实提示，不假装成功。
+     */
+    private fun refreshMessageCenter() {
+        if (!::messageCenterController.isInitialized) return
+        if (messageCenterRefreshRunning) return
+        messageCenterRefreshRunning = true
+        messageCenterController.render(null, loading = true)
+        Thread {
+            val snapshot = try {
+                val endpoint = teamChannelEndpoint()
+                if (endpoint == null) {
+                    MessageCenterSnapshot()
+                } else {
+                    val (host, _) = endpoint
+                    val transport = PlatformChannelMcpTransport(
+                        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                        endpoint = PlatformAgent.mcpEndpoint(host),
+                    )
+                    // 本机身份别名（@我 的判定集合）：本机 App / 协调者，
+                    // 加注册表里启用的本机 Agent（@ 到自己的 Agent 也算 @我，
+                    // 与 ChannelAgentRelay.findMentions 的 @寻址口径同族）。
+                    val agentNames = try {
+                        agentStore.listAgents().enabledAgents()
+                            .flatMap { listOf(it.agentId, it.displayName) }
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    val sources = transport.listChannels()
+                        .filter { !it.archived && it.kind != "dm" }
+                        .map { MessageCenterChannelSource(it.id, it.name) }
+                    runBlocking {
+                        MessageCenterLoader(transport).fetch(
+                            sources,
+                            listOf("我", "本机 App", "协调者") + agentNames,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    messageCenterRefreshRunning = false
+                    if (!::messageCenterController.isInitialized) return@runOnUiThread
+                    messageCenterController.render(
+                        null,
+                        notice = "消息中心刷新失败：${(e.message ?: e.javaClass.simpleName).take(200)}",
+                    )
+                }
+                return@Thread
+            }
+            runOnUiThread {
+                messageCenterRefreshRunning = false
+                if (!::messageCenterController.isInitialized) return@runOnUiThread
+                messageCenterController.render(snapshot)
+            }
+        }.start()
+    }
+
+    private fun openMessageCenterEntry(entry: MessageCenterEntry) {
+        teamChannelDmMode = false
+        teamChannelActiveId = entry.channelId
+        teamChannelSearchResults = null
+        teamChannelActiveTopicRootId = null
+        showEntry(DrawerController.ID_TEAM_CHANNEL)
+    }
+
     /** 快照组装失败时的兜底渲染（只报失败原因，不丢已有消息）。 */
     private fun refreshTeamChannelFallback() {
         val endpoint = teamChannelEndpoint()
@@ -6280,15 +6764,14 @@ class MainActivity : AppCompatActivity() {
         teamChannelController.render(
             TeamChannelSnapshot(
                 configured = endpoint != null,
-                setupHint = "频道还没法连：先去 Agent 页加一个平台 Agent，" +
-                    "并在表单的平台凭证栏填入 App 的平台凭证" +
-                    "（由你的平台管理员签发）。",
+                setupHint = "频道还没法连：请到设置里的“平台连接与令牌签发”填写平台地址、保存凭证并选择频道。",
                 channelId = endpoint?.second.orEmpty(),
                 activeChannelId = activeId,
                 connectionState = feed?.connectionState
                     ?: ChannelConnectionState.STOPPED,
                 connectionError = feed?.lastError,
                 members = teamChannelMembers(),
+                dmCandidates = teamChannelDmCandidates(),
                 messages = messages,
                 unreadCount = 0,
                 unreadCapped = false,
@@ -6357,7 +6840,14 @@ class MainActivity : AppCompatActivity() {
             )
             runOnUiThread { refreshTeamChannel() }
         }
-        feed.onConnectionChange = { _, _ ->
+        feed.onConnectionChange = { state, _ ->
+            // STOPPED 只表示 feed 被停订（离开频道页/切换频道），不是连接
+            // 本身的真实状态；不许它覆盖最后已知状态，否则设置摘要永远
+            // 显示「未连接」，与频道页口径不一致。
+            if (state != ChannelConnectionState.STOPPED) {
+                teamChannelLastConnectionState = state
+                teamChannelLastConnectionChannelId = channelId
+            }
             runOnUiThread {
                 if (teamChannelFeed === feed) refreshTeamChannel()
             }
@@ -6366,10 +6856,19 @@ class MainActivity : AppCompatActivity() {
             teamChannelFeed = feed
             teamChannelFeedChannelId = channelId
         }
+        feed.onTyping = { typing ->
+            runOnUiThread {
+                if (teamChannelFeed === feed) {
+                    teamChannelTypingSender = if (typing.isTyping) typing.senderName else null
+                    refreshTeamChannel()
+                }
+            }
+        }
         feed.start()
     }
 
     private fun stopTeamChannelFeed() {
+        teamChannelTypingSender = null
         val oldFeed = synchronized(teamChannelMessages) {
             val feed = teamChannelFeed
             teamChannelFeed = null
@@ -6384,9 +6883,47 @@ class MainActivity : AppCompatActivity() {
         messages to teamChannelFeed.takeIf { teamChannelFeedChannelId == channelId }
     }
 
-    /** 当前查看的频道 id（切换/私聊时为选中的频道，否则端点默认频道）。 */
+    /** 当前查看的频道 id（切换频道优先，其次本机保存选择，再回落到 Agent/构建默认）。 */
     private fun activeTeamChannelId(): String =
-        teamChannelActiveId ?: teamChannelEndpoint()?.second ?: PlatformAgent.V5_CHANNEL_ID
+        teamChannelActiveId ?: savedActiveChannelId() ?: teamChannelEndpoint()?.second ?: PlatformAgent.V5_CHANNEL_ID
+
+    private fun savedActiveChannelId(): String? =
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .getString(KEY_ACTIVE_CHANNEL_ID, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+    private fun saveActiveChannelId(channelId: String) {
+        val value = channelId.trim()
+        if (value.isEmpty()) return
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACTIVE_CHANNEL_ID, value)
+            .apply()
+    }
+
+    private fun persistActiveTeamChannel(channelId: String) {
+        saveActiveChannelId(channelId)
+        teamChannelActiveId = channelId
+        teamChannelDmMode = false
+    }
+
+    private fun firstPlatformAgentRecord(): AgentRecord? = try {
+        agentStore.listAgents().firstOrNull { PlatformAgent.isPlatformAgentRecord(it) }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun resolvedPlatformHost(): String = try {
+        platformConnectionStore.platformHost(
+            firstPlatformAgentHost = firstPlatformAgentRecord()?.platformHost,
+            buildDefaultHost = PlatformAgent.DEFAULT_PLATFORM_HOST,
+        )
+    } catch (_: Exception) {
+        firstPlatformAgentRecord()?.platformHost?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: PlatformAgent.DEFAULT_PLATFORM_HOST
+    }
 
     private fun teamChannelTransport(host: String) = PlatformChannelMcpTransport(
         tokenProvider = { platformCredentialStore.loadPlatformToken() },
@@ -6619,8 +7156,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 频道内搜索（平台 q）：结果回填快照，列表切到搜索结果。 */
-    private fun searchTeamChannel(query: String) {
-        if (query.isBlank()) {
+    private fun searchTeamChannel(query: String) =
+        searchTeamChannel(query, null, null, null, null)
+
+    /**
+     * №12 带过滤的频道搜索：关键词 + 发言人 + 时间窗 + 分类，参数
+     * 原样透传服务端。关键词为空但带了任一过滤时照样搜（分类索引
+     * 就是 kind 单独成搜）；全空则退出搜索。
+     */
+    private fun searchTeamChannel(
+        query: String,
+        sender: String?,
+        fromTs: Long?,
+        toTs: Long?,
+        kind: String?,
+    ) {
+        if (query.isBlank() && sender == null && fromTs == null && toTs == null && kind == null) {
             teamChannelSearchResults = null
             refreshTeamChannel()
             return
@@ -6629,12 +7180,126 @@ class MainActivity : AppCompatActivity() {
         val channelId = activeTeamChannelId()
         Thread {
             try {
-                teamChannelSearchResults = teamChannelTransport(host).searchMessages(channelId, query)
+                teamChannelSearchResults = teamChannelTransport(host).searchMessages(
+                    channelId, query, sender = sender, fromTs = fromTs, toTs = toTs, kind = kind,
+                )
                 teamChannelSearchQuery = query
                 teamChannelNotice = null
             } catch (e: Exception) {
                 teamChannelNotice =
                     "搜索失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 跳到原文：以目标消息为中心取前后各 25 条，进历史浏览窗口。 */
+    private fun jumpToTeamChannelMessage(target: wherevercode.agent.core.agent.PlatformChannelMessage) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val transport = teamChannelTransport(host)
+                val before = transport.fetchMessages(channelId, limit = 25, beforeId = target.id)
+                val after = transport.fetchMessages(channelId, limit = 25, afterId = target.id)
+                teamChannelBrowseMessages = before + target + after
+                teamChannelBrowseHighlightId = target.id
+                teamChannelBrowseHasOlder = before.size >= 25
+                teamChannelBrowseHasNewer = after.size >= 25
+                teamChannelSearchResults = null
+                teamChannelNotice = null
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "跳到原文失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 跳到日期：从该日 00:00 起的第一页消息进浏览窗口。 */
+    private fun jumpToTeamChannelDate(fromTs: Long) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val page = teamChannelTransport(host)
+                    .fetchMessages(channelId, limit = 100, fromTs = fromTs)
+                if (page.isEmpty()) {
+                    teamChannelNotice = "该日期之后暂无消息。"
+                } else {
+                    teamChannelBrowseMessages = page
+                    teamChannelBrowseHighlightId = page.first().id
+                    teamChannelBrowseHasOlder = true
+                    teamChannelBrowseHasNewer = page.size >= 100
+                    teamChannelSearchResults = null
+                    teamChannelNotice = null
+                }
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "跳到日期失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 浏览窗口往前翻一页（更早）。 */
+    private fun browseTeamChannelOlder() {
+        val current = teamChannelBrowseMessages ?: return
+        val first = current.firstOrNull() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val older = teamChannelTransport(host)
+                    .fetchMessages(channelId, limit = 50, beforeId = first.id)
+                teamChannelBrowseMessages = older + current
+                teamChannelBrowseHasOlder = older.size >= 50
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "加载更早失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 浏览窗口往后翻一页（更新）。 */
+    private fun browseTeamChannelNewer() {
+        val current = teamChannelBrowseMessages ?: return
+        val last = current.lastOrNull() ?: return
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                val newer = teamChannelTransport(host)
+                    .fetchMessages(channelId, limit = 50, afterId = last.id)
+                teamChannelBrowseMessages = current + newer
+                teamChannelBrowseHasNewer = newer.size >= 50
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "加载更新失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            runOnUiThread { refreshTeamChannel() }
+        }.start()
+    }
+
+    /** №12 新成员历史可见开关：服务端校验角色，失败如实提示。 */
+    private fun setTeamChannelHistoryVisible(visible: Boolean) {
+        val (host, _) = teamChannelEndpoint() ?: return
+        val channelId = activeTeamChannelId()
+        Thread {
+            try {
+                teamChannelTransport(host).setHistoryVisible(channelId, visible)
+                teamChannelChannelsCache = teamChannelChannelsCache.map {
+                    if (it.id == channelId) it.copy(historyVisible = visible) else it
+                }
+                teamChannelNotice = if (visible) {
+                    "已开启：新成员可看全部历史。"
+                } else {
+                    "已关闭：新成员只能看入群之后的消息。"
+                }
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "改历史开关失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
             }
             runOnUiThread { refreshTeamChannel() }
         }.start()
@@ -6679,21 +7344,6 @@ class MainActivity : AppCompatActivity() {
      * 探针拉 51 条：超过 50 条即记 capped（界面文案是“50+ 条未读”）。
      * 在频道刷新线程调（已是后台线程），直接 runBlocking。
      */
-    private fun serverTeamChannelUnread(host: String, channelId: String): Pair<Int, Boolean>? {
-        return try {
-            val transport = PlatformChannelMcpTransport(
-                tokenProvider = { platformCredentialStore.loadPlatformToken() },
-                endpoint = PlatformAgent.mcpEndpoint(host),
-            )
-            val unread = runBlocking {
-                transport.pollMessages(channelId, null, 51, onlyUnread = true)
-            }
-            minOf(unread.size, 50) to (unread.size > 50)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     /**
      * 频道刷新后把服务端已读标记推到最新一条（后台线程；失败静默，
      * 下次刷新或手动“标为已读”再推）。只调 pollMessages 的 markRead
@@ -9170,26 +9820,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * 控制台总览的平台根地址。优先已添加平台 Agent 的主机，否则用构建配置；
-     * 都没有时为空串，总览显示「未配置」——平台地址不预置任何默认值。
-     * 控制器初始化早于 [agentStore]，未就绪时只走默认。
-     */
+    /** App 级地址优先；旧平台 Agent 记录与构建默认值作为迁移回落。 */
     private fun normalizedConsolePlatformRoot(): String {
-        val configured = if (::agentStore.isInitialized) {
-            try {
-                agentStore.listAgents()
-                    .firstOrNull { PlatformAgent.isPlatformAgentRecord(it) && !it.platformHost.isNullOrBlank() }
-                    ?.platformHost
-            } catch (_: Exception) {
-                null
-            }
-        } else {
-            null
-        }
-        return ConsoleScreenController.normalizedPlatformRoot(
-            configured?.takeIf { it.isNotBlank() } ?: PlatformAgent.DEFAULT_PLATFORM_HOST,
-        )
+        return ConsoleScreenController.normalizedPlatformRoot(resolvedPlatformHost())
     }
 
     /** 本机 Keystore 里是否已有平台 Token。读失败按未配置，按钮显示「配置 Token」。 */
@@ -9611,9 +10244,210 @@ class MainActivity : AppCompatActivity() {
         if (platformTokenName.text.isNullOrBlank()) {
             platformTokenName.setText(PlatformTokenIssuer.DEFAULT_NAME)
         }
+        bindPlatformConnectionSettings()
         refreshPlatformTokenStatus()
         screenSettings.findViewById<View>(R.id.buttonGeneratePlatformToken)
             .setOnClickListener { generatePlatformToken() }
+    }
+
+    private fun bindPlatformConnectionSettings() {
+        platformConnectionAddressField = screenSettings.findViewById(R.id.platformConnectionAddress)
+        platformConnectionAddressState = screenSettings.findViewById(R.id.platformConnectionAddressState)
+        platformConnectionCredentialInput = screenSettings.findViewById(R.id.platformConnectionCredentialInput)
+        platformConnectionCredentialState = screenSettings.findViewById(R.id.platformConnectionCredentialState)
+        platformConnectionChannelState = screenSettings.findViewById(R.id.platformConnectionChannelState)
+        platformManualChannelId = screenSettings.findViewById(R.id.platformManualChannelId)
+        platformConnectionSummaryAddress = screenSettings.findViewById(R.id.platformConnectionSummaryAddress)
+        platformConnectionSummaryAddressState = screenSettings.findViewById(R.id.platformConnectionSummaryAddressState)
+        platformConnectionSummaryPlatformState = screenSettings.findViewById(R.id.platformConnectionSummaryPlatformState)
+        platformConnectionSummaryConnectionState = screenSettings.findViewById(R.id.platformConnectionSummaryConnectionState)
+        platformConnectionSummaryCredentialState = screenSettings.findViewById(R.id.platformConnectionSummaryCredentialState)
+
+        screenSettings.findViewById<View>(R.id.buttonSavePlatformAddress)
+            .setOnClickListener { savePlatformConnectionAddress() }
+        screenSettings.findViewById<View>(R.id.buttonSavePlatformCredential)
+            .setOnClickListener { savePlatformConnectionCredential() }
+        screenSettings.findViewById<View>(R.id.buttonClearPlatformCredential)
+            .setOnClickListener { clearPlatformConnectionCredential() }
+        screenSettings.findViewById<View>(R.id.buttonLoadPlatformChannels)
+            .setOnClickListener { loadPlatformChannelsForSelection() }
+        screenSettings.findViewById<View>(R.id.buttonSavePlatformManualChannelId)
+            .setOnClickListener { saveManualPlatformChannelId() }
+        refreshPlatformConnectionForm()
+        refreshPlatformConnectionSummary()
+    }
+
+    private fun refreshPlatformConnectionForm() {
+        if (!::platformConnectionAddressField.isInitialized) return
+        platformConnectionAddressField.setText(normalizedConsolePlatformRoot())
+        if (!::platformManualChannelId.isInitialized) return
+        val channelId = savedActiveChannelId()
+            ?: firstPlatformAgentRecord()?.platformChannelId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: PlatformAgent.V5_CHANNEL_ID
+        platformManualChannelId.setText(channelId)
+        refreshPlatformConnectionFormStatus()
+    }
+
+    private fun refreshPlatformConnectionFormStatus() {
+        if (!::platformConnectionAddressState.isInitialized) return
+        val address = normalizedConsolePlatformRoot()
+        platformConnectionAddressState.text =
+            "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
+        platformConnectionCredentialState.text =
+            "凭证状态　" + if (hasSavedPlatformToken()) "已保存" else "未保存"
+        platformConnectionChannelState.text = currentPlatformChannelLabel()
+    }
+
+    private fun savePlatformConnectionAddress() {
+        val host = PlatformConnectionStore.hostFromAddress(
+            platformConnectionAddressField.text?.toString().orEmpty(),
+        )
+        if (host == null) {
+            platformConnectionAddressState.text = "地址状态　地址无效，请填写 HTTPS 平台域名。"
+            return
+        }
+        try {
+            firstPlatformAgentRecord()?.let { agentStore.saveAgent(it.copy(platformHost = host)) }
+            platformConnectionStore.savePlatformHost(host)
+        } catch (e: Exception) {
+            platformConnectionAddressState.text = "地址状态　保存失败"
+            toast("保存平台地址失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
+            return
+        }
+        platformConnectionAddressField.setText("https://$host")
+        refreshPlatformConnectionFormStatus()
+        refreshPlatformConnectionSummary()
+        refreshPlatformTokenStatus()
+        toast("平台地址已保存。")
+    }
+
+    private fun savePlatformConnectionCredential() {
+        val token = platformConnectionCredentialInput.text?.toString().orEmpty()
+        if (token.isBlank()) {
+            toast("请先粘贴平台凭证。")
+            return
+        }
+        try {
+            platformCredentialStore.savePlatformToken(token)
+        } catch (e: Exception) {
+            toast("保存平台凭证失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
+            return
+        }
+        platformConnectionCredentialInput.setText("")
+        refreshPlatformConnectionFormStatus()
+        refreshPlatformConnectionSummary()
+        refreshPlatformTokenStatus()
+        toast("平台凭证已保存到本机 Keystore。")
+    }
+
+    private fun clearPlatformConnectionCredential() {
+        try {
+            platformCredentialStore.clearPlatformToken()
+        } catch (e: Exception) {
+            toast("清除平台凭证失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
+            return
+        }
+        platformConnectionCredentialInput.setText("")
+        refreshPlatformConnectionFormStatus()
+        refreshPlatformConnectionSummary()
+        refreshPlatformTokenStatus()
+        toast("本机平台凭证已清除。")
+    }
+
+    private fun loadPlatformChannelsForSelection() {
+        val host = resolvedPlatformHost()
+        if (host.isBlank()) {
+            toast("请先保存平台地址。")
+            return
+        }
+        if (!hasSavedPlatformToken()) {
+            toast("请先保存平台凭证。")
+            return
+        }
+        platformConnectionChannelState.text = "当前频道　正在加载频道列表…"
+        Thread {
+            val result = runCatching { teamChannelTransport(host).listChannels() }
+            runOnUiThread {
+                if (result.isFailure) {
+                    platformConnectionChannelState.text = "当前频道　频道列表加载失败"
+                    toast("加载频道列表失败：${(result.exceptionOrNull()?.message ?: "未知错误").take(160)}")
+                    return@runOnUiThread
+                }
+                val all = result.getOrDefault(emptyList())
+                teamChannelChannelsCache = all
+                val available = all.filter { it.kind != "dm" && !it.archived }
+                if (available.isEmpty()) {
+                    platformConnectionChannelState.text = "当前频道　平台没有可选择的团队频道"
+                    refreshPlatformConnectionSummary()
+                    return@runOnUiThread
+                }
+                val labels = available.map { "${it.name} · ${it.id}" }.toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("选择平台频道")
+                    .setItems(labels) { _, index ->
+                        val channel = available[index]
+                        persistActiveTeamChannel(channel.id)
+                        platformManualChannelId.setText(channel.id)
+                        platformConnectionChannelState.text =
+                            "当前频道　${channel.name} · ${channel.id}"
+                        refreshPlatformConnectionSummary()
+                        toast("已选择频道：${channel.name}")
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+                refreshPlatformConnectionSummary()
+            }
+        }.start()
+    }
+
+    private fun saveManualPlatformChannelId() {
+        val channelId = platformManualChannelId.text?.toString()?.trim().orEmpty()
+        if (channelId.isBlank()) {
+            toast("频道 ID 不能为空。")
+            return
+        }
+        persistActiveTeamChannel(channelId)
+        platformConnectionChannelState.text = currentPlatformChannelLabel()
+        refreshPlatformConnectionSummary()
+        toast("手动频道 ID 已保存。")
+    }
+
+    private fun currentPlatformChannelLabel(): String {
+        val id = activeTeamChannelId().trim()
+        if (id.isBlank()) return "当前频道　未选择"
+        val name = teamChannelChannelsCache.firstOrNull { it.id == id }?.name
+        return "当前频道　${name?.takeIf { it.isNotBlank() }?.let { "$it · " }.orEmpty()}$id"
+    }
+
+    private fun refreshPlatformConnectionSummary() {
+        if (!::platformConnectionSummaryAddress.isInitialized) return
+        val address = normalizedConsolePlatformRoot()
+        val hasCredential = hasSavedPlatformToken()
+        platformConnectionSummaryAddress.text = "平台地址　" + address.ifBlank { "未配置" }
+        platformConnectionSummaryAddressState.text =
+            "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
+        platformConnectionSummaryPlatformState.text = if (hasCredential) {
+            "平台状态　平台已配置（凭证已存本机）"
+        } else {
+            "平台状态　平台未配置（本地优先）"
+        }
+        val activeId = activeTeamChannelId().trim()
+        val channelName = teamChannelChannelsCache.firstOrNull { it.id == activeId }?.name
+        val channelLabel = when {
+            activeId.isBlank() -> "未选择频道"
+            channelName.isNullOrBlank() -> activeId
+            else -> "$channelName · $activeId"
+        }
+        val feed = if (activeId.isBlank()) null else teamChannelFeedSnapshot(activeId).second
+        // 与频道页同一口径：优先当前 feed 的实时状态；feed 因离开频道页停订时，
+        // 用它最后上报的状态（同一文案函数），不把"离开页面停订"显示成"未连接"。
+        val feedState = feed?.connectionState
+            ?: teamChannelLastConnectionState?.takeIf { teamChannelLastConnectionChannelId == activeId }
+            ?: ChannelConnectionState.STOPPED
+        platformConnectionSummaryConnectionState.text =
+            "连接状态　$channelLabel · ${channelConnectionStateLabel(feedState)}"
+        platformConnectionSummaryCredentialState.text =
+            "凭证状态　" + if (hasCredential) "已保存" else "未保存"
     }
 
     /** 平台令牌分节的状态行：有没有平台凭证、签发走哪个端点。 */
@@ -9627,8 +10461,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 令牌签发用的平台端点：须有 App 的平台凭证；主机取第一条有平台
-     * 地址的平台 Agent 记录；公开版没有预置默认服务端点。
+     * 令牌签发用的平台端点：须有 App 的平台凭证；地址按 App 设置、
+     * 第一条平台 Agent 记录、构建默认值的顺序回落。
      * 没配平台凭证时返回 null——按钮只给提示，不假装能签发。
      */
     private fun platformTokenEndpoint(): String? {
@@ -9640,14 +10474,7 @@ class MainActivity : AppCompatActivity() {
             null
         }
         if (token.isNullOrBlank()) return null
-        val records = try {
-            agentStore.listAgents()
-        } catch (_: Exception) {
-            emptyList()
-        }.filter { PlatformAgent.isPlatformAgentRecord(it) }
-        val host = records.firstOrNull { !it.platformHost.isNullOrBlank() }
-            ?.platformHost?.trim()
-            ?: PlatformAgent.DEFAULT_PLATFORM_HOST
+        val host = resolvedPlatformHost()
         if (host.isBlank()) return null
         return PlatformAgent.mcpEndpoint(host).takeIf { it.isNotBlank() }
     }
@@ -10071,18 +10898,18 @@ class MainActivity : AppCompatActivity() {
      * 与大脑名无关。空白输入恢复默认（删键，见 [BrainDisplayName]）。
      */
     /**
-     * 阶段 A（V5 紧急开发）：聊天顶部显示当前设备与对话方。
-     * 默认会话：“当前设备：本机 · 对话方：<大脑显示名>”；
-     * Agent 会话：“当前设备：<云端/本机（CLI）/远程设备（未接入）> ·
-     * 对话方：<Agent 名>”，未接入的目标缀“（未接入）”。
-     * 每次聊天渲染都刷新（切换会话/新对话/改名都会经过 renderChat
-     * 或 refreshBrainStatus），绝不让顶部显示与实际路由脱节。
+     * 项目 chip 刷新：每次聊天渲染都经过（切换会话/新对话/改名
+     * 都会经过 renderChat 或 refreshBrainStatus），绝不让 chip
+     * 显示与当前对话的实际绑定脱节。对话方与平台状态的显示去向
+     * 见 updateChatRouteBanner 的注释（横幅已撤，2026-11-22）。
      */
     private fun updateContextPill() {
         if (!::contextPill.isInitialized) return
         val binding = chatProjectBinding.projectId
+        var iconRes = R.drawable.ic_device
+        val label: String
         if (binding == null) {
-            contextPill.text = "本机 · App 沙盒 ⌄"
+            label = "本机 · App 沙盒"
         } else {
             val name = try {
                 projectStore.getProject(binding)?.name
@@ -10094,14 +10921,31 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 null
             }
-            val homeLabel = when {
-                home == null -> "未指定家"
-                home.gitHost() != null -> "${home.gitHost()?.displayName} · ${home.workspacePath}"
-                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · ${home.workspacePath}"
-                else -> "设备 · ${deviceDisplayName(home.hostId)}"
+            // 文案与 iOS ProjectSourceChip 同构成：「提供方 · 目标」——
+            // 目标 = 当前绑定的项目，提供方按家的位置种类取标题
+            // （本机 / 设备名 / Git 托管名），不再用「项目名（家）」式。
+            label = when {
+                home == null -> "$name · 未指定家"
+                home.gitHost() != null -> {
+                    iconRes = R.drawable.ic_folder
+                    "${home.gitHost()?.displayName} · $name"
+                }
+                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · $name"
+                else -> "${deviceDisplayName(home.hostId)} · $name"
             }
-            contextPill.text = "$name（$homeLabel）⌄"
         }
+        contextPill.text = label
+        // 图标与 iOS 同形态：前置来源图标 + 尾部下箭头（不再用文字符号 ⌄）。
+        val lead = ContextCompat.getDrawable(this, iconRes)?.mutate()?.apply {
+            setTint(ContextCompat.getColor(this@MainActivity, R.color.home_text))
+            setBounds(0, 0, dp(16), dp(16))
+        }
+        val chevron = ContextCompat.getDrawable(this, R.drawable.ic_chevron_down)?.mutate()?.apply {
+            setTint(ContextCompat.getColor(this@MainActivity, R.color.home_text_secondary))
+            setBounds(0, 0, dp(12), dp(12))
+        }
+        contextPill.setCompoundDrawables(lead, null, chevron, null)
+        contextPill.compoundDrawablePadding = dp(5)
     }
 
     /**
@@ -10114,111 +10958,56 @@ class MainActivity : AppCompatActivity() {
         buttonTaskMark.visibility = View.GONE
     }
 
-    /** 首页状态行平台段（照片走查批 B）：平台地址按平台 Agent 的
-     * platformHost 计——任一平台 Agent 填了主机名即视为已配置；否则
-     * 如实报「平台未配置（本地优先）」，与 iOS 同文案。安卓首页不做
-     * 实时连通探测，故已配置时只报「平台已配置」，不谎称已连接。 */
-    private fun platformStatusLabel(): String {
-        val configured = try {
-            agentStore.listAgents().any {
-                it.brainKind == BrainKind.PLATFORM_AGENT && !it.platformHost.isNullOrBlank()
-            }
-        } catch (_: Exception) {
-            false
+    /** 对话状态行使用与设置页相同的 App 级地址来源，不声称实时连通。 */
+    /**
+     * 对话方选择器短标签：名字 · 所在位置（跨设备信息压缩进选择器，
+     * 2026-11-22 定，与 iOS partnerLabel 同口径）——云端 Agent 记
+     * 「云端」，本地模型记「本机」，设备 Agent 记设备显示名；名字
+     * 里已带该位置时不重复加。未接入的 Agent 缀「（未接入）」。
+     */
+    private fun partnerSelectorLabel(agent: AgentRecord): String {
+        val place = when (agent.kind) {
+            AgentKind.CLOUD -> "云端"
+            AgentKind.LOCAL_MODEL -> "本机"
+            AgentKind.DEVICE -> agent.deviceId?.let { deviceDisplayName(it) }
+                ?: if (agent.brainKind == BrainKind.AGENT_RUNTIME) "本机" else null
         }
-        return if (configured) "平台已配置" else "平台未配置（本地优先）"
+        var label = agent.displayName
+        if (place != null && !label.contains(place)) {
+            label += " · $place"
+        }
+        val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
+        if (route is AgentChatRoute.NotRoutable) {
+            label += "（未接入）"
+        }
+        return label
     }
 
+    /**
+     * 对话页顶部信息刷新（2026-11-22 双端统一）：原「当前设备 ·
+     * 对话方 · 平台状态」状态横幅整行撤除（Codex/Claude 式极简，
+     * 平台连接状态看控制页与设置）——对话方与跨设备位置看输入框
+     * 里的选择器标签，项目看上方 chip。直连 Agent 开关（大脑/
+     * Agent 边界，maintainer 2026-11-12：只在远程设备 Agent 对话
+     * 里出现、状态看得见、点得到、按会话记）迁到项目 chip 下方
+     * 的独立 chip，语义不变。
+     */
     private fun updateChatRouteBanner() {
-        if (!::chatRouteBanner.isInitialized || !::chatViewModel.isInitialized) return
+        if (!::chatViewModel.isInitialized) return
         val agent = chatViewModel.selectedAgent
-        // GitHub 闭环（2026-11-11）：横幅显示当前聊天项目（打开哪个项目，
-        // 对话就关联哪个项目；GitHub 家会标出仓库名）。
-        // 聊天选项目（2026-11-11）：横幅里的项目部分可点，点开选项目列表
-        // 切换绑定（下划线提示可点；没绑项目时没有项目部分，走 "+" 菜单）。
-        val projectSuffix = chatProjectBinding.projectId?.let { id ->
-            val name = try {
-                projectStore.getProject(id)?.name
-            } catch (_: Exception) {
-                null
-            } ?: id
-            val home = try {
-                projectStore.getActiveHome(id)
-            } catch (_: Exception) {
-                null
-            }
-            val homeLabel = when {
-                home == null -> "未指定家"
-                home.gitHost() != null -> "${home.gitHost()?.displayName} · ${home.workspacePath}"
-                home.homeKind == ProjectHomeKind.LOCAL -> "本机 · ${home.workspacePath}"
-                else -> "设备 · ${deviceDisplayName(home.hostId)}"
-            }
-            " · 项目：$name（$homeLabel）"
-        }.orEmpty()
-        // 大脑/Agent 边界（maintainer 2026-11-12 修订）：直连 Agent 开关只在
-        // 远端设备 Agent 对话里出现——点按切换，状态看得见（开/关写在
-        // 横幅上）、点得到（整段可点）。默认开：消息直接发给该 Agent，
-        // 大脑不拦截、不派活、不插话；关 = 该对话改走大脑幕后派活
-        // （任务型指令建派活任务行、走泵）。开关是显式选择，按会话记。
-        val directSuffix = if (agent != null && agent.deviceId != null) {
-            if (chatViewModel.isDirectAgentMode()) " · 直连 Agent：开" else " · 直连 Agent：关"
-        } else {
-            ""
-        }
-        val text = if (agent == null) {
-            "当前设备：本机 · 对话方：${brainDisplayName()} · ${platformStatusLabel()}$projectSuffix"
-        } else {
-            val route = brainComponents?.let { resolveAgentRouteForDisplay(agent, it) }
-            val suffix = if (route is AgentChatRoute.NotRoutable) "（未接入）" else ""
-            "当前设备：${AgentChatRouter.deviceLabel(agent)} · 对话方：${agent.displayName}$suffix · ${platformStatusLabel()}$projectSuffix$directSuffix"
-        }
-        val spannable = SpannableStringBuilder(text)
-        val baseEnd = text.length - directSuffix.length
-        if (projectSuffix.isNotEmpty()) {
-            val start = baseEnd - projectSuffix.length
-            spannable.setSpan(
-                object : ClickableSpan() {
-                    override fun onClick(widget: View) {
-                        showChatProjectPicker()
-                    }
-
-                    override fun updateDrawState(ds: TextPaint) {
-                        ds.isUnderlineText = true
-                    }
-                },
-                start,
-                baseEnd,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
-            )
-        }
-        if (directSuffix.isNotEmpty()) {
-            spannable.setSpan(
-                object : ClickableSpan() {
-                    override fun onClick(widget: View) {
-                        // 直连开关：关了就是真的关了（大脑不再拦截该对话
-                        // 的消息）；开了就只跟该 Agent 说话。横幅经
-                        // publish → renderChat 立刻刷新，状态马上可见。
-                        chatViewModel.setDirectAgentMode(!chatViewModel.isDirectAgentMode())
-                        updateChatRouteBanner()
-                    }
-
-                    override fun updateDrawState(ds: TextPaint) {
-                        ds.isUnderlineText = true
-                    }
-                },
-                baseEnd,
-                text.length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
-            )
-        }
-        chatRouteBanner.text = spannable
-        chatRouteBanner.movementMethod = LinkMovementMethod.getInstance()
-        chatRouteBanner.visibility = View.VISIBLE
         if (::buttonAgentSelect.isInitialized) {
             buttonAgentSelect.text = if (agent == null) {
                 "选择对话方 ⌄"
             } else {
-                "${agent.displayName} ⌄"
+                "${partnerSelectorLabel(agent)} ⌄"
+            }
+        }
+        if (::buttonDirectMode.isInitialized) {
+            val showDirect = agent != null && agent.deviceId != null
+            buttonDirectMode.visibility = if (showDirect) View.VISIBLE else View.GONE
+            if (showDirect) {
+                buttonDirectMode.text =
+                    if (chatViewModel.isDirectAgentMode()) "直连 Agent：开" else "直连 Agent：关"
             }
         }
         updateContextPill()
@@ -10279,8 +11068,8 @@ class MainActivity : AppCompatActivity() {
      * 取自真实配置，绝不编造；行首用大脑显示名（默认 WhereverCode）。
      */
     private fun refreshBrainStatus() {
-        // 阶段 A：大脑改名/切换后聊天顶部横幅同步（默认会话显示大脑名）。
-        if (::chatRouteBanner.isInitialized) updateChatRouteBanner()
+        // 大脑改名/切换后对话方选择器标签同步。
+        if (::chatViewModel.isInitialized) updateChatRouteBanner()
         refreshWorkspaceSection()
         // 设置清理 2（2026-11-11，Claude 标准）：聊天输入框里的当前大脑
         // 胶囊与大脑状态同刷；未加载/未连接时显示“未连接”。跟 Agent 对话
@@ -13094,16 +13883,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 抽屉底部用户行标签。App 内没有登录用户名可取（不写死真人姓名，
-     * 见首页问候的同款处理），只显示登录状态；有用户档案后再接真实用户名。
-     */
-    private fun drawerUserLabel(): String = try {
-        if (brainComponents?.authManager?.isSignedIn() == true) "已登录" else "未登录"
-    } catch (_: Exception) {
-        "未登录"
-    }
-
-    /**
      * 打开抽屉时刷新角标：运行中任务数读任务库（后台线程），待审批数
      * 读审批门（内存字段）。任一数读不到为 null——抽屉里不显示角标，
      * 绝不伪造数字。
@@ -13199,6 +13978,11 @@ class MainActivity : AppCompatActivity() {
             hideTaskDetail()
             return
         }
+        if (currentEntry == consoleSubpageBackTarget && consoleSubpageBackTarget != null) {
+            consoleSubpageBackTarget = null
+            showEntry(DrawerController.ID_CONSOLE)
+            return
+        }
         if (currentEntry == DrawerController.ID_PROJECTS && projectController.hasCodeOpen()) {
             projectController.closeCode()
             return
@@ -13224,6 +14008,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // 阶段 3（U4）：回前台时补一次审批 ticker（审批可能在后台到达）。
         pokeApprovalTicker()
+        // №12 WS 修复：回前台时频道 feed 若在轮询兜底，立刻重试 WS，
+        // 不等 45 秒重连点；断档消息由轮询游标静默补读。
+        teamChannelFeed?.reconnectNow()
     }
 
     override fun onDestroy() {
@@ -13247,6 +14034,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val KEY_ACTIVE_CHANNEL_ID = "active_channel_id"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_ENTRY = "ui_entry"
         private const val KEY_IN_CONVERSATION = "ui_in_conversation"

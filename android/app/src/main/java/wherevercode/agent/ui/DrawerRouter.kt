@@ -32,9 +32,18 @@ enum class EntryScreen {
     MCP_PLUGINS,
     /** V5 团队频道：有界团队聊天 + 只读扇出。 */
     TEAM_CHANNEL,
+    /**
+     * P3-MSG 三期：消息中心（@我 / 未读 / 任务回执聚合）。
+     * 入口走频道页菜单与字面 id 路由；注册表 feature_message_center
+     * 保持 TODO，翻转留到组装步。
+     */
+    MESSAGE_CENTER,
 }
 
 object DrawerRouter {
+    /** 消息中心的路由 id（注册表翻转前的可达入口，见 EntryScreen.MESSAGE_CENTER）。 */
+    const val ID_MESSAGE_CENTER: String = "message_center"
+
     fun screenFor(entryId: String): EntryScreen = when (entryId) {
         DrawerController.ID_NEW_CONVERSATION, "nav_chat", "chat" -> EntryScreen.HOME
         DrawerController.ID_HISTORY_SEARCH, "nav_history", "history" -> EntryScreen.HISTORY
@@ -50,6 +59,7 @@ object DrawerRouter {
         DrawerController.ID_CONSOLE, "nav_control", "nav_console", "control", "console", "nav_pending_approval", "feature_run_logs" -> EntryScreen.CONSOLE
         DrawerController.ID_MCP_PLUGINS, "nav_mcp_plugins", "mcp" -> EntryScreen.MCP_PLUGINS
         DrawerController.ID_TEAM_CHANNEL, "nav_channels", "nav_team_channel", "channels", "channel" -> EntryScreen.TEAM_CHANNEL
+        ID_MESSAGE_CENTER, "feature_message_center", "notifications" -> EntryScreen.MESSAGE_CENTER
         else -> EntryScreen.HOME
     }
 }

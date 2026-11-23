@@ -39,7 +39,6 @@ class DrawerView(
     private val recentSessionsProvider: () -> List<SessionItem> = { emptyList() },
     private val onDeleteSession: (sessionId: String) -> Unit = {},
     private val onNewConversation: () -> Unit = {},
-    private val onOpenFeatureCenter: () -> Unit = {},
 ) {
     data class SessionItem(val id: String, val title: String)
 
@@ -56,9 +55,7 @@ class DrawerView(
         val iconRes: Int? = null,
     )
 
-    val root: ScrollView = ScrollView(context).apply {
-        isFillViewport = true
-    }
+    val root: LinearLayout = UiKit.vertical(context)
 
     private val content: LinearLayout = UiKit.vertical(context).apply {
         setPadding(dp(16), dp(12), dp(16), dp(16))
@@ -70,6 +67,7 @@ class DrawerView(
     private var searchInputField: EditText? = null
     private var searchBoxView: LinearLayout? = null
     private var sessionListContainer: LinearLayout? = null
+    private var sessionScrollView: ScrollView? = null
     private var recentHeaderView: TextView? = null
 
     // refresh() 重建期间的插入游标：>=0 时新分节插到持久区（最近会话区）之前，
@@ -96,7 +94,9 @@ class DrawerView(
     )
 
     init {
-        root.addView(content)
+        root.addView(content, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT,
+        ))
         refresh()
     }
 
@@ -180,7 +180,7 @@ class DrawerView(
                 }
             }
         }
-        return null
+        return sessionListContainer?.findViewWithTag(id)
     }
 
     fun refresh() {
@@ -195,7 +195,7 @@ class DrawerView(
         // （重影）；脱挂还会拆掉输入连接与焦点（开抽屉立刻打字被吞）。
         // 这里只摘非持久子视图、只重建其余分节，搜索框全程纹丝不动。
         ensureRecentSectionViews()
-        val persistent = listOfNotNull(recentHeaderView, searchBoxView, sessionListContainer)
+        val persistent = listOfNotNull(recentHeaderView, searchBoxView, sessionScrollView)
         for (i in content.childCount - 1 downTo 0) {
             val child = content.getChildAt(i)
             if (child !in persistent) content.removeViewAt(i)
@@ -333,7 +333,12 @@ class DrawerView(
         if (sessionListContainer == null) {
             // 会话列表单独一个容器：打字时只重建这个容器里的行，
             // 搜索框与输入框纹丝不动。
-            sessionListContainer = UiKit.vertical(context)
+            val sessionList = UiKit.vertical(context)
+            sessionListContainer = sessionList
+            sessionScrollView = ScrollView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+                addView(sessionList)
+            }
         }
     }
 
@@ -341,12 +346,12 @@ class DrawerView(
         ensureRecentSectionViews()
         val header = recentHeaderView!!
         val searchBox = searchBoxView!!
-        val container = sessionListContainer!!
+        val scroll = sessionScrollView!!
         // 只在首次时把持久区三件套放进 content；之后 refresh() 只摘非持久
         // 子视图，三件套的挂载状态与位置保持不变，输入框永不脱挂、永不重挂。
         if (header.parent == null) addContent(header)
         if (searchBox.parent == null) addContent(searchBox)
-        if (container.parent == null) addContent(container)
+        if (scroll.parent == null) addContent(scroll)
         renderSessionRows(rows)
     }
 
@@ -580,7 +585,6 @@ class DrawerView(
             setPadding(dp(12), 0, dp(12), 0)
             gravity = Gravity.CENTER_VERTICAL
             setOnClickListener {
-                onOpenFeatureCenter()
                 onEntrySelected("nav_feature_center")
             }
         }

@@ -46,11 +46,19 @@ class McpChannelEventFeed(
     var onChannelMessage: ((PlatformChannelMessage) -> Unit)? = null,
     /** 连接状态变化的监听（LIVE = WS 推送，POLLING = 断线兜底）。 */
     var onConnectionChange: ((ChannelConnectionState, String?) -> Unit)? = null,
+    /** 输入中信令监听（零 token，不调模型）。 */
+    var onTyping: ((ChannelTypingEvent) -> Unit)? = null,
 ) {
     private val feed = ChannelFeed(
         channelId = channelId,
         transport = transport,
         wsFactory = wsFactory,
+        onTyping = { typing ->
+            try {
+                onTyping?.invoke(typing)
+            } catch (_: Exception) {
+            }
+        },
         onMessages = { messages ->
             for (message in messages) {
                 try {
@@ -79,6 +87,9 @@ class McpChannelEventFeed(
 
     /** 停止订阅（工作线程退出，WS 关闭）。 */
     fun stop() = feed.stop()
+
+    /** 回前台立即重连：透传内层 feed（轮询兜底时立刻重试 WS）。 */
+    fun reconnectNow() = feed.reconnectNow()
 
     /**
      * 把一条频道消息以 MCP 通知形式交给已连客户端。

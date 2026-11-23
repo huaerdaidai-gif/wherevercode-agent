@@ -25,6 +25,7 @@ class SettingsHomeController(
     private val onCycleTheme: () -> Unit,
     private val onTodo: (String) -> Unit,
     private val platformStatus: () -> String,
+    private val platformAddress: () -> String = { "" },
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         tag = SettingsSections.HOME_TAG
@@ -35,6 +36,9 @@ class SettingsHomeController(
     private val statusText: TextView =
         UiKit.text(context, "", 12f, R.color.text_secondary)
 
+    private val addressText = UiKit.text(context, "", 14f, R.color.text_primary)
+    private val addressState = UiKit.text(context, "", 14f, R.color.text_primary)
+
     private sealed interface Dest {
         data class Section(val section: SettingsSections.Section) : Dest
         data class Screen(val entryId: String) : Dest
@@ -44,23 +48,22 @@ class SettingsHomeController(
 
     private data class Row(val title: String, val dest: Dest)
 
-    private data class SectionGroup(val title: String, val rows: List<Row>)
+    private data class SectionGroup(val title: String?, val rows: List<Row>)
 
     private val groups: List<SectionGroup> = listOf(
         SectionGroup(
             "平台连接",
-            listOf(
-                Row("平台连接与令牌签发", Dest.Section(SettingsSections.Section.TOKEN)),
-            ),
+            emptyList(),
         ),
         SectionGroup(
             "账户",
             listOf(
                 Row("个人资料", Dest.Todo("个人资料")),
                 Row("连接管理", Dest.Section(SettingsSections.Section.CONNECTIONS)),
+                Row("仓库授权", Dest.Section(SettingsSections.Section.REPOS)),
                 Row("隐私与安全", Dest.Todo("隐私与安全")),
                 Row("跨端同步", Dest.Section(SettingsSections.Section.HAND)),
-                Row("备份与恢复", Dest.Section(SettingsSections.Section.ABOUT)),
+                Row("备份与恢复", Dest.Todo("备份与恢复")),
                 Row("用量与预算", Dest.Todo("用量与预算")),
             ),
         ),
@@ -68,36 +71,40 @@ class SettingsHomeController(
             "应用",
             listOf(
                 Row("模型配置", Dest.Screen(DrawerController.ID_MODELS)),
-                Row("仓库授权", Dest.Section(SettingsSections.Section.REPOS)),
+                Row("平台连接与令牌签发", Dest.Section(SettingsSections.Section.TOKEN)),
                 Row("插件与工具", Dest.Screen(DrawerController.ID_MCP_PLUGINS)),
                 Row("Webhook 唤醒与自动触发", Dest.Todo("Webhook 唤醒与自动触发")),
                 Row("语音与多模态", Dest.Todo("语音与多模态")),
                 Row("消息与通知", Dest.Todo("消息与通知")),
                 Row("长期记忆", Dest.Todo("长期记忆")),
                 Row("项目上下文规则", Dest.Todo("项目上下文规则")),
-                Row("Agent 偏好与技能", Dest.Todo("Agent 偏好与技能")),
-                Row("自主度", Dest.Section(SettingsSections.Section.AUTONOMY)),
                 Row("工作区", Dest.Section(SettingsSections.Section.WORKSPACE)),
+                Row("Agent 偏好与技能", Dest.Todo("Agent 偏好与技能")),
                 Row("切换深色模式", Dest.Theme),
                 Row("首次使用指南", Dest.Screen(DrawerController.ID_HELP)),
-                Row("开发者选项", Dest.Section(SettingsSections.Section.DEV)),
-                Row("关于", Dest.Section(SettingsSections.Section.ABOUT)),
+                Row("自主度", Dest.Section(SettingsSections.Section.AUTONOMY)),
                 // 大脑是已砍下放一边的分节：入口留在应用节最末（角落），
                 // 分节内容与文案一字不动。
                 Row("大脑", Dest.Section(SettingsSections.Section.BRAIN)),
+            ),
+        ),
+        SectionGroup(
+            null,
+            listOf(
+                Row("开发者选项", Dest.Section(SettingsSections.Section.DEV)),
+                Row("关于", Dest.Section(SettingsSections.Section.ABOUT)),
             ),
         ),
     )
 
     init {
         val header = UiKit.horizontal(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(
-            UiKit.text(context, "‹", 24f, R.color.text_primary, bold = true).apply {
-                setPadding(0, dp(2), dp(12), dp(2))
-                setOnClickListener { onBack() }
-            },
-        )
-        header.addView(UiKit.text(context, "设置", 20f, R.color.text_primary, bold = true))
+        header.addView(UiKit.text(context, "设置", 20f, R.color.text_primary, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(UiKit.text(context, "完成", 16f, R.color.text_primary).apply {
+            setPadding(dp(12), dp(8), dp(4), dp(8))
+            setOnClickListener { onBack() }
+        })
         root.addView(header)
 
         val card = UiKit.vertical(context).apply {
@@ -108,19 +115,32 @@ class SettingsHomeController(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12); bottomMargin = dp(4) }
         }
-        card.addView(UiKit.text(context, "平台账户", 14f, R.color.text_primary, bold = true))
-        card.addView(statusText.apply { setPadding(0, dp(3), 0, 0) })
+        card.addView(UiKit.text(context, "WhereverCode 用户", 14f, R.color.text_primary, bold = true))
+        card.addView(UiKit.text(context, "本地优先 · 无需强制登录即可使用本地对话与项目工作区", 12f, R.color.text_secondary))
         root.addView(card)
 
         groups.forEach { group ->
-            root.addView(
-                UiKit.text(context, group.title, 12f, R.color.text_secondary, bold = true).apply {
-                    setPadding(0, dp(14), 0, dp(6))
-                },
-            )
+            group.title?.let { title ->
+                root.addView(
+                    UiKit.text(context, title, 12f, R.color.text_secondary, bold = true).apply {
+                        setPadding(0, dp(14), 0, dp(6))
+                    },
+                )
+            }
             val cardRows = UiKit.vertical(context).apply {
                 setBackgroundResource(R.drawable.bg_card)
                 setPadding(dp(14), dp(4), dp(14), dp(4))
+                if (group.title == null) {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(14) }
+                }
+            }
+            if (group.title == "平台连接") {
+                cardRows.addView(addressText)
+                cardRows.addView(addressState)
+                cardRows.addView(statusText)
             }
             group.rows.forEach { row -> cardRows.addView(rowView(row)) }
             root.addView(cardRows)
@@ -134,6 +154,9 @@ class SettingsHomeController(
 
     /** 每次进首页时刷新平台状态文案（现取，不缓存）。 */
     fun render() {
+        val address = platformAddress()
+        addressText.text = "平台地址　" + address.ifBlank { "未配置" }
+        addressState.text = "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
         statusText.text = platformStatus()
     }
 

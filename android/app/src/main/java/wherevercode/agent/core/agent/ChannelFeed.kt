@@ -9,6 +9,14 @@ enum class ChannelConnectionState {
     CONNECTING, LIVE, POLLING, STOPPED,
 }
 
+/** 连接状态的统一文案：频道页与设置「连接管理」摘要共用，两处不许各写一套。 */
+fun channelConnectionStateLabel(state: ChannelConnectionState): String = when (state) {
+    ChannelConnectionState.CONNECTING -> "○ 正在连接频道…"
+    ChannelConnectionState.LIVE -> "● 直播推送（WS 已连）"
+    ChannelConnectionState.POLLING -> "○ 轮询兜底（每 15 秒补读；约 45 秒后重连推送）"
+    ChannelConnectionState.STOPPED -> "○ 频道未连接"
+}
+
 /**
  * 解析端点 WS 事件 JSON。`{"type":"message", "message": {...}}` 返回
  * 一条消息；hello / ping / 未知类型返回 null（调用方忽略）。
@@ -26,6 +34,38 @@ fun parseChannelWsEvent(text: String): PlatformChannelMessage? {
     // 与轮询同一解析口径：WS 推来的消息也带二期字段（回复/撤回/
     // 置顶/反应/附件引用/转发），否则推送与刷新看到的同一条消息不一致。
     return parsePlatformChannelMessage(msg)
+}
+
+/** 频道输入中信令事件（零 token，不调模型）。 */
+data class ChannelTypingEvent(
+    val channelId: String,
+    val senderId: String,
+    val senderName: String,
+    val isTyping: Boolean = true,
+)
+
+/**
+ * 解析端点 WS 正在输入信令 JSON。`{"type":"typing", "sender_id":..., "sender_name":...}`
+ * 或带 agent_id/agent_name 的信令帧。其他类型返回 null。
+ */
+fun parseChannelTypingWsEvent(text: String): ChannelTypingEvent? {
+    val obj = try {
+        JSONObject(text)
+    } catch (_: Exception) {
+        return null
+    }
+    if (obj.optString("type") != "typing") return null
+    val senderId = obj.optString("sender_id").ifBlank { obj.optString("agent_id") }
+    if (senderId.isBlank()) return null
+    val senderName = obj.optString("sender_name").ifBlank { obj.optString("agent_name", senderId) }
+    val channelId = obj.optString("channel_id")
+    val isTyping = if (obj.has("is_typing")) obj.optBoolean("is_typing", true) else true
+    return ChannelTypingEvent(
+        channelId = channelId,
+        senderId = senderId,
+        senderName = senderName,
+        isTyping = isTyping,
+    )
 }
 
 /**
@@ -60,6 +100,7 @@ class ChannelFeed(
     private val onConnectionChange: (ChannelConnectionState, String?) -> Unit = { _, _ -> },
     private val pollIntervalMs: Long = POLL_INTERVAL_MS,
     private val reconnectAfterMs: Long = RECONNECT_AFTER_MS,
+    private val onTyping: (ChannelTypingEvent) -> Unit = {},
 ) {
     @Volatile
     var connectionState: ChannelConnectionState = ChannelConnectionState.STOPPED
@@ -96,6 +137,17 @@ class ChannelFeed(
         currentWs?.close()
         worker?.interrupt()
         setState(ChannelConnectionState.STOPPED, null)
+    }
+
+    /**
+     * 回前台立即重连（№12 WS 修复）：正在轮询兜底时打断等待，让主
+     * 循环马上重试 WS，而不是等满 45 秒。未启动时无操作。
+     */
+    fun reconnectNow() {
+        if (!running) return
+        if (connectionState == ChannelConnectionState.POLLING) {
+            worker?.interrupt()
+        }
     }
 
     private fun loop() {
@@ -154,6 +206,11 @@ class ChannelFeed(
         if (connectionState != ChannelConnectionState.LIVE) {
             setState(ChannelConnectionState.LIVE, null)
         }
+        val typing = parseChannelTypingWsEvent(text)
+        if (typing != null) {
+            onTyping(typing)
+            return
+        }
         val message = parseChannelWsEvent(text) ?: return
         deliver(listOf(message))
     }
@@ -179,7 +236,12 @@ class ChannelFeed(
     }
 
     companion object {
-        const val POLL_LIMIT: Int = 20
+        // 219 alignment: first-load (and fallback poll) batch cap matches
+        // the iOS first-screen window of 50. At 20 the Android topic
+        // count over the loaded window (2) trailed iOS (5); counting
+        // rule B unifies the window only if the load size matches too.
+        // The 100-message buffer cap is unchanged.
+        const val POLL_LIMIT: Int = 50
         const val POLL_INTERVAL_MS: Long = 15_000L
         const val RECONNECT_AFTER_MS: Long = 45_000L
         const val MAX_SEEN_IDS: Int = 1000

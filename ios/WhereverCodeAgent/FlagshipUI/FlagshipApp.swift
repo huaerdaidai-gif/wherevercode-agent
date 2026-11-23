@@ -620,6 +620,19 @@ public struct FlagshipShellView: View {
                 .onChange(of: selectedMenu) { _ in
                     activeRoute = nil
                 }
+                // 218 深链：有待打开频道时切到频道父级，频道页自行消费。
+                .onChange(of: appState.pendingChannelID) { target in
+                    if target != nil {
+                        selectedMenu = .channels
+                        activeRoute = nil
+                    }
+                }
+                .onAppear {
+                    appState.restorePendingChannelLink()
+                    if appState.pendingChannelID != nil {
+                        selectedMenu = .channels
+                    }
+                }
             }
             .sheet(isPresented: $isSettingsOpen) {
                 NavigationStack {

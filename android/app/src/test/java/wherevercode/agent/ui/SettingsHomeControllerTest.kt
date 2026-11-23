@@ -69,7 +69,7 @@ class SettingsHomeControllerTest {
         c.render() // 生产里由 showSettingsHome() 在进设置时调；构造时不再现取状态
         val texts = allTexts(c.root)
         assertTrue(texts.any { it == "设置" })
-        assertTrue(texts.any { it == "平台账户" })
+        assertTrue(texts.any { it == "WhereverCode 用户" })
         assertTrue(texts.any { it == "平台已配置（凭证已存本机）" })
         assertTrue(texts.any { it == "平台连接" })
         assertTrue(texts.any { it == "账户" })
@@ -80,13 +80,20 @@ class SettingsHomeControllerTest {
     }
 
     @Test
-    fun `brain row is the last row of the app section`() {
-        val c = controller(Recorder())
-        val texts = allTexts(c.root)
-        val appHeader = texts.indexOf("应用")
-        val brain = texts.indexOf("大脑")
-        assertTrue(appHeader >= 0 && brain > appHeader)
-        assertEquals("大脑", texts.last { it in setOf("模型配置", "仓库授权", "大脑", "关于", "开发者选项") })
+    fun `rows follow iOS account and app order with Android additions`() {
+        val texts = allTexts(controller(Recorder()).root).filterNot { it == "›" }
+        assertEquals(
+            listOf(
+                "账户", "个人资料", "连接管理", "仓库授权", "隐私与安全",
+                "跨端同步", "备份与恢复", "用量与预算",
+                "应用", "模型配置", "平台连接与令牌签发", "插件与工具",
+                "Webhook 唤醒与自动触发", "语音与多模态", "消息与通知", "长期记忆",
+                "项目上下文规则", "工作区", "Agent 偏好与技能", "切换深色模式",
+                "首次使用指南", "自主度", "大脑",
+                "开发者选项", "关于",
+            ),
+            texts.dropWhile { it != "账户" },
+        )
     }
 
     @Test

@@ -1,7 +1,13 @@
 package wherevercode.agent.ui
 
+import android.app.Dialog
 import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.view.Gravity
+import android.view.WindowManager
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
 import wherevercode.agent.R
 
 /**
@@ -143,6 +149,95 @@ object ListDialog {
             .setNegativeButton(negativeLabel, null)
             .create()
         dialog.show()
+        return dialog
+    }
+
+    /**
+     * 卡片式对话框（2026-11-22 双端统一，与 iOS projectSourceDialog
+     * 同形态）：居中圆角卡片（20dp），标题与副标题都在卡片内，
+     * 选项行是「名（半粗）+ 说明（小字）」无边框行，「取消」是
+     * 卡片内右下角的纯文字，点卡片外关闭。目前用于「打开文件夹」
+     * 来源单子与聊天选项目名单；其余列表对话框仍走
+     * show / showWithDescriptions。selectedIndex 非空时，该行名首
+     * 加「✓」标出当前项（与 show 的选中态同口径）。
+     */
+    fun showCardWithDescriptions(
+        context: Context,
+        title: String,
+        message: String?,
+        items: List<Pair<String, String>>,
+        selectedIndex: Int? = null,
+        onPick: (Int) -> Unit,
+    ): Dialog {
+        val card = UiKit.vertical(context).apply {
+            setPadding(
+                UiKit.dp(context, 24),
+                UiKit.dp(context, 24),
+                UiKit.dp(context, 24),
+                UiKit.dp(context, 16),
+            )
+            background = ContextCompat.getDrawable(context, R.drawable.bg_dialog_card)
+        }
+        card.addView(UiKit.text(context, title, 17f, R.color.text_primary, bold = true))
+        if (!message.isNullOrBlank()) {
+            card.addView(
+                UiKit.text(context, message, 14f, R.color.text_secondary).apply {
+                    setPadding(0, UiKit.dp(context, 8), 0, UiKit.dp(context, 8))
+                },
+            )
+        }
+        val dialog = Dialog(context)
+        items.forEachIndexed { index, (name, description) ->
+            val row = UiKit.vertical(context).apply {
+                setPadding(
+                    0,
+                    UiKit.dp(context, 10),
+                    0,
+                    UiKit.dp(context, 10),
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    dialog.dismiss()
+                    onPick(index)
+                }
+            }
+            row.addView(
+                UiKit.text(
+                    context,
+                    if (index == selectedIndex) "✓ $name" else name,
+                    15f,
+                    R.color.text_primary,
+                    bold = true,
+                ),
+            )
+            row.addView(
+                UiKit.text(context, description, 13f, R.color.text_secondary).apply {
+                    setPadding(0, UiKit.dp(context, 2), 0, 0)
+                },
+            )
+            card.addView(row)
+        }
+        card.addView(
+            UiKit.text(context, "取消", 15f, R.color.text_primary).apply {
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+                gravity = Gravity.END
+                setPadding(0, UiKit.dp(context, 8), 0, 0)
+                isClickable = true
+                setOnClickListener { dialog.dismiss() }
+            },
+        )
+        dialog.setContentView(card)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.let { window ->
+            val width = (context.resources.displayMetrics.widthPixels - UiKit.dp(context, 48))
+                .coerceAtMost(UiKit.dp(context, 360))
+            window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
+        }
         return dialog
     }
 }

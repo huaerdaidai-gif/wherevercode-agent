@@ -526,10 +526,143 @@ class PlatformChannelTransportTest {
         assertEquals("dm", channels[1].kind)
         assertEquals(true, channels[1].archived)
         assertEquals(listOf("a1"), channels[0].participantIds)
+        // participants 明细要带名字（平台成员名单的显示名来源，与 iOS 同口径）。
+        assertEquals(1, channels[0].participantDetails.size)
+        assertEquals("a1", channels[0].participantDetails[0].agentId)
+        assertEquals("甲", channels[0].participantDetails[0].agentName)
+        assertEquals(emptyList<ChannelParticipant>(), channels[1].participantDetails)
         val dm = t.openDm("a9")
         assertEquals("d1", dm.optString("id"))
         val dmArgs = JSONObject(http.calls[1].bodyJson)
             .optJSONObject("params")?.optJSONObject("arguments")
         assertEquals("a9", dmArgs?.optString("agent_id"))
+    }
+
+    @Test
+    fun `fetch messages sends all no12 filter arguments`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")),
+        )
+        val t = transport(http)
+        t.fetchMessages(
+            "chan-1", limit = 25, beforeId = "m9", afterId = "m3",
+            query = "词", sender = "alice", fromTs = 100L, toTs = 200L, kind = "image",
+        )
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("chan-1", args?.optString("channel_id"))
+        assertEquals(25, args?.optInt("limit"))
+        assertEquals("m9", args?.optString("before_id"))
+        assertEquals("m3", args?.optString("after_id"))
+        assertEquals("词", args?.optString("q"))
+        assertEquals("alice", args?.optString("sender"))
+        assertEquals(100L, args?.optLong("from_ts"))
+        assertEquals(200L, args?.optLong("to_ts"))
+        assertEquals("image", args?.optString("kind"))
+    }
+
+    @Test
+    fun `fetch messages omits blank filters`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")),
+        )
+        transport(http).fetchMessages("chan-1")
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(false, args?.has("before_id"))
+        assertEquals(false, args?.has("q"))
+        assertEquals(false, args?.has("sender"))
+        assertEquals(false, args?.has("from_ts"))
+        assertEquals(false, args?.has("kind"))
+    }
+
+    @Test
+    fun `search with filters passes sender window and kind`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_messages" to envelope("""{"messages":[]}""")),
+        )
+        transport(http).searchMessages(
+            "chan-1", "", sender = "bob", fromTs = 7L, toTs = 9L, kind = "link",
+        )
+        val args = JSONObject(http.calls.single().bodyJson)
+            .optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals(false, args?.has("q"))
+        assertEquals("bob", args?.optString("sender"))
+        assertEquals(7L, args?.optLong("from_ts"))
+        assertEquals(9L, args?.optLong("to_ts"))
+        assertEquals("link", args?.optString("kind"))
+    }
+
+    @Test
+    fun `create channel webhook sends required name`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_create_webhook" to envelope("""{"webhook_id":"whk_1"}""")),
+        )
+        transport(http).createChannelWebhook("chan-1")
+        val params = JSONObject(http.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_create_webhook", params.getString("name"))
+        val args = params.getJSONObject("arguments")
+        assertEquals("chan-1", args.getString("channel_id"))
+        assertEquals("WhereverCode App", args.getString("name"))
+    }
+
+    @Test
+    fun `list and delete channel webhooks send tool names and ids`() {
+        val listHttp = ScriptedHttp(
+            mapOf("agent_channel_list_webhooks" to envelope("""{"webhooks":[]}""")),
+        )
+        transport(listHttp).listChannelWebhooks("chan-1")
+        val listParams = JSONObject(listHttp.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_list_webhooks", listParams.getString("name"))
+        assertEquals("chan-1", listParams.getJSONObject("arguments").getString("channel_id"))
+
+        val deleteHttp = ScriptedHttp(
+            mapOf("agent_channel_delete_webhook" to envelope("""{"ok":true}""")),
+        )
+        transport(deleteHttp).deleteChannelWebhook("chan-1", "whk_1")
+        val deleteParams = JSONObject(deleteHttp.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_delete_webhook", deleteParams.getString("name"))
+        val deleteArgs = deleteParams.getJSONObject("arguments")
+        assertEquals("chan-1", deleteArgs.getString("channel_id"))
+        assertEquals("whk_1", deleteArgs.getString("webhook_id"))
+    }
+
+    @Test
+    fun `set member role sends tool name member and role`() {
+        val http = ScriptedHttp(
+            mapOf("agent_channel_set_member_role" to envelope("""{"ok":true}""")),
+        )
+        transport(http).setChannelMemberRole("chan-1", "gemini", "coordinator")
+        val params = JSONObject(http.calls.single().bodyJson).getJSONObject("params")
+        assertEquals("agent_channel_set_member_role", params.getString("name"))
+        val args = params.getJSONObject("arguments")
+        assertEquals("chan-1", args.getString("channel_id"))
+        assertEquals("gemini", args.getString("member_id"))
+        assertEquals("coordinator", args.getString("role"))
+    }
+
+    @Test
+    fun `set history visible sends the new tool and parses list flag`() {
+        val http = ScriptedHttp(
+            mapOf(
+                "agent_channel_set_history_visible" to envelope("""{"id":"c1","history_visible":false}"""),
+                "agent_channel_list" to envelope(
+                    """{"channels":[{"id":"c1","name":"大厅","kind":"channel","history_visible":false,"participants":[]},{"id":"c2","name":"旧厅","kind":"channel","participants":[]}]}""",
+                ),
+            ),
+        )
+        val t = transport(http)
+        t.setHistoryVisible("c1", false)
+        val body = JSONObject(http.calls[0].bodyJson)
+        assertEquals(
+            "agent_channel_set_history_visible",
+            body.optJSONObject("params")?.optString("name"),
+        )
+        val args = body.optJSONObject("params")?.optJSONObject("arguments")
+        assertEquals("c1", args?.optString("channel_id"))
+        assertEquals(false, args?.optBoolean("visible", true))
+        val channels = t.listChannels()
+        assertEquals(false, channels[0].historyVisible)
+        assertEquals(true, channels[1].historyVisible) // 缺字段默认可见
     }
 }

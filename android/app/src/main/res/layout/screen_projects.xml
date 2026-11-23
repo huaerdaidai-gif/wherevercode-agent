@@ -2,6 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/home_bg"
     android:orientation="vertical">
 
     <LinearLayout
@@ -13,6 +14,18 @@
         android:paddingEnd="8dp"
         android:paddingTop="4dp"
         android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/buttonProjectsMenu"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/bg_circle_white"
+            android:gravity="center"
+            android:text="☰"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:contentDescription="打开抽屉" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -47,12 +60,12 @@
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:layout_marginEnd="8dp"
-            android:background="@drawable/bg_chip_accent"
+            android:background="@drawable/bg_capsule_white"
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:text="＋ 新建项目"
-            android:textColor="@color/accent"
+            android:textColor="@color/text_primary"
             android:textSize="12sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -104,7 +117,8 @@
             <TextView
                 android:id="@+id/projectListEmpty"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:padding="20dp"
                 android:lineSpacingExtra="4dp"
                 android:text="还没有项目。"
@@ -129,140 +143,10 @@
                     android:paddingBottom="12dp" />
             </ScrollView>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:text="导入与开发工具"
-                android:textColor="@color/text_tertiary"
-                android:textSize="10sp"
-                android:textStyle="bold" />
+            <!-- 项目页统一设计（Funk 2026-11-22 定）：「导入与开发工具」区
+                 删除——来源只在「新建项目」的打开文件夹对话框里出现一次，
+                 其余功能各回各页；空态在列表区居中显示。 -->
 
-            <!-- 照片走查批 C：导入行补齐与 iOS 同序同文案的 7 项（浏览文件/开始对话/
-                 Git 工作树/预览为新增；后两项安卓尚无对应屏，点开给诚实「待开发」
-                 提示）。行改横向滚动、内容宽 chips，对 iOS 的横向滚动按钮行。 -->
-            <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:scrollbars="none"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:layout_marginTop="6dp"
-                android:layout_marginBottom="10dp">
-
-                <LinearLayout
-                    android:id="@+id/projectImportRow"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/buttonImportLocal"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="选择本地文件夹"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/buttonImportGit"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="导入 Git 仓库"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/buttonImportDevice"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="连接设备项目"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/buttonBrowseFiles"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="浏览文件"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/buttonStartChat"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="开始对话"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/buttonGitTree"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="Git 工作树"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-
-                    <TextView
-                        android:id="@+id/buttonPreview"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_chip"
-                        android:gravity="center"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="预览"
-                        android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
-                </LinearLayout>
-            </HorizontalScrollView>
-            <!-- 照片走查批 C：底部大「打开文件夹」按钮删掉（iOS 项目页没有）——
-                 导入动作已在上方导入行，三个导入项仍走同一「打开文件夹」对话框。 -->
         </LinearLayout>
 
         <LinearLayout

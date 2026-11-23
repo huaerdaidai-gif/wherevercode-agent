@@ -39,13 +39,14 @@ class SettingsSectionsTest {
         root.findViewById<View>(id).visibility
 
     @Test
-    fun `block ranges cover all eight blocks in layout order`() {
+    fun `block ranges cover all nine blocks in layout order`() {
         val root = rootWithHome()
         val ranges = SettingsSections.blockRanges(root)
         assertNotNull(ranges)
         assertEquals(SettingsSections.Block.values().toSet(), ranges!!.keys)
         // 区间首尾相接、顺序与布局一致（主页容器占 0 位、页头与 chips
-        // 在 1/2 位，大脑块从 3 开始、开发者诊断收到末尾）。
+        // 在 1/2 位，大脑块从 3 开始、连接状态块排在仓库授权前，
+        // 开发者诊断收到末尾）。
         val ordered = SettingsSections.Block.values().map { ranges.getValue(it) }
         assertEquals(3, ordered.first().first)
         assertEquals(root.childCount, ordered.last().last + 1)
@@ -77,12 +78,26 @@ class SettingsSectionsTest {
     fun `connections section shows repos and token blocks together`() {
         val root = rootWithHome()
         SettingsSections.apply(root, SettingsSections.Section.CONNECTIONS)
+        assertEquals(View.VISIBLE, visibilityOf(root, R.id.platformConnectionSummaryAddress))
+        assertEquals(View.VISIBLE, visibilityOf(root, R.id.platformConnectionSummaryConnectionState))
         assertEquals(View.VISIBLE, visibilityOf(root, R.id.githubAuthStatus))
         assertEquals(View.VISIBLE, visibilityOf(root, R.id.gitlabAuthStatus))
         assertEquals(View.VISIBLE, visibilityOf(root, R.id.giteeAuthStatus))
         assertEquals(View.VISIBLE, visibilityOf(root, R.id.platformTokenStatus))
         assertEquals(View.GONE, visibilityOf(root, R.id.brainListContainer))
         assertEquals(View.GONE, visibilityOf(root, R.id.handAutoSyncRow))
+    }
+
+    @Test
+    fun `platform connection section includes address credential and channel controls`() {
+        val root = rootWithHome()
+        SettingsSections.apply(root, SettingsSections.Section.TOKEN)
+        assertEquals(View.VISIBLE, visibilityOf(root, R.id.platformConnectionAddress))
+        assertEquals(View.VISIBLE, visibilityOf(root, R.id.platformConnectionCredentialInput))
+        assertEquals(View.VISIBLE, visibilityOf(root, R.id.buttonLoadPlatformChannels))
+        assertEquals(View.VISIBLE, visibilityOf(root, R.id.platformManualChannelId))
+        assertEquals(View.GONE, visibilityOf(root, R.id.platformConnectionSummaryAddress))
+        assertEquals(View.GONE, visibilityOf(root, R.id.githubAuthStatus))
     }
 
     @Test

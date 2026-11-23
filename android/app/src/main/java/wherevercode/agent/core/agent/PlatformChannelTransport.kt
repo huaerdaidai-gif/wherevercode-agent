@@ -53,7 +53,24 @@ data class ChannelSummary(
     val name: String,
     val kind: String = "channel",
     val archived: Boolean = false,
+    /** 新成员可看全部历史（№12；平台 history_visible，缺失时默认可见）。 */
+    val historyVisible: Boolean = true,
     val participantIds: List<String> = emptyList(),
+    /** 参与者明细（平台为准的频道成员名单，与 iOS ChannelParticipant 同口径）。 */
+    val participantDetails: List<ChannelParticipant> = emptyList(),
+)
+
+/**
+ * 频道的一位参与者（平台 `agent_channel_list` 输出的 participants 一项）。
+ * 这是平台口径的成员名单：成员以平台为准，不以本机加过的 Agent 为准。
+ * [agentName] 缺失时回落 agentId（与 iOS 同口径），不编造名字。
+ */
+data class ChannelParticipant(
+    val agentId: String,
+    val agentName: String,
+    val role: String? = null,
+    val isAgent: Boolean? = null,
+    val isSelf: Boolean = false,
 )
 
 /** 一位成员对某条消息的已读状态（平台 agent_channel_readers 输出）。 */
@@ -96,13 +113,34 @@ fun parsePlatformChannelMessage(obj: JSONObject): PlatformChannelMessage {
 
 /** 平台频道 JSON → [ChannelSummary]。 */
 fun parseChannelSummary(obj: JSONObject): ChannelSummary {
-    val participants = mutableListOf<String>()
+    val details = mutableListOf<ChannelParticipant>()
     val raw = obj.optJSONArray("participants")
     if (raw != null) {
         for (i in 0 until raw.length()) {
-            val p = raw.optJSONObject(i) ?: continue
-            val pid = p.optString("agent_id", "")
-            if (pid.isNotBlank()) participants += pid
+            when (val item = raw.opt(i)) {
+                is JSONObject -> {
+                    val pid = item.optString("agent_id", "")
+                        .ifBlank { item.optString("id", "") }
+                    if (pid.isBlank()) continue
+                    details += ChannelParticipant(
+                        agentId = pid,
+                        agentName = item.optString("agent_name", "")
+                            .ifBlank { item.optString("name", "") }
+                            .ifBlank { pid },
+                        role = item.optString("role", "").takeIf { it.isNotBlank() },
+                        isAgent = if (item.has("is_agent") && !item.isNull("is_agent")) {
+                            item.optBoolean("is_agent")
+                        } else {
+                            null
+                        },
+                        isSelf = item.optBoolean("is_self", false),
+                    )
+                }
+                // 容错：participants 也可能是纯字符串数组（iOS 同口径）。
+                is String -> if (item.isNotBlank()) {
+                    details += ChannelParticipant(agentId = item, agentName = item)
+                }
+            }
         }
     }
     return ChannelSummary(
@@ -110,7 +148,9 @@ fun parseChannelSummary(obj: JSONObject): ChannelSummary {
         name = obj.optString("name", ""),
         kind = obj.optString("kind", "channel").ifBlank { "channel" },
         archived = obj.optBoolean("archived", false),
-        participantIds = participants,
+        historyVisible = obj.optBoolean("history_visible", true),
+        participantIds = details.map { it.agentId },
+        participantDetails = details,
     )
 }
 
@@ -367,11 +407,47 @@ class PlatformChannelMcpTransport(
     }
 
     /** 频道内搜索（平台 q 透传，频道补全一期补齐安卓侧）。 */
-    fun searchMessages(channelId: String, query: String, limit: Int = 50): List<PlatformChannelMessage> {
+    fun searchMessages(
+        channelId: String,
+        query: String,
+        limit: Int = 50,
+        sender: String? = null,
+        fromTs: Long? = null,
+        toTs: Long? = null,
+        kind: String? = null,
+    ): List<PlatformChannelMessage> = fetchMessages(
+        channelId, limit = limit, query = query,
+        sender = sender, fromTs = fromTs, toTs = toTs, kind = kind,
+    )
+
+    /**
+     * 通用过滤读（№12 历史标配）：参数原样透传服务端
+     * `agent_channel_messages`——[beforeId] 往前翻旧页、[afterId]
+     * 往后翻新页、[query] 关键词、[sender] 发言人（成员编号或
+     * 显示名精确匹配）、[fromTs]/[toTs] 时间窗（Unix 秒，from
+     * 含、to 不含）、[kind] 分类（image / file / link）。
+     */
+    fun fetchMessages(
+        channelId: String,
+        limit: Int = 50,
+        beforeId: String? = null,
+        afterId: String? = null,
+        query: String? = null,
+        sender: String? = null,
+        fromTs: Long? = null,
+        toTs: Long? = null,
+        kind: String? = null,
+    ): List<PlatformChannelMessage> {
         val args = JSONObject().apply {
             put("channel_id", channelId)
             put("limit", limit)
-            put("q", query)
+            if (!beforeId.isNullOrBlank()) put("before_id", beforeId)
+            if (!afterId.isNullOrBlank()) put("after_id", afterId)
+            if (!query.isNullOrBlank()) put("q", query)
+            if (!sender.isNullOrBlank()) put("sender", sender)
+            if (fromTs != null) put("from_ts", fromTs)
+            if (toTs != null) put("to_ts", toTs)
+            if (!kind.isNullOrBlank()) put("kind", kind)
         }
         return parseMessageList(toolsCall("agent_channel_messages", args))
     }
@@ -482,7 +558,12 @@ class PlatformChannelMcpTransport(
     /** 给频道建一个入帖 Webhook（令牌只在本次返回里出现一次，用户自管）。 */
     fun createChannelWebhook(channelId: String): JSONObject = toolsCall(
         "agent_channel_create_webhook",
-        JSONObject().apply { put("channel_id", channelId) },
+        JSONObject().apply {
+            put("channel_id", channelId)
+            // 服务端创建接口必填 name（实测缺了回 409）；App 不向用户
+            // 索取名字，统一用固定名，用户可在列表里按创建时间区分。
+            put("name", "WhereverCode App")
+        },
     )
 
     // ---- 频道管理（频道补全一期）----
@@ -503,6 +584,15 @@ class PlatformChannelMcpTransport(
         JSONObject().apply {
             put("channel_id", channelId)
             put("name", name)
+        },
+    )
+
+    /** 新成员历史可见开关（№12；仅 owner/协调员，服务端校验并原样报错）。 */
+    fun setHistoryVisible(channelId: String, visible: Boolean): JSONObject = toolsCall(
+        "agent_channel_set_history_visible",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("visible", visible)
         },
     )
 
@@ -536,6 +626,16 @@ class PlatformChannelMcpTransport(
         JSONObject().apply {
             put("channel_id", channelId)
             put("agent_id", agentId)
+        },
+    )
+
+    /** 设置成员角色（owner / coordinator / member；仅频道 owner 可用，服务端校验）。 */
+    fun setChannelMemberRole(channelId: String, memberId: String, role: String): JSONObject = toolsCall(
+        "agent_channel_set_member_role",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("member_id", memberId)
+            put("role", role)
         },
     )
 
@@ -589,4 +689,19 @@ class PlatformChannelMcpTransport(
             throw IOException("平台返回了无法解析的工具结果。")
         }
     }
+
+    /** 列出频道的入帖 Webhook（不含 secret，库里只存哈希）。 */
+    fun listChannelWebhooks(channelId: String): JSONObject = toolsCall(
+        "agent_channel_list_webhooks",
+        JSONObject().apply { put("channel_id", channelId) },
+    )
+
+    /** 删除一个入帖 Webhook（删后原地址立即失效）。 */
+    fun deleteChannelWebhook(channelId: String, webhookId: String): JSONObject = toolsCall(
+        "agent_channel_delete_webhook",
+        JSONObject().apply {
+            put("channel_id", channelId)
+            put("webhook_id", webhookId)
+        },
+    )
 }

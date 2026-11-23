@@ -19,7 +19,7 @@ targets:
         INFOPLIST_FILE: WhereverCodeAgent/Info.plist
         CODE_SIGN_ENTITLEMENTS: WhereverCodeAgent/WhereverCodeAgent.entitlements
         MARKETING_VERSION: "1.5"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "212"
         SWIFT_VERSION: "5.0"
     dependencies:
       - sdk: libsqlite3.tbd

@@ -1,14 +1,18 @@
 // WhereverCode Agent — iOS
 //
-// Settings, restructured to the Android app's form (see the
-// delivery notes' Android-form checklist):
+// Platform connection form, moved out of SettingsView when
+// Settings became a home + section-pages structure mirroring
+// Android (unification 212, SPEC §1/§2). Everything below is the
+// former SettingsView form, unchanged in state logic, bindings,
+// accessibility identifiers and behaviour — only the container
+// changed:
+//
 // - The platform connection is ONE connection item of the app —
-//   the 「平台连接」 section below is the iOS counterpart of
-//   Android's platform-agent form (`PlatformAgentForm` / the
-//   platform-agent form in Android's MainActivity): platform
-//   address, the app's platform credential field, and the channel
-//   selection, all in one place. It is never the app's front door
-//   and never a first-run gate.
+//   this page is the iOS counterpart of Android's platform-agent
+//   form (`PlatformAgentForm` / the platform-agent form in
+//   Android's MainActivity): platform address, the app's platform
+//   credential field, and the channel selection, all in one place.
+//   It is never the app's front door and never a first-run gate.
 // - The platform address is PREFILLED with the platform's public
 //   endpoint (the maintainer build's default, like Android's
 //   BuildConfig-provided host; editable, and a user-saved address
@@ -36,7 +40,7 @@
 //   straight into the Keychain as this app's own credential, so
 //   the user never has to copy or paste the string anywhere.
 // - After every save the app runs a REAL connection check and
-//   shows the outcome here; entering Settings (and launching the
+//   shows the outcome here; entering this page (and launching the
 //   app) re-checks automatically. Failures always show the
 //   server's / transport's real error text.
 
@@ -103,21 +107,6 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    NavigationLink {
-                        BrainSettingsView(model: appState.brainSettingsModel)
-                    } label: {
-                        HStack {
-                            Text("管理大脑")
-                            Spacer()
-                            Text(currentBrainSummary)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Text("大脑是可替换的推理后端（DeepSeek、Claude、Grok、Muse Spark、Cloudflare、通用模型 API、ChatGPT 会员）。Key 只存本机 Keychain。没有当前大脑时设备 Agent 与单兵对话不受影响。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: { Text("大脑").textCase(nil) }
                 Section {
                     TextField("平台地址（https://…）", text: $baseURLText)
                         .accessibilityIdentifier("settings.address")
@@ -249,14 +238,6 @@ struct SettingsView: View {
                     }
                     .font(.caption)
                 } header: { Text("账号与外部连接").textCase(nil) }
-                Section {
-                    LabeledContent("版本", value: Self.versionString)
-                    LabeledContent("Bundle ID", value: "wherevercode.agent")
-                    LabeledContent("最低系统", value: "iOS 17.0")
-                    Text("可用：团队频道（读 / 发 / 实时推送）、我的任务（领取 / 汇报 / 心跳 / 交活 / 放手）、设置与连接状态、大脑管理（内置大脑种子、通用模型 API、Key 存 Keychain、模型列表实时拉取、设当前大脑）、平台令牌生成（issue_agent_token，与安卓同接口；需服务端已部署该工具且本机凭证为 owner，未部署时点生成会如实报错）。阻塞中：审批、暂停 / 恢复 / 停止、改目标与设备管理——服务端无此接口，入口处有明确标注。大脑对话可用（从侧边栏「对话」进入，与当前大脑聊）；单兵对话尚未接入，入口处有明确标注。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: { Text("关于").textCase(nil) }
                 if let saveMessage {
                     Section {
                         Text(saveMessage)
@@ -265,7 +246,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle("平台连接与令牌签发")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") { saveSettings(); focusedField = nil }
@@ -347,15 +328,6 @@ struct SettingsView: View {
         }
     }
 
-    /// The current brain's label for the 大脑 section row, read
-    /// from the same config store the engine uses.
-    private var currentBrainSummary: String {
-        let store = appState.brainConfigStore
-        guard let id = store.currentBrainId(),
-              let config = store.getConfig(brainId: id) else { return "未设置" }
-        return config.label
-    }
-
     /// Android's 平台令牌 status line, same semantics: "connected"
     /// here means this app holds a platform credential and an
     /// endpoint is resolvable — the live check lives in the
@@ -402,15 +374,6 @@ struct SettingsView: View {
                     .textSelection(.enabled)
             }
         }
-    }
-
-    /// "1.3 (4)" — read from the bundle, never hardcoded, so this row
-    /// can never drift from the shipped build.
-    static var versionString: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "\(short) (\(build))"
     }
 
     // MARK: - Actions

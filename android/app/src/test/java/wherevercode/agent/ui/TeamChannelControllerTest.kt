@@ -54,7 +54,7 @@ class TeamChannelControllerTest {
         assertFalse(
             texts.any {
                 it.contains("频道未连接") || it.contains("第 1/") || it.contains("重新连接") ||
-                    it.contains("刷新消息") || it.contains("仅讨论") || it.contains("作为任务发送") ||
+                    it.contains("刷新消息") || it.contains("仅讨论") || it.contains("转为正式任务") ||
                     it.contains("只读协作工具")
             },
         )
@@ -76,7 +76,7 @@ class TeamChannelControllerTest {
         val liveTexts = visibleTexts(controller.root).map { it.text.toString() }
         assertTrue(liveTexts.any { it.contains("直播推送") })
         assertTrue(liveTexts.contains("仅讨论"))
-        assertTrue(liveTexts.contains("作为任务发送"))
+        assertTrue(liveTexts.contains("转为正式任务"))
         assertFalse(liveTexts.any { it.contains("只读协作工具") || it.contains("只读扇出") })
     }
 

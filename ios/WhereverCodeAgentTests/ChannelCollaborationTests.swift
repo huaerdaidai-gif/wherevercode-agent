@@ -165,6 +165,81 @@ final class ChannelCollaborationTests: XCTestCase {
         XCTAssertTrue(removed.isEmpty)
     }
 
+    func testPollMessagesSendsNo12Filters() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_messages")
+            XCTAssertEqual(arguments["before_id"] as? String, "m9")
+            XCTAssertEqual(arguments["sender"] as? String, "alice")
+            XCTAssertEqual(arguments["from_ts"] as? Int, 100)
+            XCTAssertEqual(arguments["to_ts"] as? Int, 200)
+            XCTAssertEqual(arguments["kind"] as? String, "image")
+            return (200, #"{"messages":[]}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let messages = try await transport.pollMessages(
+            channelID: "ch-1", beforeID: "m9", limit: 25,
+            sender: "alice", fromTs: 100, toTs: 200, kind: "image")
+        XCTAssertTrue(messages.isEmpty)
+    }
+
+    func testCreateChannelWebhookSendsTool() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_create_webhook")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            XCTAssertEqual(arguments["name"] as? String, "WhereverCode App")
+            return (200, #"{"webhook_id":"whk_1"}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+        _ = try await transport.createChannelWebhook(channelID: "ch-1", name: "WhereverCode App")
+    }
+
+    func testListChannelWebhooksSendsTool() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_list_webhooks")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            return (200, #"{"channel_id":"ch-1","webhooks":[]}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+        _ = try await transport.listChannelWebhooks(channelID: "ch-1")
+    }
+
+    func testDeleteChannelWebhookSendsTool() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_delete_webhook")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            XCTAssertEqual(arguments["webhook_id"] as? String, "whk_1")
+            return (200, #"{"deleted":true}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+        _ = try await transport.deleteChannelWebhook(channelID: "ch-1", webhookID: "whk_1")
+    }
+
+    func testSetMemberRoleSendsTool() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_set_member_role")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            XCTAssertEqual(arguments["member_id"] as? String, "gemini")
+            XCTAssertEqual(arguments["role"] as? String, "coordinator")
+            return (200, #"{"channel_id":"ch-1","member_id":"gemini","role":"coordinator"}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        _ = try await transport.setMemberRole(channelID: "ch-1", memberID: "gemini", role: "coordinator")
+    }
+
+    func testSetHistoryVisibleSendsNewTool() async throws {
+        let transport = makeTransport { name, arguments in
+            XCTAssertEqual(name, "agent_channel_set_history_visible")
+            XCTAssertEqual(arguments["channel_id"] as? String, "ch-1")
+            XCTAssertEqual(arguments["visible"] as? Bool, false)
+            return (200, #"{"id":"ch-1","history_visible":false}"#)
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        _ = try await transport.setHistoryVisible(channelID: "ch-1", visible: false)
+    }
+
     private func makeTransport(
         respond: @escaping (String, [String: Any]) -> (Int, String)
     ) -> ChannelTransport {

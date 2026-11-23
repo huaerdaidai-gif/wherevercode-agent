@@ -1,6 +1,7 @@
 package wherevercode.agent.core.team
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,6 +11,7 @@ import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.core.agent.AgentAccess
 import wherevercode.agent.core.agent.AgentKind
 import wherevercode.agent.core.agent.AgentRecord
+import wherevercode.agent.core.agent.ChannelParticipant
 
 /**
  * P3 团队频道规则测试（2026-11-11）：发帖校验、扇出选枝、只读简报、
@@ -193,6 +195,111 @@ class TeamChannelTest {
     }
 
     @Test
+    fun `mergePlatformChannelMembers adds platform-only members in platform order`() {
+        // 私聊名单口径：频道成员以平台为准——只在平台频道里、没在本机
+        // 加过的成员也必须进名单（本地条目与本机 App 行保留在前）。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val merged = mergePlatformChannelMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "codex", agentName = "Codex"),
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA（平台名）"),
+                ChannelParticipant(agentId = "gemini", agentName = "Gemini"),
+            ),
+        )
+        assertEquals(listOf("local-app", "app-qa", "codex", "gemini"), merged.map { it.agentId })
+        // 本地已有成员保留本地显示名，不被平台名覆盖。
+        assertEquals("App QA", merged.first { it.agentId == "app-qa" }.displayName)
+        // 平台补进的成员是端点直连成员。
+        assertTrue(merged.first { it.agentId == "gemini" }.isPlatformAgent)
+        assertTrue(merged.first().isLocalApp)
+    }
+
+    @Test
+    fun `mergePlatformChannelMembers propagates isSelf to new and local members`() {
+        // 私聊名单排自己靠 is_self：平台独有成员带标记进来；与本地同 id
+        // 的成员保留本地条目，但 self 标记要回写（app-qa 即此例）。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val merged = mergePlatformChannelMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA", isSelf = true),
+                ChannelParticipant(agentId = "app", agentName = "App"),
+            ),
+        )
+        assertEquals(listOf("local-app", "app-qa", "app"), merged.map { it.agentId })
+        assertTrue(merged.first { it.agentId == "app-qa" }.isSelf)
+        assertFalse(merged.first { it.agentId == "app" }.isSelf)
+    }
+
+    @Test
+    fun `transient notice shows briefly then hides`() {
+        // 定版口径：状态只在异常时短暂出现——首次出现后 TTL 内可见、
+        // 过期即隐；空通知与未计时（firstSeen=0）永不显示。
+        assertTrue(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 1_000))
+        assertTrue(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 5_999))
+        assertFalse(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 6_000))
+        assertFalse(transientNoticeVisible("出错了", firstSeenAtMs = 1_000, nowMs = 60_000))
+        assertFalse(transientNoticeVisible(null, firstSeenAtMs = 1_000, nowMs = 1_000))
+        assertFalse(transientNoticeVisible("", firstSeenAtMs = 1_000, nowMs = 1_000))
+        assertFalse(transientNoticeVisible("出错了", firstSeenAtMs = 0, nowMs = 1_000))
+    }
+
+    @Test
+    fun `mergePlatformChannelMembers carries platform roles`() {
+        // 角色管理口径：成员角色以平台为准——本地已有成员回写平台
+        // 角色，平台补进的成员带角色进来，标签函数给徽标用。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val merged = mergePlatformChannelMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA", role = "coordinator"),
+                ChannelParticipant(agentId = "codex", agentName = "Codex", role = "owner"),
+                ChannelParticipant(agentId = "gemini", agentName = "Gemini"),
+            ),
+        )
+        assertEquals("coordinator", merged.first { it.agentId == "app-qa" }.role)
+        assertEquals("owner", merged.first { it.agentId == "codex" }.role)
+        assertEquals("member", merged.first { it.agentId == "gemini" }.role)
+        assertEquals("创建者", channelRoleLabel("owner"))
+        assertEquals("协调员", channelRoleLabel("coordinator"))
+        assertEquals("", channelRoleLabel("member"))
+    }
+
+    @Test
+    fun `dmCandidates drops local app and self but keeps platform app member`() {
+        // 验收实证口径：频道 9 名成员里，私聊名单 = 全体减本机自己；
+        // agentId=app（另一台设备的 App 身份）必须在名单里。
+        val members = listOf(
+            TeamChannelMember(agentId = "local-app", displayName = "本机 App", isLocalApp = true),
+            TeamChannelMember(agentId = "app-qa", displayName = "App QA", isPlatformAgent = true, isSelf = true),
+            TeamChannelMember(agentId = "app", displayName = "App", isPlatformAgent = true),
+            TeamChannelMember(agentId = "codex", displayName = "Codex", isPlatformAgent = true),
+        )
+        assertEquals(listOf("app", "codex"), dmCandidates(members).map { it.agentId })
+    }
+
+    @Test
+    fun `dmCandidates drops self by selfIds when server omits is_self`() {
+        // 服务端 participants 不带 is_self 时（2026-11-22 实查），靠本机身份集合排自己：
+        // app-qa 必须出名单，app（另一台设备的 App 身份）必须保留。
+        val members = listOf(
+            TeamChannelMember(agentId = "local-app", displayName = "本机 App", isLocalApp = true),
+            TeamChannelMember(agentId = "app-qa", displayName = "App QA", isPlatformAgent = true),
+            TeamChannelMember(agentId = "app", displayName = "App", isPlatformAgent = true),
+            TeamChannelMember(agentId = "muse", displayName = "Muse", isPlatformAgent = true),
+        )
+        val result = dmCandidates(members, selfIds = setOf("app-qa"))
+        assertEquals(listOf("app", "muse"), result.map { it.agentId })
+    }
+
+    @Test
+    fun `mergePlatformChannelMembers with no platform list keeps local list`() {
+        val local = buildChannelMembers(listOf(record("codex", "Codex")))
+        assertEquals(local, mergePlatformChannelMembers(local, emptyList()))
+    }
+
+    @Test
     fun `buildRelayBrief says it is a relay not a dispatch`() {
         val brief = TeamChatRules.buildRelayBrief("Example Agent", "@codex 这个方案行不行？")
         assertTrue(brief.contains("@ 转达"))
@@ -366,5 +473,69 @@ class TeamChannelTest {
         assertEquals("Example Agent", plainView.senderName)
         assertNull(plainView.taskId)
         assertEquals("大家早。", plainView.text)
+    }
+
+    @Test
+    fun `groupTopicThreads groups root message and chained replies into free topic thread`() {
+        val root = TeamThreadMessage(
+            messageId = "msg-root-1",
+            senderId = "user-1",
+            senderName = "Alice",
+            text = "探讨一下客户端架构演进方案",
+            createdAtSeconds = 100.0,
+        )
+        val reply1 = TeamThreadMessage(
+            messageId = "msg-reply-1",
+            senderId = "agent-1",
+            senderName = "Codex",
+            text = "建议把状态机和视图层彻底解耦",
+            replyToId = "msg-root-1",
+            createdAtSeconds = 101.0,
+        )
+        val reply2 = TeamThreadMessage(
+            messageId = "msg-reply-2",
+            senderId = "agent-2",
+            senderName = "Claude",
+            text = "同意，而且网络层信令也应拆出来",
+            replyToId = "msg-reply-1",
+            createdAtSeconds = 102.0,
+        )
+        val standalone = TeamThreadMessage(
+            messageId = "msg-standalone",
+            senderId = "user-2",
+            senderName = "Bob",
+            text = "午饭吃什么？",
+            createdAtSeconds = 105.0,
+        )
+
+        val threads = groupTopicThreads(listOf(root, reply1, reply2, standalone))
+        assertEquals(1, threads.size)
+        val topic = threads.single()
+        assertTrue(topic.isTopicThread)
+        assertEquals("msg-root-1", topic.rootMessageId)
+        assertEquals("探讨一下客户端架构演进方案", topic.topicTitle)
+        assertEquals(3, topic.messages.size)
+        assertEquals(listOf("msg-root-1", "msg-reply-1", "msg-reply-2"), topic.messages.map { it.messageId })
+        assertEquals("话题 · 探讨一下客户端架构演进方案", teamThreadTitle(topic))
+    }
+
+    @Test
+    fun `groupTopicThreads returns empty list when no messages have replies`() {
+        val standalone1 = TeamThreadMessage(
+            messageId = "m1",
+            senderId = "u1",
+            senderName = "A",
+            text = "消息一",
+            createdAtSeconds = 1.0,
+        )
+        val standalone2 = TeamThreadMessage(
+            messageId = "m2",
+            senderId = "u2",
+            senderName = "B",
+            text = "消息二",
+            createdAtSeconds = 2.0,
+        )
+        val threads = groupTopicThreads(listOf(standalone1, standalone2))
+        assertTrue(threads.isEmpty())
     }
 }

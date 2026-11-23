@@ -131,7 +131,9 @@ final class WhereverCodeAgentUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        XCTAssertTrue(app.staticTexts["chat.connectionSummary"].waitForExistence(timeout: 15))
+        // 对话页顶部状态行已按 2026-11-22 口径整行撤除，
+        // 「页面已加载」信号改用输入框（与 testEntryRegistryNavigation 同款）。
+        XCTAssertTrue(app.descendants(matching: .any)["chat.input"].waitForExistence(timeout: 15))
         let menu = app.buttons["navigation.menu"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()

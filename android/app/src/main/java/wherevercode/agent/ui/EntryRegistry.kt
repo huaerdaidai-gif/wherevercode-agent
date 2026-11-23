@@ -131,11 +131,11 @@ object EntryRegistry {
         Entry("feature_terminal_logs", "终端与日志", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
             "终", null, "nav_projects",
-            "终端与日志待开发（终端本地进程执行需远端 Hand 协议连接）", null),
+            "终端与日志待开发（远端 Hand 执行尚未接入）", null),
         Entry("feature_git_worktree", "Git 与工作树", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
             "枝", null, "nav_projects",
-            "Git 与工作树待开发（远端 Hand 同步待接入）", null),
+            "Git 与工作树待开发（远端 Hand 同步尚未接入）", null),
         Entry("feature_run_preview", "运行预览", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
             "视", null, "nav_projects",
@@ -214,9 +214,8 @@ object EntryRegistry {
             "空", null, "nav_channels",
             "团队空间待开发（成员与频道同页的统一空间 + 创建频道尚未开发）", null),
         Entry("feature_message_center", "消息中心", Group.FEATURE,
-            Status.TODO, TargetKind.TODO, "",
-            "消", null, "nav_channels",
-            "消息中心待开发（尚未开发）", null),
+            Status.IMPLEMENTED, TargetKind.DRAWER, DrawerRouter.ID_MESSAGE_CENTER,
+            "消", null, "nav_channels", null, null),
 
         // ── 四、控制分组 (35 条) ──
         Entry("feature_brain", "大脑", Group.FEATURE,
@@ -382,7 +381,7 @@ object EntryRegistry {
         Entry("feature_nesting", "收纳系统与自定义引擎", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
             "收", null, "nav_feature_center",
-            "收纳系统待开发（第二步：全部功能一键收纳/极简/标准/专家三模式/自定义首页/模块管理）", null),
+            "收纳系统与自定义引擎待开发（极简 / 标准 / 专家模式、自定义首页尚未开发）", null),
     )
 
     /** 查找条目（含旧别名兼容：nav_console -> nav_control; feature_team_chat -> nav_team_channel; home_brain -> feature_brain）。 */
