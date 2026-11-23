@@ -29,15 +29,14 @@ data class DrawerBadges(
             if (hasPendingApproval) 1 else 0
     }
 
-    /** 该入口的角标：未知（null）不显示；0 显示“0”。 */
+    /**
+     * 该入口的角标：未知（null）不显示；0 显示“0”。
+     * 221 与 iOS 对齐：抽屉「控制」父级行不带角标——运行中/待审批的
+     * 角标只归各自入口（nav_running_tasks / nav_pending_approval）。
+     */
     fun badgeFor(entryId: String): Int? = when (entryId) {
         "nav_running_tasks" -> runningTasks
         "nav_pending_approval" -> pendingApprovals
-        "nav_control" -> {
-            val r = runningTasks ?: 0
-            val p = pendingApprovals ?: 0
-            if (runningTasks == null && pendingApprovals == null) null else (r + p)
-        }
         else -> null
     }
 }
