@@ -311,6 +311,7 @@ import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.SettingsHomeController
 import wherevercode.agent.ui.SettingsSections
 import wherevercode.agent.ui.TeamChannelController
+import wherevercode.agent.core.platform.LanPlatformServer
 import wherevercode.agent.core.platform.LocalChannelWsConnection
 import wherevercode.agent.core.platform.LocalPlatform
 import wherevercode.agent.ui.TeamChannelSnapshot
@@ -1168,6 +1169,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val themePrefs by lazy { getSharedPreferences("ui_v2_theme", MODE_PRIVATE) }
+    private val lanPrefs by lazy { getSharedPreferences("lan_platform", MODE_PRIVATE) }
     private val brainNamePrefs by lazy { getSharedPreferences(BrainDisplayName.PREFS_FILE, MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1176,6 +1178,11 @@ class MainActivity : AppCompatActivity() {
         // 频道三层一期·本地层：装好 App 内嵌的本地平台（零配置频道底座），
         // 必须赶在任何频道链路调用之前。
         LocalPlatform.install(applicationContext)
+        // 内网层（二期）：上次开着就随启动恢复监听；进程被杀服务即停，
+        // 设置页状态如实显示，不假装常驻。
+        if (lanPrefs.getBoolean("service_enabled", false)) {
+            LocalPlatform.startLanServer()
+        }
         setContentView(R.layout.activity_main)
         // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
         // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
@@ -10125,6 +10132,8 @@ class MainActivity : AppCompatActivity() {
         refreshGitHostAuthRows()
         // 平台令牌（2026-11-12，maintainer：App 没有 token 生成按钮）：设置页“平台令牌”分节。
         bindPlatformTokenSettings()
+        // 内网频道服务（频道三层二期）：设置页“内网频道服务”分节。
+        bindLanServiceSettings()
         // 自主度（2026-11-11，maintainer 22:43 两种模式）：设置页“自主度”分节。
         bindAutonomySettings()
         // Hand 同步（2026-11-12，maintainer 定：App 更新后自动同步已连接设备的 Hand）。
@@ -10333,6 +10342,141 @@ class MainActivity : AppCompatActivity() {
             .setOnClickListener { generatePlatformToken() }
     }
 
+    // ---- 内网频道服务（频道三层二期） -------------------------------------
+
+    private lateinit var lanServiceStatus: TextView
+    private lateinit var lanServiceAddress: TextView
+    private lateinit var lanServiceToggle: Button
+    private lateinit var lanTokenNameField: EditText
+    private lateinit var lanTokenListView: TextView
+
+    private fun bindLanServiceSettings() {
+        lanServiceStatus = screenSettings.findViewById(R.id.lanServiceStatus)
+        lanServiceAddress = screenSettings.findViewById(R.id.lanServiceAddress)
+        lanServiceToggle = screenSettings.findViewById(R.id.buttonToggleLanService)
+        lanTokenNameField = screenSettings.findViewById(R.id.lanTokenName)
+        lanTokenListView = screenSettings.findViewById(R.id.lanTokenList)
+        lanServiceToggle.setOnClickListener { toggleLanService() }
+        screenSettings.findViewById<View>(R.id.buttonIssueLanToken)
+            .setOnClickListener { issueLanToken() }
+        screenSettings.findViewById<View>(R.id.buttonRevokeLanToken)
+            .setOnClickListener { revokeLanToken() }
+        refreshLanServiceUi()
+    }
+
+    private fun toggleLanService() {
+        if (LocalPlatform.lanServerRunning()) {
+            LocalPlatform.stopLanServer()
+            lanPrefs.edit().putBoolean("service_enabled", false).apply()
+            toast("内网服务已关闭。")
+        } else if (LocalPlatform.startLanServer()) {
+            lanPrefs.edit().putBoolean("service_enabled", true).apply()
+            toast("内网服务已开启。")
+        } else {
+            toast("内网服务开启失败：本地平台未就绪或端口被占用。")
+        }
+        refreshLanServiceUi()
+    }
+
+    private fun refreshLanServiceUi() {
+        if (!::lanServiceStatus.isInitialized) return
+        val running = LocalPlatform.lanServerRunning()
+        lanServiceStatus.text = "服务状态　" + if (running) "运行中" else "未开启"
+        val ip = if (running) lanIpv4Address() else null
+        lanServiceAddress.text = "本机地址　" + when {
+            !running -> "—"
+            ip != null -> "$ip:${LanPlatformServer.DEFAULT_PORT}"
+            else -> "未取得局域网地址（请先连 Wi-Fi 或尾网）"
+        }
+        lanServiceToggle.text = if (running) "关闭内网服务" else "开启内网服务"
+        val entries = LocalPlatform.lanRegistryOrNull()?.list().orEmpty()
+        lanTokenListView.text = if (entries.isEmpty()) {
+            "暂无成员令牌"
+        } else {
+            entries.joinToString("\n") { entry ->
+                "${entry.agentName} · ${entry.agentId} · 令牌尾号 ****${entry.token.takeLast(4)}"
+            }
+        }
+    }
+
+    private fun issueLanToken() {
+        val registry = LocalPlatform.lanRegistryOrNull()
+        if (registry == null) {
+            toast("本地平台未就绪，无法签发。")
+            return
+        }
+        val name = lanTokenNameField.text?.toString()?.trim().orEmpty()
+        if (name.isBlank()) {
+            toast("请先填成员名称。")
+            return
+        }
+        val entry = registry.issue(name)
+        lanTokenNameField.setText("")
+        refreshLanServiceUi()
+        val ip = lanIpv4Address()
+        val addressHint = if (ip != null) "$ip:${LanPlatformServer.DEFAULT_PORT}" else "本机地址（见上方）"
+        AlertDialog.Builder(this)
+            .setTitle("成员令牌（只显示一次）")
+            .setMessage(
+                "给「${entry.agentName}」的令牌：\n\n${entry.token}\n\n" +
+                    "对方设置：平台地址填 $addressHint，平台凭证填上面的令牌。" +
+                    "关闭后只显示尾号，丢了只能撤销后重新签发。",
+            )
+            .setPositiveButton("复制令牌") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("内网成员令牌", entry.token))
+                toast("令牌已复制。")
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    private fun revokeLanToken() {
+        val registry = LocalPlatform.lanRegistryOrNull() ?: return
+        val entries = registry.list()
+        if (entries.isEmpty()) {
+            toast("暂无成员令牌。")
+            return
+        }
+        val labels = entries.map { "${it.agentName} · ${it.agentId}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("撤销哪个成员令牌")
+            .setItems(labels) { _, index ->
+                registry.revoke(entries[index].token)
+                refreshLanServiceUi()
+                toast("已撤销「${entries[index].agentName}」的令牌，立即生效。")
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 本机首个可用的内网 IPv4（私有段优先，其次尾网 100.64/10）；取不到返回 null。 */
+    private fun lanIpv4Address(): String? {
+        var tailnet: String? = null
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (!iface.isUp || iface.isLoopback) continue
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val host = addresses.nextElement().hostAddress ?: continue
+                    if (host.contains(':')) continue
+                    if (PlatformAgent.isLanAddress(host)) {
+                        if (host.startsWith("100.")) {
+                            if (tailnet == null) tailnet = host
+                        } else {
+                            return host
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            return tailnet
+        }
+        return tailnet
+    }
+
     private fun bindPlatformConnectionSettings() {
         platformConnectionAddressField = screenSettings.findViewById(R.id.platformConnectionAddress)
         platformConnectionAddressState = screenSettings.findViewById(R.id.platformConnectionAddressState)
@@ -10386,7 +10530,7 @@ class MainActivity : AppCompatActivity() {
             platformConnectionAddressField.text?.toString().orEmpty(),
         )
         if (host == null) {
-            platformConnectionAddressState.text = "地址状态　地址无效，请填写 HTTPS 平台域名。"
+            platformConnectionAddressState.text = "地址状态　地址无效，请填写平台域名或内网地址（http 仅限内网）。"
             return
         }
         try {
@@ -10397,7 +10541,9 @@ class MainActivity : AppCompatActivity() {
             toast("保存平台地址失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
             return
         }
-        platformConnectionAddressField.setText("https://$host")
+        platformConnectionAddressField.setText(
+            if (PlatformAgent.isLanAddress(host)) "http://$host" else "https://$host",
+        )
         refreshPlatformConnectionFormStatus()
         refreshPlatformConnectionSummary()
         refreshPlatformTokenStatus()
