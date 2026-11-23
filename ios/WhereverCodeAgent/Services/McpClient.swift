@@ -48,11 +48,21 @@ public struct McpClient {
     private let endpoint: URL
     private let tokenProvider: () -> String?
     private let session: URLSession
+    /// 本地优先路由（频道三层一期·本地层）：非空时请求不走网络，
+    /// 请求体在进程内直交本地平台处理（见 LocalPlatform），响应体
+    /// 仍走与远程完全相同的解信封路径。远程客户端恒为 nil。
+    private let localHandler: ((Data, String) throws -> Data)?
 
-    public init(endpoint: URL, tokenProvider: @escaping () -> String?, session: URLSession = .shared) {
+    public init(
+        endpoint: URL,
+        tokenProvider: @escaping () -> String?,
+        session: URLSession = .shared,
+        localHandler: ((Data, String) throws -> Data)? = nil
+    ) {
         self.endpoint = endpoint
         self.tokenProvider = tokenProvider
         self.session = session
+        self.localHandler = localHandler
     }
 
     /// Build the JSON-RPC request body for one `tools/call`.
@@ -77,6 +87,10 @@ public struct McpClient {
             bodyData = try JSONSerialization.data(withJSONObject: body)
         } catch {
             throw McpError.transport("无法构造请求。")
+        }
+        if let localHandler {
+            let responseData = try localHandler(bodyData, token)
+            return try Self.unwrapToolResult(data: responseData)
         }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -114,23 +128,27 @@ public struct McpClient {
             "params": [String: Any](),
         ]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.httpBody = bodyData
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 30
         let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw McpError.transport("网络请求失败：\(shortError(error))")
-        }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw Self.httpError(statusCode: http.statusCode, body: data)
+        if let localHandler {
+            data = try localHandler(bodyData, token)
+        } else {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.httpBody = bodyData
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 30
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch {
+                throw McpError.transport("网络请求失败：\(shortError(error))")
+            }
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw Self.httpError(statusCode: http.statusCode, body: data)
+            }
         }
         let json = try Self.decodeJSON(data)
         guard let result = json["result"] as? [String: Any],

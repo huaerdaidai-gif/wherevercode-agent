@@ -123,6 +123,10 @@ public final class ChannelFeed {
     private let webSocketURL: URL
     private let tokenProvider: () -> String?
     private let session: URLSession
+    /// 本地平台模式（频道三层一期·本地层）：非空时不建套接字，
+    /// 订阅本地消息总线——事件文本与平台 WS 帧同形状，解析/去重
+    /// 路径与远程一视同仁。远程模式恒为 nil。
+    private let localSubscribe: ((String, @escaping (String) -> Void) -> () -> Void)?
 
     private var stateMachine = FeedStateMachine()
     private var deduper = MessageDeduper()
@@ -148,13 +152,15 @@ public final class ChannelFeed {
         transport: ChannelTransport,
         webSocketURL: URL,
         tokenProvider: @escaping () -> String?,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        localSubscribe: ((String, @escaping (String) -> Void) -> () -> Void)? = nil
     ) {
         self.channelID = channelID
         self.transport = transport
         self.webSocketURL = webSocketURL
         self.tokenProvider = tokenProvider
         self.session = session
+        self.localSubscribe = localSubscribe
     }
 
     public var connectionState: ChannelConnectionState { stateMachine.state }
@@ -246,6 +252,9 @@ public final class ChannelFeed {
     /// Open the WS and run the receive loop until it closes or errors.
     /// Returns true when a socket was opened at all.
     private func runWebSocket() async -> Bool {
+        if let localSubscribe {
+            return await runLocalEventStream(localSubscribe)
+        }
         guard let token = tokenProvider(), !token.isEmpty else {
             lastError = "未配置平台 Agent 凭证。"
             publishState()
@@ -297,6 +306,28 @@ public final class ChannelFeed {
                 }
                 return true
             }
+        }
+        return true
+    }
+
+    /// 本地平台模式：不建任何套接字。事件经进程内消息总线以与
+    /// 平台 WS 完全相同的帧文本到达，解析/去重与远程共用同一条
+    /// 路径；流保持「已连接」直到 feed 停止或任务被取消。
+    private func runLocalEventStream(
+        _ subscribe: (String, @escaping (String) -> Void) -> () -> Void
+    ) async -> Bool {
+        let unsubscribe = subscribe(channelID) { [weak self] text in
+            guard let self else { return }
+            if self.stateMachine.state != .live { self.setState(.wsOpened) }
+            if let typing = parseChannelTypingWsEvent(text) {
+                self.onTyping?(typing)
+            } else if let parsed = parseChannelWsEvent(text) {
+                self.deliver([parsed])
+            }
+        }
+        defer { unsubscribe() }
+        while running && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         return true
     }
