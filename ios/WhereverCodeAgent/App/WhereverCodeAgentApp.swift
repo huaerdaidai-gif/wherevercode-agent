@@ -150,6 +150,12 @@ public final class AppState: ObservableObject {
         mModel.onChange = { [weak self] in self?.rebuildBrainStack() }
 
         repairCurrentBrainReference()
+
+        // 频道三层一期·本地层：装好 App 内嵌的本地平台并把本机
+        // Agent 注册表同步进去——远程平台没配全时频道走本地账本，
+        // 零配置可用（见 makeChannelMcpClient）。
+        LocalPlatform.install()
+        syncLocalPlatformAgents()
     }
 
     public func rebuildBrainStack() {
@@ -245,6 +251,49 @@ public final class AppState: ObservableObject {
         return McpClient(endpoint: endpoint, tokenProvider: tokenProvider)
     }
 
+    /// 频道链路是否走本地平台（频道三层一期·本地层）：远程平台
+    /// 没配全（地址或凭证任一缺失）时为真——与安卓
+    /// teamChannelEndpoint 同语义，远程配全后自动优先远程。
+    public var channelUsesLocalPlatform: Bool {
+        !(settings.mcpEndpoint != nil && hasToken)
+    }
+
+    /// 频道专用的 MCP 客户端：远程配全走远程，否则回落本地平台
+    /// （进程内直达本地账本，不经网络、不填地址、不要令牌）。
+    /// 任务/签发等其他链路仍走 makeMcpClient 的远程口径不变。
+    public func makeChannelMcpClient() -> McpClient? {
+        if !channelUsesLocalPlatform {
+            return makeMcpClient()
+        }
+        LocalPlatform.install()
+        syncLocalPlatformAgents()
+        return McpClient(
+            endpoint: LocalPlatform.localEndpoint,
+            tokenProvider: { LocalPlatform.localToken },
+            localHandler: LocalPlatform.handleMcpRequest
+        )
+    }
+
+    /// 把本机 Agent 注册表同步进本地平台（本地频道的加成员/私聊候选以它为准）。
+    public func syncLocalPlatformAgents() {
+        guard let service = LocalPlatform.serviceOrNull() else { return }
+        service.registerAgent(agentId: LocalPlatform.appAgentID, agentName: LocalPlatform.appAgentName)
+        if let records = try? data.agents.listAgents() {
+            for record in records {
+                service.registerAgent(agentId: record.agentId, agentName: record.displayName)
+            }
+        }
+    }
+
+    /// 频道 WS 地址：本地模式给本地伪地址（不会真的建套接字，
+    /// 推送走本地消息总线），远程模式用设置里派生的地址。
+    public func channelWebSocketURL(channelID: String) -> URL? {
+        if channelUsesLocalPlatform {
+            return LocalPlatform.localWebSocketURL(channelID: channelID)
+        }
+        return settings.channelWebSocketURL(channelID: channelID)
+    }
+
     public func loadChannels() async {
         guard let transport = makeChannelTransport() else {
             channelListError = "平台地址无效，读不到频道列表。"
@@ -316,7 +365,7 @@ public final class AppState: ObservableObject {
     }
 
     public func makeChannelTransport() -> ChannelTransport? {
-        guard let client = makeMcpClient() else { return nil }
+        guard let client = makeChannelMcpClient() else { return nil }
         return ChannelTransport(client: client)
     }
 

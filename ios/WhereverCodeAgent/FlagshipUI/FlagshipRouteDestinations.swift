@@ -2642,6 +2642,12 @@ public struct ChannelsHomeView: View {
         self.onNavigateRoute = onNavigateRoute
     }
 
+    /// 频道可用性：有平台凭证走远程；没配全时走 App 内嵌的本地
+    /// 平台（频道三层一期·本地层），频道页不再落未配置死页。
+    private var channelAvailable: Bool {
+        appState.hasToken || appState.channelUsesLocalPlatform
+    }
+
     private var filteredChannels: [V5ChannelItem] {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if q.isEmpty { return channels }
@@ -2668,13 +2674,13 @@ public struct ChannelsHomeView: View {
 
             // 218 统一版式分段一：频道／私聊直接放在页面上（与安卓
             // 同位），不再只藏在切换面板里；面板内分段与此共用状态。
-            if appState.hasToken {
+            if channelAvailable {
                 partitionPicker
             }
 
             // 对话框直达（批D）：打开即当前频道的对话框（消息流+状态+
             // 发送区）；搜索/频道列表收进切换面板（点频道名开）。
-            if !appState.hasToken {
+            if !channelAvailable {
                 unconfiguredTokenView
             } else if selectedPartition == .directMessages, activeWorkspaceDM == nil {
                 directMessagesListView
@@ -2759,7 +2765,7 @@ public struct ChannelsHomeView: View {
     /// 已删除/不存在。消费成功或定性后都清掉 pending（含持久化份，
     /// 冷启动/登录恢复靠它续上）。
     private func consumePendingChannelLink() async {
-        guard let target = appState.pendingChannelID, appState.hasToken else { return }
+        guard let target = appState.pendingChannelID, channelAvailable else { return }
         await appState.loadChannels()
         loadData()
         if let ch = channels.first(where: { $0.id == target }) {
@@ -2827,7 +2833,7 @@ public struct ChannelsHomeView: View {
 
                 if selectedPartition == .channels {
                     searchField
-                    if !appState.hasToken {
+                    if !channelAvailable {
                         unconfiguredTokenView
                     } else {
                         channelsListView
@@ -2985,7 +2991,7 @@ public struct ChannelsHomeView: View {
     }
 
     private func refreshChannels() async {
-        if appState.hasToken {
+        if channelAvailable {
             await appState.loadChannels()
         }
         await MainActor.run {
@@ -3258,7 +3264,7 @@ public struct ChannelsHomeView: View {
     }
 
     private func loadData() {
-        if !appState.hasToken {
+        if !channelAvailable {
             channels = []
             directMessages = []
             return
@@ -5124,9 +5130,9 @@ public struct ChannelDetailWorkspaceView: View {
 
     private func startFeed() {
         guard feed == nil,
-              appState.hasToken,
+              (appState.hasToken || appState.channelUsesLocalPlatform),
               let transport = appState.makeChannelTransport(),
-              let wsURL = appState.settings.channelWebSocketURL(channelID: currentChannelId) else {
+              let wsURL = appState.channelWebSocketURL(channelID: currentChannelId) else {
             connectionState = .stopped
             return
         }
@@ -5134,7 +5140,10 @@ public struct ChannelDetailWorkspaceView: View {
             channelID: currentChannelId,
             transport: transport,
             webSocketURL: wsURL,
-            tokenProvider: appState.tokenProvider
+            tokenProvider: appState.tokenProvider,
+            localSubscribe: appState.channelUsesLocalPlatform
+                ? LocalPlatform.subscribeLocalChannelEvents
+                : nil
         )
         newFeed.onMessages = { [weak newFeed] fresh in
             Task { @MainActor in
