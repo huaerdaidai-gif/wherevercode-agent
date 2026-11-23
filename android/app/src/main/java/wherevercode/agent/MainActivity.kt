@@ -309,6 +309,8 @@ import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.SettingsHomeController
 import wherevercode.agent.ui.SettingsSections
 import wherevercode.agent.ui.TeamChannelController
+import wherevercode.agent.core.platform.LocalChannelWsConnection
+import wherevercode.agent.core.platform.LocalPlatform
 import wherevercode.agent.ui.TeamChannelSnapshot
 import wherevercode.agent.ui.MessageCenterController
 import wherevercode.agent.core.message.MessageCenterChannelSource
@@ -1169,6 +1171,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         applyStoredTheme()
         super.onCreate(savedInstanceState)
+        // 频道三层一期·本地层：装好 App 内嵌的本地平台（零配置频道底座），
+        // 必须赶在任何频道链路调用之前。
+        LocalPlatform.install(applicationContext)
         setContentView(R.layout.activity_main)
         // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
         // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
@@ -6182,15 +6187,44 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             false
         }
-        if (!hasCredential) return null
-        val host = resolvedPlatformHost()
-        if (host.isBlank()) return null
-        val record = firstPlatformAgentRecord()
-        val channelId = savedActiveChannelId()
-            ?: record?.platformChannelId?.trim()?.takeIf { it.isNotBlank() }
-            ?: PlatformAgent.V5_CHANNEL_ID
-        if (channelId.isBlank()) return null
-        return host to channelId
+        if (hasCredential) {
+            val host = resolvedPlatformHost()
+            if (host.isNotBlank()) {
+                val record = firstPlatformAgentRecord()
+                val channelId = savedActiveChannelId()
+                    ?: record?.platformChannelId?.trim()?.takeIf { it.isNotBlank() }
+                    ?: PlatformAgent.V5_CHANNEL_ID
+                if (channelId.isNotBlank()) return host to channelId
+            }
+        }
+        // 本地层兜底（频道三层一期·本地层，方案便签 №11）：远程平台没配
+        // 全时不再落未配置死页——频道走 App 内嵌的本地平台，零配置
+        // 可用；远程凭证配全后上面的分支自动优先（多平台自由切换
+        // 是三层三期）。本地服务没装起来时才保持原来的未配置态。
+        syncLocalPlatformAgents()
+        val local = LocalPlatform.serviceOrNull() ?: return null
+        val savedLocal = savedActiveChannelId()?.takeIf { local.channelExists(it) }
+        return LocalPlatform.LOCAL_HOST to (savedLocal ?: local.defaultChannelId())
+    }
+
+    /** 频道链路的凭证提供者：本地平台用进程内固定凭证，远程用已存的平台凭证。 */
+    private fun channelTokenProvider(host: String): () -> String? =
+        if (LocalPlatform.isLocalHost(host)) {
+            { LocalPlatform.LOCAL_TOKEN }
+        } else {
+            { platformCredentialStore.loadPlatformToken() }
+        }
+
+    /** 把本机 Agent 注册表同步进本地平台（本地频道的加成员/私聊候选以它为准）。 */
+    private fun syncLocalPlatformAgents() {
+        val service = LocalPlatform.serviceOrNull() ?: return
+        service.registerAgent(LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME)
+        try {
+            for (record in agentStore.listAgents()) {
+                service.registerAgent(record.agentId, record.displayName)
+            }
+        } catch (_: Exception) {
+        }
     }
 
     /**
@@ -6515,7 +6549,7 @@ class MainActivity : AppCompatActivity() {
         val host = teamChannelEndpoint()?.first
         if (host == null) { toast("频道未连接；未执行管理操作。"); return }
         val transport = PlatformChannelMcpTransport(
-            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+            tokenProvider = channelTokenProvider(host),
             endpoint = PlatformAgent.mcpEndpoint(host),
         )
         Thread {
@@ -6712,7 +6746,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val (host, _) = endpoint
                     val transport = PlatformChannelMcpTransport(
-                        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                        tokenProvider = channelTokenProvider(host),
                         endpoint = PlatformAgent.mcpEndpoint(host),
                     )
                     // 本机身份别名（@我 的判定集合）：本机 App / 协调者，
@@ -6819,12 +6853,23 @@ class MainActivity : AppCompatActivity() {
                 teamChannelBufferId = channelId
             }
         }
-        val feed = McpChannelEventFeed.forPlatformChannel(
-            host = host,
-            channelId = channelId,
-            tokenProvider = { platformCredentialStore.loadPlatformToken() },
-            mcpClient = null,
-        )
+        val feed = if (LocalPlatform.isLocalHost(host)) {
+            // 本地层：传输走进程内本地平台，推送走本地消息总线（与远程
+            // WS 同形状的事件，ChannelFeed 的推送/兜底/去重逻辑无差别）。
+            McpChannelEventFeed(
+                channelId = channelId,
+                transport = teamChannelTransport(host),
+                wsFactory = { _, _ -> LocalChannelWsConnection(channelId) },
+                mcpClient = null,
+            )
+        } else {
+            McpChannelEventFeed.forPlatformChannel(
+                host = host,
+                channelId = channelId,
+                tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                mcpClient = null,
+            )
+        }
         feed.onChannelMessage = onChannelMessage@{ message ->
             synchronized(teamChannelMessages) {
                 if (teamChannelFeed !== feed) return@onChannelMessage
@@ -6931,7 +6976,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun teamChannelTransport(host: String) = PlatformChannelMcpTransport(
-        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+        tokenProvider = channelTokenProvider(host),
         endpoint = PlatformAgent.mcpEndpoint(host),
     )
 
@@ -7361,7 +7406,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                    tokenProvider = channelTokenProvider(host),
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
                 runBlocking {
@@ -7384,7 +7429,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                    tokenProvider = channelTokenProvider(host),
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
                 runBlocking {
