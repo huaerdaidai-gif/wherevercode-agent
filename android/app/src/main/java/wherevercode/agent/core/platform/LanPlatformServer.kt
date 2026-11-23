@@ -34,6 +34,9 @@ import wherevercode.agent.core.mcp.encodeWsFrame
  *
  * 诚实口径：服务活在 App 进程里，App 被杀/退后台被回收即停；
  * 界面文案须如实标注，不冒充常驻服务器。
+ *
+ * 分支：feat/channel-lan-layer-224-20261123（基线 223 安卓本地层）。
+ * 本文件是服务端核心；加入方 http 通道与宿主界面在后续提交接入。
  */
 class LanPlatformServer(
     private val serviceProvider: () -> LocalChannelService?,
