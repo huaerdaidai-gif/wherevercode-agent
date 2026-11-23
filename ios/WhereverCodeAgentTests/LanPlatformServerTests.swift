@@ -161,13 +161,23 @@ final class LanPlatformServerTests: XCTestCase {
         return probe
     }
 
+    /// 在原始字节流里找针（帧头是二进制，整段转 UTF-8 字符串会失败，
+    /// 必须按字节搜——这是本测试第一版的真 bug，推送其实到了）。
+    private func receivedContains(_ probe: WsProbe, _ needle: String) -> Bool {
+        probe.received.range(of: Data(needle.utf8)) != nil
+    }
+
+    private func receivedText(_ probe: WsProbe) -> String {
+        String(decoding: probe.received, as: UTF8.self)
+    }
+
     private func waitFor(_ probe: WsProbe, _ needle: String, timeoutSeconds: Double = 5) async -> Bool {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
-            if (String(data: probe.received, encoding: .utf8) ?? "").contains(needle) { return true }
+            if receivedContains(probe, needle) { return true }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        return (String(data: probe.received, encoding: .utf8) ?? "").contains(needle)
+        return receivedContains(probe, needle)
     }
 
     func testWsNonMemberIs403AndGetsNoMessages() async throws {
@@ -175,9 +185,8 @@ final class LanPlatformServerTests: XCTestCase {
         let channelId = service.defaultChannelId()
         let probe = wsConnect(channelId: channelId, token: entry.token)
         let refused = await waitFor(probe, "not_a_channel_member", timeoutSeconds: 3)
-        XCTAssertTrue(refused, String(data: probe.received, encoding: .utf8) ?? "")
-        let blob = String(data: probe.received, encoding: .utf8) ?? ""
-        XCTAssertTrue(blob.contains("403"), blob)
+        XCTAssertTrue(refused, receivedText(probe))
+        XCTAssertTrue(receivedContains(probe, "403"), receivedText(probe))
         probe.connection.cancel()
     }
 
@@ -187,13 +196,12 @@ final class LanPlatformServerTests: XCTestCase {
         _ = try await mcp(entry.token, "agent_channel_join", "{\"channel_id\":\"\(channelId)\"}")
         let probe = wsConnect(channelId: channelId, token: entry.token)
         let upgraded = await waitFor(probe, "101", timeoutSeconds: 3)
-        XCTAssertTrue(upgraded, String(data: probe.received, encoding: .utf8) ?? "")
-        let blob = String(data: probe.received, encoding: .utf8) ?? ""
-        XCTAssertTrue(blob.contains("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="), blob)
+        XCTAssertTrue(upgraded, receivedText(probe))
+        XCTAssertTrue(receivedContains(probe, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="), receivedText(probe))
 
         _ = try await mcp(entry.token, "agent_channel_post", "{\"channel_id\":\"\(channelId)\",\"text\":\"lan-ios-push\"}")
         let pushed = await waitFor(probe, "lan-ios-push", timeoutSeconds: 5)
-        XCTAssertTrue(pushed, String(data: probe.received, encoding: .utf8) ?? "")
+        XCTAssertTrue(pushed, receivedText(probe))
         probe.connection.cancel()
     }
 }
