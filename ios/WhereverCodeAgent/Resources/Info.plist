@@ -36,6 +36,14 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- 频道三层二期内网层：只放行本地网络的明文 http（内网平台
+		     服务）。公网仍全程 https，代码层另有护栏：AppSettings
+		     只对内网地址接受 http，公网地址一律拒绝。 -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>
