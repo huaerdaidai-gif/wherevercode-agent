@@ -29,6 +29,7 @@ public final class LanPlatformServer {
 
     private let serviceProvider: () -> LocalChannelService?
     private let registry: LanTokenRegistry
+    private let toolNames: [String]
     private let requestedPort: UInt16
     private let stateLock = NSLock()
     private var listener: NWListener?
@@ -39,11 +40,13 @@ public final class LanPlatformServer {
     public init(
         serviceProvider: @escaping () -> LocalChannelService?,
         registry: LanTokenRegistry,
-        port: UInt16 = LanPlatformServer.defaultPort
+        port: UInt16 = LanPlatformServer.defaultPort,
+        toolNames: [String] = LocalPlatform.toolNames
     ) {
         self.serviceProvider = serviceProvider
         self.registry = registry
         self.requestedPort = port
+        self.toolNames = toolNames
     }
 
     public var isRunning: Bool {
@@ -92,6 +95,10 @@ public final class LanPlatformServer {
         }
         stateLock.lock()
         listener = nwListener
+        // 乐观置位：NWListener 的 .ready 是异步回调，start 返回后界面
+        // 立刻读状态会读到未运行（安卓 ServerSocket 同步绑定无此问题）。
+        // .failed/.cancelled 回调会把它清回去，不会假报运行。
+        running = true
         stateLock.unlock()
         nwListener.start(queue: DispatchQueue(label: "lan-platform-listener"))
         return true
@@ -178,7 +185,15 @@ public final class LanPlatformServer {
             return Self.jsonError(400, "bad json")
         }
         let id: Any = request["id"] ?? NSNull()
-        if (request["method"] as? String) != "tools/call" {
+        let method = (request["method"] as? String) ?? ""
+        if method == "tools/list" {
+            // 设置页连接检查走 tools/list（与进程内本地答复同形状）：
+            // result.tools[].name。226 首版漏了它，连接状态误报
+            // 「无法解析的响应」——模拟器验收实测抓到。
+            let tools: [[String: Any]] = toolNames.map { ["name": $0] }
+            return Self.rpcEnvelope(id: id, result: ["tools": tools])
+        }
+        if method != "tools/call" {
             return Self.rpcEnvelope(id: id, result: Self.errorResult("内网平台只支持 tools/call"))
         }
         let params = (request["params"] as? [String: Any]) ?? [:]

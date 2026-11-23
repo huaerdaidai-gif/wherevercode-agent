@@ -74,6 +74,21 @@ final class LanPlatformServerTests: XCTestCase {
         return (result["isError"] as? Bool) ?? false
     }
 
+    /// 设置页连接检查走 tools/list：result.tools[].name 必须有答复
+    /// （226 首版漏答，连接状态误报「无法解析的响应」，验收实测抓到）。
+    func testToolsListAnswersWithToolNames() async throws {
+        let entry = registry.issue(agentName: "Mac")
+        let (status, body) = try await http(
+            "POST", "/api/open/v1/mcp", token: entry.token,
+            body: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/list\",\"params\":{}}")
+        XCTAssertEqual(status, 200)
+        let root = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
+        let tools = (root?["result"] as? [String: Any])?["tools"] as? [[String: Any]]
+        let names = tools?.compactMap { $0["name"] as? String } ?? []
+        XCTAssertTrue(names.contains("agent_channel_list"), names.joined(separator: ","))
+        XCTAssertTrue(names.contains("agent_channel_post"), names.joined(separator: ","))
+    }
+
     func testWsAcceptMatchesRfc6455Vector() {
         XCTAssertEqual(
             LanPlatformServer.wsAccept(key: "dGhlIHNhbXBsZSBub25jZQ=="),
