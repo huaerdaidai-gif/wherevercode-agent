@@ -3872,8 +3872,6 @@ public struct ChannelDetailWorkspaceView: View {
             notifyMode: notifyMode
         )
         let pinnedCount = messages.filter { $0.pinned && !$0.recalled }.count
-        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
-        let topicCount = groupTopicThreads(messages: rawMsgs).count
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 12) {
                 Text("消息中心")
@@ -3888,13 +3886,6 @@ public struct ChannelDetailWorkspaceView: View {
                 Text("置顶 \(pinnedCount)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button {
-                    showTopicThreadsSheet = true
-                } label: {
-                    Text(topicCount > 0 ? "话题 (\(topicCount))" : "话题")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                }
                 Spacer()
             }
             Text("计数按当前已加载消息统计")
@@ -3977,6 +3968,12 @@ public struct ChannelDetailWorkspaceView: View {
         }?.canMentionAll ?? false
     }
 
+    /// 话题数（218 计数口径 B；220 与安卓对齐：话题钮归搜索行右侧）。
+    private var topicThreadsCount: Int {
+        let rawMsgs = messages.map { ChannelMessage(id: $0.id, agentId: $0.senderId, agentName: $0.senderName, text: $0.text, replyTo: $0.replyToId) }
+        return groupTopicThreads(messages: rawMsgs).count
+    }
+
     private var searchBar: some View {
         HStack(spacing: 8) {
             TextField("搜本频道消息…", text: $searchText)
@@ -3989,6 +3986,13 @@ public struct ChannelDetailWorkspaceView: View {
                 Button("搜索") { Task { await runSearch() } }
                     .font(.caption)
                     .disabled(!searchCanRun)
+            }
+            Button {
+                showTopicThreadsSheet = true
+            } label: {
+                Text(topicThreadsCount > 0 ? "话题 (\(topicThreadsCount))" : "话题")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
             }
         }
         .padding(.horizontal, 16)

@@ -193,7 +193,6 @@ class TeamChannelController(
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val noticeLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     /** 重连/刷新行与底部输入栏（对话框铬）：未配时藏掉，配好后回来。 */
-    private lateinit var connectionActions: LinearLayout
     private lateinit var inputBar: LinearLayout
     private val diagnosticToggle: TextView = UiKit.text(context, "查看连接诊断", 10f, R.color.accent).apply {
         visibility = View.GONE
@@ -311,23 +310,7 @@ class TeamChannelController(
         root.addView(titleRow)
         connectionLine.setPadding(dp(16), 0, dp(16), dp(2))
         root.addView(connectionLine)
-        connectionActions = UiKit.horizontal(context).apply {
-            setPadding(dp(16), 0, dp(16), dp(2))
-        }
-        connectionActions.addView(
-            UiKit.text(context, "重新连接", 11f, R.color.accent, bold = true).apply {
-                setBackgroundResource(R.drawable.bg_chip_accent)
-                setPadding(dp(10), dp(5), dp(10), dp(5))
-                setOnClickListener { onReconnect() }
-            },
-        )
-        connectionActions.addView(
-            UiKit.text(context, "刷新消息", 11f, R.color.text_secondary).apply {
-                setPadding(dp(10), dp(5), dp(10), dp(5))
-                setOnClickListener { onRefresh() }
-            },
-        )
-        root.addView(connectionActions)
+        // 220 与 iOS 对齐：状态行不带「重新连接／刷新消息」钮（重连自动、刷新靠重进与轮询兜底）。
         root.addView(diagnosticToggle)
         root.addView(diagnosticLine)
         diagnosticToggle.setOnClickListener {
@@ -353,7 +336,7 @@ class TeamChannelController(
     }
 
     /**
-     * 对话框铬（照片走查批 D）：发送方式说明、连接状态行、重连/刷新、
+     * 对话框铬（照片走查批 D）：发送方式说明、连接状态行、
      * 诊断、轮次、提示、底部输入栏。未配时整套藏掉，只留页头与引导
      * （与 iOS 未配 Token 视图同构）；配好后整套回来。诊断行平时藏
      * 着，点「查看连接诊断」才展开（与原有行为一致）。
@@ -361,7 +344,6 @@ class TeamChannelController(
     private fun setDialogChromeVisible(visible: Boolean, hasDiagnostic: Boolean) {
         val v = if (visible) View.VISIBLE else View.GONE
         connectionLine.visibility = v
-        connectionActions.visibility = v
         diagnosticToggle.visibility =
             if (!visible) View.GONE else if (hasDiagnostic) View.VISIBLE else View.GONE
         diagnosticLine.visibility = View.GONE
@@ -376,43 +358,69 @@ class TeamChannelController(
             setPadding(dp(16), dp(8), dp(16), dp(12))
         }
         if (onCreateTask != null) {
-            val modes = RadioGroup(context).apply { orientation = LinearLayout.HORIZONTAL }
-            val discussion = RadioButton(context).apply { id = View.generateViewId(); text = "仅讨论"; minHeight = dp(48) }
-            val task = RadioButton(context).apply { id = View.generateViewId(); text = "转为正式任务"; minHeight = dp(48) }
-            modes.addView(discussion)
-            modes.addView(task)
-            modes.check(discussion.id)
-            modes.setOnCheckedChangeListener { _, id ->
-                asTask = id == task.id
+            // 220 与 iOS 对齐：模式切换用分段条（与 iOS 同形），不用单选钮。
+            val modes = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(6)) }
+            lateinit var discussion: TextView
+            lateinit var task: TextView
+            fun refreshModes() {
+                discussion.setBackgroundResource(if (!asTask) R.drawable.bg_chip_accent else R.drawable.bg_chip)
+                discussion.setTypeface(null, if (!asTask) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                task.setBackgroundResource(if (asTask) R.drawable.bg_chip_accent else R.drawable.bg_chip)
+                task.setTypeface(null, if (asTask) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
                 composer.sendLabel?.text = if (asTask) "创建任务" else "发送"
                 composer.input.hint = if (asTask) "任务目标与验收要求…" else "给频道发一条短消息（≤4000 字），@名字 叫一位 Agent…"
             }
+            fun modeSegment(label: String, taskMode: Boolean) =
+                UiKit.text(context, label, 12f, R.color.text_primary).apply {
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(dp(14), dp(8), dp(14), dp(8))
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f,
+                    )
+                    setOnClickListener {
+                        asTask = taskMode
+                        refreshModes()
+                    }
+                }
+            discussion = modeSegment("仅讨论", taskMode = false)
+            task = modeSegment("转为正式任务", taskMode = true)
+            modes.addView(discussion)
+            modes.addView(task)
             bar.addView(modes)
+            refreshModes()
         }
-        bar.addView(composer)
-        // 频道补全二期：附件引用（引用制）与定时发送，都是发送前的显式动作。
-        val toolsRow = UiKit.horizontal(context).apply { setPadding(0, dp(6), 0, 0) }
-        toolsRow.addView(
-            UiKit.text(context, "加附件引用", 11f, R.color.text_secondary).apply {
+        // 220 与 iOS 对齐：附件引用/定时发送收进输入框左侧「＋」菜单（与 iOS 同位同形）。
+        val composerRow = UiKit.horizontal(context)
+        composerRow.addView(
+            UiKit.text(context, "＋", 16f, R.color.text_primary, bold = true).apply {
+                gravity = android.view.Gravity.CENTER
                 setBackgroundResource(R.drawable.bg_chip)
-                setPadding(dp(10), dp(5), dp(10), dp(5))
-                setOnClickListener { onRequestAttachmentRef() }
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { rightMargin = dp(8) }
+                setOnClickListener {
+                    val options = mutableListOf("加附件引用")
+                    if (onSchedulePost != null) options.add("定时发送")
+                    ListDialog.show(context, "更多", null, options) { which ->
+                        when (options.getOrNull(which)) {
+                            "加附件引用" -> onRequestAttachmentRef()
+                            "定时发送" -> showScheduleMenu()
+                        }
+                    }
+                }
             },
         )
-        if (onSchedulePost != null) {
-            toolsRow.addView(
-                UiKit.text(context, "定时发送", 11f, R.color.text_secondary).apply {
-                    setBackgroundResource(R.drawable.bg_chip)
-                    setPadding(dp(10), dp(5), dp(10), dp(5))
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { leftMargin = dp(8) }
-                    setOnClickListener { showScheduleMenu() }
-                },
-            )
-        }
-        bar.addView(toolsRow)
+        composer.layoutParams = LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f,
+        )
+        composerRow.addView(composer)
+        bar.addView(composerRow)
         return bar
     }
 
@@ -540,6 +548,9 @@ class TeamChannelController(
             return
         }
         bodyContainer.addView(segmentRow(snapshot))
+        if (!snapshot.dmMode && snapshot.channels.isNotEmpty()) {
+            bodyContainer.addView(channelSwitcherRow(snapshot))
+        }
         if (!snapshot.dmMode) {
             bodyContainer.addView(sectionTabsRow(snapshot))
         }
@@ -557,9 +568,6 @@ class TeamChannelController(
         if (snapshot.dmMode) {
             bodyContainer.addView(dmListSection(snapshot))
         } else {
-            if (snapshot.channels.isNotEmpty()) {
-                bodyContainer.addView(channelSwitcherRow(snapshot))
-            }
             bodyContainer.addView(searchRow(snapshot))
             bodyContainer.addView(filterRow(snapshot))
             bodyContainer.addView(toolsRow(snapshot))
@@ -733,53 +741,52 @@ class TeamChannelController(
         return row
     }
 
-    /** 「频道／私聊」分段（方案 A，Funk 2026-11-20 09:31 定）。 */
+    /** 「频道／私聊」分段（方案 A，Funk 2026-11-20 09:31 定；220 改分段条形态，与 iOS 同形）。 */
     private fun segmentRow(snapshot: TeamChannelSnapshot): LinearLayout {
         val row = UiKit.horizontal(context).apply { setPadding(0, dp(2), 0, dp(8)) }
-        fun segmentChip(label: String, active: Boolean, dm: Boolean) =
+        fun segment(label: String, active: Boolean, dm: Boolean) =
             UiKit.text(context, label, 12f, R.color.text_primary, bold = active).apply {
+                gravity = android.view.Gravity.CENTER
                 setBackgroundResource(if (active) R.drawable.bg_chip_accent else R.drawable.bg_chip)
-                setPadding(dp(14), dp(6), dp(14), dp(6))
+                setPadding(dp(14), dp(7), dp(14), dp(7))
                 layoutParams = LinearLayout.LayoutParams(
+                    0,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { if (dm) leftMargin = dp(8) }
+                    1f,
+                )
                 setOnClickListener { onToggleDmMode(dm) }
             }
-        row.addView(segmentChip("频道", !snapshot.dmMode, dm = false))
-        row.addView(segmentChip("私聊", snapshot.dmMode, dm = true))
+        row.addView(segment("频道", !snapshot.dmMode, dm = false))
+        row.addView(segment("私聊", snapshot.dmMode, dm = true))
         return row
     }
-
-    /** 团队空间：频道与成员同页——频道切换 chips（当前频道高亮，归档带标）。 */
+    /** 频道选择行（220 与 iOS 对齐）：「# 频道名 ∨」单行选择器，点开列表切换（归档带标）。 */
     private fun channelSwitcherRow(snapshot: TeamChannelSnapshot): LinearLayout {
         val row = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(8)) }
-        val scroller = HorizontalScrollView(context).apply {
-            isHorizontalScrollBarEnabled = false
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val chips = UiKit.horizontal(context)
-        ChannelExtras.groupChannels(snapshot.channels).forEach { channel ->
-            val active = channel.id == snapshot.activeChannelId
-            chips.addView(
-                UiKit.text(
-                    context,
-                    channel.name + if (channel.archived) "（已归档）" else "",
-                    12f,
-                    R.color.text_primary,
-                    bold = active,
-                ).apply {
-                    setBackgroundResource(if (active) R.drawable.bg_chip_accent else R.drawable.bg_chip)
-                    setPadding(dp(10), dp(6), dp(10), dp(6))
-                    setOnClickListener { onSwitchChannel(channel.id) }
-                },
-            )
-        }
-        scroller.addView(chips)
-        row.addView(scroller)
+        val active = snapshot.channels.firstOrNull { it.id == snapshot.activeChannelId }
+        row.addView(
+            UiKit.text(
+                context,
+                "# " + (active?.name ?: "频道") + " ∨",
+                14f,
+                R.color.text_primary,
+                bold = true,
+            ).apply {
+                setOnClickListener {
+                    val channels = ChannelExtras.groupChannels(snapshot.channels)
+                    ListDialog.show(
+                        context,
+                        "选择频道",
+                        null,
+                        channels.map { it.name + if (it.archived) "（已归档）" else "" },
+                    ) { which ->
+                        channels.getOrNull(which)?.let { onSwitchChannel(it.id) }
+                    }
+                }
+            },
+        )
         return row
     }
-
     /** 私聊分段内容：已有私聊 chips + 点成员发起私聊（只给频道成员）。 */
     private fun dmListSection(snapshot: TeamChannelSnapshot): LinearLayout {
         val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(8)) }
@@ -872,8 +879,7 @@ class TeamChannelController(
     // ---- №12 搜索过滤 / 工具行 / 历史浏览 / @ 选择器 ----
 
     private fun smallChip(label: String, onClick: () -> Unit): TextView =
-        UiKit.text(context, label, 11f, R.color.text_secondary).apply {
-            setBackgroundResource(R.drawable.bg_chip)
+        UiKit.text(context, label, 11f, R.color.accent).apply {
             setPadding(dp(10), dp(5), dp(10), dp(5))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1112,7 +1118,7 @@ class TeamChannelController(
         }
     }
 
-    /** 218 分段二（与 iOS 的消息/文件/任务分段同位同名）。 */
+    /** 218 分段二（与 iOS 的消息/文件/任务分段同位同名；220 改分段条形态，与 iOS 同形）。 */
     private fun sectionTabsRow(snapshot: TeamChannelSnapshot): LinearLayout {
         val row = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(8)) }
         val labels = listOf("消息", "文件", "任务")
@@ -1120,19 +1126,20 @@ class TeamChannelController(
             val active = snapshot.sectionTab == index
             row.addView(
                 UiKit.text(context, label, 12f, R.color.text_primary, bold = active).apply {
+                    gravity = android.view.Gravity.CENTER
                     setBackgroundResource(if (active) R.drawable.bg_chip_accent else R.drawable.bg_chip)
-                    setPadding(dp(14), dp(6), dp(14), dp(6))
+                    setPadding(dp(14), dp(7), dp(14), dp(7))
                     layoutParams = LinearLayout.LayoutParams(
+                        0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { if (index > 0) leftMargin = dp(8) }
+                        1f,
+                    )
                     setOnClickListener { onSectionTabChange(index) }
                 },
             )
         }
         return row
     }
-
     /** 文件分段：服务端 kind 过滤拉回的文件类消息（引用制呈现同消息行）。 */
     private fun filesSection(snapshot: TeamChannelSnapshot): LinearLayout {
         val col = UiKit.vertical(context)

@@ -99,6 +99,7 @@ data class TeamChannelMember(
 fun channelRoleLabel(role: String): String = when (role) {
     "owner" -> "创建者"
     "coordinator" -> "协调员"
+    "member" -> "成员"
     else -> ""
 }
 
