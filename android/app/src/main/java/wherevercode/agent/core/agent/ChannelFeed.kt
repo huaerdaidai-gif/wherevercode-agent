@@ -236,7 +236,12 @@ class ChannelFeed(
     }
 
     companion object {
-        const val POLL_LIMIT: Int = 20
+        // 219 alignment: first-load (and fallback poll) batch cap matches
+        // the iOS first-screen window of 50. At 20 the Android topic
+        // count over the loaded window (2) trailed iOS (5); counting
+        // rule B unifies the window only if the load size matches too.
+        // The 100-message buffer cap is unchanged.
+        const val POLL_LIMIT: Int = 50
         const val POLL_INTERVAL_MS: Long = 15_000L
         const val RECONNECT_AFTER_MS: Long = 45_000L
         const val MAX_SEEN_IDS: Int = 1000
