@@ -37,4 +37,14 @@ class PlatformConnectionStoreTest {
         assertNull(PlatformConnectionStore.hostFromAddress("https://v5.example/api"))
         assertNull(PlatformConnectionStore.hostFromAddress("http://v5.example"))
     }
+
+    @Test
+    fun `address parser accepts http only for lan origins`() {
+        // 频道三层二期：连入内网服务时地址栏填 http://<内网地址>。
+        assertEquals("192.168.1.7:18744", PlatformConnectionStore.hostFromAddress("http://192.168.1.7:18744"))
+        assertEquals("192.168.1.7:18744", PlatformConnectionStore.hostFromAddress("192.168.1.7:18744"))
+        assertEquals("100.94.147.89:18744", PlatformConnectionStore.hostFromAddress("http://100.94.147.89:18744/"))
+        assertNull(PlatformConnectionStore.hostFromAddress("http://8.8.8.8:18744"))
+        assertNull(PlatformConnectionStore.hostFromAddress("http://192.168.1.7:18744/api"))
+    }
 }

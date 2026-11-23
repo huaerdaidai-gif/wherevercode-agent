@@ -137,6 +137,11 @@ class LocalChannelService(
     @Synchronized
     fun channelExists(channelId: String): Boolean = channels.containsKey(channelId)
 
+    /** 某 Agent 是否某频道成员（内网层 WS 订阅门禁用，与远程成员门禁同口径）。 */
+    @Synchronized
+    fun isChannelMember(channelId: String, agentId: String): Boolean =
+        memberOf(channelId, agentId) != null
+
     private fun ensureSeed() {
         registerAgent(LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME)
         if (storedDefaultChannelId.isBlank() || !channels.containsKey(storedDefaultChannelId)) {

@@ -28,6 +28,10 @@ import java.net.URI
  * - 端点由平台地址字段拼出：`https://<platformHost>/api/open/v1/mcp`
  *   （见 [mcpEndpoint]）。公开构建没有预置端点；可通过本地 Gradle 属性
  *   提供默认主机，或由用户在 Agent 表单中填写。
+ * - 内网例外（频道三层二期）：平台地址是私有/环回/尾网地址时走
+ *   `http://`——同网设备上的 App 内网服务没有公网证书，强上 HTTPS
+ *   只会全灭；与 2026-11-18 自动发现「私有走 http、公网走 https」
+ *   定版同口径。公网地址仍只许 HTTPS。
  *
  * 凭证红线：平台凭证（App 在平台上注册的 Agent 的 Bearer 令牌）
  * 与 webhook 签名密钥只存本机 Keystore（见
@@ -42,14 +46,53 @@ object PlatformAgent {
     const val MCP_PATH: String = "/api/open/v1/mcp"
 
     /**
-     * 平台 MCP 端点：由平台地址字段拼出 `https://<host>/api/open/v1/mcp`。
+     * 平台 MCP 端点：由平台地址字段拼出 `<协议>://<host>/api/open/v1/mcp`。
+     * 协议按地址定：内网地址（[isLanAddress]）用 http，其余用 https。
      * 主机名为空/未填时使用本地构建配置；公开构建缺省为空。
      */
     fun mcpEndpoint(platformHost: String?): String {
         val host = platformHost?.trim().takeIf { !it.isNullOrBlank() }
             ?: DEFAULT_PLATFORM_HOST
         return host.takeIf { it.isNotBlank() && platformHostIssue(it) == null }
-            ?.let { "https://$it$MCP_PATH" }.orEmpty()
+            ?.let { "${if (isLanAddress(it)) "http" else "https"}://$it$MCP_PATH" }.orEmpty()
+    }
+
+    /**
+     * 平台地址是否内网地址：私有 IPv4 段（10/8、172.16/12、192.168/16）、
+     * 运营商级 NAT 段 100.64/10（Tailscale 等尾网）、环回（127/8、
+     * localhost）与 .local 局域网名。只认字面形状，解析不了的一律
+     * 按公网处理（走 https），不给拼错的地址开 http 口子。
+     */
+    fun isLanAddress(platformHost: String?): Boolean {
+        val hostname = platformHost?.trim()?.substringBefore(':').orEmpty()
+        if (hostname.isEmpty()) return false
+        if (hostname.equals("localhost", ignoreCase = true)) return true
+        if (hostname.endsWith(".local", ignoreCase = true)) return true
+        val parts = hostname.split('.')
+        if (parts.size != 4) return false
+        val octets = parts.map { it.toIntOrNull() ?: return false }
+        if (octets.any { it < 0 || it > 255 }) return false
+        return when {
+            octets[0] == 10 -> true
+            octets[0] == 127 -> true
+            octets[0] == 172 && octets[1] in 16..31 -> true
+            octets[0] == 192 && octets[1] == 168 -> true
+            octets[0] == 100 && octets[1] in 64..127 -> true
+            else -> false
+        }
+    }
+
+    /**
+     * 内网 WS 目标：把平台地址字段拆成（主机名，端口），没写端口时
+     * 用 http 默认 80。只供 [isLanAddress] 为真的地址使用（频道 WS
+     * 明文通道）；公网仍走 443 + TLS，不经这里。
+     */
+    fun lanWsTarget(platformHost: String?): Pair<String, Int> {
+        val host = platformHost?.trim().orEmpty()
+        val hostname = host.substringBefore(':').ifBlank { host }
+        val port = host.substringAfter(':', "").toIntOrNull()
+            ?.takeIf { it in 1..65535 } ?: 80
+        return hostname to port
     }
 
     /** Return an actionable validation error for the host-only platform address field. */
@@ -99,7 +142,7 @@ object PlatformAgent {
     val V5_CHANNEL_ID: String = BuildConfig.PLATFORM_V5_CHANNEL.trim()
 
     const val ENDPOINT_NOTE: String =
-        "公开版不会预置平台地址。请填受信任 HTTPS 证书对应的域名（可带端口），不要填协议或路径；自签名证书会被拒绝。端点为 https://<平台地址>/api/open/v1/mcp。"
+        "公开版不会预置平台地址。请填受信任 HTTPS 证书对应的域名（可带端口），不要填协议或路径；自签名证书会被拒绝。端点为 https://<平台地址>/api/open/v1/mcp。内网例外：填局域网/尾网地址（如 192.168.1.7:18744）时自动走 http 连同网设备上的内网服务。"
 
     /**
      * 专用频道栏说明：空着时仅使用本地构建配置的默认频道；公开构建不

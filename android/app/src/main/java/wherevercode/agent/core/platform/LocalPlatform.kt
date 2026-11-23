@@ -34,6 +34,12 @@ object LocalPlatform {
             if (service != null) return
             val file = File(context.applicationContext.filesDir, "local_platform_channels.json")
             service = LocalChannelService(FileLocalChannelPersistence(file))
+            val tokenFile = File(context.applicationContext.filesDir, "lan_platform_tokens.json")
+            val tokenPersistence = FileLocalChannelPersistence(tokenFile)
+            lanRegistry = LanTokenRegistry(
+                load = { tokenPersistence.load() },
+                save = { tokenPersistence.save(it) },
+            )
         }
     }
 
@@ -59,6 +65,43 @@ object LocalPlatform {
     }
 
     fun defaultChannelId(): String? = serviceOrNull()?.defaultChannelId()?.takeIf { it.isNotBlank() }
+
+    // ---- 内网层（频道三层二期） ------------------------------------------
+    // 宿主侧：把本地账本经 LanPlatformServer 挂到局域网。默认关，
+    // 设置里手动开；进程被杀即停，不假装常驻。
+
+    @Volatile
+    private var lanRegistry: LanTokenRegistry? = null
+
+    @Volatile
+    private var lanServer: LanPlatformServer? = null
+
+    /** 内网成员令牌注册表（install 后可用；未 install 返回 null）。 */
+    fun lanRegistryOrNull(): LanTokenRegistry? = lanRegistry
+
+    /** 内网服务是否正在监听。 */
+    fun lanServerRunning(): Boolean = lanServer?.isRunning == true
+
+    /** 启动内网服务（幂等）；返回是否已在监听。 */
+    @Synchronized
+    fun startLanServer(): Boolean {
+        val registry = lanRegistry ?: return false
+        val existing = lanServer
+        if (existing != null && existing.isRunning) return true
+        val server = existing ?: LanPlatformServer({ service }, registry).also { lanServer = it }
+        return try {
+            server.start()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** 停止内网服务（幂等）。 */
+    @Synchronized
+    fun stopLanServer() {
+        lanServer?.stop()
+    }
 }
 
 /** 本地账本的文件持久化：临时文件写完再改名，避免半截文件毁账本。 */

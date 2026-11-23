@@ -21,9 +21,15 @@
          so the .so files must be extracted as real files at install. Without it,
          AGP's default (false) leaves nativeLibraryDir empty: Chaquopy still works
          (it dlopens straight from the APK) but node is reported missing. -->
+    <!-- usesCleartextTraffic=true（频道三层二期）：内网层要以 http 连
+         局域网/尾网地址（系统默认对 targetSdk 28 拦截明文）。明文只许
+         到内网地址的护栏在代码层：PlatformAgent.isLanAddress 决定端点
+         协议、PlatformConnectionStore 拒绝公网 http 地址，公网一律
+         https——放开系统开关不等于放开公网明文。 -->
     <application
         android:allowBackup="false"
         android:extractNativeLibs="true"
+        android:usesCleartextTraffic="true"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="WhereverCode"
         android:supportsRtl="true"
