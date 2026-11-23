@@ -19,7 +19,7 @@
 				"@executable_path/Frameworks",
 				"@loader_path/Frameworks",
 			);
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -45,7 +45,7 @@
 				"@executable_path/Frameworks",
 				"@loader_path/Frameworks",
 			);
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -116,7 +116,7 @@
 				CURRENT_PROJECT_VERSION = 227;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -259,7 +259,7 @@
 				CURRENT_PROJECT_VERSION = 227;
 				INFOPLIST_FILE = "WhereverCodeAgent/Resources/Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -462,7 +462,7 @@
 				CURRENT_PROJECT_VERSION = 227;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -475,7 +475,7 @@
 				CURRENT_PROJECT_VERSION = 227;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = wherevercode.agent.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
