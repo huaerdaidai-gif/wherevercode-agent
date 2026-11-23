@@ -215,6 +215,8 @@ import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.buildChannelMembers
+import wherevercode.agent.core.team.channelRosterMembers
+import wherevercode.agent.core.team.channelSelfIsMember
 import wherevercode.agent.core.team.mergePlatformChannelMembers
 import wherevercode.agent.core.team.dmCandidates
 import wherevercode.agent.core.team.visibleTeamChannelMembers
@@ -309,6 +311,8 @@ import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.SettingsHomeController
 import wherevercode.agent.ui.SettingsSections
 import wherevercode.agent.ui.TeamChannelController
+import wherevercode.agent.core.platform.LocalChannelWsConnection
+import wherevercode.agent.core.platform.LocalPlatform
 import wherevercode.agent.ui.TeamChannelSnapshot
 import wherevercode.agent.ui.MessageCenterController
 import wherevercode.agent.core.message.MessageCenterChannelSource
@@ -1169,6 +1173,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         applyStoredTheme()
         super.onCreate(savedInstanceState)
+        // 频道三层一期·本地层：装好 App 内嵌的本地平台（零配置频道底座），
+        // 必须赶在任何频道链路调用之前。
+        LocalPlatform.install(applicationContext)
         setContentView(R.layout.activity_main)
         // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
         // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
@@ -1757,7 +1764,9 @@ class MainActivity : AppCompatActivity() {
             },
             onStartDm = { agentId -> startTeamChannelDm(agentId) },
             onMessageRecall = { messageId -> runTeamChannelAction("撤回") { t, ch -> t.recallMessage(ch, messageId) } },
-            onMessageDelete = { messageId -> runTeamChannelAction("删除") { t, ch -> t.deleteMessage(ch, messageId) } },
+            onMessageDelete = { messageId ->
+                runTeamChannelAction("删除", evictMessageId = messageId) { t, ch -> t.deleteMessage(ch, messageId) }
+            },
             onTogglePin = { messageId, pinned ->
                 runTeamChannelAction(if (pinned) "置顶" else "取消置顶") { t, ch ->
                     t.setMessagePinned(ch, messageId, pinned)
@@ -6182,15 +6191,44 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             false
         }
-        if (!hasCredential) return null
-        val host = resolvedPlatformHost()
-        if (host.isBlank()) return null
-        val record = firstPlatformAgentRecord()
-        val channelId = savedActiveChannelId()
-            ?: record?.platformChannelId?.trim()?.takeIf { it.isNotBlank() }
-            ?: PlatformAgent.V5_CHANNEL_ID
-        if (channelId.isBlank()) return null
-        return host to channelId
+        if (hasCredential) {
+            val host = resolvedPlatformHost()
+            if (host.isNotBlank()) {
+                val record = firstPlatformAgentRecord()
+                val channelId = savedActiveChannelId()
+                    ?: record?.platformChannelId?.trim()?.takeIf { it.isNotBlank() }
+                    ?: PlatformAgent.V5_CHANNEL_ID
+                if (channelId.isNotBlank()) return host to channelId
+            }
+        }
+        // 本地层兜底（频道三层一期·本地层，方案便签 №11）：远程平台没配
+        // 全时不再落未配置死页——频道走 App 内嵌的本地平台，零配置
+        // 可用；远程凭证配全后上面的分支自动优先（多平台自由切换
+        // 是三层三期）。本地服务没装起来时才保持原来的未配置态。
+        syncLocalPlatformAgents()
+        val local = LocalPlatform.serviceOrNull() ?: return null
+        val savedLocal = savedActiveChannelId()?.takeIf { local.channelExists(it) }
+        return LocalPlatform.LOCAL_HOST to (savedLocal ?: local.defaultChannelId())
+    }
+
+    /** 频道链路的凭证提供者：本地平台用进程内固定凭证，远程用已存的平台凭证。 */
+    private fun channelTokenProvider(host: String): () -> String? =
+        if (LocalPlatform.isLocalHost(host)) {
+            { LocalPlatform.LOCAL_TOKEN }
+        } else {
+            { platformCredentialStore.loadPlatformToken() }
+        }
+
+    /** 把本机 Agent 注册表同步进本地平台（本地频道的加成员/私聊候选以它为准）。 */
+    private fun syncLocalPlatformAgents() {
+        val service = LocalPlatform.serviceOrNull() ?: return
+        service.registerAgent(LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME)
+        try {
+            for (record in agentStore.listAgents()) {
+                service.registerAgent(record.agentId, record.displayName)
+            }
+        } catch (_: Exception) {
+        }
     }
 
     /**
@@ -6217,7 +6255,9 @@ class MainActivity : AppCompatActivity() {
             .firstOrNull { it.id == activeTeamChannelId() }
             ?.participantDetails
             .orEmpty()
-        return mergePlatformChannelMembers(buildChannelMembers(agents), participants)
+        val selfIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } +
+            listOfNotNull(firstPlatformAgentRecord()?.agentId?.trim()?.takeIf { it.isNotBlank() })
+        return channelRosterMembers(buildChannelMembers(agents), participants, selfIds)
     }
 
     /** 私聊发起名单（频道全体成员减本机自己；不套 app 隐藏，理由见 dmCandidates）。 */
@@ -6283,6 +6323,16 @@ class MainActivity : AppCompatActivity() {
         }
         val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeId }
         val selfIdsForRole = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() }
+        // 219 遗留小修（223）：当前频道参与者已知且本机不在册 = 非成员，
+        // 空态给无权限提示（此前只进空壳页、还邀请发帖）。
+        val activeParticipants = activeSummary?.participantDetails.orEmpty()
+        val notChannelMember = activeSummary != null && activeParticipants.isNotEmpty() &&
+            !channelSelfIsMember(
+                activeParticipants,
+                selfIdsForRole + listOfNotNull(
+                    firstPlatformAgentRecord()?.agentId?.trim()?.takeIf { it.isNotBlank() },
+                ),
+            )
         val myHistoryRole = activeSummary?.participantDetails
             ?.firstOrNull { it.isSelf || it.agentId in selfIdsForRole }?.role
         return TeamChannelSnapshot(
@@ -6293,6 +6343,7 @@ class MainActivity : AppCompatActivity() {
                 ?: ChannelConnectionState.STOPPED,
             connectionError = feed?.lastError,
             members = teamChannelMembers(),
+            notChannelMember = notChannelMember,
             dmCandidates = teamChannelDmCandidates(),
             messages = messages,
             unreadCount = unreadCount,
@@ -6515,7 +6566,7 @@ class MainActivity : AppCompatActivity() {
         val host = teamChannelEndpoint()?.first
         if (host == null) { toast("频道未连接；未执行管理操作。"); return }
         val transport = PlatformChannelMcpTransport(
-            tokenProvider = { platformCredentialStore.loadPlatformToken() },
+            tokenProvider = channelTokenProvider(host),
             endpoint = PlatformAgent.mcpEndpoint(host),
         )
         Thread {
@@ -6712,7 +6763,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val (host, _) = endpoint
                     val transport = PlatformChannelMcpTransport(
-                        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                        tokenProvider = channelTokenProvider(host),
                         endpoint = PlatformAgent.mcpEndpoint(host),
                     )
                     // 本机身份别名（@我 的判定集合）：本机 App / 协调者，
@@ -6819,12 +6870,23 @@ class MainActivity : AppCompatActivity() {
                 teamChannelBufferId = channelId
             }
         }
-        val feed = McpChannelEventFeed.forPlatformChannel(
-            host = host,
-            channelId = channelId,
-            tokenProvider = { platformCredentialStore.loadPlatformToken() },
-            mcpClient = null,
-        )
+        val feed = if (LocalPlatform.isLocalHost(host)) {
+            // 本地层：传输走进程内本地平台，推送走本地消息总线（与远程
+            // WS 同形状的事件，ChannelFeed 的推送/兜底/去重逻辑无差别）。
+            McpChannelEventFeed(
+                channelId = channelId,
+                transport = teamChannelTransport(host),
+                wsFactory = { _, _ -> LocalChannelWsConnection(channelId) },
+                mcpClient = null,
+            )
+        } else {
+            McpChannelEventFeed.forPlatformChannel(
+                host = host,
+                channelId = channelId,
+                tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                mcpClient = null,
+            )
+        }
         feed.onChannelMessage = onChannelMessage@{ message ->
             synchronized(teamChannelMessages) {
                 if (teamChannelFeed !== feed) return@onChannelMessage
@@ -6931,7 +6993,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun teamChannelTransport(host: String) = PlatformChannelMcpTransport(
-        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+        tokenProvider = channelTokenProvider(host),
         endpoint = PlatformAgent.mcpEndpoint(host),
     )
 
@@ -6941,6 +7003,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun runTeamChannelAction(
         label: String,
+        evictMessageId: String? = null,
         block: (PlatformChannelMcpTransport, String) -> Unit,
     ) {
         val (host, _) = teamChannelEndpoint() ?: run {
@@ -6950,12 +7013,27 @@ class MainActivity : AppCompatActivity() {
         }
         val channelId = activeTeamChannelId()
         Thread {
+            var succeeded = false
             try {
                 block(teamChannelTransport(host), channelId)
                 teamChannelNotice = null
+                succeeded = true
             } catch (e: Exception) {
                 teamChannelNotice =
                     "$label 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+            }
+            if (succeeded) {
+                // 删除：条目从本机缓冲直接移除（重拉整页也不会再带它回来，
+                // 但 upsert 不删旧条目，必须先摘掉）。
+                if (evictMessageId != null) {
+                    synchronized(teamChannelMessages) {
+                        teamChannelMessages.removeAll { it.id == evictMessageId }
+                    }
+                }
+                // 置顶/反应/撤回等状态变化：增量 feed 永远不会把旧消息的
+                // 新状态带回来，动作成功后整页重同步一次（223 修复：
+                // 此前动作完要退出重进频道页才看得到效果）。
+                teamChannelFeed?.resync()
             }
             runOnUiThread { refreshTeamChannel() }
         }.start()
@@ -7361,7 +7439,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                    tokenProvider = channelTokenProvider(host),
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
                 runBlocking {
@@ -7384,7 +7462,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val transport = PlatformChannelMcpTransport(
-                    tokenProvider = { platformCredentialStore.loadPlatformToken() },
+                    tokenProvider = channelTokenProvider(host),
                     endpoint = PlatformAgent.mcpEndpoint(host),
                 )
                 runBlocking {

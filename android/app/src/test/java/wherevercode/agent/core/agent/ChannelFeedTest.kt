@@ -282,6 +282,42 @@ class ChannelFeedTest {
     }
 
     @Test
+    fun `resync redelivers seen messages with their latest state`() {
+        // 223 修复：置顶/反应/撤回后增量游标+去重永远带不回旧消息的
+        // 新状态，动作成功后靠 resync 整页重拉再次下发（上层按 id upsert）。
+        val transport = FakeTransport(mutableListOf(message("m1", "在吗")))
+        val delivered = mutableListOf<PlatformChannelMessage>()
+        val firstLatch = CountDownLatch(1)
+        val resyncLatch = CountDownLatch(1)
+        val feed = ChannelFeed(
+            channelId = "ch-1",
+            transport = transport,
+            wsFactory = { _, _ -> HangingWs() },
+            onMessages = { batch ->
+                synchronized(delivered) {
+                    delivered += batch
+                    if (delivered.size == 1) firstLatch.countDown()
+                    if (delivered.any { it.pinned }) resyncLatch.countDown()
+                }
+            },
+            pollIntervalMs = 100,
+            reconnectAfterMs = 300,
+        )
+        feed.start()
+        try {
+            assertTrue("首轮轮询应交付 m1", firstLatch.await(5, TimeUnit.SECONDS))
+            transport.messages[0] = message("m1", "在吗").copy(pinned = true)
+            feed.resync()
+            assertTrue(
+                "重同步应把 m1 的最新状态（已置顶）再次下发",
+                resyncLatch.await(5, TimeUnit.SECONDS),
+            )
+        } finally {
+            feed.stop()
+        }
+    }
+
+    @Test
     fun `connection state labels are the shared wording`() {
         // 频道页与设置摘要共用同一文案函数，此处钉死四个状态的原文。
         assertEquals("● 直播推送（WS 已连）", channelConnectionStateLabel(ChannelConnectionState.LIVE))
