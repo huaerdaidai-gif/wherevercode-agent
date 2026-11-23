@@ -195,6 +195,45 @@ class TeamChannelTest {
     }
 
     @Test
+    @Test
+    fun `channelRosterMembers drops local entries when self is not a channel member`() {
+        // 223 小修：非成员频道的成员行只能是平台参与者——本机 App 与
+        // 本地注册 Agent 不许冒充成员（219 实测旧疾）。
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val roster = channelRosterMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "codex", agentName = "Codex"),
+                ChannelParticipant(agentId = "gemini", agentName = "Gemini"),
+            ),
+            selfIds = setOf("app-qa"),
+        )
+        assertEquals(listOf("codex", "gemini"), roster.map { it.agentId })
+        assertTrue(roster.none { it.isLocalApp })
+    }
+
+    @Test
+    fun `channelRosterMembers keeps the merge when self is a channel member`() {
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val roster = channelRosterMembers(
+            local,
+            listOf(
+                ChannelParticipant(agentId = "codex", agentName = "Codex"),
+                ChannelParticipant(agentId = "app-qa", agentName = "App QA（平台名）"),
+            ),
+            selfIds = setOf("app-qa"),
+        )
+        assertEquals(listOf("local-app", "app-qa", "codex"), roster.map { it.agentId })
+    }
+
+    @Test
+    fun `channelRosterMembers falls back to the merge when participants are unknown`() {
+        val local = buildChannelMembers(listOf(record("app-qa", "App QA")))
+        val roster = channelRosterMembers(local, emptyList(), selfIds = setOf("app-qa"))
+        assertEquals(listOf("local-app", "app-qa"), roster.map { it.agentId })
+    }
+
+    @Test
     fun `mergePlatformChannelMembers adds platform-only members in platform order`() {
         // 私聊名单口径：频道成员以平台为准——只在平台频道里、没在本机
         // 加过的成员也必须进名单（本地条目与本机 App 行保留在前）。

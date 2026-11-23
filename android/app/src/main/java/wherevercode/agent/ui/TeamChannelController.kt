@@ -42,6 +42,8 @@ data class TeamChannelSnapshot(
     val connectionState: ChannelConnectionState,
     val connectionError: String?,
     val members: List<TeamChannelMember>,
+    /** 本机不是该频道成员（参与者名单已知且本机不在册）：空态显示无权限提示而非邀请发帖。 */
+    val notChannelMember: Boolean = false,
     /** 私聊发起名单（频道全体成员减本机自己；与成员行分开，理由见 dmCandidates）。 */
     val dmCandidates: List<TeamChannelMember> = emptyList(),
     val messages: List<PlatformChannelMessage>,
@@ -618,7 +620,15 @@ class TeamChannelController(
                 }
             }
         } else if (snapshot.messages.isEmpty()) {
-            bodyContainer.addView(note("频道里暂无消息。发一条“在吗”，看看谁回。"))
+            bodyContainer.addView(
+                note(
+                    if (snapshot.notChannelMember) {
+                        "无权限：你不是该频道成员。"
+                    } else {
+                        "频道里暂无消息。发一条“在吗”，看看谁回。"
+                    },
+                ),
+            )
         } else if (snapshot.activeTopicThreadRootId != null) {
             val allViews = snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) }
             val activeRootId = snapshot.activeTopicThreadRootId

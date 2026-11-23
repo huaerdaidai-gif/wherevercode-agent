@@ -287,6 +287,35 @@ fun mergePlatformChannelMembers(
 }
 
 /**
+ * 本机身份是否在平台参与者名单里：is_self 标记、本机学到的 self
+ * id 集合、或本地频道的合成 id（local-app）任一命中即算在册。
+ */
+fun channelSelfIsMember(
+    participants: List<ChannelParticipant>,
+    selfIds: Set<String>,
+): Boolean = participants.any {
+    it.isSelf || it.agentId in selfIds || it.agentId == "local-app"
+}
+
+/**
+ * 频道成员名单的归属口径（219 遗留小修，223 落地）：参与者名单
+ * 已知且本机身份不在其中 = 本机不是该频道成员——此时名单以平台
+ * 参与者为准，不把本机 App 与本地注册 Agent 冒充成成员（此前非
+ * 成员频道的成员行也照样列着本机 App）。参与者未知（空）或本机
+ * 在册时沿用本地+平台合并口径（主频道的中转成员语义不变）。
+ */
+fun channelRosterMembers(
+    local: List<TeamChannelMember>,
+    participants: List<ChannelParticipant>,
+    selfIds: Set<String>,
+): List<TeamChannelMember> {
+    if (participants.isNotEmpty() && !channelSelfIsMember(participants, selfIds)) {
+        return mergePlatformChannelMembers(emptyList(), participants)
+    }
+    return mergePlatformChannelMembers(local, participants)
+}
+
+/**
  * 私聊发起名单：频道全体成员减去本机自己——本机 App 行与平台
  * is_self 身份都不进名单。注意不要套成员行的可见性过滤
  * （visibleTeamChannelMembers 隐藏 agentId=app）：app 是另一台

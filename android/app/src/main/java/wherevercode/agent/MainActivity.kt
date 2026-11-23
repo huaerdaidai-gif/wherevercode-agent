@@ -215,6 +215,8 @@ import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.buildChannelMembers
+import wherevercode.agent.core.team.channelRosterMembers
+import wherevercode.agent.core.team.channelSelfIsMember
 import wherevercode.agent.core.team.mergePlatformChannelMembers
 import wherevercode.agent.core.team.dmCandidates
 import wherevercode.agent.core.team.visibleTeamChannelMembers
@@ -6253,7 +6255,9 @@ class MainActivity : AppCompatActivity() {
             .firstOrNull { it.id == activeTeamChannelId() }
             ?.participantDetails
             .orEmpty()
-        return mergePlatformChannelMembers(buildChannelMembers(agents), participants)
+        val selfIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } +
+            listOfNotNull(firstPlatformAgentRecord()?.agentId?.trim()?.takeIf { it.isNotBlank() })
+        return channelRosterMembers(buildChannelMembers(agents), participants, selfIds)
     }
 
     /** 私聊发起名单（频道全体成员减本机自己；不套 app 隐藏，理由见 dmCandidates）。 */
@@ -6319,6 +6323,16 @@ class MainActivity : AppCompatActivity() {
         }
         val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeId }
         val selfIdsForRole = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() }
+        // 219 遗留小修（223）：当前频道参与者已知且本机不在册 = 非成员，
+        // 空态给无权限提示（此前只进空壳页、还邀请发帖）。
+        val activeParticipants = activeSummary?.participantDetails.orEmpty()
+        val notChannelMember = activeSummary != null && activeParticipants.isNotEmpty() &&
+            !channelSelfIsMember(
+                activeParticipants,
+                selfIdsForRole + listOfNotNull(
+                    firstPlatformAgentRecord()?.agentId?.trim()?.takeIf { it.isNotBlank() },
+                ),
+            )
         val myHistoryRole = activeSummary?.participantDetails
             ?.firstOrNull { it.isSelf || it.agentId in selfIdsForRole }?.role
         return TeamChannelSnapshot(
@@ -6329,6 +6343,7 @@ class MainActivity : AppCompatActivity() {
                 ?: ChannelConnectionState.STOPPED,
             connectionError = feed?.lastError,
             members = teamChannelMembers(),
+            notChannelMember = notChannelMember,
             dmCandidates = teamChannelDmCandidates(),
             messages = messages,
             unreadCount = unreadCount,
