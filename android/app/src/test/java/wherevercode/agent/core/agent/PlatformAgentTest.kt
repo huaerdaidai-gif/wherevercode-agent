@@ -53,4 +53,26 @@ class PlatformAgentTest {
         assertFalse(PlatformAgent.ENDPOINT_NOTE.contains("192.0.2.10"))
         assertFalse(PlatformAgent.CHANNEL_NOTE.contains("dedicated-channel-test"))
     }
+
+    @Test
+    fun `lan addresses build http endpoints while public hosts stay https`() {
+        // 频道三层二期：内网服务没有公网证书，私有/环回/尾网走 http。
+        assertEquals("http://192.168.1.7:18744/api/open/v1/mcp", PlatformAgent.mcpEndpoint("192.168.1.7:18744"))
+        assertEquals("http://10.0.0.5/api/open/v1/mcp", PlatformAgent.mcpEndpoint("10.0.0.5"))
+        assertEquals("http://172.16.0.9:18744/api/open/v1/mcp", PlatformAgent.mcpEndpoint("172.16.0.9:18744"))
+        assertEquals("http://100.94.147.89:18744/api/open/v1/mcp", PlatformAgent.mcpEndpoint("100.94.147.89:18744"))
+        assertEquals("http://127.0.0.1:18744/api/open/v1/mcp", PlatformAgent.mcpEndpoint("127.0.0.1:18744"))
+        assertEquals("http://localhost:18744/api/open/v1/mcp", PlatformAgent.mcpEndpoint("localhost:18744"))
+        // 段外地址不许蹭 http：172.32 不在 172.16/12，100.128 不在 100.64/10。
+        assertEquals("https://172.32.0.9/api/open/v1/mcp", PlatformAgent.mcpEndpoint("172.32.0.9"))
+        assertEquals("https://100.128.0.1/api/open/v1/mcp", PlatformAgent.mcpEndpoint("100.128.0.1"))
+        assertEquals("https://8.8.8.8/api/open/v1/mcp", PlatformAgent.mcpEndpoint("8.8.8.8"))
+    }
+
+    @Test
+    fun `lan ws target splits host and port with http default`() {
+        assertEquals("192.168.1.7" to 18744, PlatformAgent.lanWsTarget("192.168.1.7:18744"))
+        assertEquals("192.168.1.7" to 80, PlatformAgent.lanWsTarget("192.168.1.7"))
+        assertEquals("localhost" to 18744, PlatformAgent.lanWsTarget(" localhost:18744 "))
+    }
 }

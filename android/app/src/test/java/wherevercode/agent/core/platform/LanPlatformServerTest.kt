@@ -163,9 +163,9 @@ class LanPlatformServerTest {
         val carol = registry.issue("丙机")
         val channels = callTool(alice.token, "agent_channel_list", JSONObject())
         val channelId = channels.getJSONArray("channels").getJSONObject(0).getString("id")
-        val head = wsHandshakeHead(carol.token, channelId)
-        assertTrue(head, head.startsWith("HTTP/1.1 403"))
-        assertTrue(head, head.contains("not_a_channel_member"))
+        val response = wsRefusedResponse(carol.token, channelId)
+        assertTrue(response, response.startsWith("HTTP/1.1 403"))
+        assertTrue(response, response.contains("not_a_channel_member"))
     }
 
     @Test
@@ -173,8 +173,8 @@ class LanPlatformServerTest {
         val alice = registry.issue("甲机")
         val channels = callTool(alice.token, "agent_channel_list", JSONObject())
         val channelId = channels.getJSONArray("channels").getJSONObject(0).getString("id")
-        val head = wsHandshakeHead("deadbeef".repeat(4), channelId)
-        assertTrue(head, head.startsWith("HTTP/1.1 401"))
+        val response = wsRefusedResponse("deadbeef".repeat(4), channelId)
+        assertTrue(response, response.startsWith("HTTP/1.1 401"))
     }
 
     // ---- 客户端小工具 ---------------------------------------------------------
@@ -243,6 +243,25 @@ class LanPlatformServerTest {
             out.write(request.toByteArray(Charsets.US_ASCII))
             out.flush()
             return readHeaderBlock(BufferedInputStream(socket.getInputStream()))
+        }
+    }
+
+    /** 拒绝类握手：读完整个响应（头＋体），供断言状态行与错误原因。 */
+    private fun wsRefusedResponse(token: String, channelId: String): String {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.1", port), 5_000)
+            socket.soTimeout = 5_000
+            val out = socket.getOutputStream()
+            val request = "GET /api/open/v1/channel/ws?channel_id=$channelId HTTP/1.1\r\n" +
+                "Host: 127.0.0.1:$port\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Authorization: Bearer $token\r\n" +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "Sec-WebSocket-Version: 13\r\n\r\n"
+            out.write(request.toByteArray(Charsets.US_ASCII))
+            out.flush()
+            return socket.getInputStream().readBytes().toString(Charsets.UTF_8)
         }
     }
 
