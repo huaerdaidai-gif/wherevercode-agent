@@ -6342,6 +6342,20 @@ class MainActivity : AppCompatActivity() {
             )
         val myHistoryRole = activeSummary?.participantDetails
             ?.firstOrNull { it.isSelf || it.agentId in selfIdsForRole }?.role
+        // 派单任务（任务派工打通，W11）：仅本地平台频道——任务账本在
+        // App 内嵌服务里，按 channel_id 过滤本频道的任务。
+        val dispatchAvailable = LocalPlatform.isLocalHost(host) &&
+            LocalPlatform.serviceOrNull() != null
+        var dispatchTasks: List<wherevercode.agent.ui.DispatchTaskItem> = emptyList()
+        var dispatchError: String? = null
+        if (dispatchAvailable) {
+            try {
+                dispatchTasks = wherevercode.agent.ui.DispatchTaskClient
+                    .listChannelTasks(activeId)
+            } catch (e: Exception) {
+                dispatchError = e.message
+            }
+        }
         return TeamChannelSnapshot(
             configured = true,
             setupHint = "",
@@ -6391,6 +6405,9 @@ class MainActivity : AppCompatActivity() {
             sectionTab = teamChannelSectionTab,
             channelFiles = if (teamChannelFilesChannelId == activeId) teamChannelFiles else emptyList(),
             filesLoaded = teamChannelFilesChannelId == activeId && teamChannelFilesLoaded,
+            dispatchAvailable = dispatchAvailable,
+            dispatchTasks = dispatchTasks,
+            dispatchError = dispatchError,
         )
     }
 
