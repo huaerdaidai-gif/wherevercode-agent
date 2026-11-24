@@ -65,7 +65,7 @@ public final class LanTokenRegistry {
             return existing
         }
         let entry = Entry(
-            token=<redacted>
+            token: Self.randomHex(bytes: 16),
             agentId: LocalPlatform.appAgentID,
             agentName: LocalPlatform.appAgentName,
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),

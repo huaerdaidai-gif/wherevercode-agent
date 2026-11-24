@@ -64,7 +64,7 @@ class LanTokenRegistry(
     fun issueOwner(): Entry {
         entries.values.firstOrNull { it.scope == "owner" }?.let { return it }
         val entry = Entry(
-            token=<redacted>
+            token = randomHex(16),
             agentId = LocalPlatform.APP_AGENT_ID,
             agentName = LocalPlatform.APP_AGENT_NAME,
             createdAtMs = System.currentTimeMillis(),
