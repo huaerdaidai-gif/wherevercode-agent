@@ -47,7 +47,9 @@ public enum LocalPlatform {
         "agent_channel_pin",
         "agent_channel_react",
         "agent_channel_readers",
-    ]
+    ] + TaskDispatchService.workerTools + TaskDispatchService.ownerTools
+    // 任务派工工具附在频道工具之后（单一来源在 TaskDispatchService）；
+    // 按调用方作用域过滤（干活侧只见 9 个）在 W12 接入本名单的消费方。
 
     private static let lock = NSLock()
     private static var service: LocalChannelService?

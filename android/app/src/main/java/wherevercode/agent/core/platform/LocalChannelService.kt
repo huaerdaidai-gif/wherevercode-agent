@@ -191,6 +191,18 @@ class LocalChannelService(
         }
     }
 
+    // ---- 任务派工（contracts/task-dispatch/spec.md） -------------------
+    // 工具名命中任务派工时由 dispatch 的一行钩子路由到
+    // TaskDispatchService；其错误在钩子处转成本地账本同一口径的
+    // LocalServiceException（门面只带文案，status/code 留在任务
+    // 服务层供对拍夹具核验）。bridge 在 W8 接线（事件写回频道）。
+    private val taskDispatch = TaskDispatchService(
+        store = TaskDispatchStore(clock),
+        directory = TaskAgentDirectory { id -> agents[id]?.name },
+        bridge = null,
+        clock = clock,
+    )
+
     // ---- 工具分发（与平台 MCP 工具同名同参同结果形状） ---------------------
 
     /**
@@ -198,8 +210,15 @@ class LocalChannelService(
      * 解析对象）。失败抛 [LocalServiceException]，文案与服务端同口径。
      */
     @Synchronized
-    fun dispatch(tool: String, args: JSONObject, callerId: String, callerName: String): JSONObject =
-        when (tool) {
+    fun dispatch(tool: String, args: JSONObject, callerId: String, callerName: String): JSONObject {
+        if (TaskDispatchService.isTaskTool(tool)) {
+            try {
+                return taskDispatch.dispatch(tool, args, callerId, callerName)
+            } catch (e: TaskDispatchException) {
+                throw LocalServiceException(e.message ?: "任务派工调用失败")
+            }
+        }
+        return when (tool) {
             "agent_channel_list" -> JSONObject().put("channels", JSONArray().apply {
                 for (channel in channels.values) put(channelJson(channel, callerId))
             })
@@ -228,6 +247,7 @@ class LocalChannelService(
             "agent_channel_readers" -> channelReaders(args, callerId)
             else -> throw LocalServiceException("本地平台没有这个工具：$tool")
         }
+    }
 
     // ---- 频道与成员 --------------------------------------------------------
 

@@ -141,6 +141,15 @@ public final class LocalChannelService {
 
     private var listeners: [String: [LocalChannelListenerToken]] = [:]
 
+    /// 任务派工服务（contracts/task-dispatch/spec.md）：dispatch 的
+    /// 一行钩子按工具名路由进来；bridge 在 W8 接线（事件写回频道）。
+    private lazy var taskDispatch: TaskDispatchService = TaskDispatchService(
+        store: TaskDispatchStore(clock: clock),
+        directory: { [weak self] id in self?.agents[id]?.name },
+        bridge: nil,
+        clock: clock
+    )
+
     public init(persistence: LocalChannelPersistence, clock: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
         self.persistence = persistence
         self.clock = clock
@@ -250,6 +259,13 @@ public final class LocalChannelService {
     /// 的解析对象）。失败抛 LocalServiceError，文案与服务端同口径。
     public func dispatch(tool: String, args: [String: Any], callerId: String, callerName: String) throws -> [String: Any] {
         lock.lock(); defer { lock.unlock() }
+        if TaskDispatchService.isTaskTool(tool) {
+            do {
+                return try taskDispatch.dispatch(tool: tool, args: args, callerId: callerId, callerName: callerName)
+            } catch let error as TaskDispatchError {
+                throw LocalServiceError(error.message)
+            }
+        }
         switch tool {
         case "agent_channel_list":
             return ["channels": channelOrder.compactMap { channels[$0] }.map { channelJson($0, viewerId: callerId) }]
