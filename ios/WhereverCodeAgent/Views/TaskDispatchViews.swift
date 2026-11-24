@@ -496,7 +496,13 @@ public struct DispatchTaskDetailView: View {
             onChanged()
             reload()
         } catch {
-            actionError = (error as? LocalServiceError)?.message ?? "\(error)"
+            let message = (error as? LocalServiceError)?.message ?? "\(error)"
+            actionError = message
+            // W13 跨切面：版本冲突（任务已被别人改动）不静默失败——
+            // 刷新到最新版本让用户核对后再操作，冲突原文留在上方。
+            if message.contains("版本已变") {
+                reload()
+            }
         }
     }
 

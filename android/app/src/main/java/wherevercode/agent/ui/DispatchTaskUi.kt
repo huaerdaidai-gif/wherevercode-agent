@@ -457,7 +457,14 @@ fun showEditDispatchTaskDialog(
                 dialog.dismiss()
                 onChanged()
             } catch (e: Exception) {
-                error.text = e.message ?: "保存失败"
+                val message = e.message ?: "保存失败"
+                error.text = message
+                // W13 跨切面：版本冲突（任务已被别人改动）不静默
+                // 失败——关窗并刷新列表，用户核对最新状态后再改。
+                if (message.contains("版本已变")) {
+                    dialog.dismiss()
+                    onChanged()
+                }
             }
         }
     }
