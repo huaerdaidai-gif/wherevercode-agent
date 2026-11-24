@@ -51,6 +51,7 @@ struct WhereverCodeAgentApp: App {
                     }
                 }
                 .task {
+                    appState.armSeatUplink()
                     await appState.refreshConnectionStatus()
                 }
         }
@@ -63,8 +64,12 @@ public final class AppState: ObservableObject {
         didSet {
             if settings.mcpEndpoint != oldValue.mcpEndpoint { resetChannelIdentity() }
             SettingsStore.save(settings)
+            if seatUplinkArmed { startSeatUplinkIfConfigured() }
         }
     }
+
+    /// 只有真正的 App 场景武装之后才拨席位连接，避免单测构造 AppState 时出网。
+    private var seatUplinkArmed = false
 
     @Published public var selectedTab: AppTab = .chat
     @Published public private(set) var connectionStatus: PlatformConnectionStatus = .unknown
@@ -234,12 +239,44 @@ public final class AppState: ObservableObject {
         try keychain.saveToken(token)
         resetChannelIdentity()
         objectWillChange.send()
+        if seatUplinkArmed { startSeatUplinkIfConfigured() }
     }
 
     public func deleteToken() throws {
         try keychain.deleteToken()
         resetChannelIdentity()
         objectWillChange.send()
+        if seatUplinkArmed { startSeatUplinkIfConfigured() }
+    }
+
+    /// App 进入前台场景后调用。有令牌才连接：地址取席位覆盖项或平台基址，
+    /// 两者都没有时用契约生产地址。无效的手填地址不拿生产地址顶上。
+    public func armSeatUplink() {
+        seatUplinkArmed = true
+        startSeatUplinkIfConfigured()
+    }
+
+    private func startSeatUplinkIfConfigured() {
+        let token = (tokenProvider() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            LocalPlatform.stopSeatUplink()
+            return
+        }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5.1"
+        let instanceId = SeatUplinkIdentity.appInstanceId()
+        if let url = settings.seatWebSocketURL() {
+            LocalPlatform.startSeatUplink(
+                url: url, bearerToken: token, appVersion: version, appInstanceId: instanceId)
+            return
+        }
+        let typed = settings.platformBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty {
+            LocalPlatform.startSeatUplink(
+                url: SeatUplinkSpec.productionURL, bearerToken: token,
+                appVersion: version, appInstanceId: instanceId)
+        } else {
+            LocalPlatform.stopSeatUplink()
+        }
     }
 
     public var isConfigured: Bool {

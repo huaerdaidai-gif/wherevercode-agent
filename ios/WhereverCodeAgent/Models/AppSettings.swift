@@ -111,6 +111,31 @@ public struct AppSettings: Equatable {
         validatedBaseURL?.appendingPathComponent("api/open/v1/mcp")
     }
 
+    /// 席位上行地址。UserDefaults 覆盖项（本地 mock）优先；
+    /// 否则从已校验的平台基址派生：`https`→`wss`、内网 `http`→`ws`，
+    /// 路径固定 `/api/open/v1/seat`。基址无效时返回 nil，调用方再决定
+    /// 要不要用契约生产地址。
+    public func seatWebSocketURL(defaults: UserDefaults = .standard) -> URL? {
+        if let override = defaults.string(forKey: SeatUplinkSpec.seatURLOverrideKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty,
+           let url = URL(string: override),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "ws" || scheme == "wss",
+           let host = url.host, !host.isEmpty {
+            return url
+        }
+        guard let base = validatedBaseURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.scheme = (components.scheme?.lowercased() == "http") ? "ws" : "wss"
+        components.path = "/api/open/v1/seat"
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
     /// Channel WebSocket URL derived from the validated base URL.
     /// `https` becomes `wss`, `http` becomes `ws` (内网层); the
     /// channel id goes in the query string.

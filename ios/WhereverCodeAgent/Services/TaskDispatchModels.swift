@@ -19,6 +19,16 @@ public struct TaskDispatchError: Error, Equatable {
     }
 }
 
+/// 云端 task_dispatch 落进本地账本的结果。同一 task_id 再派一次 created=false。
+public struct CloudDispatchReceipt: Equatable {
+    public let taskId: String
+    public let created: Bool
+    public init(taskId: String, created: Bool) {
+        self.taskId = taskId
+        self.created = created
+    }
+}
+
 public enum TaskDispatchSpec {
     public static let leaseSeconds: Double = 7200
     public static let packTimeoutSeconds: Double = 1800
