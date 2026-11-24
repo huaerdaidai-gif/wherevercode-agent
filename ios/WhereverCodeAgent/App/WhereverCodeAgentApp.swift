@@ -280,10 +280,18 @@ public final class AppState: ObservableObject {
         service.registerAgent(agentId: LocalPlatform.appAgentID, agentName: LocalPlatform.appAgentName)
         if let records = try? data.agents.listAgents() {
             for record in records {
-                service.registerAgent(agentId: record.agentId, agentName: record.displayName)
+                // 任务角色（W12）：注册表 capabilities 里写了
+                // dev/review/pack 的即为任务角色，pack 递代码链路由此点亮。
+                service.registerAgent(
+                    agentId: record.agentId,
+                    agentName: record.displayName,
+                    roles: record.capabilities.filter { Self.taskRoleNames.contains($0) })
             }
         }
     }
+
+    /// 任务角色名（W12）：与任务派工契约的 roles 同名。
+    private static let taskRoleNames: Set<String> = ["dev", "review", "pack"]
 
     /// 频道 WS 地址：本地模式给本地伪地址（不会真的建套接字，
     /// 推送走本地消息总线），远程模式用设置里派生的地址。

@@ -19,3 +19,17 @@ final class WeakTaskBridge: TaskChannelBridge {
         target?.postTaskEventMessage(channelId: channelId, taskId: taskId, text: text)
     }
 }
+
+/// 任务角色名册的弱引用适配（W12）：读 LCS 的 Agent 登记 roles，
+/// 与 WeakTaskBridge 同款解环（LCS 强持 taskDispatch，名册只弱引 LCS）。
+final class WeakTaskRoster: TaskAgentRoster {
+    weak var target: LocalChannelService?
+
+    func agentRoles(_ agentId: String) -> [String]? {
+        target?.agentRoles(agentId)
+    }
+
+    func firstAgent(withRole role: String) -> (id: String, name: String)? {
+        target?.firstAgentWithRole(role)
+    }
+}

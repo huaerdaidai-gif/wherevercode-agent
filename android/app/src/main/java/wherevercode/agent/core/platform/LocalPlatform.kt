@@ -83,6 +83,41 @@ object LocalPlatform {
     /** 内网成员令牌注册表（install 后可用；未 install 返回 null）。 */
     fun lanRegistryOrNull(): LanTokenRegistry? = lanRegistry
 
+    /** 频道工具全集（与 iOS LocalPlatform.toolNames 同序同名）。 */
+    val CHANNEL_TOOL_NAMES: List<String> = listOf(
+        "agent_channel_list",
+        "agent_channel_join",
+        "agent_channel_open_dm",
+        "agent_channel_post",
+        "agent_channel_messages",
+        "agent_channel_create",
+        "agent_channel_rename",
+        "agent_channel_set_archived",
+        "agent_channel_set_history_visible",
+        "agent_channel_delete",
+        "agent_channel_add_member",
+        "agent_channel_remove_member",
+        "agent_channel_set_member_role",
+        "agent_channel_create_webhook",
+        "agent_channel_list_webhooks",
+        "agent_channel_delete_webhook",
+        "agent_channel_recall",
+        "agent_channel_delete_message",
+        "agent_channel_pin",
+        "agent_channel_react",
+        "agent_channel_readers",
+    )
+
+    /**
+     * tools/list 名单（W12 角色化暴露）：频道工具全量 + 任务工具
+     * 按调用方作用域过滤（干活侧只见 9 个，owner 见 16 个）。
+     */
+    fun toolNames(callerScope: String): List<String> =
+        CHANNEL_TOOL_NAMES + TaskDispatchService.toolNames(callerScope)
+
+    /** 机主令牌（W12）：持它从别的设备连入即 owner 作用域。 */
+    fun lanOwnerToken(): String? = lanRegistry?.issueOwner()?.token
+
     /** 内网服务是否正在监听。 */
     fun lanServerRunning(): Boolean = lanServer?.isRunning == true
 

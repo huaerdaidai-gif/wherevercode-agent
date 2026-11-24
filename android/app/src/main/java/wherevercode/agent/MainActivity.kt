@@ -6232,7 +6232,13 @@ class MainActivity : AppCompatActivity() {
         service.registerAgent(LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME)
         try {
             for (record in agentStore.listAgents()) {
-                service.registerAgent(record.agentId, record.displayName)
+                // 任务角色（W12）：注册表 capabilities 里写了
+                // dev/review/pack 的即为任务角色，pack 递代码链路由此点亮。
+                service.registerAgent(
+                    record.agentId,
+                    record.displayName,
+                    record.capabilities.filter { it in TASK_ROLE_NAMES },
+                )
             }
         } catch (_: Exception) {
         }
@@ -10376,9 +10382,38 @@ class MainActivity : AppCompatActivity() {
         lanServiceToggle.setOnClickListener { toggleLanService() }
         screenSettings.findViewById<View>(R.id.buttonIssueLanToken)
             .setOnClickListener { issueLanToken() }
+        screenSettings.findViewById<View>(R.id.buttonOwnerLanToken)
+            .setOnClickListener { showOwnerLanToken() }
         screenSettings.findViewById<View>(R.id.buttonRevokeLanToken)
             .setOnClickListener { revokeLanToken() }
         refreshLanServiceUi()
+    }
+
+    /** 机主令牌（W12）：全表一枚、复用不换；持它连入即 owner 作用域。 */
+    private fun showOwnerLanToken() {
+        val registry = LocalPlatform.lanRegistryOrNull()
+        if (registry == null) {
+            toast("本地平台未就绪，无法签发。")
+            return
+        }
+        val entry = registry.issueOwner()
+        refreshLanServiceUi()
+        val ip = lanIpv4Address()
+        val addressHint = if (ip != null) "$ip:${LanPlatformServer.DEFAULT_PORT}" else "本机地址（见上方）"
+        AlertDialog.Builder(this)
+            .setTitle("机主令牌")
+            .setMessage(
+                "机主令牌：\n\n${entry.token}\n\n" +
+                    "在你自己的另一台设备上：平台地址填 $addressHint，平台凭证填上面的令牌，" +
+                    "即以机主身份连入（可派单、验收、撤回）。不要给别人。",
+            )
+            .setPositiveButton("复制令牌") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("内网机主令牌", entry.token))
+                toast("令牌已复制。")
+            }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     private fun toggleLanService() {
@@ -10411,7 +10446,8 @@ class MainActivity : AppCompatActivity() {
             "暂无成员令牌"
         } else {
             entries.joinToString("\n") { entry ->
-                "${entry.agentName} · ${entry.agentId} · 令牌尾号 ****${entry.token.takeLast(4)}"
+                val scopeLabel = if (entry.scope == "owner") " · 机主" else ""
+                "${entry.agentName} · ${entry.agentId}$scopeLabel · 令牌尾号 ****${entry.token.takeLast(4)}"
             }
         }
     }
@@ -14280,6 +14316,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        /** 任务角色名（W12）：与任务派工契约的 roles 同名。 */
+        private val TASK_ROLE_NAMES = setOf("dev", "review", "pack")
         private const val KEY_ACTIVE_CHANNEL_ID = "active_channel_id"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_ENTRY = "ui_entry"

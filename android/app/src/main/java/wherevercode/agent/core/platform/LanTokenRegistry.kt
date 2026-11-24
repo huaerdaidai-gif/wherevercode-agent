@@ -25,6 +25,9 @@ class LanTokenRegistry(
         val agentId: String,
         val agentName: String,
         val createdAtMs: Long,
+        /** 作用域（W12 角色化暴露）：agent = 干活侧；owner = 机主
+         * （agentId 即本机 App 身份，任务工具全开、tools/list 全量）。 */
+        val scope: String = "agent",
     )
 
     private val entries = LinkedHashMap<String, Entry>()
@@ -46,6 +49,26 @@ class LanTokenRegistry(
             agentId = agentId,
             agentName = name,
             createdAtMs = System.currentTimeMillis(),
+        )
+        entries[entry.token] = entry
+        persist()
+        return entry
+    }
+
+    /**
+     * 机主令牌（W12）：全表至多一枚，身份固定为本机 App
+     * （[LocalPlatform.APP_AGENT_ID]）——持它从别的设备连入即
+     * owner 作用域。已有则复用（重启不换令牌），被撤销后重签。
+     */
+    @Synchronized
+    fun issueOwner(): Entry {
+        entries.values.firstOrNull { it.scope == "owner" }?.let { return it }
+        val entry = Entry(
+            token=<redacted>
+            agentId = LocalPlatform.APP_AGENT_ID,
+            agentName = LocalPlatform.APP_AGENT_NAME,
+            createdAtMs = System.currentTimeMillis(),
+            scope = "owner",
         )
         entries[entry.token] = entry
         persist()
@@ -87,6 +110,7 @@ class LanTokenRegistry(
                         put("agent_id", entry.agentId)
                         put("agent_name", entry.agentName)
                         put("created_at_ms", entry.createdAtMs)
+                        put("scope", entry.scope)
                     })
                 }
             })
@@ -120,6 +144,7 @@ class LanTokenRegistry(
                 agentId = agentId,
                 agentName = row.optString("agent_name", "").ifBlank { agentId },
                 createdAtMs = row.optLong("created_at_ms", 0L),
+                scope = row.optString("scope", "agent"),
             )
         }
     }

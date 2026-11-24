@@ -190,7 +190,13 @@ public final class LanPlatformServer {
             // 设置页连接检查走 tools/list（与进程内本地答复同形状）：
             // result.tools[].name。226 首版漏了它，连接状态误报
             // 「无法解析的响应」——模拟器验收实测抓到。
-            let tools: [[String: Any]] = toolNames.map { ["name": $0] }
+            // W12 角色化暴露：任务工具按令牌作用域过滤（干活侧
+            // 只见 9 个、机主见 16 个），频道工具全量。
+            let channelNames = toolNames.filter { !TaskDispatchService.allTools.contains($0) }
+            let scope = entry.scope == "owner"
+                ? TaskDispatchService.scopeOwner : TaskDispatchService.scopeAgent
+            let names = channelNames + TaskDispatchService.toolNames(callerScope: scope)
+            let tools: [[String: Any]] = names.map { ["name": $0] }
             return Self.rpcEnvelope(id: id, result: ["tools": tools])
         }
         if method != "tools/call" {

@@ -129,6 +129,11 @@ public enum LocalPlatform {
     // ---- 内网层（频道三层二期）：局域网门面 --------------------------------
 
     /// 内网成员令牌注册表（install 后可用；设置界面签发/撤销走它）。
+    /// 机主令牌（W12）：持它从别的设备连入即 owner 作用域。
+    public static func lanOwnerToken() -> String? {
+        lanRegistryOrNull()?.issueOwner().token
+    }
+
     public static func lanRegistryOrNull() -> LanTokenRegistry? {
         lock.lock(); defer { lock.unlock() }
         return lanRegistry

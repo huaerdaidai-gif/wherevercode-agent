@@ -466,6 +466,49 @@ class LocalChannelServiceTest {
     }
 
     @Test
+    fun `pack agent from registry roles receives the delivery task`() {
+        val service = LocalChannelService(InMemoryLocalChannelPersistence()) { now }
+        service.registerAgent("dev1", "DevA")
+        service.registerAgent("rev1", "RevA")
+        service.registerAgent("pack1", "PackA", listOf("pack"))
+        val channelId = service.defaultChannelId()
+        val started = call(service, "start_task", JSONObject().apply {
+            put("agent", "dev1")
+            put("reviewer", "rev1")
+            put("goal", "带递代码的交付")
+            put("project_id", "proj")
+            put("channel_id", channelId)
+        })
+        val taskId = started.getJSONObject("task").getString("task_id")
+        call(service, "claim_task", JSONObject().put("task_id", taskId), "dev1", "DevA")
+        val submitted = call(service, "submit_result", JSONObject().apply {
+            put("task_id", taskId)
+            put("summary", "做完了")
+            put("branch", "feat/x")
+        }, "dev1", "DevA")
+        assertEquals("reviewing", submitted.getString("state"))
+        // pack 子任务只在带 pack 角色的 Agent 的活单里。
+        val packMine = call(service, "list_my_tasks", JSONObject(), "pack1", "PackA")
+            .getJSONArray("tasks")
+        assertEquals(1, packMine.length())
+        val packId = packMine.getJSONObject(0).getString("task_id")
+        assertEquals("pack", packMine.getJSONObject(0).getString("kind"))
+        call(service, "claim_task", JSONObject().put("task_id", packId), "pack1", "PackA")
+        val attached = call(service, "attach_delivery_diff", JSONObject().apply {
+            put("task_id", packId)
+            put("page", 1)
+            put("total_pages", 1)
+            put("text", "diff --git a/a b/a\n+++ b/a\n+hello\n")
+        }, "pack1", "PackA")
+        assertTrue(attached.getBoolean("complete"))
+        // 递完自动开审查：rev1 的活单里出现审查子任务。
+        val revMine = call(service, "list_my_tasks", JSONObject(), "rev1", "RevA")
+            .getJSONArray("tasks")
+        assertEquals(1, revMine.length())
+        assertEquals("review", revMine.getJSONObject(0).getString("kind"))
+    }
+
+    @Test
     fun `task without a channel writes nothing back`() {
         val service = newService()
         service.registerAgent("dev1", "DevA")

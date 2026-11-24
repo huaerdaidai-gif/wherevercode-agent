@@ -49,7 +49,13 @@ class LocalChannelService(
     taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence(),
     private val clock: () -> Double = { System.currentTimeMillis() / 1000.0 },
 ) {
-    private data class Agent(val id: String, var name: String)
+    private data class Agent(
+        val id: String,
+        var name: String,
+        /** 任务角色（W12）：dev/review/pack，来自 App 注册表
+         * capabilities 的同名项；供任务服务的 pack 名册查询。 */
+        var roles: List<String> = emptyList(),
+    )
 
     private data class Channel(
         val id: String,
@@ -114,16 +120,22 @@ class LocalChannelService(
 
     /** 登记一位本机已知 Agent（本机 App 自己 + 注册表里的 Agent）。 */
     @Synchronized
-    fun registerAgent(agentId: String, agentName: String) {
+    fun registerAgent(
+        agentId: String,
+        agentName: String,
+        roles: List<String> = emptyList(),
+    ) {
         val id = agentId.trim()
         if (id.isBlank()) return
         val name = agentName.trim().ifBlank { id }
+        val cleanRoles = roles.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         val existing = agents[id]
         if (existing == null) {
-            agents[id] = Agent(id, name)
+            agents[id] = Agent(id, name, cleanRoles)
             persist()
-        } else if (existing.name != name) {
+        } else if (existing.name != name || existing.roles != cleanRoles) {
             existing.name = name
+            existing.roles = cleanRoles
             persist()
         }
     }
@@ -238,11 +250,23 @@ class LocalChannelService(
         fireMessage(channel.id, messageJson(message, LocalPlatform.APP_AGENT_ID))
     }
 
+    /** 任务角色名册（W12）：读 LCS 的 Agent 登记（roles 来自 App
+     * 注册表 capabilities 的 dev/review/pack 同名项）。 */
+    private val taskRoster = object : TaskAgentRoster {
+        override fun agentRoles(agentId: String): List<String>? =
+            agents[agentId]?.roles
+
+        override fun firstAgentWithRole(role: String): Pair<String, String>? =
+            agents.entries.firstOrNull { role in it.value.roles }
+                ?.let { it.key to it.value.name }
+    }
+
     private val taskDispatch = TaskDispatchService(
         store = TaskDispatchStore(taskPersistence, clock),
         directory = TaskAgentDirectory { id -> agents[id]?.name },
         bridge = taskBridge,
         clock = clock,
+        roster = taskRoster,
         channelOwnerChecker = { channelId, agentId ->
             members[channelId]?.firstOrNull { it.agentId == agentId }?.role == "owner"
         },
@@ -827,7 +851,11 @@ class LocalChannelService(
         root.put("seq", seqCounter)
         root.put("agents", JSONArray().apply {
             for (agent in agents.values) {
-                put(JSONObject().put("id", agent.id).put("name", agent.name))
+                put(JSONObject().apply {
+                    put("id", agent.id)
+                    put("name", agent.name)
+                    put("roles", JSONArray(agent.roles))
+                })
             }
         })
         root.put("channels", JSONArray().apply {
@@ -938,7 +966,14 @@ class LocalChannelService(
             val row = agentRows.optJSONObject(i) ?: continue
             val id = row.optString("id", "")
             if (id.isBlank()) continue
-            agents[id] = Agent(id, row.optString("name", id))
+            val roles = mutableListOf<String>()
+            val rawRoles = row.optJSONArray("roles")
+            if (rawRoles != null) {
+                for (j in 0 until rawRoles.length()) {
+                    rawRoles.optString(j, "").takeIf { it.isNotBlank() }?.let { roles += it }
+                }
+            }
+            agents[id] = Agent(id, row.optString("name", id), roles)
         }
         val channelRows = root.optJSONArray("channels") ?: JSONArray()
         for (i in 0 until channelRows.length()) {
