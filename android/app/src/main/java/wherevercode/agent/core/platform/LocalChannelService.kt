@@ -47,6 +47,7 @@ class InMemoryLocalChannelPersistence : LocalChannelPersistence {
 class LocalChannelService(
     private val persistence: LocalChannelPersistence,
     private val clock: () -> Double = { System.currentTimeMillis() / 1000.0 },
+    taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence(),
 ) {
     private data class Agent(val id: String, var name: String)
 
@@ -197,7 +198,7 @@ class LocalChannelService(
     // LocalServiceException（门面只带文案，status/code 留在任务
     // 服务层供对拍夹具核验）。bridge 在 W8 接线（事件写回频道）。
     private val taskDispatch = TaskDispatchService(
-        store = TaskDispatchStore(clock),
+        store = TaskDispatchStore(taskPersistence, clock),
         directory = TaskAgentDirectory { id -> agents[id]?.name },
         bridge = null,
         clock = clock,
@@ -213,7 +214,14 @@ class LocalChannelService(
     fun dispatch(tool: String, args: JSONObject, callerId: String, callerName: String): JSONObject {
         if (TaskDispatchService.isTaskTool(tool)) {
             try {
-                return taskDispatch.dispatch(tool, args, callerId, callerName)
+                // 作用域：本机 App 身份 = owner，其余调用方 = agent；
+                // 内网 owner 令牌的作用域识别在 W12 接注册表后补。
+                val scope = if (callerId == LocalPlatform.APP_AGENT_ID) {
+                    TaskDispatchService.SCOPE_OWNER
+                } else {
+                    TaskDispatchService.SCOPE_AGENT
+                }
+                return taskDispatch.dispatch(tool, args, callerId, callerName, scope)
             } catch (e: TaskDispatchException) {
                 throw LocalServiceException(e.message ?: "任务派工调用失败")
             }

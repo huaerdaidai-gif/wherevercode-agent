@@ -65,7 +65,12 @@ public enum LocalPlatform {
         lock.lock(); defer { lock.unlock() }
         if service != nil { return }
         let file = storageFileURL()
-        service = LocalChannelService(persistence: FileLocalChannelPersistence(fileURL: file))
+        let taskFile = file.deletingLastPathComponent()
+            .appendingPathComponent("local_platform_tasks.json")
+        service = LocalChannelService(
+            persistence: FileLocalChannelPersistence(fileURL: file),
+            taskPersistence: FileTaskDispatchPersistence(fileURL: taskFile)
+        )
         let tokenFile = file.deletingLastPathComponent()
             .appendingPathComponent("lan_platform_tokens.json")
         let persistence = FileLocalChannelPersistence(fileURL: tokenFile)
@@ -238,6 +243,37 @@ public enum LocalPlatform {
             }
         }
         return { service.removeMessageListener(token) }
+    }
+}
+
+/// 任务派工账本的文件持久化：与频道账本同一写法（临时文件 + 改名）。
+public final class FileTaskDispatchPersistence: TaskDispatchPersistence {
+    private let fileURL: URL
+
+    public init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    public func load() -> String? {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return try? String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    public func save(_ text: String) {
+        let manager = FileManager.default
+        let directory = fileURL.deletingLastPathComponent()
+        try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let tmp = directory.appendingPathComponent(fileURL.lastPathComponent + ".tmp")
+        do {
+            try text.write(to: tmp, atomically: false, encoding: .utf8)
+            if manager.fileExists(atPath: fileURL.path) {
+                try manager.removeItem(at: fileURL)
+            }
+            try manager.moveItem(at: tmp, to: fileURL)
+        } catch {
+            try? text.write(to: fileURL, atomically: false, encoding: .utf8)
+            try? manager.removeItem(at: tmp)
+        }
     }
 }
 

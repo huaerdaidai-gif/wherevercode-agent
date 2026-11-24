@@ -81,6 +81,7 @@
 			DA000000000000000000F50F,
 			1C0DE00000000000000000A5,
 			DA0000000000000000000C05,
+			DA0000000000000000000E09,
 				DA0000000000000000000D07,
 				DA0000000000000000000D09,
 				DA0000000000000000000D11,
@@ -326,6 +327,7 @@
 			DA000000000000000000F302,
 			DA000000000000000000F510,
 			DA0000000000000000000C06,
+			DA0000000000000000000E10,
 				DA0000000000000000000D08,
 				DA0000000000000000000D10,
 				DA0000000000000000000D12,
@@ -552,6 +554,8 @@
 		DA0000000000000000000D12 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D11; };
 		DA0000000000000000000C05 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChannelServiceTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000C06 = {isa = PBXBuildFile; fileRef = DA0000000000000000000C05; };
+		DA0000000000000000000E09 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchFixtureTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E10 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E09; };
 		DA0000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainTypes.swift; sourceTree = "<group>"; };
 		DA0000000000000000000022 = {isa = PBXBuildFile; fileRef = DA0000000000000000000021; };
 		DA0000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainConfig.swift; sourceTree = "<group>"; };

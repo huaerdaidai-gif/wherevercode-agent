@@ -122,6 +122,7 @@ public final class LocalChannelService {
     }
 
     private let persistence: LocalChannelPersistence
+    private let taskPersistence: TaskDispatchPersistence
     private let clock: () -> Double
     private let lock = NSRecursiveLock()
 
@@ -144,14 +145,15 @@ public final class LocalChannelService {
     /// 任务派工服务（contracts/task-dispatch/spec.md）：dispatch 的
     /// 一行钩子按工具名路由进来；bridge 在 W8 接线（事件写回频道）。
     private lazy var taskDispatch: TaskDispatchService = TaskDispatchService(
-        store: TaskDispatchStore(clock: clock),
+        store: TaskDispatchStore(persistence: taskPersistence, clock: clock),
         directory: { [weak self] id in self?.agents[id]?.name },
         bridge: nil,
         clock: clock
     )
 
-    public init(persistence: LocalChannelPersistence, clock: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
+    public init(persistence: LocalChannelPersistence, clock: @escaping () -> Double = { Date().timeIntervalSince1970 }, taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence()) {
         self.persistence = persistence
+        self.taskPersistence = taskPersistence
         self.clock = clock
         restore()
         ensureSeed()
@@ -261,7 +263,11 @@ public final class LocalChannelService {
         lock.lock(); defer { lock.unlock() }
         if TaskDispatchService.isTaskTool(tool) {
             do {
-                return try taskDispatch.dispatch(tool: tool, args: args, callerId: callerId, callerName: callerName)
+                // 作用域：本机 App 身份 = owner，其余调用方 = agent；
+                // 内网 owner 令牌的作用域识别在 W12 接注册表后补。
+                let scope = callerId == LocalPlatform.appAgentID
+                    ? TaskDispatchService.scopeOwner : TaskDispatchService.scopeAgent
+                return try taskDispatch.dispatch(tool: tool, args: args, callerId: callerId, callerName: callerName, callerScope: scope)
             } catch let error as TaskDispatchError {
                 throw LocalServiceError(error.message)
             }

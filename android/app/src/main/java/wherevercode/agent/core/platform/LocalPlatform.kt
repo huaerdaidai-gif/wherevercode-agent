@@ -33,7 +33,11 @@ object LocalPlatform {
         synchronized(this) {
             if (service != null) return
             val file = File(context.applicationContext.filesDir, "local_platform_channels.json")
-            service = LocalChannelService(FileLocalChannelPersistence(file))
+            val taskFile = File(context.applicationContext.filesDir, "local_platform_tasks.json")
+            service = LocalChannelService(
+                FileLocalChannelPersistence(file),
+                taskPersistence = FileTaskDispatchPersistence(taskFile),
+            )
             val tokenFile = File(context.applicationContext.filesDir, "lan_platform_tokens.json")
             val tokenPersistence = FileLocalChannelPersistence(tokenFile)
             lanRegistry = LanTokenRegistry(
@@ -101,6 +105,26 @@ object LocalPlatform {
     @Synchronized
     fun stopLanServer() {
         lanServer?.stop()
+    }
+}
+
+/** 任务派工账本的文件持久化：与频道账本同一写法（临时文件 + 改名）。 */
+class FileTaskDispatchPersistence(private val file: File) : TaskDispatchPersistence {
+    override fun load(): String? = try {
+        if (file.isFile) file.readText(Charsets.UTF_8) else null
+    } catch (_: Exception) {
+        null
+    }
+
+    override fun save(text: String) {
+        val parent = file.parentFile
+        if (parent != null && !parent.exists()) parent.mkdirs()
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(text, Charsets.UTF_8)
+        if (!tmp.renameTo(file)) {
+            file.writeText(text, Charsets.UTF_8)
+            tmp.delete()
+        }
     }
 }
 
