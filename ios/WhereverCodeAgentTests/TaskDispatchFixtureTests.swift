@@ -22,9 +22,21 @@ final class TaskDispatchFixtureTests: XCTestCase {
         "a02-claim-flow",
         "a03-fencing",
         "a04-progress-heartbeat-release",
+        "a05-submit-evidence-gate",
+        "a06-submit-review-approve",
+        "a07-rework-rounds",
+        "a08-decide-cancel",
         "a09-lease-expiry",
+        "a10-pack-flow",
+        "a11-pack-timeout-skip",
+        "a12-submit-state-guards",
         "a13-report-status",
+        "a14-release-review",
+        "a15-reservation-expiry",
         "b06-role-exposure",
+        "c01-adversarial-delivery",
+        "c02-adversarial-basics",
+        "c03-adversarial-pages",
     ]
 
     /// 录制时的显示名（recorder 口径）：directory 与 callerName 都用它。
@@ -100,12 +112,27 @@ final class TaskDispatchFixtureTests: XCTestCase {
         let seed = fixture["seed"] as? [String: Any] ?? [:]
         var scopes: [String: String] = [:]
         var names: [String: String] = [:]
+        var rolesById: [String: [String]] = [:]
+        var seedOrder: [String] = []
         for agent in (seed["agents"] as? [[String: Any]]) ?? [] {
             guard let id = agent["id"] as? String else { continue }
             names[id] = Self.displayNames[id] ?? id
+            seedOrder.append(id)
             let scopeList = (agent["scopes"] as? [Any])?.compactMap { $0 as? String } ?? []
             scopes[id] = scopeList.contains("owner")
                 ? TaskDispatchService.scopeOwner : TaskDispatchService.scopeAgent
+            rolesById[id] = (agent["roles"] as? [Any])?.compactMap { $0 as? String } ?? []
+        }
+        struct FixtureRoster: TaskAgentRoster {
+            let rolesById: [String: [String]]
+            let seedOrder: [String]
+            let names: [String: String]
+            func agentRoles(_ agentId: String) -> [String]? { rolesById[agentId] }
+            func firstAgent(withRole role: String) -> (id: String, name: String)? {
+                guard let id = seedOrder.first(where: { rolesById[$0]?.contains(role) == true })
+                else { return nil }
+                return (id: id, name: names[id] ?? id)
+            }
         }
         var now = Self.baseTs
         let store = TaskDispatchStore(persistence: InMemoryTaskDispatchPersistence(), clock: { now })
@@ -114,7 +141,8 @@ final class TaskDispatchFixtureTests: XCTestCase {
             directory: { id in names[id] },
             bridge: nil,
             clock: { now },
-            leaseSeconds: (seed["lease_seconds"] as? NSNumber)?.doubleValue ?? TaskDispatchSpec.leaseSeconds
+            leaseSeconds: (seed["lease_seconds"] as? NSNumber)?.doubleValue ?? TaskDispatchSpec.leaseSeconds,
+            roster: FixtureRoster(rolesById: rolesById, seedOrder: seedOrder, names: names)
         )
         let recMap = recorderIdMap(fixture)
         let steps = (fixture["steps"] as? [[String: Any]]) ?? []

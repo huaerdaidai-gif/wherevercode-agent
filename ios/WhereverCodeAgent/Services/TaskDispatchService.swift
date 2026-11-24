@@ -16,13 +16,23 @@
 //
 // 落地进度：W4/W5 = 租约清扫 + start/get/list/decide + 干活侧
 // 读与领活链（list_my/claim/release/progress/heartbeat/
-// report_status）；submit/attach/get_delivery_diff 在 W6；
+// report_status）；W6 = 交付链（submit/attach/get_delivery_diff）；
 // update/withdraw/reopen 在 W9。未落地的如实抛「尚未启用」。
 
 import Foundation
 
 /// 派单侧建单时查 Agent 是否存在、取显示名（start_task 的 agent/reviewer 校验）。
 public typealias TaskAgentDirectory = (_ agentId: String) -> String?
+
+/// Agent 名册口：角色查询（attach 的 pack 角色门、submit 找 pack
+/// Agent）。生产由 LCS 的 Agent 注册表提供；未接名册时 pack 链
+/// 不可用（submit 走无 pack 路径、attach 如实报 pack_role_required）。
+public protocol TaskAgentRoster {
+    /// 角色列表；Agent 不存在返回 nil。
+    func agentRoles(_ agentId: String) -> [String]?
+    /// 注册顺序里第一个带该角色的 Agent；没有返回 nil。
+    func firstAgent(withRole role: String) -> (id: String, name: String)?
+}
 
 public final class TaskDispatchService {
     /// 干活侧 9 个（spec §6 的顺序即 tools/list 顺序）。
@@ -60,6 +70,7 @@ public final class TaskDispatchService {
     private let bridge: TaskChannelBridge?
     private let clock: () -> Double
     private let leaseSeconds: Double
+    private let roster: TaskAgentRoster?
     private let lock = NSRecursiveLock()
 
     /// 失败回滚点：dispatch 入口先置为当前快照，租约清扫落盘后前移。
@@ -67,12 +78,14 @@ public final class TaskDispatchService {
 
     public init(store: TaskDispatchStore, directory: TaskAgentDirectory?,
                 bridge: TaskChannelBridge?, clock: @escaping () -> Double,
-                leaseSeconds: Double = TaskDispatchSpec.leaseSeconds) {
+                leaseSeconds: Double = TaskDispatchSpec.leaseSeconds,
+                roster: TaskAgentRoster? = nil) {
         self.store = store
         self.directory = directory
         self.bridge = bridge
         self.clock = clock
         self.leaseSeconds = leaseSeconds
+        self.roster = roster
         self.rollbackPoint = store.snapshotText()
     }
 
@@ -97,6 +110,9 @@ public final class TaskDispatchService {
             case "report_progress": result = try reportProgress(args: args, callerId: callerId, callerName: callerName)
             case "heartbeat": result = try heartbeat(args: args, callerId: callerId)
             case "report_status": result = try reportStatus(args: args, callerId: callerId)
+            case "submit_result": result = try submitResult(args: args, callerId: callerId, callerName: callerName)
+            case "attach_delivery_diff": result = try attachDelivery(args: args, callerId: callerId, callerName: callerName)
+            case "get_delivery_diff": result = try getDeliveryDiff(args: args, callerId: callerId)
             case "start_task": result = try startTask(args: args, callerId: callerId)
             case "get_task": result = try getTask(args: args)
             case "list_tasks": result = try listTasks(args: args)
@@ -694,6 +710,393 @@ public final class TaskDispatchService {
             "quota_text": opt(record.quotaText),
             "quota_reset_at": opt(record.quotaResetAt),
             "reported_at": record.reportedAt,
+        ]
+    }
+
+    // ---- 交付链（W6，基线 submit_work / submit_verdict /
+    //      attach_delivery / get_delivery_page） ----------------------------
+
+    // 基线 _REF_RE / _SHA_RE / _URL_RE（证据格式门）。
+    private static let refRegex = try! NSRegularExpression(pattern: "^[A-Za-z0-9._/-]{1,200}$")
+    private static let shaRegex = try! NSRegularExpression(pattern: "^[0-9a-f]{7,64}$")
+    private static let urlRegex = try! NSRegularExpression(pattern: "^https?://\\S{1,2000}$")
+
+    private func recordAttemptRaw(taskId: String?, epoch: Int, action: String,
+                                  attemptId: String?, result: [String: Any]) {
+        guard let attemptId, let taskId else { return }
+        let key = "\(taskId)|\(epoch)|\(action)|\(attemptId)"
+        if store.idempotency[key] == nil,
+           let data = try? JSONSerialization.data(withJSONObject: result),
+           let text = String(data: data, encoding: .utf8) {
+            store.idempotency[key] = text
+        }
+    }
+
+    /// 基线 _opt_ref / _opt_url：给定时须是字符串且格式合规。
+    private func optRef(_ args: [String: Any], _ key: String, field: String,
+                        regex: NSRegularExpression) throws -> String? {
+        guard let raw = rawArg(args, key) else { return nil }
+        guard let string = raw as? String,
+              regex.firstMatch(in: string, range: NSRange(string.startIndex..., in: string)) != nil
+        else {
+            throw TaskDispatchError("\(field) 格式无效")
+        }
+        return string
+    }
+
+    private func submitResult(args: [String: Any], callerId: String,
+                              callerName: String) throws -> [String: Any] {
+        if let verdictRaw = rawArg(args, "verdict") {
+            guard let verdict = verdictRaw as? String,
+                  verdict == "approve" || verdict == "changes_requested" else {
+                throw TaskDispatchError("verdict 只能是 approve 或 changes_requested")
+            }
+            return try submitVerdict(args: args, callerId: callerId,
+                                     callerName: callerName, verdict: verdict)
+        }
+        return try submitWork(args: args, callerId: callerId, callerName: callerName)
+    }
+
+    private func submitWork(args: [String: Any], callerId: String,
+                            callerName: String) throws -> [String: Any] {
+        let summary = try textArg(args, "summary", field: "summary",
+                                  maxLen: TaskDispatchSpec.maxSummaryChars)!
+        let branch = try optRef(args, "branch", field: "branch", regex: Self.refRegex)
+        let commit = try optRef(args, "commit", field: "commit", regex: Self.shaRegex)
+        let prUrl = try optRef(args, "pr_url", field: "pr_url", regex: Self.urlRegex)
+        if branch == nil && commit == nil && prUrl == nil {
+            throw TaskDispatchError(
+                "交付需要证据：请带上 branch、commit 或 pr_url 其中至少一个",
+                status: 422, code: "evidence_required")
+        }
+        let task = try ownedOpen(taskId: stringArg(args, "task_id"), agentId: callerId,
+                                 states: [TaskDispatchSpec.claimed])
+        if let replay = try checkFencing(task, args: args, action: "submit_result") {
+            return replay
+        }
+        if task.kind == "pack" {
+            throw TaskDispatchError(
+                "递代码任务请用 attach_delivery_diff 递 diff，不用 submit_result",
+                status: 409, code: "use_attach_for_pack_tasks")
+        }
+        if task.kind != "work" {
+            throw TaskDispatchError(
+                "审查任务请用 verdict 交结论",
+                status: 409, code: "use_verdict_for_review_tasks")
+        }
+        let delivered = "交付" +
+            (branch != nil ? "：分支 \(branch!)" : "") +
+            (commit != nil ? " 提交 \(String(commit!.prefix(12)))" : "")
+        event(taskId: task.taskId, who: callerName, kind: "submitted",
+              text: delivered + "\n" + summary)
+        // 提交即清本任务旧 delivery_pages（基线 DELETE 同步清计数）。
+        store.deliveryPages.removeValue(forKey: task.taskId)
+        task.summary = summary
+        task.branch = branch
+        task.commitSha = commit
+        task.prUrl = prUrl
+        task.leaseUntil = nil
+        task.deliveryTotalPages = 0
+        task.deliveryPages = 0
+        task.deliveryTruncated = false
+        task.deliveryFiles = nil
+        let packAgent = roster?.firstAgent(withRole: "pack")
+        let note: String
+        if let packAgent, branch != nil {
+            task.state = TaskDispatchSpec.reviewing
+            touch(task)
+            _ = openPack(work: task, packAgent: packAgent)
+            event(taskId: task.taskId, who: "平台", kind: "pack_opened",
+                  text: "已排递代码活，改动递到后自动开审查")
+            note = "已排递代码，改动递到后自动交给审查方。"
+        } else if task.reviewerId != nil {
+            task.state = TaskDispatchSpec.reviewing
+            touch(task)
+            _ = openReview(work: task, summary: summary, branch: branch,
+                           commit: commit, prUrl: prUrl)
+            event(taskId: task.taskId, who: "平台", kind: "review_opened",
+                  text: "已交给 \(task.reviewerName ?? "") 审查")
+            note = "已交给审查方，结论出来后会自动通知；要返工时这个任务会重新出现在 list_my_tasks。"
+        } else {
+            task.state = TaskDispatchSpec.needsDecision
+            task.decisionReason = "no_reviewer"
+            touch(task)
+            note = "已交付，等项目负责人查看。"
+        }
+        let result: [String: Any] = ["ok": true, "state": task.state, "note": note]
+        recordAttempt(task, action: "submit_result",
+                      attemptId: try attemptIdArg(args), result: result)
+        return result
+    }
+
+    /// 基线 pack 子任务开单（submit 带 branch 且有 pack 角色 Agent 时）。
+    @discardableResult
+    private func openPack(work: TaskRecord,
+                          packAgent: (id: String, name: String)) -> TaskRecord {
+        let pack = TaskRecord(
+            taskId: newId(),
+            projectId: work.projectId,
+            kind: "pack",
+            parentId: work.taskId,
+            assigneeId: packAgent.id,
+            assigneeName: packAgent.name,
+            reviewerId: nil,
+            reviewerName: nil,
+            title: "递代码：" + String(work.title.prefix(110)),
+            goal: work.goal,
+            state: TaskDispatchSpec.queued,
+            round: work.round,
+            maxRounds: work.maxRounds,
+            leaseUntil: nil,
+            summary: work.summary,
+            branch: work.branch,
+            commitSha: work.commitSha,
+            prUrl: work.prUrl,
+            verdict: nil,
+            feedback: nil,
+            decisionReason: nil,
+            claimedById: nil,
+            claimedByName: nil,
+            reservedForId: nil,
+            reservedUntil: nil,
+            createdAt: now(),
+            updatedAt: now()
+        )
+        store.putTask(pack)
+        return pack
+    }
+
+    private func submitVerdict(args: [String: Any], callerId: String,
+                               callerName: String, verdict: String) throws -> [String: Any] {
+        let summary = try textArg(args, "summary", field: "summary",
+                                  maxLen: TaskDispatchSpec.maxSummaryChars)!
+        let task = try ownedOpen(taskId: stringArg(args, "task_id"), agentId: callerId,
+                                 states: [TaskDispatchSpec.claimed])
+        if let replay = try checkFencing(task, args: args, action: "submit_result") {
+            return replay
+        }
+        if task.kind != "review" {
+            throw TaskDispatchError(
+                "开发任务请用 submit_result 交 summary + branch/commit，不要用 verdict",
+                status: 409, code: "use_submit_for_work_tasks")
+        }
+        task.state = TaskDispatchSpec.done
+        task.verdict = verdict
+        task.feedback = summary
+        clearClaim(task)
+        touch(task)
+        event(taskId: task.taskId, who: callerName, kind: "verdict",
+              text: "审查结论：\(verdict)\n\(summary)")
+        let work = task.parentId.flatMap { store.tasks[$0] }
+        var note = "结论已记录，团队流程会据此继续。"
+        if let work {
+            if work.state != TaskDispatchSpec.reviewing {
+                event(taskId: work.taskId, who: callerName, kind: "verdict_ignored",
+                      text: "任务已不在审查中，结论未生效")
+            } else if verdict == "approve" {
+                work.state = TaskDispatchSpec.approved
+                work.verdict = verdict
+                work.feedback = summary
+                work.decisionReason = nil
+                work.claimedById = nil
+                work.claimedByName = nil
+                work.reservedForId = nil
+                work.reservedUntil = nil
+                touch(work)
+                event(taskId: work.taskId, who: callerName, kind: "approved",
+                      text: "审查通过\n\(summary)")
+            } else if work.round < work.maxRounds {
+                let reserved = work.claimedById
+                let implementer = work.claimedByName ?? work.assigneeName
+                work.state = TaskDispatchSpec.queued
+                work.verdict = verdict
+                work.feedback = summary
+                work.round += 1
+                work.claimedById = nil
+                work.claimedByName = nil
+                work.reservedForId = reserved
+                work.reservedUntil = reserved != nil ? now() + leaseSeconds : nil
+                touch(work)
+                event(taskId: work.taskId, who: callerName, kind: "changes_requested",
+                      text: "审查要求修改，自动打回给 \(implementer)（第 \(work.round) 轮）\n\(summary)")
+                note = "结论已转给实现方，任务已打回返工。"
+            } else {
+                work.state = TaskDispatchSpec.needsDecision
+                work.verdict = verdict
+                work.feedback = summary
+                work.decisionReason = "rounds_exceeded"
+                work.claimedById = nil
+                work.claimedByName = nil
+                work.reservedForId = nil
+                work.reservedUntil = nil
+                touch(work)
+                event(taskId: work.taskId, who: callerName, kind: "rounds_exceeded",
+                      text: "返工轮数已用完，转为需要项目负责人决定")
+                note = "返工轮数已用完，转为需要项目负责人决定。"
+            }
+        }
+        let result: [String: Any] = ["ok": true, "state": TaskDispatchSpec.done, "note": note]
+        recordAttempt(task, action: "submit_result",
+                      attemptId: try attemptIdArg(args), result: result)
+        return result
+    }
+
+    private func attachDelivery(args: [String: Any], callerId: String,
+                                callerName: String) throws -> [String: Any] {
+        let page = intValue(rawArg(args, "page"))
+        let totalPages = intValue(rawArg(args, "total_pages"))
+        guard let page, let totalPages,
+              1 <= page, page <= totalPages,
+              totalPages <= TaskDispatchSpec.maxDeliveryPages else {
+            throw TaskDispatchError("page/total_pages 无效（1 <= page <= total_pages <= 200）")
+        }
+        guard let text = rawArg(args, "text") as? String,
+              text.count <= TaskDispatchSpec.maxPageChars else {
+            throw TaskDispatchError("一页 diff 不能超过 65536 个字符")
+        }
+        let truncatedRaw = rawArg(args, "truncated")
+        let truncated: Bool
+        if let bool = truncatedRaw as? Bool {
+            truncated = bool
+        } else if let number = truncatedRaw as? NSNumber {
+            truncated = number.doubleValue != 0
+        } else {
+            truncated = truncatedRaw != nil
+        }
+        let argTaskId = stringArg(args, "task_id")
+        guard var row = argTaskId.flatMap({ store.tasks[$0] }) else {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        if row.kind == "work" {
+            // 填 work id 时自动定位其最新 pack 子任务（基线口径）。
+            guard let pack = store.orderedTasks
+                .filter({ $0.parentId == row.taskId && $0.kind == "pack" })
+                .sorted(by: { $0.createdAt < $1.createdAt }).last else {
+                throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+            }
+            row = pack
+        }
+        if row.kind != "pack" {
+            throw TaskDispatchError(
+                "只有递代码任务能递 diff",
+                status: 409, code: "use_attach_for_pack_tasks")
+        }
+        let roles = roster?.agentRoles(callerId)
+        if roles == nil || !roles!.contains("pack") {
+            throw TaskDispatchError(
+                "只有带递代码角色的 Agent 能递 diff",
+                status: 409, code: "pack_role_required")
+        }
+        if row.state != TaskDispatchSpec.claimed ||
+            (row.assigneeId != callerId && row.claimedById != callerId) {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        if let replay = try checkFencing(row, args: args, action: "attach_delivery_diff") {
+            return replay
+        }
+        let workId = row.parentId!
+        guard let work = store.tasks[workId] else {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        var pages = store.deliveryPages[workId] ?? [:]
+        for old in pages.values {
+            if old.totalPages != totalPages {
+                throw TaskDispatchError("total_pages 与前面几页不一致")
+            }
+        }
+        // 基线按字符数计总量（len(text)），不是字节数。
+        let storedChars = pages.values.filter { $0.page != page }
+            .reduce(0) { $0 + $1.text.count } + text.count
+        if storedChars > TaskDispatchSpec.maxDeliveryBytes {
+            throw TaskDispatchError("整份 diff 不能超过 2 MB")
+        }
+        pages[page] = DeliveryPageRecord(page: page, totalPages: totalPages, text: text)
+        store.deliveryPages[workId] = pages
+        let received = pages.count
+        let files = parseDiffFiles(
+            pages.values.sorted { $0.page < $1.page }.map { $0.text }.joined())
+        work.deliveryTotalPages = totalPages
+        work.deliveryPages = received
+        if truncated { work.deliveryTruncated = true }
+        if let data = try? JSONSerialization.data(withJSONObject: files),
+           let filesText = String(data: data, encoding: .utf8) {
+            work.deliveryFiles = filesText
+        }
+        touch(work)
+        if received < totalPages {
+            event(taskId: workId, who: callerName, kind: "pack_progress",
+                  text: "递代码 \(received)/\(totalPages) 页")
+            let result: [String: Any] = [
+                "ok": true, "work_id": workId, "pack_task_id": row.taskId,
+                "pages_received": received, "total_pages": totalPages, "complete": false,
+            ]
+            recordAttemptRaw(taskId: argTaskId, epoch: row.epoch,
+                             action: "attach_delivery_diff",
+                             attemptId: try attemptIdArg(args), result: result)
+            return result
+        }
+        row.state = TaskDispatchSpec.done
+        clearClaim(row)
+        touch(row)
+        if work.reviewerId != nil {
+            _ = openReview(work: work, summary: work.summary, branch: work.branch,
+                           commit: work.commitSha, prUrl: work.prUrl)
+            event(taskId: workId, who: "平台", kind: "review_opened",
+                  text: "递代码完成（\(totalPages) 页），已交给 \(work.reviewerName ?? "") 审查")
+        } else {
+            work.state = TaskDispatchSpec.needsDecision
+            work.decisionReason = "no_reviewer"
+            touch(work)
+            event(taskId: workId, who: "平台", kind: "pack_done",
+                  text: "递代码完成（\(totalPages) 页），等你查看")
+        }
+        let result: [String: Any] = [
+            "ok": true, "work_id": workId, "pack_task_id": row.taskId,
+            "pages_received": received, "total_pages": totalPages, "complete": true,
+        ]
+        recordAttemptRaw(taskId: argTaskId, epoch: row.epoch,
+                         action: "attach_delivery_diff",
+                         attemptId: try attemptIdArg(args), result: result)
+        return result
+    }
+
+    private func getDeliveryDiff(args: [String: Any], callerId: String) throws -> [String: Any] {
+        guard let page = intValue(rawArg(args, "page")), page >= 1 else {
+            throw TaskDispatchError("page 无效")
+        }
+        guard let row = stringArg(args, "task_id").flatMap({ store.tasks[$0] }) else {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        if row.kind == "review" && row.parentId == nil {
+            throw TaskDispatchError(
+                "独立审查任务没有递代码",
+                status: 409, code: "no_delivery_diff")
+        }
+        let workId = row.kind == "review" ? row.parentId! : row.taskId
+        guard let work = store.tasks[workId], work.kind == "work" else {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        let review = store.orderedTasks
+            .filter { $0.parentId == workId && $0.kind == "review" }
+            .sorted { $0.createdAt < $1.createdAt }.last
+        let allowed = review != nil &&
+            (review!.assigneeId == callerId || review!.claimedById == callerId)
+        if !allowed {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        let pages = store.deliveryPages[workId] ?? [:]
+        guard let found = pages[page] else {
+            throw TaskDispatchError("这一页 diff 还没到", status: 404, code: "delivery_page_missing")
+        }
+        return [
+            "ok": true,
+            "work_id": workId,
+            "page": page,
+            "total_pages": found.totalPages,
+            "pages_received": pages.count,
+            "truncated": work.deliveryTruncated,
+            "changed_files": parseFilesJson(work.deliveryFiles),
+            "text": found.text,
         ]
     }
 

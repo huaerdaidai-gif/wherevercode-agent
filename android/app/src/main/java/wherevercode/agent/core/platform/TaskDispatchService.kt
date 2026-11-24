@@ -10,6 +10,19 @@ fun interface TaskAgentDirectory {
 }
 
 /**
+ * Agent 名册口：角色查询（attach 的 pack 角色门、submit 找 pack
+ * Agent）。生产由 LCS 的 Agent 注册表提供；未接名册时 pack 链
+ * 不可用（submit 走无 pack 路径、attach 如实报 pack_role_required）。
+ */
+interface TaskAgentRoster {
+    /** 角色列表；Agent 不存在返回 null。 */
+    fun agentRoles(agentId: String): List<String>?
+
+    /** 注册顺序里第一个带该角色的 Agent（id, name）；没有返回 null。 */
+    fun firstAgentWithRole(role: String): Pair<String, String>?
+}
+
+/**
  * 任务派工服务（spec §2）：16 个工具的统一入口，由
  * [LocalChannelService.dispatch] 的一行钩子按工具名路由进来，
  * 内网门面经频道服务转发、同一条路径。
@@ -26,7 +39,7 @@ fun interface TaskAgentDirectory {
  *
  * 落地进度：W4/W5 = 租约清扫 + start/get/list/decide + 干活侧
  * 读与领活链（list_my/claim/release/progress/heartbeat/
- * report_status）；submit/attach/get_delivery_diff 在 W6；
+ * report_status）；W6 = 交付链（submit/attach/get_delivery_diff）；
  * update/withdraw/reopen 在 W9。未落地的如实抛「尚未启用」。
  */
 class TaskDispatchService(
@@ -35,6 +48,7 @@ class TaskDispatchService(
     private val bridge: TaskChannelBridge?,
     private val clock: () -> Double,
     private val leaseSeconds: Double = TaskDispatchSpec.LEASE_SECONDS,
+    private val roster: TaskAgentRoster? = null,
 ) {
     companion object {
         /** 干活侧 9 个（spec §6 的顺序即 tools/list 顺序）。 */
@@ -59,6 +73,11 @@ class TaskDispatchService(
             "完成 goal，不要直接推 main。中途用 report_progress 报进度（同时续租 2 小时），" +
                 "也可以用 heartbeat 只续租不报进度；完成后用 submit_result 交付：" +
                 "summary 写做了什么、怎么验证的，并给出 branch、commit 或 pr_url 其中至少一个作为证据。"
+
+        // 基线 _REF_RE / _SHA_RE / _URL_RE（证据格式门）。
+        private val REF_RE = Regex("^[A-Za-z0-9._/-]{1,200}$")
+        private val SHA_RE = Regex("^[0-9a-f]{7,64}$")
+        private val URL_RE = Regex("^https?://\\S{1,2000}$")
 
         fun isTaskTool(tool: String): Boolean = tool in ALL_TOOLS
 
@@ -95,6 +114,9 @@ class TaskDispatchService(
                 "report_progress" -> reportProgress(args, callerId, callerName)
                 "heartbeat" -> heartbeat(args, callerId)
                 "report_status" -> reportStatus(args, callerId)
+                "submit_result" -> submitResult(args, callerId, callerName)
+                "attach_delivery_diff" -> attachDelivery(args, callerId, callerName)
+                "get_delivery_diff" -> getDeliveryDiff(args, callerId)
                 "start_task" -> startTask(args, callerId)
                 "get_task" -> getTask(args)
                 "list_tasks" -> listTasks(args)
@@ -690,6 +712,388 @@ class TaskDispatchService(
             putNullable(this, "quota_text", record.quotaText)
             putNullable(this, "quota_reset_at", record.quotaResetAt)
             put("reported_at", record.reportedAt)
+        }
+    }
+
+    // ---- 交付链（W6，基线 submit_work / submit_verdict /
+    //      attach_delivery / get_delivery_page） ----------------------------
+
+    private fun recordAttemptRaw(
+        taskId: String?,
+        epoch: Int,
+        action: String,
+        attemptId: String?,
+        result: JSONObject,
+    ) {
+        if (attemptId == null || taskId == null) return
+        val key = "$taskId|$epoch|$action|$attemptId"
+        if (key !in store.idempotency) {
+            store.idempotency[key] = result.toString()
+        }
+    }
+
+    /** 基线 _opt_ref / _opt_url：给定时须是字符串且格式合规。 */
+    private fun optRef(args: JSONObject, key: String, field: String, regex: Regex): String? {
+        val raw = rawArg(args, key) ?: return null
+        if (raw !is String || !regex.matches(raw)) {
+            throw TaskDispatchException("$field 格式无效")
+        }
+        return raw
+    }
+
+    private fun submitResult(args: JSONObject, callerId: String, callerName: String): JSONObject {
+        val verdictRaw = rawArg(args, "verdict")
+        if (verdictRaw != null) {
+            if (verdictRaw != "approve" && verdictRaw != "changes_requested") {
+                throw TaskDispatchException("verdict 只能是 approve 或 changes_requested")
+            }
+            return submitVerdict(args, callerId, callerName, verdictRaw as String)
+        }
+        return submitWork(args, callerId, callerName)
+    }
+
+    private fun submitWork(args: JSONObject, callerId: String, callerName: String): JSONObject {
+        val summary = textArg(args, "summary", "summary", TaskDispatchSpec.MAX_SUMMARY_CHARS)!!
+        val branch = optRef(args, "branch", "branch", REF_RE)
+        val commit = optRef(args, "commit", "commit", SHA_RE)
+        val prUrl = optRef(args, "pr_url", "pr_url", URL_RE)
+        if (branch == null && commit == null && prUrl == null) {
+            throw TaskDispatchException(
+                "交付需要证据：请带上 branch、commit 或 pr_url 其中至少一个",
+                422, "evidence_required",
+            )
+        }
+        val task = ownedOpen(stringArg(args, "task_id"), callerId, setOf(TaskDispatchSpec.CLAIMED))
+        checkFencing(task, args, "submit_result")?.let { return it }
+        if (task.kind == "pack") {
+            throw TaskDispatchException(
+                "递代码任务请用 attach_delivery_diff 递 diff，不用 submit_result",
+                409, "use_attach_for_pack_tasks",
+            )
+        }
+        if (task.kind != "work") {
+            throw TaskDispatchException(
+                "审查任务请用 verdict 交结论",
+                409, "use_verdict_for_review_tasks",
+            )
+        }
+        val delivered = "交付" +
+            (if (branch != null) "：分支 $branch" else "") +
+            (if (commit != null) " 提交 ${commit.take(12)}" else "")
+        event(task.taskId, callerName, "submitted", delivered + "\n" + summary)
+        // 提交即清本任务旧 delivery_pages（基线 DELETE 同步清计数）。
+        store.deliveryPages.remove(task.taskId)
+        task.summary = summary
+        task.branch = branch
+        task.commitSha = commit
+        task.prUrl = prUrl
+        task.leaseUntil = null
+        task.deliveryTotalPages = 0
+        task.deliveryPages = 0
+        task.deliveryTruncated = false
+        task.deliveryFiles = null
+        val packAgent = roster?.firstAgentWithRole("pack")
+        val note: String
+        if (packAgent != null && branch != null) {
+            task.state = TaskDispatchSpec.REVIEWING
+            touch(task)
+            openPack(task, packAgent)
+            event(task.taskId, "平台", "pack_opened", "已排递代码活，改动递到后自动开审查")
+            note = "已排递代码，改动递到后自动交给审查方。"
+        } else if (task.reviewerId != null) {
+            task.state = TaskDispatchSpec.REVIEWING
+            touch(task)
+            openReview(task, summary, branch, commit, prUrl)
+            event(task.taskId, "平台", "review_opened", "已交给 ${task.reviewerName} 审查")
+            note = "已交给审查方，结论出来后会自动通知；要返工时这个任务会重新出现在 list_my_tasks。"
+        } else {
+            task.state = TaskDispatchSpec.NEEDS_DECISION
+            task.decisionReason = "no_reviewer"
+            touch(task)
+            note = "已交付，等项目负责人查看。"
+        }
+        val result = JSONObject().apply {
+            put("ok", true)
+            put("state", task.state)
+            put("note", note)
+        }
+        recordAttempt(task, "submit_result", attemptIdArg(args), result)
+        return result
+    }
+
+    /** 基线 pack 子任务开单（submit 带 branch 且有 pack 角色 Agent 时）。 */
+    private fun openPack(work: TaskRecord, packAgent: Pair<String, String>): TaskRecord {
+        val pack = TaskRecord(
+            taskId = newId(),
+            projectId = work.projectId,
+            kind = "pack",
+            parentId = work.taskId,
+            assigneeId = packAgent.first,
+            assigneeName = packAgent.second,
+            reviewerId = null,
+            reviewerName = null,
+            title = "递代码：" + work.title.take(110),
+            goal = work.goal,
+            state = TaskDispatchSpec.QUEUED,
+            round = work.round,
+            maxRounds = work.maxRounds,
+            leaseUntil = null,
+            summary = work.summary,
+            branch = work.branch,
+            commitSha = work.commitSha,
+            prUrl = work.prUrl,
+            verdict = null,
+            feedback = null,
+            decisionReason = null,
+            claimedById = null,
+            claimedByName = null,
+            reservedForId = null,
+            reservedUntil = null,
+            createdAt = now(),
+            updatedAt = now(),
+        )
+        store.tasks[pack.taskId] = pack
+        return pack
+    }
+
+    private fun submitVerdict(
+        args: JSONObject,
+        callerId: String,
+        callerName: String,
+        verdict: String,
+    ): JSONObject {
+        val summary = textArg(args, "summary", "summary", TaskDispatchSpec.MAX_SUMMARY_CHARS)!!
+        val task = ownedOpen(stringArg(args, "task_id"), callerId, setOf(TaskDispatchSpec.CLAIMED))
+        checkFencing(task, args, "submit_result")?.let { return it }
+        if (task.kind != "review") {
+            throw TaskDispatchException(
+                "开发任务请用 submit_result 交 summary + branch/commit，不要用 verdict",
+                409, "use_submit_for_work_tasks",
+            )
+        }
+        task.state = TaskDispatchSpec.DONE
+        task.verdict = verdict
+        task.feedback = summary
+        clearClaim(task)
+        touch(task)
+        event(task.taskId, callerName, "verdict", "审查结论：$verdict\n$summary")
+        val work = task.parentId?.let { store.tasks[it] }
+        var note = "结论已记录，团队流程会据此继续。"
+        if (work != null) {
+            when {
+                work.state != TaskDispatchSpec.REVIEWING -> {
+                    event(work.taskId, callerName, "verdict_ignored", "任务已不在审查中，结论未生效")
+                }
+                verdict == "approve" -> {
+                    work.state = TaskDispatchSpec.APPROVED
+                    work.verdict = verdict
+                    work.feedback = summary
+                    work.decisionReason = null
+                    work.claimedById = null
+                    work.claimedByName = null
+                    work.reservedForId = null
+                    work.reservedUntil = null
+                    touch(work)
+                    event(work.taskId, callerName, "approved", "审查通过\n$summary")
+                }
+                work.round < work.maxRounds -> {
+                    val reserved = work.claimedById
+                    val implementer = work.claimedByName ?: work.assigneeName
+                    work.state = TaskDispatchSpec.QUEUED
+                    work.verdict = verdict
+                    work.feedback = summary
+                    work.round += 1
+                    work.claimedById = null
+                    work.claimedByName = null
+                    work.reservedForId = reserved
+                    work.reservedUntil = if (reserved != null) now() + leaseSeconds else null
+                    touch(work)
+                    event(
+                        work.taskId, callerName, "changes_requested",
+                        "审查要求修改，自动打回给 $implementer（第 ${work.round} 轮）\n$summary",
+                    )
+                    note = "结论已转给实现方，任务已打回返工。"
+                }
+                else -> {
+                    work.state = TaskDispatchSpec.NEEDS_DECISION
+                    work.verdict = verdict
+                    work.feedback = summary
+                    work.decisionReason = "rounds_exceeded"
+                    work.claimedById = null
+                    work.claimedByName = null
+                    work.reservedForId = null
+                    work.reservedUntil = null
+                    touch(work)
+                    event(work.taskId, callerName, "rounds_exceeded", "返工轮数已用完，转为需要项目负责人决定")
+                    note = "返工轮数已用完，转为需要项目负责人决定。"
+                }
+            }
+        }
+        val result = JSONObject().apply {
+            put("ok", true)
+            put("state", TaskDispatchSpec.DONE)
+            put("note", note)
+        }
+        recordAttempt(task, "submit_result", attemptIdArg(args), result)
+        return result
+    }
+
+    /** 严格整数参数（基线 isinstance int 且非 bool 的口径）。 */
+    private fun intStrict(args: JSONObject, key: String): Int? =
+        when (val value = rawArg(args, key)) {
+            is Int -> value
+            is Long -> value.toInt()
+            else -> null
+        }
+
+    private fun attachDelivery(args: JSONObject, callerId: String, callerName: String): JSONObject {
+        val page = intStrict(args, "page")
+        val totalPages = intStrict(args, "total_pages")
+        if (page == null || totalPages == null ||
+            !(1 <= page && page <= totalPages && totalPages <= TaskDispatchSpec.MAX_DELIVERY_PAGES)
+        ) {
+            throw TaskDispatchException("page/total_pages 无效（1 <= page <= total_pages <= 200）")
+        }
+        val textRaw = rawArg(args, "text")
+        if (textRaw !is String || textRaw.length > TaskDispatchSpec.MAX_PAGE_CHARS) {
+            throw TaskDispatchException("一页 diff 不能超过 65536 个字符")
+        }
+        val truncatedRaw = rawArg(args, "truncated")
+        val truncated = truncatedRaw != null && truncatedRaw != false
+        val argTaskId = stringArg(args, "task_id")
+        var row = argTaskId?.let { store.tasks[it] }
+            ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        if (row.kind == "work") {
+            // 填 work id 时自动定位其最新 pack 子任务（基线口径）。
+            row = store.tasks.values
+                .filter { it.parentId == row.taskId && it.kind == "pack" }
+                .sortedBy { it.createdAt }
+                .lastOrNull()
+                ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        }
+        if (row.kind != "pack") {
+            throw TaskDispatchException(
+                "只有递代码任务能递 diff",
+                409, "use_attach_for_pack_tasks",
+            )
+        }
+        val roles = roster?.agentRoles(callerId)
+        if (roles == null || "pack" !in roles) {
+            throw TaskDispatchException(
+                "只有带递代码角色的 Agent 能递 diff",
+                409, "pack_role_required",
+            )
+        }
+        if (row.state != TaskDispatchSpec.CLAIMED ||
+            (row.assigneeId != callerId && row.claimedById != callerId)
+        ) {
+            throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        }
+        checkFencing(row, args, "attach_delivery_diff")?.let { return it }
+        val workId = row.parentId!!
+        val work = store.tasks[workId]
+            ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        val pages = store.deliveryPages.getOrPut(workId) { mutableMapOf() }
+        for (old in pages.values) {
+            if (old.totalPages != totalPages) {
+                throw TaskDispatchException("total_pages 与前面几页不一致")
+            }
+        }
+        // 基线按字符数计总量（len(text)），不是字节数。
+        val storedChars = pages.values.filter { it.page != page }.sumOf { it.text.length } +
+            textRaw.length
+        if (storedChars > TaskDispatchSpec.MAX_DELIVERY_BYTES) {
+            throw TaskDispatchException("整份 diff 不能超过 2 MB")
+        }
+        pages[page] = DeliveryPageRecord(page, totalPages, textRaw)
+        val received = pages.size
+        val files = parseDiffFiles(
+            pages.values.sortedBy { it.page }.joinToString("") { it.text },
+        )
+        work.deliveryTotalPages = totalPages
+        work.deliveryPages = received
+        if (truncated) work.deliveryTruncated = true
+        work.deliveryFiles = JSONArray(files).toString()
+        touch(work)
+        if (received < totalPages) {
+            event(workId, callerName, "pack_progress", "递代码 $received/$totalPages 页")
+            val result = JSONObject().apply {
+                put("ok", true)
+                put("work_id", workId)
+                put("pack_task_id", row.taskId)
+                put("pages_received", received)
+                put("total_pages", totalPages)
+                put("complete", false)
+            }
+            recordAttemptRaw(argTaskId, row.epoch, "attach_delivery_diff", attemptIdArg(args), result)
+            return result
+        }
+        row.state = TaskDispatchSpec.DONE
+        clearClaim(row)
+        touch(row)
+        if (work.reviewerId != null) {
+            openReview(work, work.summary, work.branch, work.commitSha, work.prUrl)
+            event(
+                workId, "平台", "review_opened",
+                "递代码完成（$totalPages 页），已交给 ${work.reviewerName} 审查",
+            )
+        } else {
+            work.state = TaskDispatchSpec.NEEDS_DECISION
+            work.decisionReason = "no_reviewer"
+            touch(work)
+            event(workId, "平台", "pack_done", "递代码完成（$totalPages 页），等你查看")
+        }
+        val result = JSONObject().apply {
+            put("ok", true)
+            put("work_id", workId)
+            put("pack_task_id", row.taskId)
+            put("pages_received", received)
+            put("total_pages", totalPages)
+            put("complete", true)
+        }
+        recordAttemptRaw(argTaskId, row.epoch, "attach_delivery_diff", attemptIdArg(args), result)
+        return result
+    }
+
+    private fun getDeliveryDiff(args: JSONObject, callerId: String): JSONObject {
+        val page = intStrict(args, "page")
+        if (page == null || page < 1) {
+            throw TaskDispatchException("page 无效")
+        }
+        val row = stringArg(args, "task_id")?.let { store.tasks[it] }
+            ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        if (row.kind == "review" && row.parentId == null) {
+            throw TaskDispatchException(
+                "独立审查任务没有递代码",
+                409, "no_delivery_diff",
+            )
+        }
+        val workId = if (row.kind == "review") row.parentId!! else row.taskId
+        val work = store.tasks[workId]
+        if (work == null || work.kind != "work") {
+            throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        }
+        val review = store.tasks.values
+            .filter { it.parentId == workId && it.kind == "review" }
+            .sortedBy { it.createdAt }
+            .lastOrNull()
+        val allowed = review != null &&
+            (review.assigneeId == callerId || review.claimedById == callerId)
+        if (!allowed) {
+            throw TaskDispatchException("任务不存在", 404, "task_not_found")
+        }
+        val pages = store.deliveryPages[workId] ?: emptyMap()
+        val found = pages[page]
+            ?: throw TaskDispatchException("这一页 diff 还没到", 404, "delivery_page_missing")
+        return JSONObject().apply {
+            put("ok", true)
+            put("work_id", workId)
+            put("page", page)
+            put("total_pages", found.totalPages)
+            put("pages_received", pages.size)
+            put("truncated", work.deliveryTruncated)
+            put("changed_files", JSONArray(parseFilesJson(work.deliveryFiles)))
+            put("text", found.text)
         }
     }
 

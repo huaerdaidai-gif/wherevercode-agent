@@ -29,9 +29,21 @@ class TaskDispatchFixtureTest {
             "a02-claim-flow",
             "a03-fencing",
             "a04-progress-heartbeat-release",
+            "a05-submit-evidence-gate",
+            "a06-submit-review-approve",
+            "a07-rework-rounds",
+            "a08-decide-cancel",
             "a09-lease-expiry",
+            "a10-pack-flow",
+            "a11-pack-timeout-skip",
+            "a12-submit-state-guards",
             "a13-report-status",
+            "a14-release-review",
+            "a15-reservation-expiry",
             "b06-role-exposure",
+            "c01-adversarial-delivery",
+            "c02-adversarial-basics",
+            "c03-adversarial-pages",
         )
 
         /** 录制时的显示名（recorder 口径）：directory 与 callerName 都用它。 */
@@ -95,16 +107,31 @@ class TaskDispatchFixtureTest {
         val seedAgents = seed.getJSONArray("agents")
         val scopes = mutableMapOf<String, String>()
         val names = mutableMapOf<String, String>()
+        val rolesById = mutableMapOf<String, List<String>>()
+        val seedOrder = mutableListOf<String>()
         for (i in 0 until seedAgents.length()) {
             val agent = seedAgents.getJSONObject(i)
             val id = agent.getString("id")
             names[id] = DISPLAY_NAMES[id] ?: id
+            seedOrder += id
             val scopeList = agent.getJSONArray("scopes")
             var scope = TaskDispatchService.SCOPE_AGENT
             for (j in 0 until scopeList.length()) {
                 if (scopeList.getString(j) == "owner") scope = TaskDispatchService.SCOPE_OWNER
             }
             scopes[id] = scope
+            val roleList = agent.optJSONArray("roles")
+            val roles = mutableListOf<String>()
+            if (roleList != null) {
+                for (j in 0 until roleList.length()) roles += roleList.getString(j)
+            }
+            rolesById[id] = roles
+        }
+        val roster = object : TaskAgentRoster {
+            override fun agentRoles(agentId: String): List<String>? = rolesById[agentId]
+            override fun firstAgentWithRole(role: String): Pair<String, String>? =
+                seedOrder.firstOrNull { rolesById[it]?.contains(role) == true }
+                    ?.let { it to (names[it] ?: it) }
         }
         var now = BASE_TS
         val recMap = recorderIdMap(fixture)
@@ -115,6 +142,7 @@ class TaskDispatchFixtureTest {
             bridge = null,
             clock = { now },
             leaseSeconds = seed.optDouble("lease_seconds", TaskDispatchSpec.LEASE_SECONDS),
+            roster = roster,
         )
         val steps = fixture.getJSONArray("steps")
         for (index in 0 until steps.length()) {
