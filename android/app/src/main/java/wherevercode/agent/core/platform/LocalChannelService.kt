@@ -46,8 +46,8 @@ class InMemoryLocalChannelPersistence : LocalChannelPersistence {
  */
 class LocalChannelService(
     private val persistence: LocalChannelPersistence,
-    private val clock: () -> Double = { System.currentTimeMillis() / 1000.0 },
     taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence(),
+    private val clock: () -> Double = { System.currentTimeMillis() / 1000.0 },
 ) {
     private data class Agent(val id: String, var name: String)
 
