@@ -64,6 +64,42 @@ class LanPlatformServerTest {
         assertEquals(404, http("GET", "/nope", null, null).first)
     }
 
+    @Test
+    fun `mcp handshake initialize ping and notifications are answered`() {
+        val member = registry.issue("Mac")
+        val initBody = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", 0)
+            put("method", "initialize")
+            put("params", JSONObject().apply {
+                put("protocolVersion", "2025-03-26")
+                put("capabilities", JSONObject())
+                put("clientInfo", JSONObject().put("name", "probe").put("version", "0"))
+            })
+        }.toString()
+        val (initStatus, initResp) = http("POST", "/api/open/v1/mcp", member.token, initBody)
+        assertEquals(200, initStatus)
+        val result = JSONObject(initResp).getJSONObject("result")
+        assertEquals("2025-03-26", result.getString("protocolVersion"))
+        assertEquals("lan-platform", result.getJSONObject("serverInfo").getString("name"))
+
+        val pingBody = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", 1)
+            put("method", "ping")
+        }.toString()
+        assertEquals(200, http("POST", "/api/open/v1/mcp", member.token, pingBody).first)
+
+        val notifBody = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("method", "notifications/initialized")
+        }.toString()
+        assertEquals(202, http("POST", "/api/open/v1/mcp", member.token, notifBody).first)
+
+        // 握手也要鉴权：无令牌的 initialize 一样 401。
+        assertEquals(401, http("POST", "/api/open/v1/mcp", null, initBody).first)
+    }
+
     // ---- W12 角色化暴露 ------------------------------------------------------
 
     private fun toolsListBody(): String = JSONObject().apply {
