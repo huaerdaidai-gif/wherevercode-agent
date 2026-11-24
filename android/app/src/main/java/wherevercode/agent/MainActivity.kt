@@ -1183,6 +1183,9 @@ class MainActivity : AppCompatActivity() {
         if (lanPrefs.getBoolean("service_enabled", false)) {
             LocalPlatform.startLanServer()
         }
+        // 跨设备层（三期）：有平台凭证就武装席位上行（云端派单落本地、
+        // 本地事件回流云端镜像）；没配凭证就不连，不假装在线。
+        LocalPlatform.armSeatUplink(applicationContext)
         setContentView(R.layout.activity_main)
         // 70 屏旗舰导航深链（双端组装第一轮）：FlagshipActivity 经 extra 指定
         // 要打开的既有入口；等首帧后再分发，保证各屏控制器已绑定完成。
@@ -9272,6 +9275,7 @@ class MainActivity : AppCompatActivity() {
                                 val typedToken = platformTokenField.text.toString()
                                 if (typedToken.isNotBlank()) {
                                     platformCredentialStore.savePlatformToken(typedToken)
+                                    LocalPlatform.armSeatUplink(applicationContext)
                                 }
                                 val typedSecret = webhookSecretField.text.toString()
                                 if (typedSecret.isNotBlank()) {
@@ -10611,6 +10615,7 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             platformCredentialStore.savePlatformToken(token)
+            LocalPlatform.armSeatUplink(applicationContext)
         } catch (e: Exception) {
             toast("保存平台凭证失败：${(e.message ?: e.javaClass.simpleName).take(120)}")
             return

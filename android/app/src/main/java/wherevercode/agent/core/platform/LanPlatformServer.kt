@@ -163,7 +163,29 @@ class LanPlatformServer(
             return jsonError(400, "bad json")
         }
         val id: Any = if (request.has("id")) request.get("id") else JSONObject.NULL
-        if (request.optString("method", "") == "tools/list") {
+        val method = request.optString("method", "")
+        if (method == "initialize") {
+            // MCP 握手（streamable HTTP）：标准客户端（Codex 等）先
+            // initialize 才肯发 tools/*，226–229 版只答 tools/* 会被
+            // 判定会话终止。无状态应答：回客户端请求的协议版本，
+            // 不建会话、不发会话头，后续请求照常逐个鉴权。
+            val version = request.optJSONObject("params")
+                ?.optString("protocolVersion", "")
+                ?.takeIf { it.isNotBlank() } ?: "2025-03-26"
+            val result = JSONObject()
+                .put("protocolVersion", version)
+                .put("capabilities", JSONObject().put("tools", JSONObject()))
+                .put("serverInfo", JSONObject().put("name", "lan-platform").put("version", "1"))
+            return rpcEnvelope(id, result)
+        }
+        if (method.startsWith("notifications/")) {
+            // 通知无应答语义：202 空体（本服务器逐连接关闭）。
+            return HttpResponse(202, "", mapOf("Content-Type" to "application/json"))
+        }
+        if (method == "ping") {
+            return rpcEnvelope(id, JSONObject())
+        }
+        if (method == "tools/list") {
             // W12 角色化暴露：任务工具按令牌作用域过滤（干活侧
             // 只见 9 个、机主见 16 个），频道工具全量（与 iOS 同口径）。
             val scope = if (entry.scope == "owner") {
@@ -178,8 +200,8 @@ class LanPlatformServer(
             }
             return rpcEnvelope(id, JSONObject().put("tools", tools))
         }
-        if (request.optString("method", "") != "tools/call") {
-            return rpcEnvelope(id, errorResult("内网平台只支持 tools/call"))
+        if (method != "tools/call") {
+            return rpcEnvelope(id, errorResult("内网平台不支持该方法"))
         }
         val params = request.optJSONObject("params") ?: JSONObject()
         val name = params.optString("name", "")

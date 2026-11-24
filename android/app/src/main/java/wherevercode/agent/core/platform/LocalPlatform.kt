@@ -3,6 +3,14 @@ package wherevercode.agent.core.platform
 import android.content.Context
 import java.io.File
 import java.net.URI
+import java.util.UUID
+import wherevercode.agent.BuildConfig
+import wherevercode.agent.core.agent.PlatformAgent
+import wherevercode.agent.core.agent.PlatformAgentCredentialStore
+import wherevercode.agent.core.agent.PlatformConnectionStore
+import wherevercode.agent.core.agent.SharedPreferencesAgentStore
+import wherevercode.agent.core.platform.uplink.UplinkConfig
+import wherevercode.agent.core.platform.uplink.UplinkRuntime
 
 /**
  * 本地平台运行时（频道三层一期·本地层）：App 内嵌平台服务的唯一
@@ -140,6 +148,113 @@ object LocalPlatform {
     @Synchronized
     fun stopLanServer() {
         lanServer?.stop()
+    }
+
+    // ---- 跨设备层（频道三层三期） --------------------------------------
+    // 宿主侧：App 以自己的平台凭证建 WS 席位连到云端平台——云端派单
+    // 落本地账本、本地事件回流云端镜像。没配平台凭证就不连，不假装
+    // 在线；凭证只在武装时现取现用，不缓存明文、不进日志。
+
+    /** App 席位在云端平台上的 agent_id（与 iOS SeatUplinkConfig 默认同口径）。 */
+    const val APP_SEAT_AGENT_ID: String = "local-app"
+
+    private const val SEAT_INSTANCE_ID_KEY: String = "seat_app_instance_id"
+
+    @Volatile
+    private var uplinkRuntime: UplinkRuntime? = null
+
+    @Volatile
+    private var uplinkKey: String? = null
+
+    /** 席位上行是否已武装（有在跑的上行客户端）。 */
+    fun seatUplinkArmed(): Boolean = uplinkRuntime != null
+
+    /**
+     * 按当前平台连接配置武装/解除席位上行：平台凭证在就连（地址按
+     * 平台连接口径解析：已存地址 → 首个平台 Agent 记录 → 构建默认），
+     * 没凭证或地址无效就停。MainActivity 启动与凭证变更后调用。
+     */
+    fun armSeatUplink(context: Context) {
+        try {
+            armSeatUplinkOrThrow(context)
+        } catch (_: Exception) {
+            // 席位是尽力而为：凭证存储/连接配置的任何异常都不许拖垮
+            // App 启动（ Robolectric 等无 Keystore 环境同理）。
+            stopSeatUplink()
+        }
+    }
+
+    private fun armSeatUplinkOrThrow(context: Context) {
+        val appContext = context.applicationContext
+        val token = PlatformAgentCredentialStore.create(appContext)
+            .loadPlatformToken()?.trim().orEmpty()
+        if (token.isEmpty()) {
+            stopSeatUplink()
+            return
+        }
+        val firstPlatformAgentHost = try {
+            SharedPreferencesAgentStore(appContext).listAgents()
+                .firstOrNull { PlatformAgent.isPlatformAgentRecord(it) }?.platformHost
+        } catch (_: Exception) {
+            null
+        }
+        val host = try {
+            PlatformConnectionStore(appContext).platformHost(
+                firstPlatformAgentHost = firstPlatformAgentHost,
+                buildDefaultHost = PlatformAgent.DEFAULT_PLATFORM_HOST,
+            )
+        } catch (_: Exception) {
+            firstPlatformAgentHost?.trim()?.takeIf { it.isNotEmpty() }
+                ?: PlatformAgent.DEFAULT_PLATFORM_HOST
+        }
+        val url = PlatformAgent.seatEndpoint(host)
+        if (url.isEmpty()) {
+            stopSeatUplink()
+            return
+        }
+        startSeatUplink(url, token, seatAppInstanceId(appContext))
+    }
+
+    /** 启动席位上行（同一地址+凭证不重复拨号；换了就停旧连新）。未 install 直接返回。 */
+    @Synchronized
+    fun startSeatUplink(url: String, token: String, appInstanceId: String) {
+        val svc = service ?: return
+        val key = url + "\n" + token
+        if (uplinkKey == key && uplinkRuntime != null) return
+        uplinkRuntime?.stop()
+        val runtime = UplinkRuntime(
+            svc,
+            UplinkConfig(
+                url = url,
+                token = token,
+                appInstanceId = appInstanceId,
+                agentId = APP_SEAT_AGENT_ID,
+                appVersion = BuildConfig.VERSION_NAME,
+            ),
+        )
+        uplinkRuntime = runtime
+        uplinkKey = key
+        runtime.start()
+    }
+
+    /** 停止席位上行（幂等）。 */
+    @Synchronized
+    fun stopSeatUplink() {
+        uplinkRuntime?.stop()
+        uplinkRuntime = null
+        uplinkKey = null
+    }
+
+    /** 持久的 App 实例 id（席位登记用；首次生成后存平台连接偏好，不随重启变）。 */
+    private fun seatAppInstanceId(context: Context): String {
+        val prefs = context.getSharedPreferences(
+            PlatformConnectionStore.PREFERENCES_NAME, Context.MODE_PRIVATE,
+        )
+        prefs.getString(SEAT_INSTANCE_ID_KEY, null)?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        val created = UUID.randomUUID().toString()
+        prefs.edit().putString(SEAT_INSTANCE_ID_KEY, created).apply()
+        return created
     }
 }
 

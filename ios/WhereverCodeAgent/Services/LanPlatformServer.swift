@@ -186,6 +186,27 @@ public final class LanPlatformServer {
         }
         let id: Any = request["id"] ?? NSNull()
         let method = (request["method"] as? String) ?? ""
+        if method == "initialize" {
+            // MCP 握手（streamable HTTP）：标准客户端（Codex 等）先
+            // initialize 才肯发 tools/*，只答 tools/* 会被判定会话
+            // 终止。无状态应答：回客户端请求的协议版本，不建会话、
+            // 不发会话头，后续请求照常逐个鉴权（与安卓同口径）。
+            let params = (request["params"] as? [String: Any]) ?? [:]
+            let version = (params["protocolVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "2025-03-26"
+            let result: [String: Any] = [
+                "protocolVersion": version,
+                "capabilities": ["tools": [String: Any]()],
+                "serverInfo": ["name": "lan-platform", "version": "1"],
+            ]
+            return Self.rpcEnvelope(id: id, result: result)
+        }
+        if method.hasPrefix("notifications/") {
+            // 通知无应答语义：202 空体（本服务器逐连接关闭）。
+            return HttpResponse(status: 202, body: "", contentType: "application/json")
+        }
+        if method == "ping" {
+            return Self.rpcEnvelope(id: id, result: [String: Any]())
+        }
         if method == "tools/list" {
             // 设置页连接检查走 tools/list（与进程内本地答复同形状）：
             // result.tools[].name。226 首版漏了它，连接状态误报
@@ -200,7 +221,7 @@ public final class LanPlatformServer {
             return Self.rpcEnvelope(id: id, result: ["tools": tools])
         }
         if method != "tools/call" {
-            return Self.rpcEnvelope(id: id, result: Self.errorResult("内网平台只支持 tools/call"))
+            return Self.rpcEnvelope(id: id, result: Self.errorResult("内网平台不支持该方法"))
         }
         let params = (request["params"] as? [String: Any]) ?? [:]
         let name = (params["name"] as? String) ?? ""
