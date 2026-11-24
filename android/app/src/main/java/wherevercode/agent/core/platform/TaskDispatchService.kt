@@ -49,6 +49,7 @@ class TaskDispatchService(
     private val clock: () -> Double,
     private val leaseSeconds: Double = TaskDispatchSpec.LEASE_SECONDS,
     private val roster: TaskAgentRoster? = null,
+    private val channelOwnerChecker: ((String, String) -> Boolean)? = null,
 ) {
     companion object {
         /** 干活侧 9 个（spec §6 的顺序即 tools/list 顺序）。 */
@@ -171,21 +172,24 @@ class TaskDispatchService(
 
     /**
      * UI 软删除（spec §2.17）：不是 MCP 工具，只供任务页调用。
-     * 仅终态 work 任务；仅建单人或频道 owner（[isChannelOwner] 由
-     * LCS 按频道成员角色算好传入）。重复删除幂等成功（不 +version、
-     * 不写事件，同 withdraw 口径）。list 排除、get_task 留墓碑。
+     * 仅终态 work 任务；仅建单人或频道 owner（频道 owner 由
+     * [channelOwnerChecker] 按 LCS 成员角色判定，未接时只认建单人）。
+     * 重复删除幂等成功（不 +version、不写事件，同 withdraw 口径）。
+     * list 排除、get_task 留墓碑。
      */
     @Synchronized
     fun uiDeleteTask(
         args: JSONObject,
         callerId: String,
         callerName: String = callerId,
-        isChannelOwner: Boolean = false,
     ): JSONObject {
         rollbackPoint = store.snapshotText()
         try {
             val task = stringArg(args, "task_id")?.let { store.tasks[it] }
                 ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+            val isChannelOwner = task.channelId?.let { channelId ->
+                channelOwnerChecker?.invoke(channelId, callerId) == true
+            } ?: false
             if (callerId != task.createdBy && !isChannelOwner) {
                 throw TaskDispatchException(
                     "只有建单人或频道 owner 可以删除",
@@ -613,6 +617,7 @@ class TaskDispatchService(
         putNullable(view, "verdict", task.verdict)
         putNullable(view, "feedback", task.feedback)
         putNullable(view, "decision_reason", task.decisionReason)
+        putNullable(view, "channel_id", task.channelId)
         view.put("version", task.version)
         view.put("epoch", task.epoch)
         view.put("created_at", task.createdAt)

@@ -71,6 +71,7 @@ public final class TaskDispatchService {
     private let clock: () -> Double
     private let leaseSeconds: Double
     private let roster: TaskAgentRoster?
+    private let channelOwnerChecker: ((String, String) -> Bool)?
     private let lock = NSRecursiveLock()
 
     /// 失败回滚点：dispatch 入口先置为当前快照，租约清扫落盘后前移。
@@ -79,13 +80,15 @@ public final class TaskDispatchService {
     public init(store: TaskDispatchStore, directory: TaskAgentDirectory?,
                 bridge: TaskChannelBridge?, clock: @escaping () -> Double,
                 leaseSeconds: Double = TaskDispatchSpec.leaseSeconds,
-                roster: TaskAgentRoster? = nil) {
+                roster: TaskAgentRoster? = nil,
+                channelOwnerChecker: ((String, String) -> Bool)? = nil) {
         self.store = store
         self.directory = directory
         self.bridge = bridge
         self.clock = clock
         self.leaseSeconds = leaseSeconds
         self.roster = roster
+        self.channelOwnerChecker = channelOwnerChecker
         self.rollbackPoint = store.snapshotText()
     }
 
@@ -159,18 +162,21 @@ public final class TaskDispatchService {
     }
 
     /// UI 软删除（spec §2.17）：不是 MCP 工具，只供任务页调用。
-    /// 仅终态 work 任务；仅建单人或频道 owner（isChannelOwner 由
-    /// LCS 按频道成员角色算好传入）。重复删除幂等成功（不 +version、
-    /// 不写事件，同 withdraw 口径）。list 排除、get_task 留墓碑。
+    /// 仅终态 work 任务；仅建单人或频道 owner（频道 owner 由
+    /// channelOwnerChecker 按 LCS 成员角色判定，未接时只认建单人）。
+    /// 重复删除幂等成功（不 +version、不写事件，同 withdraw 口径）。
+    /// list 排除、get_task 留墓碑。
     public func uiDeleteTask(args: [String: Any], callerId: String,
-                             callerName: String? = nil,
-                             isChannelOwner: Bool = false) throws -> [String: Any] {
+                             callerName: String? = nil) throws -> [String: Any] {
         lock.lock(); defer { lock.unlock() }
         rollbackPoint = store.snapshotText()
         do {
             guard let task = stringArg(args, "task_id").flatMap({ store.tasks[$0] }) else {
                 throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
             }
+            let isChannelOwner = task.channelId.map {
+                channelOwnerChecker?($0, callerId) == true
+            } ?? false
             if callerId != task.createdBy && !isChannelOwner {
                 throw TaskDispatchError(
                     "只有建单人或频道 owner 可以删除",
@@ -595,6 +601,7 @@ public final class TaskDispatchService {
         view["verdict"] = opt(task.verdict)
         view["feedback"] = opt(task.feedback)
         view["decision_reason"] = opt(task.decisionReason)
+        view["channel_id"] = opt(task.channelId)
         view["version"] = task.version
         view["epoch"] = task.epoch
         view["created_at"] = task.createdAt

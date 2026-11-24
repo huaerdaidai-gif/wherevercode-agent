@@ -200,6 +200,7 @@
 			41158D5AB6FD801A75FC1903,
 			5D93AC07A45BF27D2FEF38A9,
 			828B51501A8E088E7BC25411,
+			DA0000000000000000000E12,
 			DD5FF8DD89D9D8B920AF7867,
 			FABAA829E2C95B619B4A5E94,
 			DA0000000000000000000022,
@@ -276,6 +277,7 @@
 		7667F7CA498D0ED82757FFC2 = {isa = PBXBuildFile; fileRef = AF29026DEB46CEBD6478E0B0; };
 		7F749415C58C7FDDBBA14398 = {isa = PBXBuildFile; fileRef = 47FFE0ECCF7C83A806454DF9; };
 		828B51501A8E088E7BC25411 = {isa = PBXBuildFile; fileRef = 918CC59A2183C5FAA462994B; };
+		DA0000000000000000000E12 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E11; };
 		844C8F533FE271C19FE543DF = {isa = PBXBuildFile; fileRef = 00600EE2EA71EC2F6623B155; };
 		F17729830897440A9E54F001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelCollaborationTests.swift; sourceTree = "<group>"; };
 		892AEB362C95AAE0B8B13531 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelParsingTests.swift; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 		90A876B7A773B795F59F07C2 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskService.swift; sourceTree = "<group>"; };
 		91067B38E1192DA78C1A0C00 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhereverCodeAgentApp.swift; sourceTree = "<group>"; };
 		918CC59A2183C5FAA462994B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E11 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchViews.swift; sourceTree = "<group>"; };
 		92543349B33279DD5291FA11 = {isa = XCBuildConfiguration; buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 			}; name = Debug; };
@@ -371,6 +374,7 @@
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			DC0D1A100000000000000001,
 			918CC59A2183C5FAA462994B,
+			DA0000000000000000000E11,
 			0EC43C27AE6A9F51433ABA31,
 			F61BE8AE8EDB3888F3137986,
 			DA000000000000000000006F,

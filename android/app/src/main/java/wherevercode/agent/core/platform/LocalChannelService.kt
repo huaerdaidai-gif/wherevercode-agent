@@ -243,7 +243,19 @@ class LocalChannelService(
         directory = TaskAgentDirectory { id -> agents[id]?.name },
         bridge = taskBridge,
         clock = clock,
+        channelOwnerChecker = { channelId, agentId ->
+            members[channelId]?.firstOrNull { it.agentId == agentId }?.role == "owner"
+        },
     )
+
+    /** UI 软删除任务（spec §2.17）：任务页专用入口，不进 MCP 工具表。 */
+    @Synchronized
+    fun uiDeleteTask(taskId: String): JSONObject =
+        taskDispatch.uiDeleteTask(
+            JSONObject().put("task_id", taskId),
+            LocalPlatform.APP_AGENT_ID,
+            LocalPlatform.APP_AGENT_NAME,
+        )
 
     // ---- 工具分发（与平台 MCP 工具同名同参同结果形状） ---------------------
 

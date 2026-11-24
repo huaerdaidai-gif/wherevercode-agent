@@ -149,8 +149,21 @@ public final class LocalChannelService {
         store: TaskDispatchStore(persistence: taskPersistence, clock: clock),
         directory: { [weak self] id in self?.agents[id]?.name },
         bridge: taskBridge,
-        clock: clock
+        clock: clock,
+        channelOwnerChecker: { [weak self] channelId, agentId in
+            self?.members[channelId]?.first(where: { $0.agentId == agentId })?.role == "owner"
+        }
     )
+
+    /// UI 软删除任务（spec §2.17）：任务页专用入口，不进 MCP 工具表。
+    /// 持 LCS 锁进入（channelOwnerChecker 在服务内回调读 members）。
+    public func uiDeleteTask(taskId: String) throws -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        return try taskDispatch.uiDeleteTask(
+            args: ["task_id": taskId],
+            callerId: LocalPlatform.appAgentID,
+            callerName: LocalPlatform.appAgentName)
+    }
 
     /// spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
     /// 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
