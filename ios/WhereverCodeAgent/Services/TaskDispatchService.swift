@@ -209,6 +209,103 @@ public final class TaskDispatchService {
 
     // ---- 基础件 ----------------------------------------------------------
 
+    public var ledgerEventSeq: Int64 {
+        lock.lock(); defer { lock.unlock() }
+        return store.eventSeq
+    }
+
+    /// seq 大于给定值的账本事件（调用方再按上行种类过滤）。
+    public func events(afterSeq seq: Int64) -> [TaskEventRecord] {
+        lock.lock(); defer { lock.unlock() }
+        return store.events.filter { $0.seq > seq }
+    }
+
+    /// 云端 task_dispatch 落本地：沿用云端 task_id，状态强制 queued，
+    /// 执行身份是本机 App。重复 task_id 不覆盖已有任务（幂等）。
+    /// 云端 channel_id 不拿来当本地频道主键。
+    public func ingestCloudDispatch(
+        task payload: [String: Any],
+        channelId: String,
+        localAssigneeId: String,
+        localAssigneeName: String
+    ) throws -> CloudDispatchReceipt {
+        lock.lock(); defer { lock.unlock() }
+        guard let rawId = payload["task_id"] as? String else {
+            throw TaskDispatchError("task_id 不能为空", status: 400, code: "task_id_required")
+        }
+        let taskId = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if taskId.isEmpty {
+            throw TaskDispatchError("task_id 不能为空", status: 400, code: "task_id_required")
+        }
+        if store.tasks[taskId] != nil {
+            return CloudDispatchReceipt(taskId: taskId, created: false)
+        }
+        let seqBefore = store.eventSeq
+        var goal = (payload["goal"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var truncated = false
+        if goal.count > TaskDispatchSpec.maxGoalChars {
+            goal = String(goal.prefix(TaskDispatchSpec.maxGoalChars))
+            truncated = true
+        }
+        if goal.isEmpty { goal = "（云端派单）" }
+        let titleSource = (payload["title"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
+        if let titleSource, !titleSource.isEmpty {
+            title = String(titleSource.prefix(TaskDispatchSpec.maxTitleChars))
+        } else {
+            let line = (goal.components(separatedBy: "\n").first ?? goal)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            title = String((line.isEmpty ? "云端派单" : line).prefix(TaskDispatchSpec.maxTitleChars))
+        }
+        let projectRaw = (payload["project_id"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let projectId = projectRaw.isEmpty ? "cloud" : String(projectRaw.prefix(120))
+        let maxRounds = max(1, intValue(payload["max_rounds"]) ?? TaskDispatchSpec.defaultMaxRounds)
+        let round = max(1, intValue(payload["round"]) ?? 1)
+        let createdAt = now()
+        let task = TaskRecord(
+            taskId: taskId,
+            projectId: projectId,
+            kind: "work",
+            parentId: nil,
+            assigneeId: localAssigneeId,
+            assigneeName: localAssigneeName,
+            reviewerId: nil,
+            reviewerName: nil,
+            title: title,
+            goal: goal,
+            state: TaskDispatchSpec.queued,
+            round: round,
+            maxRounds: maxRounds,
+            leaseUntil: nil,
+            summary: nil,
+            branch: nil,
+            commitSha: nil,
+            prUrl: nil,
+            verdict: nil,
+            feedback: nil,
+            decisionReason: nil,
+            claimedById: nil,
+            claimedByName: nil,
+            reservedForId: nil,
+            reservedUntil: nil,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let channel = channelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.channelId = channel.isEmpty ? nil : channel
+        task.createdBy = "cloud"
+        store.putTask(task)
+        var note = "任务已派给 \(localAssigneeName)"
+        if truncated { note += "（goal 已截断）" }
+        event(taskId: task.taskId, who: "cloud", kind: "created", text: note)
+        store.persist()
+        writeBackEvents(afterSeq: seqBefore)
+        return CloudDispatchReceipt(taskId: taskId, created: true)
+    }
+
     private func now() -> Double { clock() }
 
     private func newId() -> String {

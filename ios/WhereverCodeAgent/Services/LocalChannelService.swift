@@ -147,6 +147,10 @@ public final class LocalChannelService {
 
     private var listeners: [String: [LocalChannelListenerToken]] = [:]
 
+    /// 席位上行（弱引用，避免和客户端互相持有）。任务工具返回后把
+    /// 新的状态迁移交给它；离线时由对端自己缓存。
+    public weak var taskUplink: LocalTaskUplink?
+
     /// 任务派工服务（contracts/task-dispatch/spec.md）：dispatch 的
     /// 一行钩子按工具名路由进来；bridge 在 W8 接线（事件写回频道）。
     private let taskBridge = WeakTaskBridge()
@@ -266,6 +270,42 @@ public final class LocalChannelService {
         return agents[agentId] != nil
     }
 
+    /// 上报给席位登记的本地频道 id（未归档，创建顺序）。
+    public func localChannelIds() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return channelOrder.filter { channels[$0]?.archived == false }
+    }
+
+    /// 云端派单落本地账本：同一个 task_id、状态 queued、绑默认本地频道。
+    public func ingestCloudDispatch(task: [String: Any]) throws -> CloudDispatchReceipt {
+        lock.lock(); defer { lock.unlock() }
+        do {
+            return try taskDispatch.ingestCloudDispatch(
+                task: task,
+                channelId: storedDefaultChannelId,
+                localAssigneeId: LocalPlatform.appAgentID,
+                localAssigneeName: LocalPlatform.appAgentName)
+        } catch let error as TaskDispatchError {
+            throw LocalServiceError(error.message)
+        }
+    }
+
+    /// 账本里尚未过滤的上行候选（客户端按队列里的确认状态再去重）。
+    public func ledgerUplinkEvents() -> [LedgerUplinkEvent] {
+        lock.lock(); defer { lock.unlock() }
+        return uplinkEvents(afterSeq: 0)
+    }
+
+    private func uplinkEvents(afterSeq seq: Int64) -> [LedgerUplinkEvent] {
+        taskDispatch.events(afterSeq: seq)
+            .filter { SeatUplinkSpec.eventKinds.contains($0.kind) }
+            .map {
+                LedgerUplinkEvent(
+                    seq: $0.seq, taskId: $0.taskId, kind: $0.kind,
+                    actor: $0.who ?? "", at: $0.at, text: $0.text)
+            }
+    }
+
     /// 本地默认频道 id（首次启动种子建好，之后稳定不变）。
     public func defaultChannelId() -> String {
         lock.lock(); defer { lock.unlock() }
@@ -337,15 +377,27 @@ public final class LocalChannelService {
     /// 执行一个平台频道工具，返回工具结果字典（即 MCP content 文本
     /// 的解析对象）。失败抛 LocalServiceError，文案与服务端同口径。
     public func dispatch(tool: String, args: [String: Any], callerId: String, callerName: String) throws -> [String: Any] {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        var uplinkBatch: [LedgerUplinkEvent] = []
+        defer {
+            lock.unlock()
+            if !uplinkBatch.isEmpty {
+                taskUplink?.recordLedgerEvents(uplinkBatch)
+            }
+        }
         if TaskDispatchService.isTaskTool(tool) {
+            let before = taskDispatch.ledgerEventSeq
             do {
                 // 作用域：本机 App 身份 = owner，其余调用方 = agent；
                 // 内网 owner 令牌的作用域识别在 W12 接注册表后补。
                 let scope = callerId == LocalPlatform.appAgentID
                     ? TaskDispatchService.scopeOwner : TaskDispatchService.scopeAgent
-                return try taskDispatch.dispatch(tool: tool, args: args, callerId: callerId, callerName: callerName, callerScope: scope)
+                let result = try taskDispatch.dispatch(tool: tool, args: args, callerId: callerId, callerName: callerName, callerScope: scope)
+                uplinkBatch = uplinkEvents(afterSeq: before)
+                return result
             } catch let error as TaskDispatchError {
+                // 租约清扫先落盘，工具失败也不会把 lease_expired 滚掉。
+                uplinkBatch = uplinkEvents(afterSeq: before)
                 throw LocalServiceError(error.message)
             }
         }

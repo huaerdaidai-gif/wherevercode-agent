@@ -55,6 +55,8 @@ public enum LocalPlatform {
     private static var service: LocalChannelService?
     private static var lanRegistry: LanTokenRegistry?
     private static var lanServer: LanPlatformServer?
+    private static var seatClient: SeatUplinkClient?
+    private static var seatClientKey: String?
 
     /// 内网服务开关的持久化键（与安卓 lanPrefs 同口径：开过就记住，
     /// App 重启自动恢复监听；iOS 宿主仅前台，后台系统暂停即不可达）。
@@ -167,6 +169,61 @@ public enum LocalPlatform {
         lock.lock(); defer { lock.unlock() }
         lanServer?.stop()
         lanServer = nil
+    }
+
+    /// 启动席位上行。同一地址+令牌不重复拨号；换地址则停掉旧连接。
+    /// 没装本地服务时直接返回。令牌只进握手头，不进任何帧。
+    public static func startSeatUplink(url: URL, bearerToken: String,
+                                       appVersion: String, appInstanceId: String) {
+        guard let service = serviceOrNull() else { return }
+        let token = bearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = url.absoluteString + "\n" + token
+        lock.lock()
+        let existing = seatClient
+        let same = seatClientKey == key && existing != nil
+        lock.unlock()
+        if same, let existing {
+            service.taskUplink = existing
+            return
+        }
+        existing?.stop()
+        let outbox = FileUplinkQueuePersistence(fileURL: seatOutboxURL())
+        let queue = UplinkReplayQueue(persistence: outbox)
+        let client = SeatUplinkClient(
+            config: SeatUplinkConfig(
+                url: url,
+                bearerToken: token,
+                appInstanceId: appInstanceId,
+                appVersion: appVersion,
+                channelIds: { [weak service] in service?.localChannelIds() ?? [] }),
+            socket: URLSessionSeatSocket(),
+            queue: queue)
+        client.onTaskDispatch = { [weak service] task in
+            guard let service else { return nil }
+            return (try? service.ingestCloudDispatch(task: task))?.taskId
+        }
+        service.taskUplink = client
+        client.recordLedgerEvents(service.ledgerUplinkEvents())
+        lock.lock()
+        seatClient = client
+        seatClientKey = key
+        lock.unlock()
+        client.start()
+    }
+
+    public static func stopSeatUplink() {
+        lock.lock()
+        let client = seatClient
+        seatClient = nil
+        seatClientKey = nil
+        lock.unlock()
+        client?.stop()
+        serviceOrNull()?.taskUplink = nil
+    }
+
+    private static func seatOutboxURL() -> URL {
+        storageFileURL().deletingLastPathComponent()
+            .appendingPathComponent("seat_uplink_outbox.json")
     }
 
     // ---- 本地优先路由（McpClient 的进程内处理器） --------------------------
