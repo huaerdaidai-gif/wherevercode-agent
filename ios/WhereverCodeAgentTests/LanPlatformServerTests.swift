@@ -91,6 +91,31 @@ final class LanPlatformServerTests: XCTestCase {
 
     /// W12 角色化暴露：成员令牌的 tools/list 只有干活侧任务工具，
     /// 机主令牌全量；成员调派单工具被拒、机主可派单。
+    /// MCP 握手：标准客户端（Codex 等）先 initialize 才肯发 tools/*；
+    /// 只答 tools/* 会被判定会话终止（229 真机派活测试实测）。
+    /// 无状态应答回客户端请求的协议版本；通知 202 空体；握手也要鉴权。
+    func testMcpHandshakeInitializePingNotifications() async throws {
+        let entry = registry.issue(agentName: "Mac")
+        let initBody = "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"probe\",\"version\":\"0\"}}}"
+        let (status, body) = try await http("POST", "/api/open/v1/mcp", token: entry.token, body: initBody)
+        XCTAssertEqual(status, 200)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        let result = try XCTUnwrap(root["result"] as? [String: Any])
+        XCTAssertEqual(result["protocolVersion"] as? String, "2025-03-26")
+        XCTAssertEqual((result["serverInfo"] as? [String: Any])?["name"] as? String, "lan-platform")
+
+        let (pingStatus, _) = try await http("POST", "/api/open/v1/mcp", token: entry.token,
+                                             body: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}")
+        XCTAssertEqual(pingStatus, 200)
+
+        let (notifStatus, _) = try await http("POST", "/api/open/v1/mcp", token: entry.token,
+                                              body: "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
+        XCTAssertEqual(notifStatus, 202)
+
+        let (anonStatus, _) = try await http("POST", "/api/open/v1/mcp", body: initBody)
+        XCTAssertEqual(anonStatus, 401)
+    }
+
     func testToolsListFiltersTaskToolsByTokenScope() async throws {
         let member = registry.issue(agentName: "Mac")
         let memberList = try await http(
