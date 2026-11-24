@@ -17,7 +17,7 @@
 // 落地进度：W4/W5 = 租约清扫 + start/get/list/decide + 干活侧
 // 读与领活链（list_my/claim/release/progress/heartbeat/
 // report_status）；W6 = 交付链（submit/attach/get_delivery_diff）；
-// update/withdraw/reopen 在 W9。未落地的如实抛「尚未启用」。
+// W9 = update/withdraw/reopen。16 工具已全量落地。
 
 import Foundation
 
@@ -118,6 +118,9 @@ public final class TaskDispatchService {
             case "get_task": result = try getTask(args: args)
             case "list_tasks": result = try listTasks(args: args)
             case "decide_task": result = try decideTask(args: args)
+            case "update_task": result = try updateTask(args: args, callerName: callerName)
+            case "withdraw_task": result = try withdrawTask(args: args, callerName: callerName)
+            case "reopen_task": result = try reopenTask(args: args, callerName: callerName)
             default: throw TaskDispatchError("任务派工尚未启用")
             }
             store.persist()
@@ -556,6 +559,7 @@ public final class TaskDispatchService {
         view["feedback"] = opt(task.feedback)
         view["decision_reason"] = opt(task.decisionReason)
         view["version"] = task.version
+        view["epoch"] = task.epoch
         view["created_at"] = task.createdAt
         view["updated_at"] = task.updatedAt
         if let deletedAt = task.deletedAt {
@@ -1279,5 +1283,183 @@ public final class TaskDispatchService {
         event(taskId: task.taskId, who: "项目负责人", kind: "decided",
               text: "已\(verb)：\(reason)")
         return ["ok": true, "task": ownerView(task), "state": task.state]
+    }
+
+    // ---- 派单侧新工具（W9，spec §2.14–2.16） ------------------------------
+
+    private func ownerTask(args: [String: Any]) throws -> TaskRecord {
+        guard let task = stringArg(args, "task_id").flatMap({ store.tasks[$0] }) else {
+            throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+        }
+        return task
+    }
+
+    private func stateGuard(_ task: TaskRecord, allowed: Set<String>) throws {
+        if !allowed.contains(task.state) {
+            throw TaskDispatchError(
+                "任务当前状态是\(label(task.state))，做不了这一步",
+                status: 409, code: "task_state_\(task.state)")
+        }
+    }
+
+    private func updateTask(args: [String: Any], callerName: String) throws -> [String: Any] {
+        let task = try ownerTask(args: args)
+        if task.kind != "work" {
+            throw TaskDispatchError("只有工作任务可以更新")
+        }
+        guard let expectedRaw = rawArg(args, "expected_version") else {
+            throw TaskDispatchError("expected_version 必填")
+        }
+        guard let expected = intValue(expectedRaw) else {
+            throw TaskDispatchError("expected_version 必须是整数")
+        }
+        if expected != task.version {
+            throw TaskDispatchError(
+                "版本已变（当前 v\(task.version)，你给的是 v\(expected)）：请重新读取任务后再试",
+                status: 409, code: "stale_version")
+        }
+        try stateGuard(task, allowed: [TaskDispatchSpec.queued, TaskDispatchSpec.claimed])
+        if let channelRaw = rawArg(args, "channel_id"), (channelRaw as? String) != task.channelId {
+            throw TaskDispatchError("channel_id 不可修改")
+        }
+        // 先全量校验再落地（任一字段不合法整单不动）。
+        var newTitle: String? = nil
+        if rawArg(args, "title") != nil {
+            guard let rawTitle = rawArg(args, "title") as? String,
+                  !rawTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw TaskDispatchError("title 不能为空")
+            }
+            newTitle = String(rawTitle.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        }
+        var newGoal: String? = nil
+        if rawArg(args, "goal") != nil {
+            newGoal = try textArg(args, "goal", field: "goal",
+                                  maxLen: TaskDispatchSpec.maxGoalChars)
+        }
+        var reviewerTouched = false
+        var newReviewerId: String? = nil
+        var newReviewerName: String? = nil
+        if args["reviewer"] != nil {
+            reviewerTouched = true
+            if let reviewerRaw = rawArg(args, "reviewer") {
+                guard let reviewerId = reviewerRaw as? String else {
+                    throw TaskDispatchError("reviewer 格式无效")
+                }
+                guard let name = directory?(reviewerId) else {
+                    throw TaskDispatchError("reviewer \(reviewerId) 不存在")
+                }
+                newReviewerId = reviewerId
+                newReviewerName = name
+            }
+        }
+        var reassignTo: (id: String, name: String)? = nil
+        if let agentRaw = rawArg(args, "agent") {
+            guard let agentId = agentRaw as? String else {
+                throw TaskDispatchError("agent 格式无效")
+            }
+            guard let name = directory?(agentId) else {
+                throw TaskDispatchError("agent \(agentId) 不存在")
+            }
+            if agentId != task.assigneeId {
+                reassignTo = (id: agentId, name: name)
+            }
+        }
+        if let newTitle { task.title = newTitle }
+        if let newGoal { task.goal = newGoal }
+        if reviewerTouched {
+            task.reviewerId = newReviewerId
+            task.reviewerName = newReviewerName
+        }
+        if let reassignTo {
+            task.assigneeId = reassignTo.id
+            task.assigneeName = reassignTo.name
+            task.state = TaskDispatchSpec.queued
+            clearClaim(task)
+            task.reservedForId = reassignTo.id
+            task.reservedUntil = now() + leaseSeconds
+            touch(task)
+            event(taskId: task.taskId, who: callerName, kind: "reassigned",
+                  text: "改派给 \(reassignTo.name)，原执行人已释放")
+        } else {
+            touch(task)
+            event(taskId: task.taskId, who: callerName, kind: "updated",
+                  text: "任务内容已更新")
+        }
+        return ["ok": true, "task": ownerView(task)]
+    }
+
+    private func withdrawTask(args: [String: Any], callerName: String) throws -> [String: Any] {
+        let task = try ownerTask(args: args)
+        if task.kind != "work" {
+            throw TaskDispatchError("只有工作任务可以撤回")
+        }
+        if task.state == TaskDispatchSpec.cancelled {
+            // 幂等重放：已取消直接成功，不 +version、不写事件（spec §1）。
+            return ["ok": true, "state": TaskDispatchSpec.cancelled, "task": ownerView(task)]
+        }
+        try stateGuard(task, allowed: [
+            TaskDispatchSpec.queued, TaskDispatchSpec.claimed, TaskDispatchSpec.reviewing,
+        ])
+        let reason = try textArg(args, "reason", field: "reason",
+                                 maxLen: TaskDispatchSpec.maxProgressChars,
+                                 required: false)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = "任务已撤回" + ((reason?.isEmpty == false) ? "：\(reason!)" : "")
+        // 打开着的子任务同步取消（各 +1、各记 withdrawn）。
+        for child in store.orderedTasks where child.parentId == task.taskId {
+            if child.state == TaskDispatchSpec.done ||
+                child.state == TaskDispatchSpec.cancelled ||
+                child.state == TaskDispatchSpec.approved {
+                continue
+            }
+            child.state = TaskDispatchSpec.cancelled
+            clearClaim(child)
+            child.reservedForId = nil
+            child.reservedUntil = nil
+            touch(child)
+            event(taskId: child.taskId, who: callerName, kind: "withdrawn", text: text)
+        }
+        task.state = TaskDispatchSpec.cancelled
+        clearClaim(task)
+        task.reservedForId = nil
+        task.reservedUntil = nil
+        touch(task)
+        event(taskId: task.taskId, who: callerName, kind: "withdrawn", text: text)
+        return ["ok": true, "state": TaskDispatchSpec.cancelled, "task": ownerView(task)]
+    }
+
+    private func reopenTask(args: [String: Any], callerName: String) throws -> [String: Any] {
+        let task = try ownerTask(args: args)
+        if task.kind != "work" {
+            throw TaskDispatchError("只有工作任务可以重开")
+        }
+        try stateGuard(task, allowed: [
+            TaskDispatchSpec.approved, TaskDispatchSpec.done, TaskDispatchSpec.cancelled,
+        ])
+        var snapshot = "上一轮：状态 \(label(task.state))、第 \(task.round) 轮"
+        if let verdict = task.verdict { snapshot += "、结论 \(verdict)" }
+        if let summary = task.summary { snapshot += "、交付摘要：\(String(summary.prefix(100)))" }
+        task.state = TaskDispatchSpec.queued
+        task.round = 1
+        task.epoch += 1
+        task.verdict = nil
+        task.feedback = nil
+        task.summary = nil
+        task.branch = nil
+        task.commitSha = nil
+        task.prUrl = nil
+        task.decisionReason = nil
+        clearClaim(task)
+        task.reservedForId = nil
+        task.reservedUntil = nil
+        task.deliveryTotalPages = 0
+        task.deliveryPages = 0
+        task.deliveryTruncated = false
+        task.deliveryFiles = nil
+        store.deliveryPages.removeValue(forKey: task.taskId)
+        touch(task)
+        event(taskId: task.taskId, who: callerName, kind: "reopened",
+              text: "任务已重开（\(snapshot)）")
+        return ["ok": true, "task": ownerView(task)]
     }
 }

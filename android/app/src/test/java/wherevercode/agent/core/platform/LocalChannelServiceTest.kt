@@ -437,6 +437,7 @@ class LocalChannelServiceTest {
         val started = call(service, "start_task", JSONObject().apply {
             put("agent", "dev1")
             put("goal", "写回测试任务")
+            put("project_id", "proj")
             put("channel_id", channelId)
         })
         val taskId = started.getJSONObject("task").getString("task_id")
@@ -472,6 +473,7 @@ class LocalChannelServiceTest {
         call(service, "start_task", JSONObject().apply {
             put("agent", "dev1")
             put("goal", "不绑频道的任务")
+            put("project_id", "proj")
         })
         val messages = messagesOf(call(service, "agent_channel_messages", JSONObject().apply {
             put("channel_id", channelId)

@@ -406,6 +406,7 @@ final class LocalChannelServiceTests: XCTestCase {
         let started = try call(service, "start_task", [
             "agent": "dev1",
             "goal": "写回测试任务",
+            "project_id": "proj",
             "channel_id": channelId,
         ])
         let task = started["task"] as? [String: Any] ?? [:]
@@ -436,6 +437,7 @@ final class LocalChannelServiceTests: XCTestCase {
         _ = try call(service, "start_task", [
             "agent": "dev1",
             "goal": "不绑频道的任务",
+            "project_id": "proj",
         ])
         let messages = messagesOf(try call(service, "agent_channel_messages", [
             "channel_id": channelId,

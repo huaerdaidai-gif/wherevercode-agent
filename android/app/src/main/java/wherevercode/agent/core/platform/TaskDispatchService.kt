@@ -40,7 +40,7 @@ interface TaskAgentRoster {
  * 落地进度：W4/W5 = 租约清扫 + start/get/list/decide + 干活侧
  * 读与领活链（list_my/claim/release/progress/heartbeat/
  * report_status）；W6 = 交付链（submit/attach/get_delivery_diff）；
- * update/withdraw/reopen 在 W9。未落地的如实抛「尚未启用」。
+ * W9 = update/withdraw/reopen。16 工具已全量落地。
  */
 class TaskDispatchService(
     val store: TaskDispatchStore,
@@ -130,6 +130,9 @@ class TaskDispatchService(
                 "get_task" -> getTask(args)
                 "list_tasks" -> listTasks(args)
                 "decide_task" -> decideTask(args)
+                "update_task" -> updateTask(args, callerName)
+                "withdraw_task" -> withdrawTask(args, callerName)
+                "reopen_task" -> reopenTask(args, callerName)
                 else -> throw TaskDispatchException("任务派工尚未启用")
             }
             store.persist()
@@ -565,6 +568,7 @@ class TaskDispatchService(
         putNullable(view, "feedback", task.feedback)
         putNullable(view, "decision_reason", task.decisionReason)
         view.put("version", task.version)
+        view.put("epoch", task.epoch)
         view.put("created_at", task.createdAt)
         view.put("updated_at", task.updatedAt)
         if (task.deletedAt != null) {
@@ -1285,6 +1289,203 @@ class TaskDispatchService(
             put("ok", true)
             put("task", ownerView(task))
             put("state", task.state)
+        }
+    }
+
+    // ---- 派单侧新工具（W9，spec §2.14–2.16） ------------------------------
+
+    private fun ownerTask(args: JSONObject): TaskRecord =
+        stringArg(args, "task_id")?.let { store.tasks[it] }
+            ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+
+    private fun stateGuard(task: TaskRecord, allowed: Set<String>) {
+        if (task.state !in allowed) {
+            throw TaskDispatchException(
+                "任务当前状态是${label(task.state)}，做不了这一步",
+                409, "task_state_${task.state}",
+            )
+        }
+    }
+
+    private fun updateTask(args: JSONObject, callerName: String): JSONObject {
+        val task = ownerTask(args)
+        if (task.kind != "work") {
+            throw TaskDispatchException("只有工作任务可以更新")
+        }
+        val expectedRaw = rawArg(args, "expected_version")
+            ?: throw TaskDispatchException("expected_version 必填")
+        val expected = when (expectedRaw) {
+            is Int -> expectedRaw
+            is Long -> expectedRaw.toInt()
+            else -> throw TaskDispatchException("expected_version 必须是整数")
+        }
+        if (expected != task.version) {
+            throw TaskDispatchException(
+                "版本已变（当前 v${task.version}，你给的是 v$expected）：请重新读取任务后再试",
+                409, "stale_version",
+            )
+        }
+        stateGuard(task, setOf(TaskDispatchSpec.QUEUED, TaskDispatchSpec.CLAIMED))
+        val channelRaw = rawArg(args, "channel_id")
+        if (channelRaw != null && channelRaw != task.channelId) {
+            throw TaskDispatchException("channel_id 不可修改")
+        }
+        // 先全量校验再落地（任一字段不合法整单不动）。
+        val newTitle = if (rawArg(args, "title") != null) {
+            val rawTitle = rawArg(args, "title")
+            if (rawTitle !is String || rawTitle.isBlank()) {
+                throw TaskDispatchException("title 不能为空")
+            }
+            rawTitle.trim().take(100)
+        } else {
+            null
+        }
+        val newGoal = if (rawArg(args, "goal") != null) {
+            textArg(args, "goal", "goal", TaskDispatchSpec.MAX_GOAL_CHARS)
+        } else {
+            null
+        }
+        var reviewerTouched = false
+        var newReviewerId: String? = null
+        var newReviewerName: String? = null
+        if (args.has("reviewer")) {
+            reviewerTouched = true
+            val reviewerRaw = rawArg(args, "reviewer")
+            if (reviewerRaw != null) {
+                if (reviewerRaw !is String) throw TaskDispatchException("reviewer 格式无效")
+                newReviewerName = directory.agentName(reviewerRaw)
+                    ?: throw TaskDispatchException("reviewer $reviewerRaw 不存在")
+                newReviewerId = reviewerRaw
+            }
+        }
+        var reassignTo: Pair<String, String>? = null
+        val agentRaw = rawArg(args, "agent")
+        if (agentRaw != null) {
+            if (agentRaw !is String) throw TaskDispatchException("agent 格式无效")
+            val name = directory.agentName(agentRaw)
+                ?: throw TaskDispatchException("agent $agentRaw 不存在")
+            if (agentRaw != task.assigneeId) reassignTo = agentRaw to name
+        }
+        if (newTitle != null) task.title = newTitle
+        if (newGoal != null) task.goal = newGoal
+        if (reviewerTouched) {
+            task.reviewerId = newReviewerId
+            task.reviewerName = newReviewerName
+        }
+        if (reassignTo != null) {
+            task.assigneeId = reassignTo.first
+            task.assigneeName = reassignTo.second
+            task.state = TaskDispatchSpec.QUEUED
+            clearClaim(task)
+            task.reservedForId = reassignTo.first
+            task.reservedUntil = now() + leaseSeconds
+            touch(task)
+            event(
+                task.taskId, callerName, "reassigned",
+                "改派给 ${reassignTo.second}，原执行人已释放",
+            )
+        } else {
+            touch(task)
+            event(task.taskId, callerName, "updated", "任务内容已更新")
+        }
+        return JSONObject().apply {
+            put("ok", true)
+            put("task", ownerView(task))
+        }
+    }
+
+    private fun withdrawTask(args: JSONObject, callerName: String): JSONObject {
+        val task = ownerTask(args)
+        if (task.kind != "work") {
+            throw TaskDispatchException("只有工作任务可以撤回")
+        }
+        if (task.state == TaskDispatchSpec.CANCELLED) {
+            // 幂等重放：已取消直接成功，不 +version、不写事件（spec §1）。
+            return JSONObject().apply {
+                put("ok", true)
+                put("state", TaskDispatchSpec.CANCELLED)
+                put("task", ownerView(task))
+            }
+        }
+        stateGuard(
+            task,
+            setOf(
+                TaskDispatchSpec.QUEUED, TaskDispatchSpec.CLAIMED,
+                TaskDispatchSpec.REVIEWING,
+            ),
+        )
+        val reason = textArg(
+            args, "reason", "reason", TaskDispatchSpec.MAX_PROGRESS_CHARS,
+            required = false,
+        )?.trim()
+        val text = "任务已撤回" + (if (!reason.isNullOrBlank()) "：$reason" else "")
+        // 打开着的子任务同步取消（各 +1、各记 withdrawn）。
+        for (child in store.tasks.values) {
+            if (child.parentId != task.taskId) continue
+            if (child.state == TaskDispatchSpec.DONE ||
+                child.state == TaskDispatchSpec.CANCELLED ||
+                child.state == TaskDispatchSpec.APPROVED
+            ) {
+                continue
+            }
+            child.state = TaskDispatchSpec.CANCELLED
+            clearClaim(child)
+            child.reservedForId = null
+            child.reservedUntil = null
+            touch(child)
+            event(child.taskId, callerName, "withdrawn", text)
+        }
+        task.state = TaskDispatchSpec.CANCELLED
+        clearClaim(task)
+        task.reservedForId = null
+        task.reservedUntil = null
+        touch(task)
+        event(task.taskId, callerName, "withdrawn", text)
+        return JSONObject().apply {
+            put("ok", true)
+            put("state", TaskDispatchSpec.CANCELLED)
+            put("task", ownerView(task))
+        }
+    }
+
+    private fun reopenTask(args: JSONObject, callerName: String): JSONObject {
+        val task = ownerTask(args)
+        if (task.kind != "work") {
+            throw TaskDispatchException("只有工作任务可以重开")
+        }
+        stateGuard(
+            task,
+            setOf(
+                TaskDispatchSpec.APPROVED, TaskDispatchSpec.DONE,
+                TaskDispatchSpec.CANCELLED,
+            ),
+        )
+        val snapshot = "上一轮：状态 ${label(task.state)}、第 ${task.round} 轮" +
+            (task.verdict?.let { "、结论 $it" } ?: "") +
+            (task.summary?.let { "、交付摘要：${it.take(100)}" } ?: "")
+        task.state = TaskDispatchSpec.QUEUED
+        task.round = 1
+        task.epoch += 1
+        task.verdict = null
+        task.feedback = null
+        task.summary = null
+        task.branch = null
+        task.commitSha = null
+        task.prUrl = null
+        task.decisionReason = null
+        clearClaim(task)
+        task.reservedForId = null
+        task.reservedUntil = null
+        task.deliveryTotalPages = 0
+        task.deliveryPages = 0
+        task.deliveryTruncated = false
+        task.deliveryFiles = null
+        store.deliveryPages.remove(task.taskId)
+        touch(task)
+        event(task.taskId, callerName, "reopened", "任务已重开（$snapshot）")
+        return JSONObject().apply {
+            put("ok", true)
+            put("task", ownerView(task))
         }
     }
 }
