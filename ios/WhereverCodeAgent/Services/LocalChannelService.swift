@@ -144,12 +144,47 @@ public final class LocalChannelService {
 
     /// 任务派工服务（contracts/task-dispatch/spec.md）：dispatch 的
     /// 一行钩子按工具名路由进来；bridge 在 W8 接线（事件写回频道）。
+    private let taskBridge = WeakTaskBridge()
     private lazy var taskDispatch: TaskDispatchService = TaskDispatchService(
         store: TaskDispatchStore(persistence: taskPersistence, clock: clock),
         directory: { [weak self] id in self?.agents[id]?.name },
-        bridge: nil,
+        bridge: taskBridge,
         clock: clock
     )
+
+    /// spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
+    /// 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
+    /// 频道不存在/已归档时静默跳过——写回失败不回滚任务操作。
+    /// 与 postMessage 同语义：发帖自动入群（App 作为成员出现）。
+    func postTaskEventMessage(channelId: String, taskId: String, text: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard let channel = channels[channelId], !channel.archived else { return }
+        if members[channel.id] == nil { members[channel.id] = [] }
+        if !(members[channel.id]?.contains(where: { $0.agentId == LocalPlatform.appAgentID }) ?? false) {
+            members[channel.id]?.append(
+                Member(agentId: LocalPlatform.appAgentID,
+                       agentName: LocalPlatform.appAgentName,
+                       role: "member", joinedAt: clock()))
+        }
+        seqCounter += 1
+        let message = Message(
+            id: newId(),
+            channelId: channel.id,
+            agentId: LocalPlatform.appAgentID,
+            agentName: LocalPlatform.appAgentName,
+            text: text + "\n[task:" + taskId + "]",
+            replyTo: nil,
+            createdAt: clock(),
+            seq: seqCounter,
+            mentionsAll: false,
+            attachmentRef: nil,
+            forwardOf: nil
+        )
+        messages[channel.id, default: []].append(message)
+        persist()
+        fireMessage(channelId: channel.id,
+                    messageJson: messageJson(message, viewerId: LocalPlatform.appAgentID))
+    }
 
     public init(persistence: LocalChannelPersistence, clock: @escaping () -> Double = { Date().timeIntervalSince1970 }, taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence()) {
         self.persistence = persistence
@@ -157,6 +192,7 @@ public final class LocalChannelService {
         self.clock = clock
         restore()
         ensureSeed()
+        taskBridge.target = self
     }
 
     // ---- 身份与种子 -------------------------------------------------------

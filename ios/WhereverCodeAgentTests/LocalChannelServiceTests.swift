@@ -398,4 +398,48 @@ final class LocalChannelServiceTests: XCTestCase {
         await fulfillment(of: [delivered], timeout: 10)
         feed.stop()
     }
+
+    func testTaskEventsWriteBackToBoundChannel() throws {
+        let service = newService()
+        service.registerAgent(agentId: "dev1", agentName: "DevA")
+        let channelId = service.defaultChannelId()
+        let started = try call(service, "start_task", [
+            "agent": "dev1",
+            "goal": "写回测试任务",
+            "channel_id": channelId,
+        ])
+        let task = started["task"] as? [String: Any] ?? [:]
+        let taskId = str(task, "task_id")
+        XCTAssertFalse(taskId.isEmpty)
+        _ = try call(service, "claim_task", ["task_id": taskId],
+                     callerId: "dev1", callerName: "DevA")
+        let messages = messagesOf(try call(service, "agent_channel_messages", [
+            "channel_id": channelId,
+        ]))
+        let texts = messages.map { str($0, "text") }
+        XCTAssertTrue(
+            texts.contains { $0.contains("任务已派给 DevA") && $0.contains("[task:\(taskId)]") },
+            "created 事件应写回绑定的频道")
+        XCTAssertTrue(
+            texts.contains { $0.contains("DevA 接手了") && $0.contains("[task:\(taskId)]") },
+            "claimed 事件应写回绑定的频道")
+        XCTAssertTrue(
+            messages.filter { str($0, "text").contains("[task:\(taskId)]") }
+                .allSatisfy { str($0, "agent_id") == LocalPlatform.appAgentID },
+            "写回消息应以本机 App 身份发出")
+    }
+
+    func testTaskWithoutChannelWritesNothingBack() throws {
+        let service = newService()
+        service.registerAgent(agentId: "dev1", agentName: "DevA")
+        let channelId = service.defaultChannelId()
+        _ = try call(service, "start_task", [
+            "agent": "dev1",
+            "goal": "不绑频道的任务",
+        ])
+        let messages = messagesOf(try call(service, "agent_channel_messages", [
+            "channel_id": channelId,
+        ]))
+        XCTAssertTrue(messages.allSatisfy { !str($0, "text").contains("[task:") })
+    }
 }

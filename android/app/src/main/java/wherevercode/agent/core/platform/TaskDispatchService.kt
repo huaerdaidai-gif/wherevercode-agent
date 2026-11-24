@@ -74,6 +74,14 @@ class TaskDispatchService(
                 "也可以用 heartbeat 只续租不报进度；完成后用 submit_result 交付：" +
                 "summary 写做了什么、怎么验证的，并给出 branch、commit 或 pr_url 其中至少一个作为证据。"
 
+        // spec §5 写回事件清单（verdict 的 changes_requested 形态
+        // 记在 work 任务上、同名 kind 一并写回）。
+        private val WRITEBACK_KINDS = setOf(
+            "created", "claimed", "submitted", "verdict", "approved",
+            "changes_requested", "decided", "withdrawn", "reopened",
+            "reassigned", "lease_expired", "rounds_exceeded",
+        )
+
         // 基线 _REF_RE / _SHA_RE / _URL_RE（证据格式门）。
         private val REF_RE = Regex("^[A-Za-z0-9._/-]{1,200}$")
         private val SHA_RE = Regex("^[0-9a-f]{7,64}$")
@@ -106,6 +114,7 @@ class TaskDispatchService(
             throw TaskDispatchException("task_id 格式无效")
         }
         rollbackPoint = store.snapshotText()
+        val seqBefore = store.eventSeq
         try {
             val result = when (tool) {
                 "list_my_tasks" -> listMyTasks(callerId)
@@ -124,10 +133,36 @@ class TaskDispatchService(
                 else -> throw TaskDispatchException("任务派工尚未启用")
             }
             store.persist()
+            writeBackEvents(seqBefore)
             return result
         } catch (e: TaskDispatchException) {
             store.restoreFromText(rollbackPoint)
             throw e
+        }
+    }
+
+    /**
+     * spec §5 事件写回：本次调用新落账本的事件里，命中写回清单且
+     * 任务绑了频道的，反向写成频道消息（子任务经 parent 归属父任务
+     * 的频道，引用用父任务 id）。写回失败不回滚任务操作。
+     */
+    private fun writeBackEvents(afterSeq: Long) {
+        val bridge = bridge ?: return
+        for (event in store.events) {
+            if (event.seq <= afterSeq) continue
+            if (event.kind !in WRITEBACK_KINDS) continue
+            val task = store.tasks[event.taskId] ?: continue
+            val channelId = task.channelId
+                ?: task.parentId?.let { store.tasks[it]?.channelId }
+                ?: continue
+            val rootId = if (task.channelId != null) {
+                task.taskId
+            } else {
+                task.parentId ?: task.taskId
+            }
+            runCatching {
+                bridge.postTaskEvent(channelId, rootId, event.kind, event.text)
+            }
         }
     }
 

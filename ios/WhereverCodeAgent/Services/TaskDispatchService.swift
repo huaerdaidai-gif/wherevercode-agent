@@ -101,6 +101,7 @@ public final class TaskDispatchService {
             throw TaskDispatchError("task_id 格式无效")
         }
         rollbackPoint = store.snapshotText()
+        let seqBefore = store.eventSeq
         do {
             let result: [String: Any]
             switch tool {
@@ -120,10 +121,37 @@ public final class TaskDispatchService {
             default: throw TaskDispatchError("任务派工尚未启用")
             }
             store.persist()
+            writeBackEvents(afterSeq: seqBefore)
             return result
         } catch let error as TaskDispatchError {
             store.restoreFromText(rollbackPoint)
             throw error
+        }
+    }
+
+    /// spec §5 写回事件清单（verdict 的 changes_requested 形态
+    /// 记在 work 任务上、同名 kind 一并写回）。
+    private static let writebackKinds: Set<String> = [
+        "created", "claimed", "submitted", "verdict", "approved",
+        "changes_requested", "decided", "withdrawn", "reopened",
+        "reassigned", "lease_expired", "rounds_exceeded",
+    ]
+
+    /// spec §5 事件写回：本次调用新落账本的事件里，命中写回清单且
+    /// 任务绑了频道的，反向写成频道消息（子任务经 parent 归属父任务
+    /// 的频道，引用用父任务 id）。写回失败不回滚任务操作。
+    private func writeBackEvents(afterSeq: Int64) {
+        guard let bridge else { return }
+        for event in store.events {
+            if event.seq <= afterSeq { continue }
+            if !Self.writebackKinds.contains(event.kind) { continue }
+            guard let task = store.tasks[event.taskId] else { continue }
+            let channelId = task.channelId
+                ?? task.parentId.flatMap { store.tasks[$0]?.channelId }
+            guard let channelId else { continue }
+            let rootId = task.channelId != nil ? task.taskId : (task.parentId ?? task.taskId)
+            bridge.postTaskEvent(channelId: channelId, taskId: rootId,
+                                 kind: event.kind, text: event.text)
         }
     }
 

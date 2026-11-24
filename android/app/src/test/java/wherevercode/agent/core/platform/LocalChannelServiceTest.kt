@@ -428,4 +428,54 @@ class LocalChannelServiceTest {
         thread.join(5_000)
         assertFalse(connection.isOpen)
     }
+
+    @Test
+    fun `task events write back to the bound channel`() {
+        val service = newService()
+        service.registerAgent("dev1", "DevA")
+        val channelId = service.defaultChannelId()
+        val started = call(service, "start_task", JSONObject().apply {
+            put("agent", "dev1")
+            put("goal", "写回测试任务")
+            put("channel_id", channelId)
+        })
+        val taskId = started.getJSONObject("task").getString("task_id")
+        call(
+            service, "claim_task",
+            JSONObject().put("task_id", taskId),
+            callerId = "dev1", callerName = "DevA",
+        )
+        val messages = messagesOf(call(service, "agent_channel_messages", JSONObject().apply {
+            put("channel_id", channelId)
+        }))
+        val texts = messages.map { it.getString("text") }
+        assertTrue(
+            "created 事件应写回绑定的频道",
+            texts.any { it.contains("任务已派给 DevA") && it.contains("[task:$taskId]") },
+        )
+        assertTrue(
+            "claimed 事件应写回绑定的频道",
+            texts.any { it.contains("DevA 接手了") && it.contains("[task:$taskId]") },
+        )
+        assertTrue(
+            "写回消息应以本机 App 身份发出",
+            messages.filter { it.getString("text").contains("[task:$taskId]") }
+                .all { it.getString("agent_id") == LocalPlatform.APP_AGENT_ID },
+        )
+    }
+
+    @Test
+    fun `task without a channel writes nothing back`() {
+        val service = newService()
+        service.registerAgent("dev1", "DevA")
+        val channelId = service.defaultChannelId()
+        call(service, "start_task", JSONObject().apply {
+            put("agent", "dev1")
+            put("goal", "不绑频道的任务")
+        })
+        val messages = messagesOf(call(service, "agent_channel_messages", JSONObject().apply {
+            put("channel_id", channelId)
+        }))
+        assertTrue(messages.none { it.getString("text").contains("[task:") })
+    }
 }

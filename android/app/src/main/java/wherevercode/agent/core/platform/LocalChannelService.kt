@@ -197,10 +197,51 @@ class LocalChannelService(
     // TaskDispatchService；其错误在钩子处转成本地账本同一口径的
     // LocalServiceException（门面只带文案，status/code 留在任务
     // 服务层供对拍夹具核验）。bridge 在 W8 接线（事件写回频道）。
+    private val taskBridge = object : TaskChannelBridge {
+        override fun postTaskEvent(channelId: String, taskId: String, kind: String, text: String) {
+            postTaskEventMessage(channelId, taskId, text)
+        }
+    }
+
+    /**
+     * spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
+     * 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
+     * 频道不存在/已归档时静默跳过——写回失败不回滚任务操作。
+     * 与 postMessage 同语义：发帖自动入群（App 作为成员出现）。
+     */
+    @Synchronized
+    private fun postTaskEventMessage(channelId: String, taskId: String, text: String) {
+        val channel = channels[channelId] ?: return
+        if (channel.archived) return
+        val list = members.getOrPut(channel.id) { mutableListOf() }
+        if (list.none { it.agentId == LocalPlatform.APP_AGENT_ID }) {
+            list += Member(
+                LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME,
+                "member", clock(),
+            )
+        }
+        val message = Message(
+            id = newId(),
+            channelId = channel.id,
+            agentId = LocalPlatform.APP_AGENT_ID,
+            agentName = LocalPlatform.APP_AGENT_NAME,
+            text = text + "\n[task:" + taskId + "]",
+            replyTo = null,
+            createdAt = clock(),
+            seq = ++seqCounter,
+            mentionsAll = false,
+            attachmentRef = null,
+            forwardOf = null,
+        )
+        messages.getOrPut(channel.id) { mutableListOf() } += message
+        persist()
+        fireMessage(channel.id, messageJson(message, LocalPlatform.APP_AGENT_ID))
+    }
+
     private val taskDispatch = TaskDispatchService(
         store = TaskDispatchStore(taskPersistence, clock),
         directory = TaskAgentDirectory { id -> agents[id]?.name },
-        bridge = null,
+        bridge = taskBridge,
         clock = clock,
     )
 
