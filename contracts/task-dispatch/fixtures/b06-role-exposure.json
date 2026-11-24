@@ -1,0 +1,171 @@
+{
+  "name": "b06-role-exposure",
+  "group": "B",
+  "description": "Workers see exactly the 9 worker tools; owner tools are unknown tools to them, not forbidden ones.",
+  "source": "handwritten per spec.md",
+  "seed": {
+    "agents": [
+      {
+        "id": "boss",
+        "scopes": [
+          "owner"
+        ],
+        "roles": []
+      },
+      {
+        "id": "dev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "dev2",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "rev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "review"
+        ]
+      }
+    ],
+    "lease_seconds": 7200
+  },
+  "steps": [
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "tools/list",
+        "args": {}
+      },
+      "expect": {
+        "result": {
+          "tools": [
+            "list_my_tasks",
+            "claim_task",
+            "release_task",
+            "report_progress",
+            "report_status",
+            "submit_result",
+            "attach_delivery_diff",
+            "get_delivery_diff",
+            "heartbeat"
+          ]
+        }
+      },
+      "state_after": []
+    },
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "tools/list",
+        "args": {}
+      },
+      "expect": {
+        "result": {
+          "tools": [
+            "list_my_tasks",
+            "claim_task",
+            "release_task",
+            "report_progress",
+            "report_status",
+            "submit_result",
+            "attach_delivery_diff",
+            "get_delivery_diff",
+            "heartbeat",
+            "start_task",
+            "get_task",
+            "list_tasks",
+            "decide_task",
+            "update_task",
+            "withdraw_task",
+            "reopen_task"
+          ]
+        }
+      },
+      "state_after": []
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "get_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 409,
+          "code": "v5_error",
+          "message": "未知工具"
+        }
+      },
+      "state_after": []
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "start_task",
+        "args": {
+          "agent": "dev1",
+          "project_id": "proj",
+          "goal": "实现登录页的记住我功能"
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 409,
+          "code": "v5_error",
+          "message": "未知工具"
+        }
+      },
+      "state_after": []
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "update_task",
+        "args": {
+          "task_id": "TASK_1",
+          "expected_version": 1
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 409,
+          "code": "v5_error",
+          "message": "未知工具"
+        }
+      },
+      "state_after": []
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "withdraw_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 409,
+          "code": "v5_error",
+          "message": "未知工具"
+        }
+      },
+      "state_after": []
+    }
+  ]
+}

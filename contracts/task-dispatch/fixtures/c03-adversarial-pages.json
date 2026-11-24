@@ -1,0 +1,469 @@
+{
+  "name": "c03-adversarial-pages",
+  "group": "C",
+  "description": "Adversarial: total_pages changes mid-delivery.",
+  "seed": {
+    "agents": [
+      {
+        "id": "boss",
+        "scopes": [
+          "owner"
+        ],
+        "roles": []
+      },
+      {
+        "id": "dev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "dev2",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "rev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "review"
+        ]
+      },
+      {
+        "id": "pack1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "pack"
+        ]
+      }
+    ],
+    "lease_seconds": 7200
+  },
+  "steps": [
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "start_task",
+        "args": {
+          "agent": "dev1",
+          "reviewer": "rev1",
+          "project_id": "proj",
+          "goal": "实现登录页的记住我功能"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "35e821adac2d4cd5a034217378c44591",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "queued",
+            "state_label": "等待接手",
+            "round": 1,
+            "max_rounds": 3,
+            "assignee_id": "dev1",
+            "assignee_name": "DevA",
+            "reviewer_id": "rev1",
+            "reviewer_name": "RevA",
+            "claimed_by_id": null,
+            "claimed_by_name": null,
+            "lease_until": null,
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "verdict": null,
+            "feedback": null,
+            "decision_reason": null,
+            "version": 1,
+            "created_at": "<ts>",
+            "updated_at": "<ts>"
+          },
+          "state": "queued"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "claimed",
+            "round": 1,
+            "max_rounds": 3,
+            "source": "v5_platform",
+            "task_ref": "v5:TASK_1",
+            "version": 2,
+            "attempt": 0,
+            "attempt_id": null,
+            "cancel_pending": false,
+            "assignee_name": "DevA",
+            "claimed_by_name": "DevA",
+            "lease_until": "<ts>",
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "feedback": null,
+            "verdict": null,
+            "messages": [],
+            "instructions": "完成 goal，不要直接推 main。中途用 report_progress 报进度（同时续租 2 小时），也可以用 heartbeat 只续租不报进度；完成后用 submit_result 交付：summary 写做了什么、怎么验证的，并给出 branch、commit 或 pr_url 其中至少一个作为证据。"
+          },
+          "lease_seconds": 7200
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_1",
+          "summary": "已实现",
+          "branch": "feat/login"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "reviewing",
+          "note": "已排递代码，改动递到后自动交给审查方。"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "pack_opened"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "pack",
+          "parent": "TASK_1",
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "pack1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": []
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "pack1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_2"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_2",
+            "kind": "pack",
+            "project_id": "proj",
+            "title": "递代码：实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "claimed",
+            "round": 1,
+            "max_rounds": 3,
+            "source": "v5_platform",
+            "task_ref": "v5:TASK_2",
+            "version": 2,
+            "attempt": 0,
+            "attempt_id": null,
+            "cancel_pending": false,
+            "assignee_name": "PackA",
+            "claimed_by_name": "PackA",
+            "lease_until": "<ts>",
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "summary": "已实现",
+            "branch": "feat/login",
+            "commit": null,
+            "pr_url": null,
+            "feedback": null,
+            "verdict": null,
+            "messages": [],
+            "work_id": "TASK_1",
+            "delivery": {
+              "summary": "已实现",
+              "branch": "feat/login",
+              "commit": null,
+              "pr_url": null,
+              "pages_received": 0,
+              "total_pages": 0
+            },
+            "instructions": "递代码：用 attach_delivery_diff(task_id, page, total_pages, text) 把这次交付的 diff 按页上传，task_id 就是本任务的 task_id；全部页到齐后平台自动开审查，你不用再 submit_result。"
+          },
+          "lease_seconds": 7200
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "pack_opened"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "pack",
+          "parent": "TASK_1",
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "pack1",
+          "claimed_by_id": "pack1",
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "pack1",
+        "tool": "attach_delivery_diff",
+        "args": {
+          "task_id": "TASK_2",
+          "page": 1,
+          "total_pages": 2,
+          "text": "diff --git a/Login.kt b/Login.kt\n+rememberMe()\n"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "work_id": "TASK_1",
+          "pack_task_id": "TASK_2",
+          "pages_received": 1,
+          "total_pages": 2,
+          "complete": false
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 4,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 1,
+          "delivery_total_pages": 2,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "pack_opened",
+            "pack_progress"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "pack",
+          "parent": "TASK_1",
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "pack1",
+          "claimed_by_id": "pack1",
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "pack1",
+        "tool": "attach_delivery_diff",
+        "args": {
+          "task_id": "TASK_2",
+          "page": 2,
+          "total_pages": 3,
+          "text": "diff --git a/LoginTest.kt b/LoginTest.kt\n+testRememberMe()\n"
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 409,
+          "code": "v5_error",
+          "message": "total_pages 与前面几页不一致"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 4,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 1,
+          "delivery_total_pages": 2,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "pack_opened",
+            "pack_progress"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "pack",
+          "parent": "TASK_1",
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "pack1",
+          "claimed_by_id": "pack1",
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed"
+          ]
+        }
+      ]
+    }
+  ]
+}
