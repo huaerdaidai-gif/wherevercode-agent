@@ -18,7 +18,22 @@ final class TaskDispatchFixtureTests: XCTestCase {
 
     /// 已启用的夹具（按 W 包推进逐步加满，W15 前清空跳过）。
     private static let enabled: Set<String> = [
+        "a01-create-and-list",
+        "a02-claim-flow",
+        "a03-fencing",
+        "a04-progress-heartbeat-release",
+        "a09-lease-expiry",
+        "a13-report-status",
         "b06-role-exposure",
+    ]
+
+    /// 录制时的显示名（recorder 口径）：directory 与 callerName 都用它。
+    private static let displayNames: [String: String] = [
+        "boss": "Boss",
+        "dev1": "DevA",
+        "dev2": "DevB",
+        "rev1": "RevA",
+        "pack1": "PackA",
     ]
 
     private func fixturesDir() -> URL {
@@ -87,7 +102,7 @@ final class TaskDispatchFixtureTests: XCTestCase {
         var names: [String: String] = [:]
         for agent in (seed["agents"] as? [[String: Any]]) ?? [] {
             guard let id = agent["id"] as? String else { continue }
-            names[id] = id
+            names[id] = Self.displayNames[id] ?? id
             let scopeList = (agent["scopes"] as? [Any])?.compactMap { $0 as? String } ?? []
             scopes[id] = scopeList.contains("owner")
                 ? TaskDispatchService.scopeOwner : TaskDispatchService.scopeAgent
@@ -101,15 +116,26 @@ final class TaskDispatchFixtureTests: XCTestCase {
             clock: { now },
             leaseSeconds: (seed["lease_seconds"] as? NSNumber)?.doubleValue ?? TaskDispatchSpec.leaseSeconds
         )
+        let recMap = recorderIdMap(fixture)
         let steps = (fixture["steps"] as? [[String: Any]]) ?? []
         for (index, step) in steps.enumerated() {
+            if let advance = (step["advance_clock_seconds"] as? NSNumber)?.doubleValue {
+                // 纯推进时钟步：没有调用，只核对推进后的状态快照
+                // （清扫是懒触发的，推进本身不改账本）。
+                now += advance
+                let advanceIdMap = buildIdMap(store)
+                if let mismatch = exactMismatch(normalizeNumbers(step["state_after"]),
+                                                snapshotState(store, idMap: advanceIdMap),
+                                                path: "state_after") {
+                    throw FixtureFailure(message: "step \(index + 1) (advance_clock) \(mismatch)")
+                }
+                continue
+            }
             let call = step["call"] as? [String: Any] ?? [:]
             let actor = call["actor"] as? String ?? ""
             let tool = call["tool"] as? String ?? ""
-            let args = call["args"] as? [String: Any] ?? [:]
-            if let advance = (step["advance_seconds"] as? NSNumber)?.doubleValue {
-                now += advance
-            }
+            let rawArgs = call["args"] as? [String: Any] ?? [:]
+            let args = substituteArgs(rawArgs, store: store) as? [String: Any] ?? [:]
             var result: [String: Any]?
             var thrown: TaskDispatchError?
             do {
@@ -119,7 +145,8 @@ final class TaskDispatchFixtureTests: XCTestCase {
                     result = try service.uiDeleteTask(args: args, callerId: actor)
                 } else {
                     result = try service.dispatch(tool: tool, args: args, callerId: actor,
-                                                  callerName: actor, callerScope: scopes[actor] ?? "agent")
+                                                  callerName: names[actor] ?? actor,
+                                                  callerScope: scopes[actor] ?? "agent")
                 }
             } catch let error as TaskDispatchError {
                 thrown = error
@@ -137,7 +164,7 @@ final class TaskDispatchFixtureTests: XCTestCase {
                           "\(whereabouts) error.message 不符：期望 \(expectedError["message"] ?? "?")，实际 \(thrown!.message)")
             } else {
                 try check(thrown == nil, "\(whereabouts) 应成功，实际报错 \(thrown?.code ?? "?"): \(thrown?.message ?? "")")
-                let expectedResult = normalizeNumbers(expect["result"])
+                let expectedResult = normalize(normalizeNumbers(expect["result"]), idMap: recMap)
                 let actualResult = normalize(result, idMap: idMap)
                 if let mismatch = subsetMismatch(expectedResult, actualResult, path: "result") {
                     throw FixtureFailure(message: "\(whereabouts) \(mismatch)")
@@ -184,6 +211,59 @@ final class TaskDispatchFixtureTests: XCTestCase {
         }
     }
 
+    /// 期望侧的录制 id 映射：扫全部步骤期望结果里恰好 32 位十六进制的
+    /// 字符串（任务 id 的形状；commit SHA 是 40 位或短哈希，不会误伤），
+    /// 按首次出现顺序编号 TASK_n —— 录制时任务的创建顺序即首次出现顺序。
+    private func recorderIdMap(_ fixture: [String: Any]) -> [String: String] {
+        var map: [String: String] = [:]
+        func visit(_ value: Any?) {
+            guard let value else { return }
+            if let dict = value as? [String: Any] {
+                for v in dict.values { visit(v) }
+            } else if let list = value as? [Any] {
+                for v in list { visit(v) }
+            } else if let string = value as? String {
+                let candidate = string.hasPrefix("v5:") ? String(string.dropFirst(3)) : string
+                if candidate.count == 32,
+                   candidate.allSatisfy({ "0123456789abcdef".contains($0) }),
+                   map[candidate] == nil {
+                    map[candidate] = "TASK_\(map.count + 1)"
+                }
+            }
+        }
+        for step in (fixture["steps"] as? [[String: Any]]) ?? [] {
+            if let expect = step["expect"] as? [String: Any], expect["result"] != nil {
+                visit(expect["result"])
+            }
+        }
+        return map
+    }
+
+    /// 调用参数里的 TASK_n 占位换成账本里的真 id（按创建顺序）。
+    private func substituteArgs(_ value: Any?, store: TaskDispatchStore) -> Any? {
+        guard let value else { return nil }
+        if value is NSNull { return NSNull() }
+        if let dict = value as? [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in dict { out[k] = substituteArgs(v, store: store) ?? NSNull() }
+            return out
+        }
+        if let list = value as? [Any] {
+            return list.map { substituteArgs($0, store: store) ?? NSNull() }
+        }
+        if let string = value as? String {
+            if string.hasPrefix("TASK_") {
+                let rest = String(string.dropFirst(5))
+                if !rest.isEmpty, rest.allSatisfy({ $0.isNumber }),
+                   let n = Int(rest), n >= 1, n <= store.taskOrder.count {
+                    return store.taskOrder[n - 1]
+                }
+            }
+            return string
+        }
+        return value
+    }
+
     // ---- 归一与比对 --------------------------------------------------------
 
     /// JSON 数字统一成 Double；Bool 保持 Bool（NSNumber 两者都装，要分开）。
@@ -217,7 +297,11 @@ final class TaskDispatchFixtureTests: XCTestCase {
             return list.map { normalize($0, idMap: idMap) ?? NSNull() }
         }
         if let string = value as? String {
-            return idMap[string] ?? string
+            if let mapped = idMap[string] { return mapped }
+            if string.hasPrefix("v5:"), let mapped = idMap[String(string.dropFirst(3))] {
+                return "v5:" + mapped
+            }
+            return string
         }
         if let number = value as? NSNumber {
             if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue }

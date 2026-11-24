@@ -63,8 +63,16 @@ class TaskDispatchStore(
         persistence.save(snapshotJson().toString())
     }
 
+    /** 当前内存状态的快照文本（服务层失败回滚用，与落盘格式同一份）。 */
+    fun snapshotText(): String = snapshotJson().toString()
+
     private fun restore() {
         val text = persistence.load() ?: return
+        restoreFromText(text)
+    }
+
+    /** 从快照文本整体恢复内存状态（回滚时事件序号一并回到快照点）。 */
+    fun restoreFromText(text: String) {
         val root = try {
             JSONObject(text)
         } catch (_: Exception) {

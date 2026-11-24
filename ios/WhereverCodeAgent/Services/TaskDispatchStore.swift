@@ -67,14 +67,24 @@ public final class TaskDispatchStore {
     // ---- 快照 ------------------------------------------------------------
 
     public func persist() {
+        persistence.save(snapshotText())
+    }
+
+    /// 当前内存状态的快照文本（服务层失败回滚用，与落盘格式同一份）。
+    public func snapshotText() -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: snapshotObject()),
-              let text = String(data: data, encoding: .utf8) else { return }
-        persistence.save(text)
+              let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
     }
 
     private func restore() {
-        guard let text = persistence.load(),
-              let data = text.data(using: .utf8),
+        guard let text = persistence.load() else { return }
+        restoreFromText(text)
+    }
+
+    /// 从快照文本整体恢复内存状态（回滚时事件序号一并回到快照点）。
+    public func restoreFromText(_ text: String) {
+        guard let data = text.data(using: .utf8),
               let parsed = try? JSONSerialization.jsonObject(with: data),
               let root = parsed as? [String: Any] else { return }
         tasks = [:]
