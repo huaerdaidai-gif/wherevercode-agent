@@ -11,6 +11,8 @@
 import Foundation
 import XCTest
 
+@testable import WhereverCodeAgent
+
 final class TaskDispatchFixtureTests: XCTestCase {
     private static let baseTs: Double = 1_700_000_000
 
