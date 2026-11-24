@@ -57,6 +57,22 @@ object PlatformAgent {
             ?.let { "${if (isLanAddress(it)) "http" else "https"}://$it$MCP_PATH" }.orEmpty()
     }
 
+    /** 席位上行 WS 路径（固定后缀；主机由平台地址字段定，见 [seatEndpoint]）。 */
+    const val SEAT_PATH: String = "/api/open/v1/seat"
+
+    /**
+     * 席位上行端点（频道三层三期）：由平台地址字段拼出
+     * `<协议>://<host>/api/open/v1/seat`。协议按地址定：内网地址
+     * 用 ws，其余用 wss（与 [mcpEndpoint] 的 http/https 口径一致）。
+     * 主机为空或不合法时返回空串，调用方据此不武装上行。
+     */
+    fun seatEndpoint(platformHost: String?): String {
+        val host = platformHost?.trim().takeIf { !it.isNullOrBlank() }
+            ?: DEFAULT_PLATFORM_HOST
+        return host.takeIf { it.isNotBlank() && platformHostIssue(it) == null }
+            ?.let { "${if (isLanAddress(it)) "ws" else "wss"}://$it$SEAT_PATH" }.orEmpty()
+    }
+
     /**
      * 平台地址是否内网地址：私有 IPv4 段（10/8、172.16/12、192.168/16）、
      * 运营商级 NAT 段 100.64/10（Tailscale 等尾网）、环回（127/8、
