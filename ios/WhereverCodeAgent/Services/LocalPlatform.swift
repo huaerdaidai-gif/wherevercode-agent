@@ -47,7 +47,9 @@ public enum LocalPlatform {
         "agent_channel_pin",
         "agent_channel_react",
         "agent_channel_readers",
-    ]
+    ] + TaskDispatchService.workerTools + TaskDispatchService.ownerTools
+    // 任务派工工具附在频道工具之后（单一来源在 TaskDispatchService）；
+    // 按调用方作用域过滤（干活侧只见 9 个）在 W12 接入本名单的消费方。
 
     private static let lock = NSLock()
     private static var service: LocalChannelService?
@@ -63,7 +65,12 @@ public enum LocalPlatform {
         lock.lock(); defer { lock.unlock() }
         if service != nil { return }
         let file = storageFileURL()
-        service = LocalChannelService(persistence: FileLocalChannelPersistence(fileURL: file))
+        let taskFile = file.deletingLastPathComponent()
+            .appendingPathComponent("local_platform_tasks.json")
+        service = LocalChannelService(
+            persistence: FileLocalChannelPersistence(fileURL: file),
+            taskPersistence: FileTaskDispatchPersistence(fileURL: taskFile)
+        )
         let tokenFile = file.deletingLastPathComponent()
             .appendingPathComponent("lan_platform_tokens.json")
         let persistence = FileLocalChannelPersistence(fileURL: tokenFile)
@@ -122,6 +129,11 @@ public enum LocalPlatform {
     // ---- 内网层（频道三层二期）：局域网门面 --------------------------------
 
     /// 内网成员令牌注册表（install 后可用；设置界面签发/撤销走它）。
+    /// 机主令牌（W12）：持它从别的设备连入即 owner 作用域。
+    public static func lanOwnerToken() -> String? {
+        lanRegistryOrNull()?.issueOwner().token
+    }
+
     public static func lanRegistryOrNull() -> LanTokenRegistry? {
         lock.lock(); defer { lock.unlock() }
         return lanRegistry
@@ -236,6 +248,37 @@ public enum LocalPlatform {
             }
         }
         return { service.removeMessageListener(token) }
+    }
+}
+
+/// 任务派工账本的文件持久化：与频道账本同一写法（临时文件 + 改名）。
+public final class FileTaskDispatchPersistence: TaskDispatchPersistence {
+    private let fileURL: URL
+
+    public init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    public func load() -> String? {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return try? String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    public func save(_ text: String) {
+        let manager = FileManager.default
+        let directory = fileURL.deletingLastPathComponent()
+        try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let tmp = directory.appendingPathComponent(fileURL.lastPathComponent + ".tmp")
+        do {
+            try text.write(to: tmp, atomically: false, encoding: .utf8)
+            if manager.fileExists(atPath: fileURL.path) {
+                try manager.removeItem(at: fileURL)
+            }
+            try manager.moveItem(at: tmp, to: fileURL)
+        } catch {
+            try? text.write(to: fileURL, atomically: false, encoding: .utf8)
+            try? manager.removeItem(at: tmp)
+        }
     }
 }
 

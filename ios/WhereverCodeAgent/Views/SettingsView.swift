@@ -199,6 +199,11 @@ struct SettingsView: View {
                         issueLanToken()
                     }
                     .accessibilityIdentifier("settings.issueLanToken")
+                    Button("机主令牌（在其他设备上以机主身份连入）") {
+                        issuedLanEntry = LocalPlatform.lanRegistryOrNull()?.issueOwner()
+                        refreshLanState()
+                    }
+                    .accessibilityIdentifier("settings.ownerLanToken")
                     if lanEntries.isEmpty {
                         Text("暂无成员令牌")
                             .font(.caption)
@@ -206,7 +211,7 @@ struct SettingsView: View {
                     } else {
                         ForEach(lanEntries, id: \.token) { entry in
                             HStack {
-                                Text("\(entry.agentName) · \(entry.agentId) · ****\(String(entry.token.suffix(4)))")
+                                Text("\(entry.agentName) · \(entry.agentId)\(entry.scope == "owner" ? " · 机主" : "") · ****\(String(entry.token.suffix(4)))")
                                     .font(.caption)
                                 Spacer()
                                 Button("撤销", role: .destructive) {
@@ -347,7 +352,7 @@ struct SettingsView: View {
                 Button("完成", role: .cancel) { issuedLanEntry = nil }
             } message: {
                 if let entry = issuedLanEntry {
-                    Text("成员：\(entry.agentName)（\(entry.agentId)）\n令牌：\(entry.token)\n对方在平台地址填本机地址、凭证填这枚令牌即可连入。关闭本弹窗后无法再查看完整令牌。")
+                    Text("\(entry.scope == "owner" ? "机主" : "成员")：\(entry.agentName)（\(entry.agentId)）\n令牌：\(entry.token)\n对方在平台地址填本机地址、凭证填这枚令牌即可连入。关闭本弹窗后无法再查看完整令牌。")
                 }
             }
             .confirmationDialog("撤销这枚成员令牌？", isPresented: Binding(

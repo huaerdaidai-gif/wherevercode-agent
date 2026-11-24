@@ -1,0 +1,317 @@
+{
+  "name": "a02-claim-flow",
+  "group": "A",
+  "description": "Claim by assignee only; invisible to others; re-claim renews; 409 when taken.",
+  "seed": {
+    "agents": [
+      {
+        "id": "boss",
+        "scopes": [
+          "owner"
+        ],
+        "roles": []
+      },
+      {
+        "id": "dev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "dev2",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "rev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "review"
+        ]
+      }
+    ],
+    "lease_seconds": 7200
+  },
+  "steps": [
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "start_task",
+        "args": {
+          "agent": "dev1",
+          "reviewer": "rev1",
+          "project_id": "proj",
+          "goal": "实现登录页的记住我功能"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "1d72b1efe0824756842c1fc4694a0e7f",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "queued",
+            "state_label": "等待接手",
+            "round": 1,
+            "max_rounds": 3,
+            "assignee_id": "dev1",
+            "assignee_name": "DevA",
+            "reviewer_id": "rev1",
+            "reviewer_name": "RevA",
+            "claimed_by_id": null,
+            "claimed_by_name": null,
+            "lease_until": null,
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "verdict": null,
+            "feedback": null,
+            "decision_reason": null,
+            "version": 1,
+            "created_at": "<ts>",
+            "updated_at": "<ts>"
+          },
+          "state": "queued"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev2",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 404,
+          "code": "task_not_found",
+          "message": "任务不存在"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "claimed",
+            "round": 1,
+            "max_rounds": 3,
+            "source": "v5_platform",
+            "task_ref": "v5:TASK_1",
+            "version": 2,
+            "attempt": 0,
+            "attempt_id": null,
+            "cancel_pending": false,
+            "assignee_name": "DevA",
+            "claimed_by_name": "DevA",
+            "lease_until": "<ts>",
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "feedback": null,
+            "verdict": null,
+            "messages": [],
+            "instructions": "完成 goal，不要直接推 main。中途用 report_progress 报进度（同时续租 2 小时），也可以用 heartbeat 只续租不报进度；完成后用 submit_result 交付：summary 写做了什么、怎么验证的，并给出 branch、commit 或 pr_url 其中至少一个作为证据。"
+          },
+          "lease_seconds": 7200
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "claimed",
+            "round": 1,
+            "max_rounds": 3,
+            "source": "v5_platform",
+            "task_ref": "v5:TASK_1",
+            "version": 3,
+            "attempt": 0,
+            "attempt_id": null,
+            "cancel_pending": false,
+            "assignee_name": "DevA",
+            "claimed_by_name": "DevA",
+            "lease_until": "<ts>",
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "feedback": null,
+            "verdict": null,
+            "messages": [],
+            "instructions": "完成 goal，不要直接推 main。中途用 report_progress 报进度（同时续租 2 小时），也可以用 heartbeat 只续租不报进度；完成后用 submit_result 交付：summary 写做了什么、怎么验证的，并给出 branch、commit 或 pr_url 其中至少一个作为证据。"
+          },
+          "lease_seconds": 7200
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev2",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "error": {
+          "status": 409,
+          "code": "task_state_claimed",
+          "message": "任务已被别人领走"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed"
+          ]
+        }
+      ]
+    }
+  ]
+}

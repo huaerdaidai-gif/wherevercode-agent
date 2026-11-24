@@ -64,6 +64,72 @@ class LanPlatformServerTest {
         assertEquals(404, http("GET", "/nope", null, null).first)
     }
 
+    // ---- W12 角色化暴露 ------------------------------------------------------
+
+    private fun toolsListBody(): String = JSONObject().apply {
+        put("jsonrpc", "2.0")
+        put("id", 9)
+        put("method", "tools/list")
+        put("params", JSONObject())
+    }.toString()
+
+    private fun toolNamesOf(body: String): List<String> {
+        val tools = JSONObject(body).getJSONObject("result").getJSONArray("tools")
+        return (0 until tools.length()).map { tools.getJSONObject(it).getString("name") }
+    }
+
+    @Test
+    fun `tools list filters task tools by token scope`() {
+        val member = registry.issue("Mac")
+        val memberNames = toolNamesOf(
+            http("POST", "/api/open/v1/mcp", member.token, toolsListBody()).second,
+        )
+        assertTrue(memberNames.contains("agent_channel_list"))
+        assertTrue(memberNames.contains("list_my_tasks"))
+        assertTrue(memberNames.contains("submit_result"))
+        assertFalse(memberNames.contains("start_task"))
+        assertFalse(memberNames.contains("decide_task"))
+        assertFalse(memberNames.contains("withdraw_task"))
+
+        val owner = registry.issueOwner()
+        assertEquals(owner.token, registry.issueOwner().token)
+        val ownerNames = toolNamesOf(
+            http("POST", "/api/open/v1/mcp", owner.token, toolsListBody()).second,
+        )
+        assertTrue(ownerNames.contains("start_task"))
+        assertTrue(ownerNames.contains("decide_task"))
+        assertTrue(ownerNames.contains("reopen_task"))
+    }
+
+    @Test
+    fun `owner token can dispatch while member token is refused owner tools`() {
+        service.registerAgent("dev1", "DevA")
+        val channelId = service.defaultChannelId()
+        val member = registry.issue("Mac")
+        val denied = http(
+            "POST", "/api/open/v1/mcp", member.token,
+            rpcBody("start_task", JSONObject().apply {
+                put("agent", "dev1")
+                put("project_id", "proj")
+                put("goal", "成员不许派单")
+                put("channel_id", channelId)
+            }),
+        ).second
+        assertTrue(denied, JSONObject(denied).getJSONObject("result").getBoolean("isError"))
+
+        val owner = registry.issueOwner()
+        val started = http(
+            "POST", "/api/open/v1/mcp", owner.token,
+            rpcBody("start_task", JSONObject().apply {
+                put("agent", "dev1")
+                put("project_id", "proj")
+                put("goal", "机主从另一台设备派单")
+                put("channel_id", channelId)
+            }),
+        ).second
+        assertFalse(started, JSONObject(started).getJSONObject("result").getBoolean("isError"))
+    }
+
     // ---- 成员身份与发读 ------------------------------------------------------
 
     @Test

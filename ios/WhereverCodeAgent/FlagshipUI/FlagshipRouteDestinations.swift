@@ -4968,6 +4968,14 @@ public struct ChannelDetailWorkspaceView: View {
     private var tasksTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                // 派单任务（App 内嵌任务服务，仅本地平台频道）：本频道
+                // 派出的活、进度与交付都在这里，区别于下方本机协同任务。
+                if appState.channelUsesLocalPlatform {
+                    ChannelDispatchTasksSection(
+                        channelId: currentChannelId,
+                        agentOptions: members.map { (id: $0.id, name: $0.name) })
+                    Divider()
+                }
                 HStack {
                     Text("频道关联任务 (\(activeTasks.count))")
                         .font(.system(size: 14, weight: .semibold))

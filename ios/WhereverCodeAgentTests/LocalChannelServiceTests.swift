@@ -398,4 +398,94 @@ final class LocalChannelServiceTests: XCTestCase {
         await fulfillment(of: [delivered], timeout: 10)
         feed.stop()
     }
+
+    func testPackAgentFromRegistryRolesReceivesDeliveryTask() throws {
+        let service = newService()
+        service.registerAgent(agentId: "dev1", agentName: "DevA")
+        service.registerAgent(agentId: "rev1", agentName: "RevA")
+        service.registerAgent(agentId: "pack1", agentName: "PackA", roles: ["pack"])
+        let channelId = service.defaultChannelId()
+        let started = try call(service, "start_task", [
+            "agent": "dev1",
+            "reviewer": "rev1",
+            "goal": "带递代码的交付",
+            "project_id": "proj",
+            "channel_id": channelId,
+        ])
+        let taskId = str(started["task"] as? [String: Any] ?? [:], "task_id")
+        _ = try call(service, "claim_task", ["task_id": taskId],
+                     callerId: "dev1", callerName: "DevA")
+        let submitted = try call(service, "submit_result", [
+            "task_id": taskId,
+            "summary": "做完了",
+            "branch": "feat/x",
+        ], callerId: "dev1", callerName: "DevA")
+        XCTAssertEqual(str(submitted, "state"), "reviewing")
+        let packMine = try call(service, "list_my_tasks", [:],
+                                callerId: "pack1", callerName: "PackA")
+        let packTasks = (packMine["tasks"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(packTasks.count, 1)
+        XCTAssertEqual(str(packTasks.first ?? [:], "kind"), "pack")
+        let packId = str(packTasks.first ?? [:], "task_id")
+        _ = try call(service, "claim_task", ["task_id": packId],
+                     callerId: "pack1", callerName: "PackA")
+        let attached = try call(service, "attach_delivery_diff", [
+            "task_id": packId,
+            "page": 1,
+            "total_pages": 1,
+            "text": "diff --git a/a b/a\n+++ b/a\n+hello\n",
+        ], callerId: "pack1", callerName: "PackA")
+        XCTAssertEqual((attached["complete"] as? Bool) ?? false, true)
+        let revMine = try call(service, "list_my_tasks", [:],
+                               callerId: "rev1", callerName: "RevA")
+        let revTasks = (revMine["tasks"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(revTasks.count, 1)
+        XCTAssertEqual(str(revTasks.first ?? [:], "kind"), "review")
+    }
+
+    func testTaskEventsWriteBackToBoundChannel() throws {
+        let service = newService()
+        service.registerAgent(agentId: "dev1", agentName: "DevA")
+        let channelId = service.defaultChannelId()
+        let started = try call(service, "start_task", [
+            "agent": "dev1",
+            "goal": "写回测试任务",
+            "project_id": "proj",
+            "channel_id": channelId,
+        ])
+        let task = started["task"] as? [String: Any] ?? [:]
+        let taskId = str(task, "task_id")
+        XCTAssertFalse(taskId.isEmpty)
+        _ = try call(service, "claim_task", ["task_id": taskId],
+                     callerId: "dev1", callerName: "DevA")
+        let messages = messagesOf(try call(service, "agent_channel_messages", [
+            "channel_id": channelId,
+        ]))
+        let texts = messages.map { str($0, "text") }
+        XCTAssertTrue(
+            texts.contains { $0.contains("任务已派给 DevA") && $0.contains("[task:\(taskId)]") },
+            "created 事件应写回绑定的频道")
+        XCTAssertTrue(
+            texts.contains { $0.contains("DevA 接手了") && $0.contains("[task:\(taskId)]") },
+            "claimed 事件应写回绑定的频道")
+        XCTAssertTrue(
+            messages.filter { str($0, "text").contains("[task:\(taskId)]") }
+                .allSatisfy { str($0, "agent_id") == LocalPlatform.appAgentID },
+            "写回消息应以本机 App 身份发出")
+    }
+
+    func testTaskWithoutChannelWritesNothingBack() throws {
+        let service = newService()
+        service.registerAgent(agentId: "dev1", agentName: "DevA")
+        let channelId = service.defaultChannelId()
+        _ = try call(service, "start_task", [
+            "agent": "dev1",
+            "goal": "不绑频道的任务",
+            "project_id": "proj",
+        ])
+        let messages = messagesOf(try call(service, "agent_channel_messages", [
+            "channel_id": channelId,
+        ]))
+        XCTAssertTrue(messages.allSatisfy { !str($0, "text").contains("[task:") })
+    }
 }

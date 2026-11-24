@@ -18,6 +18,9 @@ public final class LanTokenRegistry {
         public let agentId: String
         public let agentName: String
         public let createdAtMs: Int64
+        /// 作用域（W12 角色化暴露）：agent = 干活侧；owner = 机主
+        /// （agentId 即本机 App 身份，任务工具全开、tools/list 全量）。
+        public var scope: String = "agent"
     }
 
     private let loadFn: () -> String?
@@ -46,6 +49,27 @@ public final class LanTokenRegistry {
             agentId: agentId,
             agentName: displayName,
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        entries[entry.token] = entry
+        order.append(entry.token)
+        persist()
+        return entry
+    }
+
+    /// 机主令牌（W12）：全表至多一枚，身份固定为本机 App
+    /// （LocalPlatform.appAgentID）——持它从别的设备连入即
+    /// owner 作用域。已有则复用（重启不换令牌），被撤销后重签。
+    public func issueOwner() -> Entry {
+        lock.lock(); defer { lock.unlock() }
+        if let existing = entries.values.first(where: { $0.scope == "owner" }) {
+            return existing
+        }
+        let entry = Entry(
+            token: Self.randomHex(bytes: 16),
+            agentId: LocalPlatform.appAgentID,
+            agentName: LocalPlatform.appAgentName,
+            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+            scope: "owner"
         )
         entries[entry.token] = entry
         order.append(entry.token)
@@ -94,6 +118,7 @@ public final class LanTokenRegistry {
                     "agent_id": $0.agentId,
                     "agent_name": $0.agentName,
                     "created_at_ms": $0.createdAtMs,
+                    "scope": $0.scope,
                 ]
             }
         }
@@ -119,7 +144,8 @@ public final class LanTokenRegistry {
                 token: token,
                 agentId: agentId,
                 agentName: name.isEmpty ? agentId : name,
-                createdAtMs: created
+                createdAtMs: created,
+                scope: (row["scope"] as? String) ?? "agent"
             )
             order.append(token)
         }

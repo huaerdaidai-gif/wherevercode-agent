@@ -95,6 +95,10 @@ data class TeamChannelSnapshot(
     /** 文件分段数据：服务端 kind=file/image/link 过滤拉取（合并去重）。 */
     val channelFiles: List<PlatformChannelMessage> = emptyList(),
     val filesLoaded: Boolean = false,
+    /** 派单任务（App 内嵌任务服务，仅本地平台频道）：本频道绑定的任务。 */
+    val dispatchAvailable: Boolean = false,
+    val dispatchTasks: List<DispatchTaskItem> = emptyList(),
+    val dispatchError: String? = null,
 )
 
 /**
@@ -1179,13 +1183,104 @@ class TeamChannelController(
      */
     private fun tasksSection(snapshot: TeamChannelSnapshot): LinearLayout {
         val col = UiKit.vertical(context)
-        col.addView(note("服务端暂无按频道的任务接口：此处只显示本机从本频道派发的任务，频道历史任务无法从服务端拉取，完整任务请到任务列表查看。"))
+        if (snapshot.dispatchAvailable) {
+            col.addView(dispatchTasksSection(snapshot))
+            col.addView(note("以下为本机协同任务卡（本会话回显），与上方派单任务是两套账。"))
+        } else {
+            col.addView(note("服务端暂无按频道的任务接口：此处只显示本机从本频道派发的任务，频道历史任务无法从服务端拉取，完整任务请到任务列表查看。"))
+        }
         if (snapshot.taskCards.isEmpty()) {
             col.addView(note("本会话还没有从本频道派发的任务。用输入栏「转为正式任务」发送即在此留卡。"))
         } else {
             col.addView(taskCardsSection(snapshot.taskCards))
         }
         return col
+    }
+
+    /**
+     * 派单任务区（任务派工打通，W11）：数据来自 App 内嵌任务服务
+     * （list_tasks 按 channel_id 过滤），区别于下方本机协同任务卡。
+     * 派单/详情/操作都在本区内完成，动作后走 onRefresh 重建快照。
+     */
+    private fun dispatchTasksSection(snapshot: TeamChannelSnapshot): LinearLayout {
+        val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(8)) }
+        val header = UiKit.horizontal(context)
+        header.addView(
+            UiKit.text(
+                context, "派单任务 (${snapshot.dispatchTasks.size})",
+                12f, R.color.text_primary, bold = true,
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        header.addView(
+            UiKit.text(context, "＋ 派单", 12f, R.color.text_primary, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                setOnClickListener {
+                    showCreateDispatchTaskDialog(
+                        context,
+                        snapshot.activeChannelId,
+                        snapshot.members.map { it.agentId to it.displayName },
+                    ) { onRefresh() }
+                }
+            },
+        )
+        col.addView(header)
+        if (snapshot.dispatchError != null) {
+            col.addView(note("派单任务加载失败：${snapshot.dispatchError}"))
+        } else if (snapshot.dispatchTasks.isEmpty()) {
+            col.addView(note("本频道还没有派单任务。点「派单」把活派给一位 Agent，进度和交付会回到本频道。"))
+        } else {
+            for (task in snapshot.dispatchTasks) {
+                col.addView(dispatchTaskCard(snapshot, task))
+            }
+        }
+        return col
+    }
+
+    private fun dispatchTaskCard(snapshot: TeamChannelSnapshot, task: DispatchTaskItem): LinearLayout {
+        val card = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) }
+            setOnClickListener {
+                showDispatchTaskDetailDialog(
+                    context, task.taskId,
+                    snapshot.members.map { it.agentId to it.displayName },
+                ) { onRefresh() }
+            }
+        }
+        val titleRow = UiKit.horizontal(context)
+        titleRow.addView(
+            UiKit.text(context, task.title, 13f, R.color.text_primary, bold = true).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        titleRow.addView(UiKit.text(context, task.stateLabel, 11f, R.color.text_secondary, bold = true))
+        card.addView(titleRow)
+        card.addView(
+            UiKit.text(context, task.goal, 12f, R.color.text_secondary).apply {
+                setPadding(0, dp(3), 0, 0)
+                maxLines = 2
+            },
+        )
+        val meta = StringBuilder("执行：${task.assigneeName}")
+        if (task.reviewerName != null) meta.append(" · 审查：${task.reviewerName}")
+        if (task.maxRounds > 1) meta.append(" · 第 ${task.round}/${task.maxRounds} 轮")
+        card.addView(
+            UiKit.text(context, meta.toString(), 10f, R.color.text_tertiary).apply {
+                setPadding(0, dp(3), 0, 0)
+            },
+        )
+        return card
     }
 
     /** 消息中心（聚合 @我 与未读；点条目不跳转，只呈现，频道补全三期）。

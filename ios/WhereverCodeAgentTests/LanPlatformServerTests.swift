@@ -89,6 +89,46 @@ final class LanPlatformServerTests: XCTestCase {
         XCTAssertTrue(names.contains("agent_channel_post"), names.joined(separator: ","))
     }
 
+    /// W12 角色化暴露：成员令牌的 tools/list 只有干活侧任务工具，
+    /// 机主令牌全量；成员调派单工具被拒、机主可派单。
+    func testToolsListFiltersTaskToolsByTokenScope() async throws {
+        let member = registry.issue(agentName: "Mac")
+        let memberList = try await http(
+            "POST", "/api/open/v1/mcp", token: member.token,
+            body: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/list\",\"params\":{}}")
+        XCTAssertEqual(memberList.0, 200)
+        let memberRoot = try JSONSerialization.jsonObject(with: Data(memberList.1.utf8)) as? [String: Any]
+        let memberTools = (memberRoot?["result"] as? [String: Any])?["tools"] as? [[String: Any]]
+        let memberNames = memberTools?.compactMap { $0["name"] as? String } ?? []
+        XCTAssertTrue(memberNames.contains("agent_channel_list"))
+        XCTAssertTrue(memberNames.contains("list_my_tasks"))
+        XCTAssertFalse(memberNames.contains("start_task"))
+        XCTAssertFalse(memberNames.contains("decide_task"))
+
+        let owner = registry.issueOwner()
+        XCTAssertEqual(owner.token, registry.issueOwner().token)
+        let ownerList = try await http(
+            "POST", "/api/open/v1/mcp", token: owner.token,
+            body: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/list\",\"params\":{}}")
+        let ownerRoot = try JSONSerialization.jsonObject(with: Data(ownerList.1.utf8)) as? [String: Any]
+        let ownerTools = (ownerRoot?["result"] as? [String: Any])?["tools"] as? [[String: Any]]
+        let ownerNames = ownerTools?.compactMap { $0["name"] as? String } ?? []
+        XCTAssertTrue(ownerNames.contains("start_task"))
+        XCTAssertTrue(ownerNames.contains("reopen_task"))
+    }
+
+    func testOwnerTokenCanDispatchMemberCannot() async throws {
+        service.registerAgent(agentId: "dev1", agentName: "DevA")
+        let channelId = service.defaultChannelId()
+        let startBody = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"start_task\",\"arguments\":{\"agent\":\"dev1\",\"project_id\":\"proj\",\"goal\":\"内网派单\",\"channel_id\":\"\(channelId)\"}}}"
+        let member = registry.issue(agentName: "Mac")
+        let denied = try await http("POST", "/api/open/v1/mcp", token: member.token, body: startBody)
+        XCTAssertTrue(isError(denied.1), denied.1)
+        let owner = registry.issueOwner()
+        let started = try await http("POST", "/api/open/v1/mcp", token: owner.token, body: startBody)
+        XCTAssertFalse(isError(started.1), started.1)
+    }
+
     func testWsAcceptMatchesRfc6455Vector() {
         XCTAssertEqual(
             LanPlatformServer.wsAccept(key: "dGhlIHNhbXBsZSBub25jZQ=="),

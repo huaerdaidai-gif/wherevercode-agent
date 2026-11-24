@@ -1,0 +1,861 @@
+{
+  "name": "b03-reopen-task",
+  "group": "B",
+  "description": "reopen resets round, bumps epoch, clears delivery fields; old attempt_ids execute fresh under the new epoch; reopen is repeatable.",
+  "source": "handwritten per spec.md",
+  "seed": {
+    "agents": [
+      {
+        "id": "boss",
+        "scopes": [
+          "owner"
+        ],
+        "roles": []
+      },
+      {
+        "id": "dev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "dev2",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "rev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "review"
+        ]
+      }
+    ],
+    "lease_seconds": 7200
+  },
+  "steps": [
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "start_task",
+        "args": {
+          "agent": "dev1",
+          "reviewer": "rev1",
+          "project_id": "proj",
+          "goal": "实现登录页的记住我功能"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "state": "queued"
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1",
+          "attempt_id": "a-1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "state": "claimed"
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_1",
+          "summary": "第一版",
+          "branch": "feat/login",
+          "attempt_id": "s-1"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "reviewing"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_2"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_2",
+            "state": "claimed"
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "rev1",
+          "claimed_by_id": "rev1",
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_2",
+          "verdict": "approve",
+          "summary": "通过",
+          "attempt_id": "v-1"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "done"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "approved",
+          "round": 1,
+          "version": 4,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "reopen_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "state": "queued",
+            "round": 1,
+            "version": 5,
+            "epoch": 2,
+            "verdict": null,
+            "summary": null
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 5,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened"
+          ],
+          "channel_id": null,
+          "epoch": 2,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1",
+          "attempt_id": "a-1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "state": "claimed",
+            "version": 6
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 6,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened",
+            "claimed"
+          ],
+          "channel_id": null,
+          "epoch": 2,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_1",
+          "summary": "重开后第二版",
+          "branch": "feat/login",
+          "attempt_id": "s-1"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "reviewing"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 7,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ],
+          "channel_id": null,
+          "epoch": 2,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_3",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_3"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_3",
+            "state": "claimed"
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 7,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ],
+          "channel_id": null,
+          "epoch": 2,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_3",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "rev1",
+          "claimed_by_id": "rev1",
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_3",
+          "verdict": "approve",
+          "summary": "通过"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "done"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "approved",
+          "round": 1,
+          "version": 8,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved"
+          ],
+          "channel_id": null,
+          "epoch": 2,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_3",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "reopen_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "state": "queued",
+            "epoch": 3
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 9,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved",
+            "reopened"
+          ],
+          "channel_id": null,
+          "epoch": 3,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        },
+        {
+          "ref": "TASK_3",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ],
+          "channel_id": null,
+          "epoch": 1,
+          "deleted": false
+        }
+      ]
+    }
+  ]
+}

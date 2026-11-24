@@ -1,0 +1,616 @@
+{
+  "name": "a06-submit-review-approve",
+  "group": "A",
+  "description": "Submit opens a review subtask; approve -> work approved.",
+  "seed": {
+    "agents": [
+      {
+        "id": "boss",
+        "scopes": [
+          "owner"
+        ],
+        "roles": []
+      },
+      {
+        "id": "dev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "dev2",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "dev"
+        ]
+      },
+      {
+        "id": "rev1",
+        "scopes": [
+          "agent"
+        ],
+        "roles": [
+          "review"
+        ]
+      }
+    ],
+    "lease_seconds": 7200
+  },
+  "steps": [
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "start_task",
+        "args": {
+          "agent": "dev1",
+          "reviewer": "rev1",
+          "project_id": "proj",
+          "goal": "实现登录页的记住我功能"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "626ee80589bf41fa80671b1664aa4cbb",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "queued",
+            "state_label": "等待接手",
+            "round": 1,
+            "max_rounds": 3,
+            "assignee_id": "dev1",
+            "assignee_name": "DevA",
+            "reviewer_id": "rev1",
+            "reviewer_name": "RevA",
+            "claimed_by_id": null,
+            "claimed_by_name": null,
+            "lease_until": null,
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "verdict": null,
+            "feedback": null,
+            "decision_reason": null,
+            "version": 1,
+            "created_at": "<ts>",
+            "updated_at": "<ts>"
+          },
+          "state": "queued"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_1"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "claimed",
+            "round": 1,
+            "max_rounds": 3,
+            "source": "v5_platform",
+            "task_ref": "v5:TASK_1",
+            "version": 2,
+            "attempt": 0,
+            "attempt_id": null,
+            "cancel_pending": false,
+            "assignee_name": "DevA",
+            "claimed_by_name": "DevA",
+            "lease_until": "<ts>",
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "summary": null,
+            "branch": null,
+            "commit": null,
+            "pr_url": null,
+            "feedback": null,
+            "verdict": null,
+            "messages": [],
+            "instructions": "完成 goal，不要直接推 main。中途用 report_progress 报进度（同时续租 2 小时），也可以用 heartbeat 只续租不报进度；完成后用 submit_result 交付：summary 写做了什么、怎么验证的，并给出 branch、commit 或 pr_url 其中至少一个作为证据。"
+          },
+          "lease_seconds": 7200
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "dev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_1",
+          "summary": "已实现并自测",
+          "branch": "feat/login",
+          "commit": "abc1234"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "reviewing",
+          "note": "已交给审查方，结论出来后会自动通知；要返工时这个任务会重新出现在 list_my_tasks。"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": []
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "list_my_tasks",
+        "args": {}
+      },
+      "expect": {
+        "result": {
+          "tasks": [
+            {
+              "task_id": "TASK_2",
+              "kind": "review",
+              "project_id": "proj",
+              "title": "审查：实现登录页的记住我功能",
+              "goal": "实现登录页的记住我功能",
+              "state": "queued",
+              "round": 1,
+              "max_rounds": 3,
+              "source": "v5_platform",
+              "task_ref": "v5:TASK_2",
+              "version": 1,
+              "attempt": 0,
+              "attempt_id": null,
+              "cancel_pending": false,
+              "assignee_name": "RevA",
+              "claimed_by_name": null,
+              "lease_until": null,
+              "created_at": "<ts>",
+              "updated_at": "<ts>",
+              "summary": "已实现并自测",
+              "branch": "feat/login",
+              "commit": "abc1234",
+              "pr_url": null,
+              "feedback": null,
+              "verdict": null,
+              "messages": [],
+              "delivery": {
+                "implementer": "DevA",
+                "summary": "已实现并自测",
+                "branch": "feat/login",
+                "commit": "abc1234",
+                "pr_url": null,
+                "total_pages": 0,
+                "pages_received": 0,
+                "changed_files": [],
+                "delivery_truncated": false
+              },
+              "instructions": "审查这次交付是否满足 goal：读分支上的真实改动，按需运行相关测试。有递代码时用 get_delivery_diff(task_id, page) 按页读改动，task_id 可填审查任务或原开发任务的 task_id。用 submit_result 交结论：verdict=approve 或 changes_requested，summary 写具体理由和要改的地方（会原样转给实现方）。"
+            }
+          ],
+          "note": "排队的先领；领取后租约 2 小时，超过 2 小时没有动静会回到队伍。"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "queued",
+          "round": 1,
+          "version": 1,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": []
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "claim_task",
+        "args": {
+          "task_id": "TASK_2"
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_2",
+            "kind": "review",
+            "project_id": "proj",
+            "title": "审查：实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "claimed",
+            "round": 1,
+            "max_rounds": 3,
+            "source": "v5_platform",
+            "task_ref": "v5:TASK_2",
+            "version": 2,
+            "attempt": 0,
+            "attempt_id": null,
+            "cancel_pending": false,
+            "assignee_name": "RevA",
+            "claimed_by_name": "RevA",
+            "lease_until": "<ts>",
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "summary": "已实现并自测",
+            "branch": "feat/login",
+            "commit": "abc1234",
+            "pr_url": null,
+            "feedback": null,
+            "verdict": null,
+            "messages": [],
+            "delivery": {
+              "implementer": "DevA",
+              "summary": "已实现并自测",
+              "branch": "feat/login",
+              "commit": "abc1234",
+              "pr_url": null,
+              "total_pages": 0,
+              "pages_received": 0,
+              "changed_files": [],
+              "delivery_truncated": false
+            },
+            "instructions": "审查这次交付是否满足 goal：读分支上的真实改动，按需运行相关测试。有递代码时用 get_delivery_diff(task_id, page) 按页读改动，task_id 可填审查任务或原开发任务的 task_id。用 submit_result 交结论：verdict=approve 或 changes_requested，summary 写具体理由和要改的地方（会原样转给实现方）。"
+          },
+          "lease_seconds": 7200
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "reviewing",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "dev1",
+          "claimed_by_id": "dev1",
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "claimed",
+          "round": 1,
+          "version": 2,
+          "assignee_id": "rev1",
+          "claimed_by_id": "rev1",
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": null,
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "rev1",
+        "tool": "submit_result",
+        "args": {
+          "task_id": "TASK_2",
+          "verdict": "approve",
+          "summary": "改动符合目标，测试齐全"
+        }
+      },
+      "expect": {
+        "result": {
+          "ok": true,
+          "state": "done",
+          "note": "结论已记录，团队流程会据此继续。"
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "approved",
+          "round": 1,
+          "version": 4,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ]
+        }
+      ]
+    },
+    {
+      "call": {
+        "actor": "boss",
+        "tool": "get_task",
+        "args": {
+          "task_id": "TASK_1",
+          "include_events": true
+        }
+      },
+      "expect": {
+        "result": {
+          "task": {
+            "task_id": "TASK_1",
+            "kind": "work",
+            "project_id": "proj",
+            "title": "实现登录页的记住我功能",
+            "goal": "实现登录页的记住我功能",
+            "state": "approved",
+            "state_label": "审查通过",
+            "round": 1,
+            "max_rounds": 3,
+            "assignee_id": "dev1",
+            "assignee_name": "DevA",
+            "reviewer_id": "rev1",
+            "reviewer_name": "RevA",
+            "claimed_by_id": null,
+            "claimed_by_name": null,
+            "lease_until": null,
+            "summary": "已实现并自测",
+            "branch": "feat/login",
+            "commit": "abc1234",
+            "pr_url": null,
+            "verdict": "approve",
+            "feedback": "改动符合目标，测试齐全",
+            "decision_reason": null,
+            "version": 4,
+            "created_at": "<ts>",
+            "updated_at": "<ts>",
+            "events": [
+              {
+                "seq": 1,
+                "at": "<ts>",
+                "who": "boss",
+                "kind": "created",
+                "text": "任务已派给 DevA"
+              },
+              {
+                "seq": 2,
+                "at": "<ts>",
+                "who": "DevA",
+                "kind": "claimed",
+                "text": "DevA 接手了"
+              },
+              {
+                "seq": 3,
+                "at": "<ts>",
+                "who": "DevA",
+                "kind": "submitted",
+                "text": "交付：分支 feat/login 提交 abc1234\n已实现并自测"
+              },
+              {
+                "seq": 4,
+                "at": "<ts>",
+                "who": "平台",
+                "kind": "review_opened",
+                "text": "已交给 RevA 审查"
+              },
+              {
+                "seq": 7,
+                "at": "<ts>",
+                "who": "RevA",
+                "kind": "approved",
+                "text": "审查通过\n改动符合目标，测试齐全"
+              }
+            ]
+          }
+        }
+      },
+      "state_after": [
+        {
+          "ref": "TASK_1",
+          "kind": "work",
+          "parent": null,
+          "state": "approved",
+          "round": 1,
+          "version": 4,
+          "assignee_id": "dev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": "rev1",
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "created",
+            "claimed",
+            "submitted",
+            "review_opened",
+            "approved"
+          ]
+        },
+        {
+          "ref": "TASK_2",
+          "kind": "review",
+          "parent": "TASK_1",
+          "state": "done",
+          "round": 1,
+          "version": 3,
+          "assignee_id": "rev1",
+          "claimed_by_id": null,
+          "reserved_for_id": null,
+          "reviewer_id": null,
+          "decision_reason": null,
+          "verdict": "approve",
+          "delivery_pages": 0,
+          "delivery_total_pages": 0,
+          "events": [
+            "claimed",
+            "verdict"
+          ]
+        }
+      ]
+    }
+  ]
+}

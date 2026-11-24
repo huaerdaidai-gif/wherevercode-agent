@@ -46,9 +46,16 @@ class InMemoryLocalChannelPersistence : LocalChannelPersistence {
  */
 class LocalChannelService(
     private val persistence: LocalChannelPersistence,
+    taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence(),
     private val clock: () -> Double = { System.currentTimeMillis() / 1000.0 },
 ) {
-    private data class Agent(val id: String, var name: String)
+    private data class Agent(
+        val id: String,
+        var name: String,
+        /** 任务角色（W12）：dev/review/pack，来自 App 注册表
+         * capabilities 的同名项；供任务服务的 pack 名册查询。 */
+        var roles: List<String> = emptyList(),
+    )
 
     private data class Channel(
         val id: String,
@@ -113,16 +120,22 @@ class LocalChannelService(
 
     /** 登记一位本机已知 Agent（本机 App 自己 + 注册表里的 Agent）。 */
     @Synchronized
-    fun registerAgent(agentId: String, agentName: String) {
+    fun registerAgent(
+        agentId: String,
+        agentName: String,
+        roles: List<String> = emptyList(),
+    ) {
         val id = agentId.trim()
         if (id.isBlank()) return
         val name = agentName.trim().ifBlank { id }
+        val cleanRoles = roles.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         val existing = agents[id]
         if (existing == null) {
-            agents[id] = Agent(id, name)
+            agents[id] = Agent(id, name, cleanRoles)
             persist()
-        } else if (existing.name != name) {
+        } else if (existing.name != name || existing.roles != cleanRoles) {
             existing.name = name
+            existing.roles = cleanRoles
             persist()
         }
     }
@@ -191,6 +204,83 @@ class LocalChannelService(
         }
     }
 
+    // ---- 任务派工（contracts/task-dispatch/spec.md） -------------------
+    // 工具名命中任务派工时由 dispatch 的一行钩子路由到
+    // TaskDispatchService；其错误在钩子处转成本地账本同一口径的
+    // LocalServiceException（门面只带文案，status/code 留在任务
+    // 服务层供对拍夹具核验）。bridge 在 W8 接线（事件写回频道）。
+    private val taskBridge = object : TaskChannelBridge {
+        override fun postTaskEvent(channelId: String, taskId: String, kind: String, text: String) {
+            postTaskEventMessage(channelId, taskId, text)
+        }
+    }
+
+    /**
+     * spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
+     * 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
+     * 频道不存在/已归档时静默跳过——写回失败不回滚任务操作。
+     * 与 postMessage 同语义：发帖自动入群（App 作为成员出现）。
+     */
+    @Synchronized
+    private fun postTaskEventMessage(channelId: String, taskId: String, text: String) {
+        val channel = channels[channelId] ?: return
+        if (channel.archived) return
+        val list = members.getOrPut(channel.id) { mutableListOf() }
+        if (list.none { it.agentId == LocalPlatform.APP_AGENT_ID }) {
+            list += Member(
+                LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME,
+                "member", clock(),
+            )
+        }
+        val message = Message(
+            id = newId(),
+            channelId = channel.id,
+            agentId = LocalPlatform.APP_AGENT_ID,
+            agentName = LocalPlatform.APP_AGENT_NAME,
+            text = text + "\n[task:" + taskId + "]",
+            replyTo = null,
+            createdAt = clock(),
+            seq = ++seqCounter,
+            mentionsAll = false,
+            attachmentRef = null,
+            forwardOf = null,
+        )
+        messages.getOrPut(channel.id) { mutableListOf() } += message
+        persist()
+        fireMessage(channel.id, messageJson(message, LocalPlatform.APP_AGENT_ID))
+    }
+
+    /** 任务角色名册（W12）：读 LCS 的 Agent 登记（roles 来自 App
+     * 注册表 capabilities 的 dev/review/pack 同名项）。 */
+    private val taskRoster = object : TaskAgentRoster {
+        override fun agentRoles(agentId: String): List<String>? =
+            agents[agentId]?.roles
+
+        override fun firstAgentWithRole(role: String): Pair<String, String>? =
+            agents.entries.firstOrNull { role in it.value.roles }
+                ?.let { it.key to it.value.name }
+    }
+
+    private val taskDispatch = TaskDispatchService(
+        store = TaskDispatchStore(taskPersistence, clock),
+        directory = TaskAgentDirectory { id -> agents[id]?.name },
+        bridge = taskBridge,
+        clock = clock,
+        roster = taskRoster,
+        channelOwnerChecker = { channelId, agentId ->
+            members[channelId]?.firstOrNull { it.agentId == agentId }?.role == "owner"
+        },
+    )
+
+    /** UI 软删除任务（spec §2.17）：任务页专用入口，不进 MCP 工具表。 */
+    @Synchronized
+    fun uiDeleteTask(taskId: String): JSONObject =
+        taskDispatch.uiDeleteTask(
+            JSONObject().put("task_id", taskId),
+            LocalPlatform.APP_AGENT_ID,
+            LocalPlatform.APP_AGENT_NAME,
+        )
+
     // ---- 工具分发（与平台 MCP 工具同名同参同结果形状） ---------------------
 
     /**
@@ -198,8 +288,22 @@ class LocalChannelService(
      * 解析对象）。失败抛 [LocalServiceException]，文案与服务端同口径。
      */
     @Synchronized
-    fun dispatch(tool: String, args: JSONObject, callerId: String, callerName: String): JSONObject =
-        when (tool) {
+    fun dispatch(tool: String, args: JSONObject, callerId: String, callerName: String): JSONObject {
+        if (TaskDispatchService.isTaskTool(tool)) {
+            try {
+                // 作用域：本机 App 身份 = owner，其余调用方 = agent；
+                // 内网 owner 令牌的作用域识别在 W12 接注册表后补。
+                val scope = if (callerId == LocalPlatform.APP_AGENT_ID) {
+                    TaskDispatchService.SCOPE_OWNER
+                } else {
+                    TaskDispatchService.SCOPE_AGENT
+                }
+                return taskDispatch.dispatch(tool, args, callerId, callerName, scope)
+            } catch (e: TaskDispatchException) {
+                throw LocalServiceException(e.message ?: "任务派工调用失败")
+            }
+        }
+        return when (tool) {
             "agent_channel_list" -> JSONObject().put("channels", JSONArray().apply {
                 for (channel in channels.values) put(channelJson(channel, callerId))
             })
@@ -228,6 +332,7 @@ class LocalChannelService(
             "agent_channel_readers" -> channelReaders(args, callerId)
             else -> throw LocalServiceException("本地平台没有这个工具：$tool")
         }
+    }
 
     // ---- 频道与成员 --------------------------------------------------------
 
@@ -746,7 +851,11 @@ class LocalChannelService(
         root.put("seq", seqCounter)
         root.put("agents", JSONArray().apply {
             for (agent in agents.values) {
-                put(JSONObject().put("id", agent.id).put("name", agent.name))
+                put(JSONObject().apply {
+                    put("id", agent.id)
+                    put("name", agent.name)
+                    put("roles", JSONArray(agent.roles))
+                })
             }
         })
         root.put("channels", JSONArray().apply {
@@ -857,7 +966,14 @@ class LocalChannelService(
             val row = agentRows.optJSONObject(i) ?: continue
             val id = row.optString("id", "")
             if (id.isBlank()) continue
-            agents[id] = Agent(id, row.optString("name", id))
+            val roles = mutableListOf<String>()
+            val rawRoles = row.optJSONArray("roles")
+            if (rawRoles != null) {
+                for (j in 0 until rawRoles.length()) {
+                    rawRoles.optString(j, "").takeIf { it.isNotBlank() }?.let { roles += it }
+                }
+            }
+            agents[id] = Agent(id, row.optString("name", id), roles)
         }
         val channelRows = root.optJSONArray("channels") ?: JSONArray()
         for (i in 0 until channelRows.length()) {

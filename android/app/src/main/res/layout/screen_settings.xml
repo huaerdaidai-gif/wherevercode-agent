@@ -1665,6 +1665,17 @@
             android:textColor="@color/accent"
             android:textSize="11sp" />
 
+        <Button
+            android:id="@+id/buttonOwnerLanToken"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip_accent"
+            android:text="机主令牌（在其他设备上以机主身份连入）"
+            android:textAllCaps="false"
+            android:textColor="@color/accent"
+            android:textSize="11sp" />
+
         <TextView
             android:id="@+id/lanTokenList"
             android:layout_width="match_parent"

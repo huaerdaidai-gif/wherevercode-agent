@@ -55,7 +55,12 @@ public final class LocalChannelService {
     private final class Agent {
         let id: String
         var name: String
-        init(id: String, name: String) { self.id = id; self.name = name }
+        /// 任务角色（W12）：dev/review/pack，来自 App 注册表
+        /// capabilities 的同名项；供任务服务的 pack 名册查询。
+        var roles: [String]
+        init(id: String, name: String, roles: [String] = []) {
+            self.id = id; self.name = name; self.roles = roles
+        }
     }
 
     private final class Channel {
@@ -122,6 +127,7 @@ public final class LocalChannelService {
     }
 
     private let persistence: LocalChannelPersistence
+    private let taskPersistence: TaskDispatchPersistence
     private let clock: () -> Double
     private let lock = NSRecursiveLock()
 
@@ -141,33 +147,115 @@ public final class LocalChannelService {
 
     private var listeners: [String: [LocalChannelListenerToken]] = [:]
 
-    public init(persistence: LocalChannelPersistence, clock: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
+    /// 任务派工服务（contracts/task-dispatch/spec.md）：dispatch 的
+    /// 一行钩子按工具名路由进来；bridge 在 W8 接线（事件写回频道）。
+    private let taskBridge = WeakTaskBridge()
+    private let taskRoster = WeakTaskRoster()
+    private lazy var taskDispatch: TaskDispatchService = TaskDispatchService(
+        store: TaskDispatchStore(persistence: taskPersistence, clock: clock),
+        directory: { [weak self] id in self?.agents[id]?.name },
+        bridge: taskBridge,
+        clock: clock,
+        roster: taskRoster,
+        channelOwnerChecker: { [weak self] channelId, agentId in
+            self?.members[channelId]?.first(where: { $0.agentId == agentId })?.role == "owner"
+        }
+    )
+
+    /// 任务名册查询（W12，WeakTaskRoster 回调用）：登记顺序即
+    /// agentOrder；roles 来自 App 注册表 capabilities 的同名项。
+    /// 与 directory 闭包同口径裸读（不另加锁，避免与服务锁成环）。
+    func agentRoles(_ agentId: String) -> [String]? {
+        agents[agentId]?.roles
+    }
+
+    func firstAgentWithRole(_ role: String) -> (id: String, name: String)? {
+        for id in agentOrder {
+            if let agent = agents[id], agent.roles.contains(role) {
+                return (id: agent.id, name: agent.name)
+            }
+        }
+        return nil
+    }
+
+    /// UI 软删除任务（spec §2.17）：任务页专用入口，不进 MCP 工具表。
+    /// 持 LCS 锁进入（channelOwnerChecker 在服务内回调读 members）。
+    public func uiDeleteTask(taskId: String) throws -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        return try taskDispatch.uiDeleteTask(
+            args: ["task_id": taskId],
+            callerId: LocalPlatform.appAgentID,
+            callerName: LocalPlatform.appAgentName)
+    }
+
+    /// spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
+    /// 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
+    /// 频道不存在/已归档时静默跳过——写回失败不回滚任务操作。
+    /// 与 postMessage 同语义：发帖自动入群（App 作为成员出现）。
+    func postTaskEventMessage(channelId: String, taskId: String, text: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard let channel = channels[channelId], !channel.archived else { return }
+        if members[channel.id] == nil { members[channel.id] = [] }
+        if !(members[channel.id]?.contains(where: { $0.agentId == LocalPlatform.appAgentID }) ?? false) {
+            members[channel.id]?.append(
+                Member(agentId: LocalPlatform.appAgentID,
+                       agentName: LocalPlatform.appAgentName,
+                       role: "member", joinedAt: clock()))
+        }
+        seqCounter += 1
+        let message = Message(
+            id: newId(),
+            channelId: channel.id,
+            agentId: LocalPlatform.appAgentID,
+            agentName: LocalPlatform.appAgentName,
+            text: text + "\n[task:" + taskId + "]",
+            replyTo: nil,
+            createdAt: clock(),
+            seq: seqCounter,
+            mentionsAll: false,
+            attachmentRef: nil,
+            forwardOf: nil
+        )
+        messages[channel.id, default: []].append(message)
+        persist()
+        fireMessage(channelId: channel.id,
+                    messageJson: messageJson(message, viewerId: LocalPlatform.appAgentID))
+    }
+
+    public init(persistence: LocalChannelPersistence, clock: @escaping () -> Double = { Date().timeIntervalSince1970 }, taskPersistence: TaskDispatchPersistence = InMemoryTaskDispatchPersistence()) {
         self.persistence = persistence
+        self.taskPersistence = taskPersistence
         self.clock = clock
         restore()
         ensureSeed()
+        taskBridge.target = self
+        taskRoster.target = self
     }
 
     // ---- 身份与种子 -------------------------------------------------------
 
     /// 登记一位本机已知 Agent（本机 App 自己 + 注册表里的 Agent）。
-    public func registerAgent(agentId: String, agentName: String) {
+    public func registerAgent(agentId: String, agentName: String, roles: [String] = []) {
         lock.lock(); defer { lock.unlock() }
-        registerAgentLocked(agentId: agentId, agentName: agentName)
+        registerAgentLocked(agentId: agentId, agentName: agentName, roles: roles)
     }
 
-    private func registerAgentLocked(agentId: String, agentName: String) {
+    private func registerAgentLocked(agentId: String, agentName: String, roles: [String] = []) {
         let id = agentId.trimmingCharacters(in: .whitespacesAndNewlines)
         if id.isEmpty { return }
         let trimmed = agentName.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = trimmed.isEmpty ? id : trimmed
+        let cleanRoles = Array(Set(roles.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty })).sorted()
         if let existing = agents[id] {
-            if existing.name != name {
+            if existing.name != name || existing.roles != cleanRoles {
                 existing.name = name
+                existing.roles = cleanRoles
                 persist()
             }
         } else {
-            agents[id] = Agent(id: id, name: name)
+            agents[id] = Agent(id: id, name: name, roles: cleanRoles)
             agentOrder.append(id)
             persist()
         }
@@ -250,6 +338,17 @@ public final class LocalChannelService {
     /// 的解析对象）。失败抛 LocalServiceError，文案与服务端同口径。
     public func dispatch(tool: String, args: [String: Any], callerId: String, callerName: String) throws -> [String: Any] {
         lock.lock(); defer { lock.unlock() }
+        if TaskDispatchService.isTaskTool(tool) {
+            do {
+                // 作用域：本机 App 身份 = owner，其余调用方 = agent；
+                // 内网 owner 令牌的作用域识别在 W12 接注册表后补。
+                let scope = callerId == LocalPlatform.appAgentID
+                    ? TaskDispatchService.scopeOwner : TaskDispatchService.scopeAgent
+                return try taskDispatch.dispatch(tool: tool, args: args, callerId: callerId, callerName: callerName, callerScope: scope)
+            } catch let error as TaskDispatchError {
+                throw LocalServiceError(error.message)
+            }
+        }
         switch tool {
         case "agent_channel_list":
             return ["channels": channelOrder.compactMap { channels[$0] }.map { channelJson($0, viewerId: callerId) }]
@@ -887,7 +986,7 @@ public final class LocalChannelService {
         root["default_channel_id"] = storedDefaultChannelId
         root["seq"] = seqCounter
         root["agents"] = agentOrder.compactMap { agents[$0] }.map {
-            ["id": $0.id, "name": $0.name] as [String: Any]
+            ["id": $0.id, "name": $0.name, "roles": $0.roles] as [String: Any]
         }
         root["channels"] = channelOrder.compactMap { channels[$0] }.map { channel in
             [
@@ -984,7 +1083,9 @@ public final class LocalChannelService {
         for row in (root["agents"] as? [[String: Any]]) ?? [] {
             let id = optString(row, "id")
             if id.isEmpty { continue }
-            agents[id] = Agent(id: id, name: optString(row, "name", id))
+            let roles = ((row["roles"] as? [String]) ?? [])
+                .filter { !$0.isEmpty }
+            agents[id] = Agent(id: id, name: optString(row, "name", id), roles: roles)
             agentOrder.append(id)
         }
         for row in (root["channels"] as? [[String: Any]]) ?? [] {

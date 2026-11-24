@@ -163,6 +163,21 @@ class LanPlatformServer(
             return jsonError(400, "bad json")
         }
         val id: Any = if (request.has("id")) request.get("id") else JSONObject.NULL
+        if (request.optString("method", "") == "tools/list") {
+            // W12 角色化暴露：任务工具按令牌作用域过滤（干活侧
+            // 只见 9 个、机主见 16 个），频道工具全量（与 iOS 同口径）。
+            val scope = if (entry.scope == "owner") {
+                TaskDispatchService.SCOPE_OWNER
+            } else {
+                TaskDispatchService.SCOPE_AGENT
+            }
+            val tools = JSONArray().apply {
+                for (name in LocalPlatform.toolNames(scope)) {
+                    put(JSONObject().put("name", name))
+                }
+            }
+            return rpcEnvelope(id, JSONObject().put("tools", tools))
+        }
         if (request.optString("method", "") != "tools/call") {
             return rpcEnvelope(id, errorResult("内网平台只支持 tools/call"))
         }

@@ -81,6 +81,7 @@
 			DA000000000000000000F50F,
 			1C0DE00000000000000000A5,
 			DA0000000000000000000C05,
+			DA0000000000000000000E09,
 				DA0000000000000000000D07,
 				DA0000000000000000000D09,
 				DA0000000000000000000D11,
@@ -192,9 +193,14 @@
 				DA0000000000000000000D02,
 				DA0000000000000000000D04,
 				DA0000000000000000000D06,
+				DA0000000000000000000E02,
+				DA0000000000000000000E04,
+				DA0000000000000000000E06,
+				DA0000000000000000000E08,
 			41158D5AB6FD801A75FC1903,
 			5D93AC07A45BF27D2FEF38A9,
 			828B51501A8E088E7BC25411,
+			DA0000000000000000000E12,
 			DD5FF8DD89D9D8B920AF7867,
 			FABAA829E2C95B619B4A5E94,
 			DA0000000000000000000022,
@@ -271,6 +277,7 @@
 		7667F7CA498D0ED82757FFC2 = {isa = PBXBuildFile; fileRef = AF29026DEB46CEBD6478E0B0; };
 		7F749415C58C7FDDBBA14398 = {isa = PBXBuildFile; fileRef = 47FFE0ECCF7C83A806454DF9; };
 		828B51501A8E088E7BC25411 = {isa = PBXBuildFile; fileRef = 918CC59A2183C5FAA462994B; };
+		DA0000000000000000000E12 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E11; };
 		844C8F533FE271C19FE543DF = {isa = PBXBuildFile; fileRef = 00600EE2EA71EC2F6623B155; };
 		F17729830897440A9E54F001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelCollaborationTests.swift; sourceTree = "<group>"; };
 		892AEB362C95AAE0B8B13531 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelParsingTests.swift; sourceTree = "<group>"; };
@@ -284,6 +291,7 @@
 		90A876B7A773B795F59F07C2 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskService.swift; sourceTree = "<group>"; };
 		91067B38E1192DA78C1A0C00 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhereverCodeAgentApp.swift; sourceTree = "<group>"; };
 		918CC59A2183C5FAA462994B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E11 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchViews.swift; sourceTree = "<group>"; };
 		92543349B33279DD5291FA11 = {isa = XCBuildConfiguration; buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 			}; name = Debug; };
@@ -322,6 +330,7 @@
 			DA000000000000000000F302,
 			DA000000000000000000F510,
 			DA0000000000000000000C06,
+			DA0000000000000000000E10,
 				DA0000000000000000000D08,
 				DA0000000000000000000D10,
 				DA0000000000000000000D12,
@@ -345,6 +354,10 @@
 				DA0000000000000000000D01,
 				DA0000000000000000000D03,
 				DA0000000000000000000D05,
+				DA0000000000000000000E01,
+				DA0000000000000000000E03,
+				DA0000000000000000000E05,
+				DA0000000000000000000E07,
 		); name = Services; path = Services; sourceTree = "<group>"; };
 		BB35B5B26176D7E09841F13F = {isa = PBXBuildFile; fileRef = 2FAFA8646A910CE4490E1BBD; };
 		BEB0DA9A7B8738232918BE47 = {isa = PBXGroup; children = (
@@ -361,6 +374,7 @@
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			DC0D1A100000000000000001,
 			918CC59A2183C5FAA462994B,
+			DA0000000000000000000E11,
 			0EC43C27AE6A9F51433ABA31,
 			F61BE8AE8EDB3888F3137986,
 			DA000000000000000000006F,
@@ -524,6 +538,10 @@
 		DA0000000000000000000D01 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanAddress.swift; sourceTree = "<group>"; };
 		DA0000000000000000000D03 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanTokenRegistry.swift; sourceTree = "<group>"; };
 		DA0000000000000000000D05 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanPlatformServer.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E01 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchModels.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E03 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchStore.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E05 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchService.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E07 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskChannelBridge.swift; sourceTree = "<group>"; };
 		DA0000000000000000000D07 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanTokenRegistryTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000D09 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanPlatformServerTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000D11 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanAddressTests.swift; sourceTree = "<group>"; };
@@ -531,11 +549,17 @@
 		DA0000000000000000000D02 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D01; };
 		DA0000000000000000000D04 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D03; };
 		DA0000000000000000000D06 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D05; };
+		DA0000000000000000000E02 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E01; };
+		DA0000000000000000000E04 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E03; };
+		DA0000000000000000000E06 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E05; };
+		DA0000000000000000000E08 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E07; };
 		DA0000000000000000000D08 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D07; };
 		DA0000000000000000000D10 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D09; };
 		DA0000000000000000000D12 = {isa = PBXBuildFile; fileRef = DA0000000000000000000D11; };
 		DA0000000000000000000C05 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChannelServiceTests.swift; sourceTree = "<group>"; };
 		DA0000000000000000000C06 = {isa = PBXBuildFile; fileRef = DA0000000000000000000C05; };
+		DA0000000000000000000E09 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDispatchFixtureTests.swift; sourceTree = "<group>"; };
+		DA0000000000000000000E10 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E09; };
 		DA0000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainTypes.swift; sourceTree = "<group>"; };
 		DA0000000000000000000022 = {isa = PBXBuildFile; fileRef = DA0000000000000000000021; };
 		DA0000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainConfig.swift; sourceTree = "<group>"; };
