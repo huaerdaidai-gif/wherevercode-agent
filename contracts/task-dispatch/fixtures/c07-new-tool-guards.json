@@ -1,752 +1,752 @@
 {
-  "name": "c07-new-tool-guards",
-  "group": "C",
-  "description": "Guards for the new tools: reopen needs a terminal work task, update needs expected_version and Q/C state, withdraw refuses terminal states.",
-  "source": "handwritten per spec.md",
-  "seed": {
-    "agents": [
-      {
-        "id": "boss",
-        "scopes": [
-          "owner"
-        ],
-        "roles": []
-      },
-      {
-        "id": "dev1",
-        "scopes": [
-          "agent"
-        ],
-        "roles": [
-          "dev"
-        ]
-      },
-      {
-        "id": "dev2",
-        "scopes": [
-          "agent"
-        ],
-        "roles": [
-          "dev"
-        ]
-      },
-      {
-        "id": "rev1",
-        "scopes": [
-          "agent"
-        ],
-        "roles": [
-          "review"
-        ]
-      }
+ "name": "c07-new-tool-guards",
+ "group": "C",
+ "description": "Guards for the new tools: reopen needs a terminal work task, update needs expected_version and Q/C state, withdraw refuses terminal states.",
+ "source": "handwritten per spec.md",
+ "seed": {
+  "agents": [
+   {
+    "id": "boss",
+    "scopes": [
+     "owner"
     ],
-    "lease_seconds": 7200
-  },
-  "steps": [
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "start_task",
-        "args": {
-          "agent": "dev1",
-          "project_id": "proj",
-          "goal": "实现登录页的记住我功能"
-        }
-      },
-      "expect": {
-        "result": {
-          "task": {
-            "task_id": "TASK_1",
-            "state": "queued"
-          }
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 1,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "dev1",
-        "tool": "claim_task",
-        "args": {
-          "task_id": "TASK_1"
-        }
-      },
-      "expect": {
-        "result": {
-          "task": {
-            "task_id": "TASK_1",
-            "state": "claimed"
-          }
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "claimed",
-          "round": 1,
-          "version": 2,
-          "assignee_id": "dev1",
-          "claimed_by_id": "dev1",
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "reopen_task",
-        "args": {
-          "task_id": "TASK_1"
-        }
-      },
-      "expect": {
-        "error": {
-          "status": 409,
-          "code": "task_state_claimed",
-          "message": "任务当前状态是进行中，做不了这一步"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "claimed",
-          "round": 1,
-          "version": 2,
-          "assignee_id": "dev1",
-          "claimed_by_id": "dev1",
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "update_task",
-        "args": {
-          "task_id": "TASK_1",
-          "goal": "实现登录页的记住我功能（含退出登录后清除）"
-        }
-      },
-      "expect": {
-        "error": {
-          "status": 409,
-          "code": "v5_error",
-          "message": "expected_version 必填"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "claimed",
-          "round": 1,
-          "version": 2,
-          "assignee_id": "dev1",
-          "claimed_by_id": "dev1",
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "dev1",
-        "tool": "submit_result",
-        "args": {
-          "task_id": "TASK_1",
-          "summary": "做完了",
-          "commit": "abc1234"
-        }
-      },
-      "expect": {
-        "result": {
-          "ok": true,
-          "state": "needs_decision"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "needs_decision",
-          "round": 1,
-          "version": 3,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": "no_reviewer",
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "update_task",
-        "args": {
-          "task_id": "TASK_1",
-          "expected_version": 3,
-          "goal": "实现登录页的记住我功能（含退出登录后清除）"
-        }
-      },
-      "expect": {
-        "error": {
-          "status": 409,
-          "code": "task_state_needs_decision",
-          "message": "任务当前状态是等你决定，做不了这一步"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "needs_decision",
-          "round": 1,
-          "version": 3,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": "no_reviewer",
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "decide_task",
-        "args": {
-          "task_id": "TASK_1",
-          "action": "done",
-          "reason": "确认"
-        }
-      },
-      "expect": {
-        "result": {
-          "ok": true,
-          "state": "done"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "done",
-          "round": 1,
-          "version": 4,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "withdraw_task",
-        "args": {
-          "task_id": "TASK_1"
-        }
-      },
-      "expect": {
-        "error": {
-          "status": 409,
-          "code": "task_state_done",
-          "message": "任务当前状态是完成，做不了这一步"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "done",
-          "round": 1,
-          "version": 4,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "reopen_task",
-        "args": {
-          "task_id": "TASK_1"
-        }
-      },
-      "expect": {
-        "result": {
-          "task": {
-            "task_id": "TASK_1",
-            "state": "queued",
-            "epoch": 2
-          }
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 5,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided",
-            "reopened"
-          ],
-          "channel_id": null,
-          "epoch": 2,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "start_task",
-        "args": {
-          "agent": "dev1",
-          "reviewer": "rev1",
-          "project_id": "proj",
-          "goal": "实现登录页的记住我功能"
-        }
-      },
-      "expect": {
-        "result": {
-          "task": {
-            "task_id": "TASK_2",
-            "state": "queued"
-          }
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 5,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided",
-            "reopened"
-          ],
-          "channel_id": null,
-          "epoch": 2,
-          "deleted": false
-        },
-        {
-          "ref": "TASK_2",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 1,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": "rev1",
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "dev1",
-        "tool": "claim_task",
-        "args": {
-          "task_id": "TASK_2"
-        }
-      },
-      "expect": {
-        "result": {
-          "task": {
-            "task_id": "TASK_2",
-            "state": "claimed"
-          }
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 5,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided",
-            "reopened"
-          ],
-          "channel_id": null,
-          "epoch": 2,
-          "deleted": false
-        },
-        {
-          "ref": "TASK_2",
-          "kind": "work",
-          "parent": null,
-          "state": "claimed",
-          "round": 1,
-          "version": 2,
-          "assignee_id": "dev1",
-          "claimed_by_id": "dev1",
-          "reserved_for_id": null,
-          "reviewer_id": "rev1",
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "dev1",
-        "tool": "submit_result",
-        "args": {
-          "task_id": "TASK_2",
-          "summary": "已实现",
-          "branch": "feat/login"
-        }
-      },
-      "expect": {
-        "result": {
-          "ok": true,
-          "state": "reviewing"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 5,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided",
-            "reopened"
-          ],
-          "channel_id": null,
-          "epoch": 2,
-          "deleted": false
-        },
-        {
-          "ref": "TASK_2",
-          "kind": "work",
-          "parent": null,
-          "state": "reviewing",
-          "round": 1,
-          "version": 3,
-          "assignee_id": "dev1",
-          "claimed_by_id": "dev1",
-          "reserved_for_id": null,
-          "reviewer_id": "rev1",
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "review_opened"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        },
-        {
-          "ref": "TASK_3",
-          "kind": "review",
-          "parent": "TASK_2",
-          "state": "queued",
-          "round": 1,
-          "version": 1,
-          "assignee_id": "rev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
-    },
-    {
-      "call": {
-        "actor": "boss",
-        "tool": "reopen_task",
-        "args": {
-          "task_id": "TASK_3"
-        }
-      },
-      "expect": {
-        "error": {
-          "status": 409,
-          "code": "v5_error",
-          "message": "只有工作任务可以重开"
-        }
-      },
-      "state_after": [
-        {
-          "ref": "TASK_1",
-          "kind": "work",
-          "parent": null,
-          "state": "queued",
-          "round": 1,
-          "version": 5,
-          "assignee_id": "dev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "decided",
-            "reopened"
-          ],
-          "channel_id": null,
-          "epoch": 2,
-          "deleted": false
-        },
-        {
-          "ref": "TASK_2",
-          "kind": "work",
-          "parent": null,
-          "state": "reviewing",
-          "round": 1,
-          "version": 3,
-          "assignee_id": "dev1",
-          "claimed_by_id": "dev1",
-          "reserved_for_id": null,
-          "reviewer_id": "rev1",
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [
-            "created",
-            "claimed",
-            "submitted",
-            "review_opened"
-          ],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        },
-        {
-          "ref": "TASK_3",
-          "kind": "review",
-          "parent": "TASK_2",
-          "state": "queued",
-          "round": 1,
-          "version": 1,
-          "assignee_id": "rev1",
-          "claimed_by_id": null,
-          "reserved_for_id": null,
-          "reviewer_id": null,
-          "decision_reason": null,
-          "verdict": null,
-          "delivery_pages": 0,
-          "delivery_total_pages": 0,
-          "events": [],
-          "channel_id": null,
-          "epoch": 1,
-          "deleted": false
-        }
-      ]
+    "roles": []
+   },
+   {
+    "id": "dev1",
+    "scopes": [
+     "agent"
+    ],
+    "roles": [
+     "dev"
+    ]
+   },
+   {
+    "id": "dev2",
+    "scopes": [
+     "agent"
+    ],
+    "roles": [
+     "dev"
+    ]
+   },
+   {
+    "id": "rev1",
+    "scopes": [
+     "agent"
+    ],
+    "roles": [
+     "review"
+    ]
+   }
+  ],
+  "lease_seconds": 7200
+ },
+ "steps": [
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "start_task",
+    "args": {
+     "agent": "dev1",
+     "project_id": "proj",
+     "goal": "实现登录页的记住我功能"
     }
-  ]
+   },
+   "expect": {
+    "result": {
+     "task": {
+      "task_id": "TASK_1",
+      "state": "queued"
+     }
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 1,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "dev1",
+    "tool": "claim_task",
+    "args": {
+     "task_id": "TASK_1"
+    }
+   },
+   "expect": {
+    "result": {
+     "task": {
+      "task_id": "TASK_1",
+      "state": "claimed"
+     }
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "claimed",
+     "round": 1,
+     "version": 2,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "reopen_task",
+    "args": {
+     "task_id": "TASK_1"
+    }
+   },
+   "expect": {
+    "error": {
+     "status": 409,
+     "code": "task_state_claimed",
+     "message": "任务当前状态是进行中，做不了这一步"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "claimed",
+     "round": 1,
+     "version": 2,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "update_task",
+    "args": {
+     "task_id": "TASK_1",
+     "goal": "实现登录页的记住我功能（含退出登录后清除）"
+    }
+   },
+   "expect": {
+    "error": {
+     "status": 409,
+     "code": "v5_error",
+     "message": "expected_version 必填"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "claimed",
+     "round": 1,
+     "version": 2,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "dev1",
+    "tool": "submit_result",
+    "args": {
+     "task_id": "TASK_1",
+     "summary": "做完了",
+     "commit": "abc1234"
+    }
+   },
+   "expect": {
+    "result": {
+     "ok": true,
+     "state": "needs_decision"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "needs_decision",
+     "round": 1,
+     "version": 3,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": "no_reviewer",
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "update_task",
+    "args": {
+     "task_id": "TASK_1",
+     "expected_version": 3,
+     "goal": "实现登录页的记住我功能（含退出登录后清除）"
+    }
+   },
+   "expect": {
+    "error": {
+     "status": 409,
+     "code": "task_state_needs_decision",
+     "message": "任务当前状态是等你决定，做不了这一步"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "needs_decision",
+     "round": 1,
+     "version": 3,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": "no_reviewer",
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "decide_task",
+    "args": {
+     "task_id": "TASK_1",
+     "action": "done",
+     "reason": "确认"
+    }
+   },
+   "expect": {
+    "result": {
+     "ok": true,
+     "state": "done"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "done",
+     "round": 1,
+     "version": 4,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "withdraw_task",
+    "args": {
+     "task_id": "TASK_1"
+    }
+   },
+   "expect": {
+    "error": {
+     "status": 409,
+     "code": "task_state_done",
+     "message": "任务当前状态是完成，做不了这一步"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "done",
+     "round": 1,
+     "version": 4,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "reopen_task",
+    "args": {
+     "task_id": "TASK_1"
+    }
+   },
+   "expect": {
+    "result": {
+     "task": {
+      "task_id": "TASK_1",
+      "state": "queued",
+      "epoch": 2
+     }
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 5,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided",
+      "reopened"
+     ],
+     "channel_id": null,
+     "epoch": 2,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "start_task",
+    "args": {
+     "agent": "dev1",
+     "reviewer": "rev1",
+     "project_id": "proj",
+     "goal": "实现登录页的记住我功能"
+    }
+   },
+   "expect": {
+    "result": {
+     "task": {
+      "task_id": "TASK_2",
+      "state": "queued"
+     }
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 5,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided",
+      "reopened"
+     ],
+     "channel_id": null,
+     "epoch": 2,
+     "deleted": false
+    },
+    {
+     "ref": "TASK_2",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 1,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": "rev1",
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "dev1",
+    "tool": "claim_task",
+    "args": {
+     "task_id": "TASK_2"
+    }
+   },
+   "expect": {
+    "result": {
+     "task": {
+      "task_id": "TASK_2",
+      "state": "claimed"
+     }
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 5,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided",
+      "reopened"
+     ],
+     "channel_id": null,
+     "epoch": 2,
+     "deleted": false
+    },
+    {
+     "ref": "TASK_2",
+     "kind": "work",
+     "parent": null,
+     "state": "claimed",
+     "round": 1,
+     "version": 2,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": "rev1",
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "dev1",
+    "tool": "submit_result",
+    "args": {
+     "task_id": "TASK_2",
+     "summary": "已实现",
+     "branch": "feat/login"
+    }
+   },
+   "expect": {
+    "result": {
+     "ok": true,
+     "state": "reviewing"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 5,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided",
+      "reopened"
+     ],
+     "channel_id": null,
+     "epoch": 2,
+     "deleted": false
+    },
+    {
+     "ref": "TASK_2",
+     "kind": "work",
+     "parent": null,
+     "state": "reviewing",
+     "round": 1,
+     "version": 3,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": "rev1",
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "review_opened"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    },
+    {
+     "ref": "TASK_3",
+     "kind": "review",
+     "parent": "TASK_2",
+     "state": "queued",
+     "round": 1,
+     "version": 1,
+     "assignee_id": "rev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  },
+  {
+   "call": {
+    "actor": "boss",
+    "tool": "reopen_task",
+    "args": {
+     "task_id": "TASK_3"
+    }
+   },
+   "expect": {
+    "error": {
+     "status": 409,
+     "code": "v5_error",
+     "message": "只有工作任务可以重开"
+    }
+   },
+   "state_after": [
+    {
+     "ref": "TASK_1",
+     "kind": "work",
+     "parent": null,
+     "state": "queued",
+     "round": 1,
+     "version": 5,
+     "assignee_id": "dev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "decided",
+      "reopened"
+     ],
+     "channel_id": null,
+     "epoch": 2,
+     "deleted": false
+    },
+    {
+     "ref": "TASK_2",
+     "kind": "work",
+     "parent": null,
+     "state": "reviewing",
+     "round": 1,
+     "version": 3,
+     "assignee_id": "dev1",
+     "claimed_by_id": "dev1",
+     "reserved_for_id": null,
+     "reviewer_id": "rev1",
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [
+      "created",
+      "claimed",
+      "submitted",
+      "review_opened"
+     ],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    },
+    {
+     "ref": "TASK_3",
+     "kind": "review",
+     "parent": "TASK_2",
+     "state": "queued",
+     "round": 1,
+     "version": 1,
+     "assignee_id": "rev1",
+     "claimed_by_id": null,
+     "reserved_for_id": null,
+     "reviewer_id": null,
+     "decision_reason": null,
+     "verdict": null,
+     "delivery_pages": 0,
+     "delivery_total_pages": 0,
+     "events": [],
+     "channel_id": null,
+     "epoch": 1,
+     "deleted": false
+    }
+   ]
+  }
+ ]
 }

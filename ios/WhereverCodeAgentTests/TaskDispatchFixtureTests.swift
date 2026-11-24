@@ -38,10 +38,13 @@ final class TaskDispatchFixtureTests: XCTestCase {
         "b02-withdraw-queued",
         "b02-withdraw-reviewing",
         "b03-reopen-task",
+        "b04-channel-idempotency",
+        "b05-soft-delete",
         "b06-role-exposure",
         "c01-adversarial-delivery",
         "c02-adversarial-basics",
         "c03-adversarial-pages",
+        "c07-new-tool-guards",
     ]
 
     /// 录制时的显示名（recorder 口径）：directory 与 callerName 都用它。

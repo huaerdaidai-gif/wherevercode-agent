@@ -158,10 +158,47 @@ public final class TaskDispatchService {
         }
     }
 
-    /// UI 软删除（spec §2.17）：不是 MCP 工具，只供任务页调用。W11 落地。
-    public func uiDeleteTask(args: [String: Any], callerId: String) throws -> [String: Any] {
+    /// UI 软删除（spec §2.17）：不是 MCP 工具，只供任务页调用。
+    /// 仅终态 work 任务；仅建单人或频道 owner（isChannelOwner 由
+    /// LCS 按频道成员角色算好传入）。重复删除幂等成功（不 +version、
+    /// 不写事件，同 withdraw 口径）。list 排除、get_task 留墓碑。
+    public func uiDeleteTask(args: [String: Any], callerId: String,
+                             callerName: String? = nil,
+                             isChannelOwner: Bool = false) throws -> [String: Any] {
         lock.lock(); defer { lock.unlock() }
-        throw TaskDispatchError("任务派工尚未启用")
+        rollbackPoint = store.snapshotText()
+        do {
+            guard let task = stringArg(args, "task_id").flatMap({ store.tasks[$0] }) else {
+                throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+            }
+            if callerId != task.createdBy && !isChannelOwner {
+                throw TaskDispatchError(
+                    "只有建单人或频道 owner 可以删除",
+                    status: 403, code: "task_forbidden")
+            }
+            if task.kind != "work" {
+                throw TaskDispatchError("只有工作任务可以删除")
+            }
+            if task.state != TaskDispatchSpec.approved &&
+                task.state != TaskDispatchSpec.done &&
+                task.state != TaskDispatchSpec.cancelled {
+                throw TaskDispatchError(
+                    "只有终态任务可以删除",
+                    status: 409, code: "task_not_terminal")
+            }
+            if task.deletedAt == nil {
+                task.deletedAt = now()
+                task.deletedBy = callerId
+                touch(task)
+                event(taskId: task.taskId, who: callerName ?? callerId,
+                      kind: "deleted", text: "任务已删除")
+            }
+            store.persist()
+            return ["ok": true, "task": ownerView(task)]
+        } catch let error as TaskDispatchError {
+            store.restoreFromText(rollbackPoint)
+            throw error
+        }
     }
 
     // ---- 基础件 ----------------------------------------------------------

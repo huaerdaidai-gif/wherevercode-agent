@@ -309,8 +309,10 @@ def b05():
     t1 = T("TASK_1", "work", "claimed", 2, ["created", "claimed"], claimed="dev1")
     steps.append(step("dev1", "claim_task", {"task_id": "TASK_1"},
                       ok({"task": {"task_id": "TASK_1", "state": "claimed"}}), [t1]))
+    # 基线实测（a08 录制）：submit 转 needs_decision 不清 claimed_by，
+    # decide 才清——此处期望须与录制组一致。
     t1 = T("TASK_1", "work", "needs_decision", 3, ["created", "claimed", "submitted"],
-           decision="no_reviewer")
+           claimed="dev1", decision="no_reviewer")
     steps.append(step("dev1", "submit_result",
                       {"task_id": "TASK_1", "summary": "做完了", "commit": "abc1234"},
                       ok({"ok": True, "state": "needs_decision"}), [t1]))
@@ -377,8 +379,10 @@ def c07():
                       err(409, "task_state_claimed", "任务当前状态是进行中，做不了这一步"), [t1]))
     steps.append(step("boss", "update_task", {"task_id": "TASK_1", "goal": GOAL2},
                       err(409, "v5_error", "expected_version 必填"), [t1]))
+    # 基线实测（a08 录制）：submit 转 needs_decision 不清 claimed_by，
+    # decide 才清——此处期望须与录制组一致。
     t1 = T("TASK_1", "work", "needs_decision", 3, ["created", "claimed", "submitted"],
-           decision="no_reviewer")
+           claimed="dev1", decision="no_reviewer")
     steps.append(step("dev1", "submit_result",
                       {"task_id": "TASK_1", "summary": "做完了", "commit": "abc1234"},
                       ok({"ok": True, "state": "needs_decision"}), [t1]))

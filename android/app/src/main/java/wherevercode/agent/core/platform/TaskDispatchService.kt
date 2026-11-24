@@ -169,10 +169,56 @@ class TaskDispatchService(
         }
     }
 
-    /** UI 软删除（spec §2.17）：不是 MCP 工具，只供任务页调用。W11 落地。 */
+    /**
+     * UI 软删除（spec §2.17）：不是 MCP 工具，只供任务页调用。
+     * 仅终态 work 任务；仅建单人或频道 owner（[isChannelOwner] 由
+     * LCS 按频道成员角色算好传入）。重复删除幂等成功（不 +version、
+     * 不写事件，同 withdraw 口径）。list 排除、get_task 留墓碑。
+     */
     @Synchronized
-    fun uiDeleteTask(args: JSONObject, callerId: String): JSONObject {
-        throw TaskDispatchException("任务派工尚未启用")
+    fun uiDeleteTask(
+        args: JSONObject,
+        callerId: String,
+        callerName: String = callerId,
+        isChannelOwner: Boolean = false,
+    ): JSONObject {
+        rollbackPoint = store.snapshotText()
+        try {
+            val task = stringArg(args, "task_id")?.let { store.tasks[it] }
+                ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+            if (callerId != task.createdBy && !isChannelOwner) {
+                throw TaskDispatchException(
+                    "只有建单人或频道 owner 可以删除",
+                    403, "task_forbidden",
+                )
+            }
+            if (task.kind != "work") {
+                throw TaskDispatchException("只有工作任务可以删除")
+            }
+            if (task.state != TaskDispatchSpec.APPROVED &&
+                task.state != TaskDispatchSpec.DONE &&
+                task.state != TaskDispatchSpec.CANCELLED
+            ) {
+                throw TaskDispatchException(
+                    "只有终态任务可以删除",
+                    409, "task_not_terminal",
+                )
+            }
+            if (task.deletedAt == null) {
+                task.deletedAt = now()
+                task.deletedBy = callerId
+                touch(task)
+                event(task.taskId, callerName, "deleted", "任务已删除")
+            }
+            store.persist()
+            return JSONObject().apply {
+                put("ok", true)
+                put("task", ownerView(task))
+            }
+        } catch (e: TaskDispatchException) {
+            store.restoreFromText(rollbackPoint)
+            throw e
+        }
     }
 
     // ---- 基础件 ----------------------------------------------------------
