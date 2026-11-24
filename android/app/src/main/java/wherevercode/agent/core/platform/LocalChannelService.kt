@@ -272,6 +272,31 @@ class LocalChannelService(
         },
     )
 
+    // ---- 三期上行（云端派单落本地 / 事件回流） -----------------------------
+
+    /** 非归档、非私聊的本地频道 id 列表（seat_register 上报用）。 */
+    @Synchronized
+    fun localChannelIds(): List<String> =
+        channels.values.filter { !it.archived && it.kind != "dm" }.map { it.id }
+
+    /** 本地任务事件出口（仅云端派单任务；见 [TaskDispatchService.eventSink]）。 */
+    fun setTaskEventSink(sink: ((TaskEventRecord, TaskRecord) -> Unit)?) {
+        taskDispatch.eventSink = sink
+    }
+
+    /**
+     * 云端 task_dispatch 落本地：同一 task_id 建单（queued），绑定到默认本地频道
+     * （无默认频道则取第一个本地频道）；已存在返回 false（幂等）。
+     */
+    @Synchronized
+    fun ingestCloudTask(cloudTask: JSONObject): Boolean {
+        val target = storedDefaultChannelId.takeIf { it.isNotBlank() && channels.containsKey(it) }
+            ?: localChannelIds().firstOrNull()
+        return taskDispatch.ingestCloudTask(
+            cloudTask, target, LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME,
+        )
+    }
+
     /** UI 软删除任务（spec §2.17）：任务页专用入口，不进 MCP 工具表。 */
     @Synchronized
     fun uiDeleteTask(taskId: String): JSONObject =

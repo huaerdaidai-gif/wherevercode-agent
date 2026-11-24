@@ -88,6 +88,10 @@ class TaskDispatchService(
         private val SHA_RE = Regex("^[0-9a-f]{7,64}$")
         private val URL_RE = Regex("^https?://\\S{1,2000}$")
 
+        /** 云端派单任务的来源标记（createdBy）：三期上行只回流这类任务。 */
+        const val CLOUD_ORIGIN = "cloud-dispatch"
+        private val CLOUD_TASK_ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
+
         fun isTaskTool(tool: String): Boolean = tool in ALL_TOOLS
 
         /** tools/list 的名单：owner = 干活 9 + 派单 7（顺序同 spec §6）。 */
@@ -138,11 +142,83 @@ class TaskDispatchService(
             }
             store.persist()
             writeBackEvents(seqBefore)
+            emitToSink(seqBefore)
             return result
         } catch (e: TaskDispatchException) {
             store.restoreFromText(rollbackPoint)
             throw e
         }
+    }
+
+    /**
+     * 三期上行：本地任务事件出口（成功落盘后才发，回滚的调用不会泄露事件）。
+     * 只带 createdBy == [CLOUD_ORIGIN] 的云端派单任务；seq 沿用账本单调 seq。
+     */
+    @Volatile
+    var eventSink: ((TaskEventRecord, TaskRecord) -> Unit)? = null
+
+    private fun emitToSink(afterSeq: Long) {
+        val sink = eventSink ?: return
+        for (event in store.events.toList()) {
+            if (event.seq <= afterSeq) continue
+            val task = store.tasks[event.taskId] ?: continue
+            if (task.createdBy != CLOUD_ORIGIN) continue
+            runCatching { sink(event, task) }
+        }
+    }
+
+    /**
+     * 三期下行：云端 task_dispatch 以**同一个 task_id** 在本地建单（queued）。
+     * 幂等：task_id 已存在返回 false（调用方照常 ack，不重复建单）。
+     * 执行身份 = 本机 App（local-app，契约“成员对号”）；goal 超长按既有口径截断。
+     */
+    @Synchronized
+    fun ingestCloudTask(cloudTask: JSONObject, localChannelId: String?, executorId: String, executorName: String): Boolean {
+        val taskId = cloudTask.optString("task_id", "")
+        if (!CLOUD_TASK_ID_RE.matches(taskId)) throw TaskDispatchException("task_id 格式无效", 400, "bad_request")
+        if (store.tasks.containsKey(taskId)) return false
+        val goalRaw = cloudTask.optString("goal", "")
+        val goal = goalRaw.take(TaskDispatchSpec.MAX_GOAL_CHARS)
+        val titleRaw = cloudTask.optString("title", "")
+        val title = (if (titleRaw.isNotBlank()) titleRaw.trim() else goal.split("\n").first())
+            .take(TaskDispatchSpec.MAX_TITLE_CHARS)
+        val maxRounds = cloudTask.optInt("max_rounds", TaskDispatchSpec.DEFAULT_MAX_ROUNDS).coerceIn(1, 20)
+        val t = now()
+        val task = TaskRecord(
+            taskId = taskId,
+            projectId = cloudTask.optString("project_id", "cloud").ifBlank { "cloud" }.take(120),
+            kind = "work",
+            parentId = null,
+            assigneeId = executorId,
+            assigneeName = executorName,
+            reviewerId = null,
+            reviewerName = null,
+            title = title,
+            goal = goal,
+            state = TaskDispatchSpec.QUEUED,
+            round = 1,
+            maxRounds = maxRounds,
+            leaseUntil = null,
+            summary = null,
+            branch = null,
+            commitSha = null,
+            prUrl = null,
+            verdict = null,
+            feedback = null,
+            decisionReason = null,
+            claimedById = null,
+            claimedByName = null,
+            reservedForId = null,
+            reservedUntil = null,
+            channelId = localChannelId,
+            createdBy = CLOUD_ORIGIN,
+            createdAt = t,
+            updatedAt = t,
+        )
+        store.tasks[taskId] = task
+        event(taskId, CLOUD_ORIGIN, "created", "云端派单已落本地" + if (goalRaw.length > goal.length) "（goal 已截断）" else "")
+        store.persist()
+        return true
     }
 
     /**
