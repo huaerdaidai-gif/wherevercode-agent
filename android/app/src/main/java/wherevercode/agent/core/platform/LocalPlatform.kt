@@ -175,6 +175,16 @@ object LocalPlatform {
      * 没凭证或地址无效就停。MainActivity 启动与凭证变更后调用。
      */
     fun armSeatUplink(context: Context) {
+        try {
+            armSeatUplinkOrThrow(context)
+        } catch (_: Exception) {
+            // 席位是尽力而为：凭证存储/连接配置的任何异常都不许拖垮
+            // App 启动（ Robolectric 等无 Keystore 环境同理）。
+            stopSeatUplink()
+        }
+    }
+
+    private fun armSeatUplinkOrThrow(context: Context) {
         val appContext = context.applicationContext
         val token = PlatformAgentCredentialStore.create(appContext)
             .loadPlatformToken()?.trim().orEmpty()
