@@ -237,7 +237,12 @@ class TeamChannelController(
     private var lastNoticeText: String? = null
     private var lastNoticeAtMs: Long = 0
     private val clearNoticeRunnable = Runnable {
-        if (noticeLine.text.toString() == lastNoticeText) noticeLine.text = ""
+        if (noticeLine.text.toString() == lastNoticeText) {
+            noticeLine.text = ""
+            // 列表层没有常驻提示行：文案过期清空时把行一并收起，
+            // 不留空白带（对话层提示行是对话框铬的一部分，保持原样）。
+            if (snapshot?.listMode == true) noticeLine.visibility = View.GONE
+        }
     }
 
     private val replyBanner: TextView = UiKit.text(context, "", 11f, R.color.accent).apply {
