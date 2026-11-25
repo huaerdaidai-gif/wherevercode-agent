@@ -624,7 +624,15 @@ class TeamChannelController(
             setDialogChromeVisible(false, diagnostic != null)
             if (noticeLine.text.isNotBlank()) noticeLine.visibility = View.VISIBLE
             bodyContainer.addView(segmentRow(snapshot))
-            bodyContainer.addView(channelListSearchRow())
+            // 238：与 iOS 对齐——列表为空（无频道/无私聊）时不显示搜索框。
+            val hasSearchableEntries = if (snapshot.dmMode) {
+                snapshot.dmChannels.isNotEmpty()
+            } else {
+                snapshot.channels.any { it.kind != "dm" }
+            }
+            if (hasSearchableEntries) {
+                bodyContainer.addView(channelListSearchRow())
+            }
             val listContainer = UiKit.vertical(context)
             channelListContainer = listContainer
             fillChannelList(listContainer, snapshot)

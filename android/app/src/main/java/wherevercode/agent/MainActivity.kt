@@ -481,6 +481,10 @@ class MainActivity : AppCompatActivity() {
     private var teamChannelKeepConversation = false
     /** 最近一次从平台拉到的频道列表缓存（团队空间切换行与私聊列表共用）。 */
     private var teamChannelChannelsCache: List<ChannelSummary> = emptyList()
+
+    /** 238：频道列表至少成功加载过一次（活动频道存在性校验的云端依据）。 */
+    @Volatile
+    private var teamChannelListLoaded = false
     /** 云端层频道缓存（237 切换面板用）：当前端点在云端时随列表刷新同步更新。 */
     private var teamChannelCloudCache: List<ChannelSummary> = emptyList()
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
@@ -6433,7 +6437,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
         val (host, channelId) = endpoint
-        val activeId = teamChannelActiveId ?: channelId
+        val activeId = resolveValidActiveChannelId(host, teamChannelActiveId ?: channelId)
         val (messages, feed) = teamChannelFeedSnapshot(activeId)
         val lastReadId = teamChannelLastReadId(activeId)
         // 218 计数口径 B（与 iOS 同一定义）：未读只按本机已读游标在
@@ -7426,6 +7430,7 @@ class MainActivity : AppCompatActivity() {
                 val endpoint = teamChannelEndpoint()
                 if (endpoint != null) {
                     teamChannelChannelsCache = teamChannelTransport(endpoint.first).listChannels()
+                    teamChannelListLoaded = true
                     if (!LocalPlatform.isLocalHost(endpoint.first)) {
                         teamChannelCloudCache = teamChannelChannelsCache
                     }
@@ -7723,6 +7728,47 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
             .getString(if (layer == "local") KEY_ACTIVE_CHANNEL_ID_LOCAL else KEY_ACTIVE_CHANNEL_ID_CLOUD, null)
             ?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * 238（Issue #22 升级路径修复）：记住的活动频道可能已不存在——旧版种子
+     * 频道被一次性清理、或当前频道被删除后，持久化的活动 id 仍指向它，
+     * 频道页会掉进无名、无消息的空白对话。组装快照前先校验存在性：本地层
+     * 问本地服务（权威，含私聊），云端层看已成功加载的频道列表缓存；确认
+     * 不存在则清掉内存与持久化记忆并返回空串，快照随之回落列表层（空态）。
+     * 列表从未成功加载过（离线首启）时不下结论，保持原行为。
+     */
+    private fun resolveValidActiveChannelId(host: String, candidate: String): String {
+        if (candidate.isBlank()) return candidate
+        val exists = when {
+            LocalPlatform.isLocalHost(host) -> try {
+                LocalPlatform.serviceOrNull()?.channelExists(candidate) ?: true
+            } catch (_: Exception) {
+                true
+            }
+            teamChannelListLoaded -> teamChannelChannelsCache.any { it.id == candidate }
+            else -> true
+        }
+        if (exists) return candidate
+        teamChannelActiveId = null
+        clearSavedActiveChannelId(candidate)
+        return ""
+    }
+
+    /** 只清与失效值一致的持久化活动频道记忆，不动其他层的有效记忆。 */
+    private fun clearSavedActiveChannelId(staleId: String) {
+        val prefs = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+        val editor = prefs.edit()
+        if (prefs.getString(KEY_ACTIVE_CHANNEL_ID, null) == staleId) {
+            editor.remove(KEY_ACTIVE_CHANNEL_ID)
+        }
+        if (prefs.getString(KEY_ACTIVE_CHANNEL_ID_LOCAL, null) == staleId) {
+            editor.remove(KEY_ACTIVE_CHANNEL_ID_LOCAL)
+        }
+        if (prefs.getString(KEY_ACTIVE_CHANNEL_ID_CLOUD, null) == staleId) {
+            editor.remove(KEY_ACTIVE_CHANNEL_ID_CLOUD)
+        }
+        editor.apply()
+    }
 
     private fun persistActiveTeamChannel(channelId: String) {
         saveActiveChannelId(channelId)
