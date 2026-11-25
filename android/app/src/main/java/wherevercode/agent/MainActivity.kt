@@ -1765,6 +1765,7 @@ class MainActivity : AppCompatActivity() {
             },
             onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onCreateNew = { showChannelCreateMenu() },
+            onCreateChannelDirect = { showCreateChannelPage() },
             onOpenDrawer = { openDrawer() },
             onSwitchChannel = { channelId ->
                 teamChannelListMode = false
@@ -6847,7 +6848,7 @@ class MainActivity : AppCompatActivity() {
         ListDialog.show(this, "新建", null, options) { which ->
             when (which) {
                 0 -> firstAction()
-                1 -> showChannelNameDialog(create = true)
+                1 -> showCreateChannelPage()
                 2 -> {
                     // 发起私聊：切到私聊分段列表页（方案 A），从频道
                     // 成员名单点人发起（控制器 onStartDm），不在此凭空建。
@@ -6858,6 +6859,150 @@ class MainActivity : AppCompatActivity() {
                 3 -> showEntry(DrawerRouter.ID_MESSAGE_CENTER)
             }
         }
+    }
+
+    /**
+     * 新建频道整页（238 对齐批，与 iOS 新建 sheet 同形）：顶栏
+     * 「取消／创建」白胶囊钮＋大标题＋「频道」分节＋大圆角输入框
+     * （预填「本地频道」）；云端可用时带「放在」分段（本机/云端，
+     * 默认当前层）。创建仍走 [createChannelOnLayer]（含重名处理、
+     * 成功后落入新频道、失败 toast）；改名仍走原对话框，不动。
+     * 页头菜单与列表空态钮都直达本页（iOS 同行为）。
+     */
+    private fun showCreateChannelPage() {
+        val cloudAvailable = hasSavedPlatformToken() && resolvedPlatformHost().isNotBlank()
+        var chosenLayer = currentChannelLayer()
+        if (chosenLayer == "cloud" && !cloudAvailable) chosenLayer = "local"
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val root = UiKit.vertical(this).apply {
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bg))
+        }
+        val nameInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            minLines = 1
+            maxLines = 1
+            textSize = 16f
+            setText("本地频道")
+            setSelection(text.length)
+            setBackgroundResource(R.drawable.bg_input_card)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = dp(16)
+                rightMargin = dp(16)
+            }
+        }
+        // 顶栏：取消（左）／创建（右），白胶囊描边钮（iOS toolbar 同形）。
+        val topBar = UiKit.horizontal(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(14), dp(16), 0)
+        }
+        topBar.addView(
+            UiKit.text(this, "取消", 14f, R.color.text_primary).apply {
+                setBackgroundResource(R.drawable.bg_capsule_btn)
+                setPadding(dp(16), dp(8), dp(16), dp(8))
+                setOnClickListener { dialog.dismiss() }
+            },
+        )
+        topBar.addView(
+            View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        topBar.addView(
+            UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_capsule_btn)
+                setPadding(dp(16), dp(8), dp(16), dp(8))
+                setOnClickListener {
+                    val name = nameInput.text.toString().trim()
+                    if (name.isEmpty()) {
+                        toast("频道名称不能为空。")
+                    } else {
+                        createChannelOnLayer(chosenLayer, name)
+                        dialog.dismiss()
+                    }
+                }
+            },
+        )
+        root.addView(topBar)
+        root.addView(
+            UiKit.text(this, "新建频道", 28f, R.color.text_primary, bold = true).apply {
+                setPadding(dp(16), dp(20), dp(16), 0)
+            },
+        )
+        root.addView(
+            UiKit.text(this, "频道", 13f, R.color.text_secondary, bold = true).apply {
+                setPadding(dp(32), dp(16), dp(16), dp(6))
+            },
+        )
+        root.addView(nameInput)
+        if (cloudAvailable) {
+            root.addView(
+                UiKit.text(this, "放在", 13f, R.color.text_secondary, bold = true).apply {
+                    setPadding(dp(32), dp(20), dp(16), dp(6))
+                },
+            )
+            val track = UiKit.horizontal(this).apply {
+                setBackgroundResource(R.drawable.bg_segment_track)
+                setPadding(dp(2), dp(2), dp(2), dp(2))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    leftMargin = dp(16)
+                    rightMargin = dp(16)
+                }
+            }
+            lateinit var localSeg: TextView
+            lateinit var cloudSeg: TextView
+            fun refreshLayerSegs() {
+                listOf(localSeg to "local", cloudSeg to "cloud").forEach { (view, layer) ->
+                    val active = chosenLayer == layer
+                    if (active) {
+                        view.setBackgroundResource(R.drawable.bg_segment_active)
+                    } else {
+                        view.background = null
+                    }
+                    view.setTypeface(
+                        null,
+                        if (active) {
+                            android.graphics.Typeface.BOLD
+                        } else {
+                            android.graphics.Typeface.NORMAL
+                        },
+                    )
+                }
+            }
+            fun layerSegment(label: String, layer: String): TextView =
+                UiKit.text(this, label, 13f, R.color.text_primary).apply {
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(dp(14), dp(6), dp(14), dp(6))
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                    setOnClickListener {
+                        chosenLayer = layer
+                        refreshLayerSegs()
+                    }
+                }
+            localSeg = layerSegment("本机", "local")
+            cloudSeg = layerSegment("云端", "cloud")
+            track.addView(localSeg)
+            track.addView(cloudSeg)
+            root.addView(track)
+            refreshLayerSegs()
+        }
+        dialog.setContentView(root)
+        dialog.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+        )
+        dialog.show()
     }
 
     /** 管理操作的目标端点（当前频道 = 已保存的当前选择）；未连接时如实提示。 */
