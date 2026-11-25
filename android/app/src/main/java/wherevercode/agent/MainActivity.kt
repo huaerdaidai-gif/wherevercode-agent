@@ -1804,7 +1804,11 @@ class MainActivity : AppCompatActivity() {
             },
             onSchedulePost = { text, delaySeconds -> scheduleTeamChannelPost(text, delaySeconds) },
             onCancelScheduled = { id -> cancelTeamChannelScheduled(id) },
-            onNotifyModeChange = { mode -> setChannelNotifyMode(mode) },
+            onNotifyModeChange = { mode -> setChannelNotifyMode(activeTeamChannelId(), mode) },
+            onChannelSettings = { id -> showChannelSettings(id) },
+            onDmSettings = { id -> showDmSettings(id) },
+            onSetChannelNotify = { id, mode -> setChannelNotifyMode(id, mode) },
+            onToggleChannelArchived = { id, archived -> confirmArchiveChannel(id, archived) },
             onSearch = { query -> searchTeamChannel(query) },
             onSearchFiltered = { query, sender, fromTs, toTs, kind ->
                 searchTeamChannel(query, sender, fromTs, toTs, kind)
@@ -5443,7 +5447,7 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
-                "channel_manage" -> showChannelSettings()
+                "channel_manage" -> showChannelManagementList()
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
@@ -6491,6 +6495,12 @@ class MainActivity : AppCompatActivity() {
                 getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
                     .getString("notify_$activeId", null),
             ),
+            channelNotifyModes = teamChannelChannelsCache.associate { c ->
+                c.id to normalizeNotifyMode(
+                    getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                        .getString("notify_${c.id}", null),
+                )
+            },
             searchQuery = teamChannelSearchQuery,
             searchResults = teamChannelSearchResults,
             typingSenderName = teamChannelTypingSender,
@@ -6534,10 +6544,32 @@ class MainActivity : AppCompatActivity() {
      * 删除、成员、Webhook、通知）全在频道设置页里，见 [showChannelSettings]。
      */
     private fun showChannelCreateMenu() {
-        val options = listOf("管理频道", "新建频道", "发起私聊", "打开消息中心")
+        // 第一项随当前层级变（第二轮对齐 iOS）：列表层是「管理频道」
+        // （频道名单 → 点行进该频道设置页）；频道对话层是「频道设置」；
+        // 私聊对话层是「私聊设置」。其余三项与 iOS 顶栏菜单同序。
+        val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeTeamChannelId() }
+        val dmSummary = activeSummary?.takeIf { it.kind == "dm" }
+        val firstLabel: String
+        val firstAction: () -> Unit
+        when {
+            teamChannelListMode -> {
+                firstLabel = "管理频道"
+                firstAction = { showChannelManagementList() }
+            }
+            dmSummary != null -> {
+                firstLabel = "私聊设置"
+                val dmId = dmSummary.id
+                firstAction = { showDmSettings(dmId) }
+            }
+            else -> {
+                firstLabel = "频道设置"
+                firstAction = { showChannelSettings(activeTeamChannelId()) }
+            }
+        }
+        val options = listOf(firstLabel, "新建频道", "发起私聊", "打开消息中心")
         ListDialog.show(this, "新建", null, options) { which ->
             when (which) {
-                0 -> showChannelSettings()
+                0 -> firstAction()
                 1 -> showChannelNameDialog(create = true)
                 2 -> {
                     // 发起私聊：切到私聊分段列表页（方案 A），从频道
@@ -6559,11 +6591,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 新建频道／改名共用对话框（原「频道管理」菜单两项，逻辑未变）。 */
-    private fun showChannelNameDialog(create: Boolean) {
-        val channelId = if (create) null else requireChannelEndpoint()?.second ?: return
+    private fun showChannelNameDialog(create: Boolean, targetChannelId: String? = null) {
+        val channelId = if (create) null else (targetChannelId ?: requireChannelEndpoint()?.second ?: return)
         val input = EditText(this).apply { hint = if (create) "频道名称" else "新频道名称" }
         AlertDialog.Builder(this).setTitle(if (create) "新建频道" else "修改频道名称").setView(input)
-            .setNegativeButton("取消", null).setPositiveButton("确定") { _, _ ->
+            .setNegativeButton("取消", null).setPositiveButton(if (create) "创建" else "保存") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
                 if (create) performChannelManagement { it.createChannel(name) }
@@ -6572,8 +6604,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 归档／取消归档（原菜单只有归档；按 iOS 频道设置页的开关式同项补上取消归档）。 */
-    private fun confirmArchiveChannel(archived: Boolean) {
-        val (_, channelId) = requireChannelEndpoint() ?: return
+    private fun confirmArchiveChannel(channelId: String, archived: Boolean) {
+        requireChannelEndpoint() ?: return
         if (archived) {
             AlertDialog.Builder(this).setTitle("取消归档频道？")
                 .setMessage("将把频道移出归档，恢复到频道列表中。")
@@ -6589,8 +6621,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 添加成员：候选 = 本机已添加的平台 Agent（原菜单同逻辑）。 */
-    private fun addChannelMember() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
+    private fun addChannelMember(channelId: String) {
+        requireChannelEndpoint() ?: return
         val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
             .filter { PlatformAgent.isPlatformAgentRecord(it) }
         if (candidates.isEmpty()) { toast("没有可用的平台 Agent。"); return }
@@ -6601,15 +6633,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 移除成员（原菜单同逻辑：创建者不可移除，服务端拒绝时显示真实原因）。 */
-    private fun removeChannelMember() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
-        val members = teamChannelMembers().filterNot { it.isLocalApp }
+    /** 移除成员（名单取目标频道参与者明细；确认文案与 iOS 同字）。 */
+    private fun removeChannelMember(channelId: String) {
+        requireChannelEndpoint() ?: return
+        val members = teamChannelChannelsCache.firstOrNull { it.id == channelId }
+            ?.participantDetails?.filterNot { it.isSelf }.orEmpty()
         if (members.isEmpty()) { toast("当前没有可见的频道成员可移除。创建者不可移除。"); return }
-        ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.displayName }) { index ->
+        ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.agentName }) { index ->
             val member = members[index]
             AlertDialog.Builder(this).setTitle("移除频道成员？")
-                .setMessage("将从频道移除 ${member.displayName}。创建者不可移除；若服务端拒绝，将显示其返回原因。")
+                .setMessage("确定将 ${member.agentName} 移出此频道？")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("移除") { _, _ ->
                     performChannelManagement { it.removeChannelMember(channelId, member.agentId) }
@@ -6617,21 +6650,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 设置成员角色（原菜单同逻辑：仅频道 owner 可改，服务端校验）。 */
-    private fun setChannelMemberRole() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
-        val members = mergedTeamChannelMembers().filterNot { it.isLocalApp }
+    /** 设置成员角色（名单取目标频道参与者明细；仅频道 owner 可改，服务端校验）。 */
+    private fun setChannelMemberRole(channelId: String) {
+        requireChannelEndpoint() ?: return
+        val members = teamChannelChannelsCache.firstOrNull { it.id == channelId }
+            ?.participantDetails?.filterNot { it.isSelf }.orEmpty()
         if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return }
         val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
-        ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { m ->
-            m.displayName + "（当前：" + (roleNames.firstOrNull { it.first == m.role }?.second ?: m.role) + "）"
+        ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { mm ->
+            mm.agentName + "（当前：" + (roleNames.firstOrNull { it.first == mm.role }?.second ?: mm.role) + "）"
         }) { index ->
             val member = members[index]
-            ListDialog.show(this, "设置 ${member.displayName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
+            ListDialog.show(this, "设置 ${member.agentName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
                 val newRole = roleNames[roleIndex].first
                 if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
                 AlertDialog.Builder(this).setTitle("更改成员角色？")
-                    .setMessage("把 ${member.displayName} 的角色改为${roleNames[roleIndex].second}。")
+                    .setMessage("把 ${member.agentName} 的角色改为${roleNames[roleIndex].second}。")
                     .setNegativeButton("取消", null)
                     .setPositiveButton("更改") { _, _ ->
                         performChannelManagement { it.setChannelMemberRole(channelId, member.agentId, newRole) }
@@ -6640,20 +6674,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 删除频道（原菜单同逻辑：仅 owner 可删，服务端授权校验，不可撤销）。 */
-    private fun deleteActiveChannel() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
-        AlertDialog.Builder(this).setTitle("删除频道？")
-            .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
+    /** 删除频道（确认文案与 iOS 同字：仅 owner 有权限，服务端将验证权限）。 */
+    private fun deleteChannel(channelId: String) {
+        requireChannelEndpoint() ?: return
+        AlertDialog.Builder(this).setTitle("确定删除频道？")
+            .setMessage("删除无法撤销。仅频道 owner 有权限，服务端将验证权限。")
             .setNegativeButton("取消", null)
-            .setPositiveButton("删除") { _, _ ->
+            .setPositiveButton("删除频道") { _, _ ->
                 performChannelManagement { it.deleteChannel(channelId) }
             }.show()
     }
 
     /** 创建入帖 Webhook（原菜单同逻辑：服务端返回地址路径＋一次性密钥＋签名说明）。 */
-    private fun createChannelWebhook() {
-        val (host, channelId) = requireChannelEndpoint() ?: return
+    private fun createChannelWebhook(channelId: String) {
+        val (host, _) = requireChannelEndpoint() ?: return
         Thread {
             try {
                 val result = teamChannelTransport(host).createChannelWebhook(channelId)
@@ -6683,8 +6717,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 管理 Webhook：列表＋删除（原菜单同逻辑；secret 不回显，丢了删掉重建）。 */
-    private fun manageChannelWebhooks() {
-        val (host, channelId) = requireChannelEndpoint() ?: return
+    private fun manageChannelWebhooks(channelId: String) {
+        val (host, _) = requireChannelEndpoint() ?: return
         Thread {
             try {
                 val result = teamChannelTransport(host).listChannelWebhooks(channelId)
@@ -6729,31 +6763,38 @@ class MainActivity : AppCompatActivity() {
         else -> "全部消息"
     }
 
-    /** 逐频道通知档（本机偏好）：控制器成员行与频道设置页共用一处写。 */
-    private fun setChannelNotifyMode(mode: String) {
-        val channelId = activeTeamChannelId()
+    /** 逐频道通知档（本机偏好）：控制器成员行、频道/私聊设置页、列表长按共用一处写。 */
+    private fun setChannelNotifyMode(channelId: String, mode: String) {
         getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
             .edit().putString("notify_$channelId", mode).apply()
-        teamChannelNotice = "本频道通知：$mode"
+        teamChannelNotice =
+            if (channelId == activeTeamChannelId()) "本频道通知：$mode" else "通知已设为：$mode"
         refreshTeamChannel()
     }
 
+    /** 通知档说明文案（iOS 通知设置节同文案，随当前档位显示一行）。 */
+    private fun notifyModePrompt(mode: String): String = when (mode) {
+        "仅@我" -> "仅接收提及我的消息通知与未读提醒"
+        "静音" -> "不接收通知，不计入未读提醒"
+        else -> "接收所有新消息通知与未读计数"
+    }
+
     /**
-     * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构，Funk
-     * 2026-11-25 批）：频道信息（改名/归档/删除）／通知设置／入帖
-     * Webhook／频道成员四节。功能全是既有管理动作换摆法，一项不删；
-     * 通知档与 iOS 同词（全部消息/仅@我/静音），与成员行同值；旧值读时归一。
+     * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构）：频道信息
+     * （含 iOS 同有的频道性质/成员总数行，本机另留频道 ID 行）／通知设置
+     * （三档同词＋随档位说明一行）／入帖 Webhook／频道成员四节。
+     * 所有管理动作按传入的频道 id 执行，不再只认当前频道。
      */
-    private fun showChannelSettings() {
-        val endpoint = teamChannelEndpoint()
-        if (endpoint == null) {
+    private fun showChannelSettings(channelId: String) {
+        if (teamChannelEndpoint() == null) {
             toast("频道未连接；没有可管理的频道。")
             return
         }
-        val channelId = endpoint.second
         val summary = teamChannelChannelsCache.firstOrNull { it.id == channelId }
         val channelName = summary?.name?.takeIf { it.isNotBlank() } ?: "频道"
         val archived = summary?.archived == true
+        val memberTotal = summary?.participantDetails?.size?.takeIf { it > 0 }
+            ?: summary?.participantIds?.size ?: 0
         val notifyMode = normalizeNotifyMode(
             getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
                 .getString("notify_$channelId", null),
@@ -6796,25 +6837,117 @@ class MainActivity : AppCompatActivity() {
         sectionHeader("频道信息")
         infoLine("当前频道：$channelName")
         infoLine("频道 ID：$channelId")
-        actionRow("改名") { showChannelNameDialog(create = false) }
-        actionRow(if (archived) "取消归档" else "归档频道") { confirmArchiveChannel(archived) }
-        actionRow("删除频道", R.color.danger) { deleteActiveChannel() }
+        infoLine("频道性质：公开频道")
+        infoLine("成员总数：$memberTotal 人")
+        actionRow("改名") { showChannelNameDialog(create = false, targetChannelId = channelId) }
+        actionRow(if (archived) "取消归档" else "归档频道") { confirmArchiveChannel(channelId, archived) }
+        actionRow("删除频道", R.color.danger) { deleteChannel(channelId) }
         infoLine("仅频道 owner 可删除。删除权限由服务端校验。")
         sectionHeader("通知设置")
         listOf("全部消息", "仅@我", "静音").forEach { mode ->
-            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(mode) }
+            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(channelId, mode) }
         }
+        infoLine(notifyModePrompt(notifyMode))
         sectionHeader("入帖 Webhook")
-        actionRow("创建入帖 Webhook") { createChannelWebhook() }
-        actionRow("管理 Webhook") { manageChannelWebhooks() }
+        actionRow("创建入帖 Webhook") { createChannelWebhook(channelId) }
+        actionRow("管理 Webhook") { manageChannelWebhooks(channelId) }
         sectionHeader("频道成员")
-        actionRow("添加成员") { addChannelMember() }
-        actionRow("移除成员") { removeChannelMember() }
-        actionRow("设置成员角色") { setChannelMemberRole() }
+        actionRow("添加成员") { addChannelMember(channelId) }
+        actionRow("移除成员") { removeChannelMember(channelId) }
+        actionRow("设置成员角色") { setChannelMemberRole(channelId) }
 
         val scroll = ScrollView(this).apply { addView(container) }
         dialog = AlertDialog.Builder(this)
             .setTitle("频道设置")
+            .setView(scroll)
+            .setPositiveButton("完成", null)
+            .create()
+        dialog.show()
+    }
+
+    /** 管理频道（iOS 同构：先出频道名单，行尾标状态，点行进该频道的设置页）。 */
+    private fun showChannelManagementList() {
+        val channels = teamChannelChannelsCache.filter { it.kind != "dm" }
+        if (channels.isEmpty()) {
+            toast("暂无频道。")
+            return
+        }
+        val labels = channels.map { ch ->
+            "# ${ch.name}" + if (ch.archived) " · 已归档" else " · 活动中"
+        }
+        ListDialog.show(this, "管理频道", null, labels) { index ->
+            showChannelSettings(channels[index].id)
+        }
+    }
+
+    /** 频道角色中文名（与 iOS channelRoleLabel 同词）。 */
+    private fun channelRoleLabelText(role: String?): String = when (role) {
+        "owner" -> "创建者"
+        "coordinator" -> "协调员"
+        "member" -> "成员"
+        null -> "私聊"
+        else -> role
+    }
+
+    /** 私聊设置（iOS 私聊设置同节：私聊信息＋通知设置；通知档与频道共用本机偏好）。 */
+    private fun showDmSettings(dmId: String) {
+        val summary = teamChannelChannelsCache.firstOrNull { it.id == dmId }
+        val peer = summary?.participantDetails?.firstOrNull { !it.isSelf }
+        val peerName = peer?.agentName?.takeIf { it.isNotBlank() }
+            ?: summary?.name?.takeIf { it.isNotBlank() } ?: "私聊"
+        val identity = if (peer?.isAgent == false) "团队成员" else "平台 Agent"
+        val notifyMode = normalizeNotifyMode(
+            getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_$dmId", null),
+        )
+
+        lateinit var dialog: AlertDialog
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+            )
+        }
+        fun sectionHeader(label: String) {
+            container.addView(
+                UiKit.text(this, label, 13f, R.color.text_secondary, bold = true).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 16), 0, UiKit.dp(this@MainActivity, 4))
+                },
+            )
+        }
+        fun infoLine(text: String) {
+            container.addView(
+                UiKit.text(this, text, 12f, R.color.text_tertiary).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 2), 0, UiKit.dp(this@MainActivity, 2))
+                },
+            )
+        }
+        fun actionRow(label: String, onClick: () -> Unit) {
+            container.addView(
+                UiKit.text(this, label, 15f, R.color.text_primary).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 11), 0, UiKit.dp(this@MainActivity, 11))
+                    setOnClickListener {
+                        dialog.dismiss()
+                        onClick()
+                    }
+                },
+            )
+        }
+
+        sectionHeader("私聊信息")
+        infoLine("对象姓名：$peerName")
+        infoLine("身份类型：$identity")
+        infoLine("归属角色：${channelRoleLabelText(peer?.role)}")
+        sectionHeader("通知设置")
+        listOf("全部消息", "仅@我", "静音").forEach { mode ->
+            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(dmId, mode) }
+        }
+        infoLine(notifyModePrompt(notifyMode))
+
+        val scroll = ScrollView(this).apply { addView(container) }
+        dialog = AlertDialog.Builder(this)
+            .setTitle("私聊设置")
             .setView(scroll)
             .setPositiveButton("完成", null)
             .create()
