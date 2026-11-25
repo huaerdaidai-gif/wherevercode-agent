@@ -7731,27 +7731,40 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 238（Issue #22 升级路径修复）：记住的活动频道可能已不存在——旧版种子
-     * 频道被一次性清理、或当前频道被删除后，持久化的活动 id 仍指向它，
-     * 频道页会掉进无名、无消息的空白对话。组装快照前先校验存在性：本地层
-     * 问本地服务（权威，含私聊），云端层看已成功加载的频道列表缓存；确认
-     * 不存在则清掉内存与持久化记忆并返回空串，快照随之回落列表层（空态）。
-     * 列表从未成功加载过（离线首启）时不下结论，保持原行为。
+     * 频道被一次性清理、或当前频道被删除后，持久化的活动 id 仍指向它。
+     * 危害不止是快照落到死频道：[activeTeamChannelId] 优先返回持久化记忆，
+     * 它与快照的 activeChannelId 对不上时，刷新会判定「不一致」而只重刷
+     * 不渲染，页面永久冻结在空白骨架（237 升级路径实证）。组装快照前先
+     * 校验两处记忆：持久化 id 与端点候选都按存在性过一遍，确认不存在就
+     * 清掉；候选为空时也不能跳过持久化 id 的校验。存在性判定：本地层问
+     * 本地服务（权威，含私聊），云端层看已成功加载的频道列表缓存；暂不
+     * 可判（离线首启、列表未加载）时不动任何状态，保持原行为。
      */
     private fun resolveValidActiveChannelId(host: String, candidate: String): String {
-        if (candidate.isBlank()) return candidate
-        val exists = when {
-            LocalPlatform.isLocalHost(host) -> try {
-                LocalPlatform.serviceOrNull()?.channelExists(candidate) ?: true
-            } catch (_: Exception) {
-                true
-            }
-            teamChannelListLoaded -> teamChannelChannelsCache.any { it.id == candidate }
-            else -> true
+        val saved = savedActiveChannelId()
+        if (saved != null && saved != candidate &&
+            channelExistsForGuard(host, saved) == false
+        ) {
+            clearSavedActiveChannelId(saved)
         }
-        if (exists) return candidate
-        teamChannelActiveId = null
-        clearSavedActiveChannelId(candidate)
-        return ""
+        if (candidate.isBlank()) return candidate
+        if (channelExistsForGuard(host, candidate) == false) {
+            teamChannelActiveId = null
+            clearSavedActiveChannelId(candidate)
+            return ""
+        }
+        return candidate
+    }
+
+    /** 活动频道存在性判定：true/false 为确凿结论，null 为暂不可判。 */
+    private fun channelExistsForGuard(host: String, channelId: String): Boolean? = when {
+        LocalPlatform.isLocalHost(host) -> try {
+            LocalPlatform.serviceOrNull()?.channelExists(channelId)
+        } catch (_: Exception) {
+            null
+        }
+        teamChannelListLoaded -> teamChannelChannelsCache.any { it.id == channelId }
+        else -> null
     }
 
     /** 只清与失效值一致的持久化活动频道记忆，不动其他层的有效记忆。 */
