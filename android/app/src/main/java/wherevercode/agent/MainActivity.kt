@@ -6487,8 +6487,10 @@ class MainActivity : AppCompatActivity() {
                     synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
             ),
             scheduled = loadScheduledPosts().filter { it.channelId == activeId },
-            notifyMode = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
-                .getString("notify_$activeId", "全部") ?: "全部",
+            notifyMode = normalizeNotifyMode(
+                getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                    .getString("notify_$activeId", null),
+            ),
             searchQuery = teamChannelSearchQuery,
             searchResults = teamChannelSearchResults,
             typingSenderName = teamChannelTypingSender,
@@ -6720,6 +6722,13 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /** 通知档归一（与 iOS 同词）：全部消息/仅@我/静音；旧值（全部/免打扰）读时迁移。 */
+    private fun normalizeNotifyMode(raw: String?): String = when (raw) {
+        "仅@我" -> "仅@我"
+        "静音", "免打扰" -> "静音"
+        else -> "全部消息"
+    }
+
     /** 逐频道通知档（本机偏好）：控制器成员行与频道设置页共用一处写。 */
     private fun setChannelNotifyMode(mode: String) {
         val channelId = activeTeamChannelId()
@@ -6733,7 +6742,7 @@ class MainActivity : AppCompatActivity() {
      * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构，Funk
      * 2026-11-25 批）：频道信息（改名/归档/删除）／通知设置／入帖
      * Webhook／频道成员四节。功能全是既有管理动作换摆法，一项不删；
-     * 通知档沿用本机既有三档（全部/仅@我/免打扰），与成员行同值。
+     * 通知档与 iOS 同词（全部消息/仅@我/静音），与成员行同值；旧值读时归一。
      */
     private fun showChannelSettings() {
         val endpoint = teamChannelEndpoint()
@@ -6745,8 +6754,10 @@ class MainActivity : AppCompatActivity() {
         val summary = teamChannelChannelsCache.firstOrNull { it.id == channelId }
         val channelName = summary?.name?.takeIf { it.isNotBlank() } ?: "频道"
         val archived = summary?.archived == true
-        val notifyMode = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
-            .getString("notify_$channelId", "全部") ?: "全部"
+        val notifyMode = normalizeNotifyMode(
+            getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_$channelId", null),
+        )
 
         lateinit var dialog: AlertDialog
         val container = LinearLayout(this).apply {
@@ -6790,7 +6801,7 @@ class MainActivity : AppCompatActivity() {
         actionRow("删除频道", R.color.danger) { deleteActiveChannel() }
         infoLine("仅频道 owner 可删除。删除权限由服务端校验。")
         sectionHeader("通知设置")
-        listOf("全部", "仅@我", "免打扰").forEach { mode ->
+        listOf("全部消息", "仅@我", "静音").forEach { mode ->
             actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(mode) }
         }
         sectionHeader("入帖 Webhook")

@@ -69,8 +69,8 @@ data class TeamChannelSnapshot(
     val messageCenter: MessageCenter? = null,
     /** 待发的定时消息（频道补全二期）。 */
     val scheduled: List<ScheduledChannelPost> = emptyList(),
-    /** 本频道通知档：全部 / 仅@我 / 免打扰（本机偏好，频道补全三期）。 */
-    val notifyMode: String = "全部",
+    /** 本频道通知档：全部消息 / 仅@我 / 静音（与 iOS 同词；本机偏好，频道补全三期）。 */
+    val notifyMode: String = "全部消息",
     /** 频道内搜索词（非空且 searchResults 非 null 时列表显示搜索结果）。 */
     val searchQuery: String = "",
     val searchResults: List<PlatformChannelMessage>? = null,
@@ -743,16 +743,16 @@ class TeamChannelController(
         }
         scroller.addView(chips)
         row.addView(scroller)
-        // 逐频道通知档（本机偏好）：全部 → 仅@我 → 免打扰 循环切换。
+        // 逐频道通知档（本机偏好）：全部消息 → 仅@我 → 静音 循环切换。
         row.addView(
             UiKit.text(context, "通知：${snapshot.notifyMode}", 11f, R.color.text_secondary).apply {
                 setBackgroundResource(R.drawable.bg_chip)
                 setPadding(dp(8), dp(6), dp(8), dp(6))
                 setOnClickListener {
                     val next = when (snapshot.notifyMode) {
-                        "全部" -> "仅@我"
-                        "仅@我" -> "免打扰"
-                        else -> "全部"
+                        "全部消息" -> "仅@我"
+                        "仅@我" -> "静音"
+                        else -> "全部消息"
                     }
                     onNotifyModeChange(next)
                 }
