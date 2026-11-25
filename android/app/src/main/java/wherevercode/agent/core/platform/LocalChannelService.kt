@@ -108,6 +108,7 @@ class LocalChannelService(
     private val effectKeys = HashMap<String, String>()
     private var seqCounter = 0L
     private var storedDefaultChannelId: String = ""
+    private var seedCleanupV1Done: Boolean = false
 
     private val listeners = HashMap<String, MutableList<(JSONObject) -> Unit>>()
 
@@ -143,9 +144,10 @@ class LocalChannelService(
     @Synchronized
     fun isRegisteredAgent(agentId: String): Boolean = agents.containsKey(agentId)
 
-    /** 本地默认频道 id（首次启动种子建好，之后稳定不变）。 */
+    /** 旧种子频道的 id（种子已取消：仅当该频道仍存在时返回，否则空串）。 */
     @Synchronized
-    fun defaultChannelId(): String = storedDefaultChannelId
+    fun defaultChannelId(): String =
+        storedDefaultChannelId.takeIf { it.isNotBlank() && channels.containsKey(it) } ?: ""
 
     @Synchronized
     fun channelExists(channelId: String): Boolean = channels.containsKey(channelId)
@@ -157,23 +159,47 @@ class LocalChannelService(
 
     private fun ensureSeed() {
         registerAgent(LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME)
-        if (storedDefaultChannelId.isBlank() || !channels.containsKey(storedDefaultChannelId)) {
-            val channel = Channel(
-                id = newId(),
-                name = DEFAULT_CHANNEL_NAME,
-                kind = "channel",
-                archived = false,
-                historyVisible = true,
-                createdAt = clock(),
-            )
-            channels[channel.id] = channel
-            members[channel.id] = mutableListOf(
-                Member(LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME, "owner", clock()),
-            )
-            messages[channel.id] = mutableListOf()
-            storedDefaultChannelId = channel.id
-            persist()
+        cleanupSeededChannelIfNeeded()
+    }
+
+    /**
+     * 一次性清理（Issue #22）：旧版本自动种下的默认频道，若仍叫默认名且零消息，
+     * 静默删除；有消息的一律保留。迁移标记防重复执行。
+     */
+    private fun cleanupSeededChannelIfNeeded() {
+        if (seedCleanupV1Done) return
+        seedCleanupV1Done = true
+        val seededId = storedDefaultChannelId
+        val channel = channels[seededId]
+        if (seededId.isNotBlank() && channel != null &&
+            channel.name == DEFAULT_CHANNEL_NAME &&
+            messages[seededId].isNullOrEmpty()
+        ) {
+            channels.remove(seededId)
+            members.remove(seededId)
+            messages.remove(seededId)
+            webhooks.removeAll { it.channelId == seededId }
+            readMarkers.keys.removeAll { it.startsWith(seededId + "|") }
+            storedDefaultChannelId = ""
         }
+        persist()
+    }
+
+    /** 派单落点规则（Issue #22）：显式指定 ＞ 唯一本地频道 ＞ 挂起待落地（返回 null）。 */
+    private fun resolveLandingChannelId(requested: String?): String? {
+        val req = requested?.trim().orEmpty()
+        if (req.isNotEmpty() && channels.containsKey(req)) return req
+        val locals = channels.values.filter { it.kind == "channel" && !it.archived }
+        return if (locals.size == 1) locals[0].id else null
+    }
+
+    /** 新建频道重名自动加序号（Issue #22）：「本地频道」→「本地频道 2」→「本地频道 3」…… */
+    private fun uniqueChannelName(name: String): String {
+        val taken = channels.values.filter { !it.archived }.map { it.name }.toSet()
+        if (name !in taken) return name
+        var n = 2
+        while ("$name $n" in taken) n++
+        return "$name $n"
     }
 
     // ---- 实时推送（本地总线，喂给频道页的 WS 形状事件） --------------------
@@ -290,8 +316,7 @@ class LocalChannelService(
      */
     @Synchronized
     fun ingestCloudTask(cloudTask: JSONObject): Boolean {
-        val target = storedDefaultChannelId.takeIf { it.isNotBlank() && channels.containsKey(it) }
-            ?: localChannelIds().firstOrNull()
+        val target = resolveLandingChannelId(cloudTask.optString("local_channel_id", "").ifBlank { null })
         return taskDispatch.ingestCloudTask(
             cloudTask, target, LocalPlatform.APP_AGENT_ID, LocalPlatform.APP_AGENT_NAME,
         )
@@ -426,7 +451,7 @@ class LocalChannelService(
     }
 
     private fun createChannel(args: JSONObject, callerId: String, callerName: String): JSONObject {
-        val name = reqText(args, "name", 100)
+        val name = uniqueChannelName(reqText(args, "name", 100))
         val channel = Channel(newId(), name, "channel", false, true, clock())
         channels[channel.id] = channel
         members[channel.id] = mutableListOf(Member(callerId, callerName, "owner", clock()))
@@ -873,6 +898,7 @@ class LocalChannelService(
         val root = JSONObject()
         root.put("version", 1)
         root.put("default_channel_id", storedDefaultChannelId)
+        root.put("seed_cleanup_v1_done", seedCleanupV1Done)
         root.put("seq", seqCounter)
         root.put("agents", JSONArray().apply {
             for (agent in agents.values) {
@@ -985,6 +1011,7 @@ class LocalChannelService(
             return
         }
         storedDefaultChannelId = root.optString("default_channel_id", "")
+        seedCleanupV1Done = root.optBoolean("seed_cleanup_v1_done", false)
         seqCounter = root.optLong("seq", 0)
         val agentRows = root.optJSONArray("agents") ?: JSONArray()
         for (i in 0 until agentRows.length()) {

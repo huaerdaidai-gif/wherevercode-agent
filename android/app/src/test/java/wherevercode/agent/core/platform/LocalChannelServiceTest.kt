@@ -2,6 +2,7 @@ package wherevercode.agent.core.platform
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,7 +13,7 @@ import wherevercode.agent.core.agent.PlatformHttpClient
 
 /**
  * 本地频道账本（频道三层一期·本地层）：语义与平台服务端对齐的
- * 关键路径——种子频道、发读游标、成员门禁、私聊规则、角色保护、
+ * 关键路径——取消种子与空壳清理、发读游标、成员门禁、私聊规则、角色保护、
  * 二/三期操作（置顶/反应/撤回/已读）、effect_key 幂等、落盘恢复、
  * 进程内 MCP 信封与本地推送总线。
  */
@@ -36,31 +37,112 @@ class LocalChannelServiceTest {
         put("text", text)
     }
 
+    /** 无种子时代的频道夹具：显式建一个频道（本机 App 为 owner），返回其 id。 */
+    private fun makeChannel(service: LocalChannelService, name: String = "测试频道"): String =
+        call(service, "agent_channel_create", JSONObject().put("name", name)).getString("id")
+
     private fun messagesOf(result: JSONObject): List<JSONObject> {
         val array = result.getJSONArray("messages")
         return (0 until array.length()).map { array.getJSONObject(it) }
     }
 
     @Test
-    fun `fresh service seeds a default channel owned by the app`() {
+    fun `fresh service starts empty without a seeded channel`() {
         val service = newService()
+        val result = call(service, "agent_channel_list")
+        assertEquals(0, result.getJSONArray("channels").length())
+        assertEquals("", service.defaultChannelId())
+    }
+
+    @Test
+    fun `legacy seeded empty channel is cleaned up once`() {
+        val persistence = InMemoryLocalChannelPersistence()
+        persistence.stored = legacySeededSnapshot(null)
+        val service = newService(persistence)
+        val result = call(service, "agent_channel_list")
+        assertEquals(0, result.getJSONArray("channels").length())
+        assertEquals("", service.defaultChannelId())
+    }
+
+    @Test
+    fun `legacy seeded channel with messages is kept`() {
+        val persistence = InMemoryLocalChannelPersistence()
+        persistence.stored = legacySeededSnapshot("种子里的真消息")
+        val service = newService(persistence)
         val result = call(service, "agent_channel_list")
         val channels = result.getJSONArray("channels")
         assertEquals(1, channels.length())
-        val channel = channels.getJSONObject(0)
-        assertEquals(service.defaultChannelId(), channel.getString("id"))
-        assertEquals("本地频道", channel.getString("name"))
-        val participants = channel.getJSONArray("participants")
-        assertEquals(1, participants.length())
-        assertEquals(LocalPlatform.APP_AGENT_ID, participants.getJSONObject(0).getString("agent_id"))
-        assertEquals("owner", participants.getJSONObject(0).getString("role"))
-        assertTrue(participants.getJSONObject(0).getBoolean("is_self"))
+        assertEquals("本地频道", channels.getJSONObject(0).getString("name"))
+        val listed = messagesOf(call(service, "agent_channel_messages",
+            JSONObject().put("channel_id", channels.getJSONObject(0).getString("id"))))
+        assertEquals(listOf("种子里的真消息"), listed.map { it.getString("text") })
+    }
+
+    @Test
+    fun `create channel dedupes duplicate names`() {
+        val service = newService()
+        val first = call(service, "agent_channel_create", JSONObject().put("name", "本地频道"))
+        val second = call(service, "agent_channel_create", JSONObject().put("name", "本地频道"))
+        val third = call(service, "agent_channel_create", JSONObject().put("name", "本地频道"))
+        assertEquals("本地频道", first.getString("name"))
+        assertEquals("本地频道 2", second.getString("name"))
+        assertEquals("本地频道 3", third.getString("name"))
+    }
+
+    /** 旧版本（种子时代）落盘快照的最小复刻：默认频道 + 本机 App owner + 可选一条消息。 */
+    private fun legacySeededSnapshot(messageText: String?): String {
+        val channelId = "seededchan000000000000000000001"
+        val messages = JSONArray()
+        if (messageText != null) {
+            messages.put(JSONObject().apply {
+                put("id", "seededmsg0000000000000000000001")
+                put("channel_id", channelId)
+                put("agent_id", LocalPlatform.APP_AGENT_ID)
+                put("agent_name", LocalPlatform.APP_AGENT_NAME)
+                put("text", messageText)
+                put("created_at", 1_000.0)
+                put("seq", 1)
+                put("mentions_all", false)
+                put("pinned", false)
+                put("recalled", false)
+            })
+        }
+        return JSONObject().apply {
+            put("version", 1)
+            put("default_channel_id", channelId)
+            put("seq", 1)
+            put("agents", JSONArray().put(JSONObject().apply {
+                put("id", LocalPlatform.APP_AGENT_ID)
+                put("name", LocalPlatform.APP_AGENT_NAME)
+                put("roles", JSONArray())
+            }))
+            put("channels", JSONArray().put(JSONObject().apply {
+                put("id", channelId)
+                put("name", "本地频道")
+                put("kind", "channel")
+                put("archived", false)
+                put("history_visible", true)
+                put("created_at", 1_000.0)
+            }))
+            put("members", JSONArray().put(JSONObject().apply {
+                put("channel_id", channelId)
+                put("agent_id", LocalPlatform.APP_AGENT_ID)
+                put("agent_name", LocalPlatform.APP_AGENT_NAME)
+                put("role", "owner")
+                put("joined_at", 1_000.0)
+            }))
+            put("messages", messages)
+            put("reactions", JSONArray())
+            put("read_markers", JSONArray())
+            put("webhooks", JSONArray())
+            put("effect_keys", JSONArray())
+        }.toString()
     }
 
     @Test
     fun `post and read round trip keeps platform message shape`() {
         val service = newService()
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val posted = call(service, "agent_channel_post", postArgs(channelId, "第一条"))
         assertEquals(32, posted.getString("id").length)
         assertEquals("第一条", posted.getString("text"))
@@ -82,7 +164,7 @@ class LocalChannelServiceTest {
     fun `non member cannot read and gate message mentions membership`() {
         val service = newService()
         service.registerAgent("agent-b", "Agent B")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         call(service, "agent_channel_post", postArgs(channelId, "内部消息"))
         try {
             call(service, "agent_channel_messages", JSONObject().put("channel_id", channelId),
@@ -125,7 +207,7 @@ class LocalChannelServiceTest {
     @Test
     fun `pagination follows after and before cursors`() {
         val service = newService()
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val ids = (1..30).map {
             now += 1
             call(service, "agent_channel_post", postArgs(channelId, "m$it")).getString("id")
@@ -152,7 +234,7 @@ class LocalChannelServiceTest {
     @Test
     fun `effect key dedupes repost`() {
         val service = newService()
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val args = postArgs(channelId, "定时补发").apply { put("effect_key", "sched-1") }
         val first = call(service, "agent_channel_post", args)
         val second = call(service, "agent_channel_post", args)
@@ -166,7 +248,7 @@ class LocalChannelServiceTest {
     fun `pin react recall and readers work end to end`() {
         val service = newService()
         service.registerAgent("agent-b", "Agent B")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         call(service, "agent_channel_join", JSONObject().put("channel_id", channelId),
             callerId = "agent-b", callerName = "Agent B")
         val posted = call(service, "agent_channel_post", postArgs(channelId, "看这条"))
@@ -230,7 +312,7 @@ class LocalChannelServiceTest {
     fun `role changes are owner only and last owner is protected`() {
         val service = newService()
         service.registerAgent("agent-b", "Agent B")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         call(service, "agent_channel_join", JSONObject().put("channel_id", channelId),
             callerId = "agent-b", callerName = "Agent B")
         try {
@@ -265,7 +347,7 @@ class LocalChannelServiceTest {
     fun `mentions all only counts for privileged posters`() {
         val service = newService()
         service.registerAgent("agent-b", "Agent B")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val ownerPost = call(service, "agent_channel_post", postArgs(channelId, "@所有人 开会"))
         assertTrue(ownerPost.getBoolean("mentions_all"))
         call(service, "agent_channel_join", JSONObject().put("channel_id", channelId),
@@ -304,7 +386,7 @@ class LocalChannelServiceTest {
     fun `webhooks need privilege and secret shows once`() {
         val service = newService()
         service.registerAgent("agent-b", "Agent B")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         call(service, "agent_channel_join", JSONObject().put("channel_id", channelId),
             callerId = "agent-b", callerName = "Agent B")
         try {
@@ -339,10 +421,11 @@ class LocalChannelServiceTest {
     fun `state survives a rebuild over the same persistence`() {
         val persistence = InMemoryLocalChannelPersistence()
         val first = newService(persistence)
-        val channelId = first.defaultChannelId()
+        val channelId = makeChannel(first)
         call(first, "agent_channel_post", postArgs(channelId, "落盘的消息"))
         val second = newService(persistence)
-        assertEquals(channelId, second.defaultChannelId())
+        val channels = call(second, "agent_channel_list").getJSONArray("channels")
+        assertEquals(listOf(channelId), (0 until channels.length()).map { channels.getJSONObject(it).getString("id") })
         val listed = messagesOf(call(second, "agent_channel_messages",
             JSONObject().put("channel_id", channelId)))
         assertEquals(listOf("落盘的消息"), listed.map { it.getString("text") })
@@ -360,7 +443,7 @@ class LocalChannelServiceTest {
             },
             serviceProvider = { service },
         )
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val body = JSONObject().apply {
             put("jsonrpc", "2.0")
             put("id", "1")
@@ -402,7 +485,7 @@ class LocalChannelServiceTest {
     @Test
     fun `local ws connection delivers posted message events`() {
         val service = newService()
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val connection = LocalChannelWsConnection(channelId) { service }
         val latch = CountDownLatch(1)
         val received = StringBuilder()
@@ -433,7 +516,7 @@ class LocalChannelServiceTest {
     fun `task events write back to the bound channel`() {
         val service = newService()
         service.registerAgent("dev1", "DevA")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val started = call(service, "start_task", JSONObject().apply {
             put("agent", "dev1")
             put("goal", "写回测试任务")
@@ -471,7 +554,7 @@ class LocalChannelServiceTest {
         service.registerAgent("dev1", "DevA")
         service.registerAgent("rev1", "RevA")
         service.registerAgent("pack1", "PackA", listOf("pack"))
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         val started = call(service, "start_task", JSONObject().apply {
             put("agent", "dev1")
             put("reviewer", "rev1")
@@ -512,7 +595,7 @@ class LocalChannelServiceTest {
     fun `task without a channel writes nothing back`() {
         val service = newService()
         service.registerAgent("dev1", "DevA")
-        val channelId = service.defaultChannelId()
+        val channelId = makeChannel(service)
         call(service, "start_task", JSONObject().apply {
             put("agent", "dev1")
             put("goal", "不绑频道的任务")
