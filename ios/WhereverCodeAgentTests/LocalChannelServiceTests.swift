@@ -1,7 +1,7 @@
 // WhereverCode Agent — iOS tests
 //
 // 本地频道账本（频道三层一期·本地层）：与安卓
-// LocalChannelServiceTest 同一验收清单逐条对应——种子频道、
+// LocalChannelServiceTest 同一验收清单逐条对应——取消种子与空壳清理、
 // 发读游标、成员门禁、私聊规则、角色保护、二/三期操作（置顶/
 // 反应/撤回/已读）、effect_key 幂等、落盘恢复、进程内 MCP 信封
 // 与本地推送总线。断言口径与安卓一致，不放宽。
@@ -37,6 +37,12 @@ final class LocalChannelServiceTests: XCTestCase {
         ["channel_id": channelId, "text": text]
     }
 
+    /// 无种子时代的频道夹具：显式建一个频道（本机 App 为 owner），返回其 id。
+    private func makeChannel(_ service: LocalChannelService, name: String = "测试频道") throws -> String {
+        let created = try call(service, "agent_channel_create", ["name": name])
+        return str(created, "id")
+    }
+
     private func messagesOf(_ result: [String: Any]) -> [[String: Any]] {
         (result["messages"] as? [[String: Any]]) ?? []
     }
@@ -64,24 +70,92 @@ final class LocalChannelServiceTests: XCTestCase {
         }
     }
 
-    func testFreshServiceSeedsDefaultChannelOwnedByApp() throws {
+    func testFreshServiceStartsEmptyWithoutSeededChannel() throws {
         let service = newService()
         let result = try call(service, "agent_channel_list")
         let channels = (result["channels"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(channels.count, 0)
+        XCTAssertEqual(service.defaultChannelId(), "")
+    }
+
+    func testLegacySeededEmptyChannelIsCleanedUpOnce() throws {
+        let persistence = InMemoryLocalChannelPersistence()
+        persistence.stored = Self.legacySeededSnapshot(messageText: nil)
+        let service = newService(persistence: persistence)
+        let result = try call(service, "agent_channel_list")
+        let channels = (result["channels"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(channels.count, 0)
+        XCTAssertEqual(service.defaultChannelId(), "")
+    }
+
+    func testLegacySeededChannelWithMessagesIsKept() throws {
+        let persistence = InMemoryLocalChannelPersistence()
+        persistence.stored = Self.legacySeededSnapshot(messageText: "种子里的真消息")
+        let service = newService(persistence: persistence)
+        let result = try call(service, "agent_channel_list")
+        let channels = (result["channels"] as? [[String: Any]]) ?? []
         XCTAssertEqual(channels.count, 1)
-        let channel = channels[0]
-        XCTAssertEqual(str(channel, "id"), service.defaultChannelId())
-        XCTAssertEqual(str(channel, "name"), "本地频道")
-        let participants = (channel["participants"] as? [[String: Any]]) ?? []
-        XCTAssertEqual(participants.count, 1)
-        XCTAssertEqual(str(participants[0], "agent_id"), LocalPlatform.appAgentID)
-        XCTAssertEqual(str(participants[0], "role"), "owner")
-        XCTAssertEqual(participants[0]["is_self"] as? Bool, true)
+        XCTAssertEqual(str(channels[0], "name"), "本地频道")
+        let listed = messagesOf(try call(service, "agent_channel_messages", [
+            "channel_id": str(channels[0], "id"),
+        ]))
+        XCTAssertEqual(listed.map { str($0, "text") }, ["种子里的真消息"])
+    }
+
+    func testCreateChannelDedupesDuplicateNames() throws {
+        let service = newService()
+        let first = try call(service, "agent_channel_create", ["name": "本地频道"])
+        let second = try call(service, "agent_channel_create", ["name": "本地频道"])
+        let third = try call(service, "agent_channel_create", ["name": "本地频道"])
+        XCTAssertEqual(str(first, "name"), "本地频道")
+        XCTAssertEqual(str(second, "name"), "本地频道 2")
+        XCTAssertEqual(str(third, "name"), "本地频道 3")
+    }
+
+    /// 旧版本（种子时代）落盘快照的最小复刻：默认频道 + 本机 App owner + 可选一条消息。
+    private static func legacySeededSnapshot(messageText: String?) -> String {
+        let channelId = "seededchan000000000000000000001"
+        var messages: [[String: Any]] = []
+        if let messageText {
+            messages.append([
+                "id": "seededmsg0000000000000000000001",
+                "channel_id": channelId,
+                "agent_id": LocalPlatform.appAgentID,
+                "agent_name": LocalPlatform.appAgentName,
+                "text": messageText,
+                "created_at": 1_000.0,
+                "seq": 1,
+                "mentions_all": false,
+                "pinned": false,
+                "recalled": false,
+            ])
+        }
+        let root: [String: Any] = [
+            "version": 1,
+            "default_channel_id": channelId,
+            "seq": 1,
+            "agents": [["id": LocalPlatform.appAgentID, "name": LocalPlatform.appAgentName, "roles": [String]()]],
+            "channels": [[
+                "id": channelId, "name": "本地频道", "kind": "channel",
+                "archived": false, "history_visible": true, "created_at": 1_000.0,
+            ]],
+            "members": [[
+                "channel_id": channelId, "agent_id": LocalPlatform.appAgentID,
+                "agent_name": LocalPlatform.appAgentName, "role": "owner", "joined_at": 1_000.0,
+            ]],
+            "messages": messages,
+            "reactions": [[String: Any]](),
+            "read_markers": [[String: Any]](),
+            "webhooks": [[String: Any]](),
+            "effect_keys": [[String: Any]](),
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: root)
+        return String(data: data, encoding: .utf8)!
     }
 
     func testPostAndReadRoundTripKeepsPlatformMessageShape() throws {
         let service = newService()
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let posted = try call(service, "agent_channel_post", postArgs(channelId, "第一条"))
         XCTAssertEqual(str(posted, "id").count, 32)
         XCTAssertEqual(str(posted, "text"), "第一条")
@@ -101,7 +175,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testNonMemberCannotReadAndGateMentionsMembership() throws {
         let service = newService()
         service.registerAgent(agentId: "agent-b", agentName: "Agent B")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         _ = try call(service, "agent_channel_post", postArgs(channelId, "内部消息"))
         expectLocalError("成员") {
             try self.call(service, "agent_channel_messages", ["channel_id": channelId],
@@ -135,7 +209,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testPaginationFollowsAfterAndBeforeCursors() throws {
         let clockBox = ClockBox()
         let service = newService(clockBox: clockBox)
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         var ids: [String] = []
         for i in 1...30 {
             clockBox.now += 1
@@ -158,7 +232,7 @@ final class LocalChannelServiceTests: XCTestCase {
 
     func testEffectKeyDedupesRepost() throws {
         let service = newService()
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         var args = postArgs(channelId, "定时补发")
         args["effect_key"] = "sched-1"
         let first = try call(service, "agent_channel_post", args)
@@ -173,7 +247,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testPinReactRecallAndReadersWorkEndToEnd() throws {
         let service = newService()
         service.registerAgent(agentId: "agent-b", agentName: "Agent B")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         _ = try call(service, "agent_channel_join", ["channel_id": channelId],
                      callerId: "agent-b", callerName: "Agent B")
         let posted = try call(service, "agent_channel_post", postArgs(channelId, "看这条"))
@@ -225,7 +299,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testRoleChangesAreOwnerOnlyAndLastOwnerIsProtected() throws {
         let service = newService()
         service.registerAgent(agentId: "agent-b", agentName: "Agent B")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         _ = try call(service, "agent_channel_join", ["channel_id": channelId],
                      callerId: "agent-b", callerName: "Agent B")
         expectLocalError("owner") {
@@ -247,7 +321,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testMentionsAllOnlyCountsForPrivilegedPosters() throws {
         let service = newService()
         service.registerAgent(agentId: "agent-b", agentName: "Agent B")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let ownerPost = try call(service, "agent_channel_post", postArgs(channelId, "@所有人 开会"))
         XCTAssertEqual(ownerPost["mentions_all"] as? Bool, true)
         _ = try call(service, "agent_channel_join", ["channel_id": channelId],
@@ -283,7 +357,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testWebhooksNeedPrivilegeAndSecretShowsOnce() throws {
         let service = newService()
         service.registerAgent(agentId: "agent-b", agentName: "Agent B")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         _ = try call(service, "agent_channel_join", ["channel_id": channelId],
                      callerId: "agent-b", callerName: "Agent B")
         expectLocalError("owner") {
@@ -309,10 +383,12 @@ final class LocalChannelServiceTests: XCTestCase {
     func testStateSurvivesRebuildOverSamePersistence() throws {
         let persistence = InMemoryLocalChannelPersistence()
         let first = newService(persistence: persistence)
-        let channelId = first.defaultChannelId()
+        let channelId = try makeChannel(first)
         _ = try call(first, "agent_channel_post", postArgs(channelId, "落盘的消息"))
         let second = newService(persistence: persistence)
-        XCTAssertEqual(second.defaultChannelId(), channelId)
+        let result = try call(second, "agent_channel_list")
+        let channels = (result["channels"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(channels.map { str($0, "id") }, [channelId])
         let listed = messagesOf(try call(second, "agent_channel_messages", [
             "channel_id": channelId,
         ]))
@@ -322,7 +398,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testMcpClientRoutesLocalEnvelopeAndErrors() async throws {
         let service = newService()
         LocalPlatform.installForTest(service)
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let client = McpClient(
             endpoint: LocalPlatform.localEndpoint,
             tokenProvider: { LocalPlatform.localToken },
@@ -352,7 +428,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testLocalBusDeliversPostedMessageEvents() throws {
         let service = newService()
         LocalPlatform.installForTest(service)
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let received = expectation(description: "本地推送到达")
         var eventText: String?
         let unsubscribe = LocalPlatform.subscribeLocalChannelEvents(channelId: channelId) { text in
@@ -372,7 +448,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testChannelFeedDeliversLocalPostsWithoutSocket() async throws {
         let service = newService()
         LocalPlatform.installForTest(service)
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let client = McpClient(
             endpoint: LocalPlatform.localEndpoint,
             tokenProvider: { LocalPlatform.localToken },
@@ -404,7 +480,7 @@ final class LocalChannelServiceTests: XCTestCase {
         service.registerAgent(agentId: "dev1", agentName: "DevA")
         service.registerAgent(agentId: "rev1", agentName: "RevA")
         service.registerAgent(agentId: "pack1", agentName: "PackA", roles: ["pack"])
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let started = try call(service, "start_task", [
             "agent": "dev1",
             "reviewer": "rev1",
@@ -446,7 +522,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testTaskEventsWriteBackToBoundChannel() throws {
         let service = newService()
         service.registerAgent(agentId: "dev1", agentName: "DevA")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         let started = try call(service, "start_task", [
             "agent": "dev1",
             "goal": "写回测试任务",
@@ -477,7 +553,7 @@ final class LocalChannelServiceTests: XCTestCase {
     func testTaskWithoutChannelWritesNothingBack() throws {
         let service = newService()
         service.registerAgent(agentId: "dev1", agentName: "DevA")
-        let channelId = service.defaultChannelId()
+        let channelId = try makeChannel(service)
         _ = try call(service, "start_task", [
             "agent": "dev1",
             "goal": "不绑频道的任务",
