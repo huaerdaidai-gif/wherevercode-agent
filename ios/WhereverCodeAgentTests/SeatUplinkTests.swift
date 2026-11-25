@@ -15,7 +15,13 @@ final class SeatUplinkTests: XCTestCase {
     }
 
     private func newService() -> LocalChannelService {
-        LocalChannelService(persistence: InMemoryLocalChannelPersistence())
+        let service = LocalChannelService(persistence: InMemoryLocalChannelPersistence())
+        // 237 起取消默认频道种子：夹具显式建唯一频道——派单落点即它、
+        // seat_register 的频道名单即 [它]（断言仍走 defaultChannelId()）。
+        _ = try? service.dispatch(
+            tool: "agent_channel_create", args: ["name": "本地频道"],
+            callerId: LocalPlatform.appAgentID, callerName: LocalPlatform.appAgentName)
+        return service
     }
 
     // MARK: - 帧编解码

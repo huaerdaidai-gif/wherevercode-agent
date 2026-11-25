@@ -19,6 +19,11 @@ final class LanPlatformServerTests: XCTestCase {
 
     override func setUp() async throws {
         service = LocalChannelService(persistence: InMemoryLocalChannelPersistence())
+        // 237 起取消默认频道种子：夹具显式建一个频道（原种子频道的同等物，
+        // 本机 App 为 owner），各用例的 defaultChannelId() 即它。
+        _ = try? service.dispatch(
+            tool: "agent_channel_create", args: ["name": "本地频道"],
+            callerId: LocalPlatform.appAgentID, callerName: LocalPlatform.appAgentName)
         registry = LanTokenRegistry()
         let svc = service!
         server = LanPlatformServer(serviceProvider: { svc }, registry: registry, port: 0)
