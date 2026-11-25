@@ -2330,6 +2330,18 @@ private struct ConnectionExtendedScreen: View {
 
 // MARK: - 3. 频道与私聊主视图实现 (ChannelsHomeView & ChannelDetailWorkspaceView)
 
+public enum ChannelLayer: String, Equatable, Hashable {
+    case local
+    case cloud
+
+    public var label: String {
+        switch self {
+        case .local: return "本机"
+        case .cloud: return "云端"
+        }
+    }
+}
+
 public struct V5ChannelItem: Identifiable, Equatable, Hashable {
     public let id: String
     public var name: String
@@ -2345,6 +2357,8 @@ public struct V5ChannelItem: Identifiable, Equatable, Hashable {
     public var isMuted: Bool
     public var isIgnored: Bool
     public var isArchived: Bool
+    /// 频道来源层：本机账本或云端列表/缓存。
+    public var layer: ChannelLayer
 
     public init(
         id: String,
@@ -2360,7 +2374,8 @@ public struct V5ChannelItem: Identifiable, Equatable, Hashable {
         unreadCount: Int = 0,
         isMuted: Bool = false,
         isIgnored: Bool = false,
-        isArchived: Bool = false
+        isArchived: Bool = false,
+        layer: ChannelLayer = .local
     ) {
         self.id = id
         self.name = name
@@ -2376,6 +2391,7 @@ public struct V5ChannelItem: Identifiable, Equatable, Hashable {
         self.isMuted = isMuted
         self.isIgnored = isIgnored
         self.isArchived = isArchived
+        self.layer = layer
     }
 }
 
@@ -2610,6 +2626,8 @@ public struct ChannelsHomeView: View {
     @State private var showSwitchPanel = false
     @State private var showCreateDMSheet = false
     @State private var showCreateChannelSheet = false
+    /// 切换面板是 sheet，要等它关掉再弹出新建频道。
+    @State private var openCreateAfterSwitchDismiss = false
     @State private var showManagementSheet = false
     @State private var showPolicyAlert = false
     @State private var policyAlertMessage = ""
@@ -2716,7 +2734,12 @@ public struct ChannelsHomeView: View {
             // 不等 onChange，出现后主动消费一次。
             await consumePendingChannelLink()
         }
-        .sheet(isPresented: $showSwitchPanel) {
+        .sheet(isPresented: $showSwitchPanel, onDismiss: {
+            if openCreateAfterSwitchDismiss {
+                openCreateAfterSwitchDismiss = false
+                showCreateChannelSheet = true
+            }
+        }) {
             switchPanel
         }
         .sheet(isPresented: $showCreateDMSheet) {
@@ -2807,21 +2830,43 @@ public struct ChannelsHomeView: View {
         }
     }
 
-    /// 暂无可选频道时的空态（与列表空态同文案）。
-    private var noChannelSelectedView: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "number.circle")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary.opacity(0.6))
-            Text("暂无频道")
-                .font(.headline)
-                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-            Text("点击右上角「＋」可创建团队讨论频道")
-                .font(.caption)
+    /// 频道首页空态：本地频道数为 0 且云端无频道。
+    private var channelEmptyState: some View {
+        VStack(spacing: 16) {
+            Text("还没有频道")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+            Text("频道是多个 Agent 协作的对话空间，可以聊天、派发任务。")
+                .font(.system(size: 14))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button {
+                if showSwitchPanel {
+                    openCreateAfterSwitchDismiss = true
+                    showSwitchPanel = false
+                } else {
+                    showCreateChannelSheet = true
+                }
+            } label: {
+                Text("新建频道")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: 280)
+                    .padding(.vertical, 12)
+                    .background(Color(red: 0.16, green: 0.15, blue: 0.14), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("channels.empty.create")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+    }
+
+    /// 暂无可选频道时的首页空态。
+    private var noChannelSelectedView: some View {
+        channelEmptyState
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// 频道切换面板（批D）：搜索框 + [频道 | 私聊] 分段 +
@@ -2999,54 +3044,39 @@ public struct ChannelsHomeView: View {
         }
     }
 
-    // MARK: - 频道列表
+    private var localFilteredChannels: [V5ChannelItem] {
+        filteredChannels.filter { $0.layer == .local }
+    }
+
+    private var cloudFilteredChannels: [V5ChannelItem] {
+        filteredChannels.filter { $0.layer == .cloud }
+    }
+
+    // MARK: - 频道列表（按层分组：本机在前，云端在后）
     private var channelsListView: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
                 if filteredChannels.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "number.circle")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary.opacity(0.6))
-                        Text(searchQuery.isEmpty ? "暂无频道" : "未找到匹配的频道")
-                            .font(.headline)
-                            .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
-                        Text("点击右上角「＋」可创建团队讨论频道")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if searchQuery.isEmpty {
+                        channelEmptyState
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "number.circle")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.secondary.opacity(0.6))
+                            Text("未找到匹配的频道")
+                                .font(.headline)
+                                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
+                    if searchQuery.isEmpty && !cloudConnected {
+                        channelGroupHeader("云端", showConnect: true)
+                    }
                 } else {
-                    ForEach(filteredChannels) { ch in
-                        Button {
-                            activeWorkspaceChannel = ch
-                            activeWorkspaceDM = nil
-                            selectedPartition = .channels
-                            showSwitchPanel = false
-                        } label: {
-                            channelRow(ch)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("channels.row.\(ch.id)")
-                        .contextMenu {
-                            Button {
-                                toggleMute(ch)
-                            } label: {
-                                Label(ch.isMuted ? "取消免打扰" : "设为免打扰", systemImage: ch.isMuted ? "bell" : "bell.slash")
-                            }
-                            Button {
-                                toggleIgnore(ch)
-                            } label: {
-                                Label(ch.isIgnored ? "取消忽略" : "忽略消息", systemImage: "eye.slash")
-                            }
-                            Button {
-                                showManagementSheet = true
-                            } label: {
-                                Label(ch.isArchived ? "移出归档" : "归档频道", systemImage: "archivebox")
-                            }
-                        }
-                    }
+                    channelLayerGroup(.local, rows: localFilteredChannels)
+                    channelLayerGroup(.cloud, rows: cloudFilteredChannels)
                 }
             }
             .padding(.horizontal, 16)
@@ -3057,7 +3087,68 @@ public struct ChannelsHomeView: View {
         }
     }
 
-    private func channelRow(_ ch: V5ChannelItem) -> some View {
+    private func channelGroupHeader(_ title: String, showConnect: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(red: 0.35, green: 0.34, blue: 0.32))
+            Spacer()
+            if showConnect {
+                Button {
+                    showSwitchPanel = false
+                    onNavigateRoute("settings")
+                } label: {
+                    Text("连接云端")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("channels.cloud.connect")
+            }
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .accessibilityIdentifier("channels.group.\(title)")
+    }
+
+    @ViewBuilder
+    private func channelLayerGroup(_ layer: ChannelLayer, rows: [V5ChannelItem]) -> some View {
+        let cacheLocked = layer == .cloud && !cloudConnected
+        channelGroupHeader(layer.label, showConnect: cacheLocked)
+        ForEach(rows) { ch in
+            Button {
+                guard !cacheLocked else { return }
+                activeWorkspaceChannel = ch
+                activeWorkspaceDM = nil
+                selectedPartition = .channels
+                showSwitchPanel = false
+            } label: {
+                channelRow(ch, cacheLocked: cacheLocked)
+            }
+            .buttonStyle(.plain)
+            .disabled(cacheLocked)
+            .accessibilityIdentifier("channels.row.\(ch.id)")
+            .contextMenu {
+                Button {
+                    toggleMute(ch)
+                } label: {
+                    Label(ch.isMuted ? "取消免打扰" : "设为免打扰", systemImage: ch.isMuted ? "bell" : "bell.slash")
+                }
+                Button {
+                    toggleIgnore(ch)
+                } label: {
+                    Label(ch.isIgnored ? "取消忽略" : "忽略消息", systemImage: "eye.slash")
+                }
+                Button {
+                    showManagementSheet = true
+                } label: {
+                    Label(ch.isArchived ? "移出归档" : "归档频道", systemImage: "archivebox")
+                }
+            }
+        }
+    }
+
+    private func channelRow(_ ch: V5ChannelItem, cacheLocked: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
@@ -3090,9 +3181,15 @@ public struct ChannelsHomeView: View {
                     Text(ch.lastMessageTime)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    if ch.layer == .local && LocalPlatform.lanServerRunning() {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("局域网共享中")
+                    }
                 }
 
-                Text(ch.lastMessageText.isEmpty ? (ch.topic.isEmpty ? "暂无新消息" : ch.topic) : ch.lastMessageText)
+                Text(cacheLocked ? "缓存内容，连接后可发送" : (ch.lastMessageText.isEmpty ? (ch.topic.isEmpty ? "暂无新消息" : ch.topic) : ch.lastMessageText))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -3116,6 +3213,7 @@ public struct ChannelsHomeView: View {
         .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(red: 0.90, green: 0.89, blue: 0.87), lineWidth: 1))
+        .opacity(cacheLocked ? 0.45 : 1)
     }
 
     // MARK: - 私聊列表
@@ -3263,6 +3361,45 @@ public struct ChannelsHomeView: View {
         }
     }
 
+    /// 已配置远程平台地址且持有凭证时，频道列表来自云端。
+    private var cloudConnected: Bool {
+        !appState.channelUsesLocalPlatform
+    }
+
+    /// 本机账本里的频道（只读，不改服务）。
+    private func readLocalChannelInfos() -> [ChannelInfo] {
+        guard let service = LocalPlatform.serviceOrNull() else { return [] }
+        guard let result = try? service.dispatch(
+            tool: "agent_channel_list",
+            args: [:],
+            callerId: LocalPlatform.appAgentID,
+            callerName: LocalPlatform.appAgentName
+        ) else { return [] }
+        return ChannelInfo.list(from: result)
+    }
+
+    /// 云端频道：已连接用实时列表，未连接只用缓存。没缓存就不列。
+    private func readCloudChannelInfos() -> [ChannelInfo] {
+        if cloudConnected {
+            return appState.availableChannels
+        }
+        return ChannelListCache().load()
+    }
+
+    private func mapChannelItem(_ c: ChannelInfo, layer: ChannelLayer) -> V5ChannelItem {
+        V5ChannelItem(
+            id: c.id,
+            name: c.displayName,
+            topic: "团队频道",
+            isPrivate: false,
+            memberCount: c.participants.count,
+            lastMessageText: c.lastMessageText ?? "",
+            unreadCount: 0,
+            isArchived: c.isArchived,
+            layer: layer
+        )
+    }
+
     private func loadData() {
         if !channelAvailable {
             channels = []
@@ -3273,18 +3410,17 @@ public struct ChannelsHomeView: View {
         let source = appState.availableChannels.isEmpty
             ? ChannelListCache().load()
             : appState.availableChannels
-        channels = source.filter { !$0.isDM }.map { c in
-            V5ChannelItem(
-                id: c.id,
-                name: c.displayName,
-                topic: "团队频道",
-                isPrivate: false,
-                memberCount: c.participants.count,
-                lastMessageText: c.lastMessageText ?? "",
-                unreadCount: 0,
-                isArchived: c.isArchived
-            )
+        let localInfos = readLocalChannelInfos().filter { !$0.isDM }
+        let cloudInfos = readCloudChannelInfos().filter { !$0.isDM }
+        var seen = Set<String>()
+        var merged: [V5ChannelItem] = []
+        for info in localInfos where seen.insert(info.id).inserted {
+            merged.append(mapChannelItem(info, layer: .local))
         }
+        for info in cloudInfos where seen.insert(info.id).inserted {
+            merged.append(mapChannelItem(info, layer: .cloud))
+        }
+        channels = merged
         directMessages = source.filter(\.isDM).map { c in
             let peer = c.participantDetails.first(where: { !$0.isSelf })
             return V5DirectMessageItem(
@@ -3680,6 +3816,12 @@ public struct ChannelDetailWorkspaceView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
+                }
+                if let ch = channelItem {
+                    Text(ch.layer.label)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("channel.layerSubtitle")
                 }
                 Text(headerSubtitle)
                     .font(.caption2)
@@ -5437,13 +5579,35 @@ public struct CreateChannelSheet: View {
     @ObservedObject public var appState: AppState
     public var onCreated: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
+    @State private var name = LocalChannelService.defaultChannelName
+    @State private var placement: ChannelLayer = .local
     @State private var errorText: String?
     @State private var isWorking = false
+
+    /// 已连云端才出现「放在」；未连时只建本机频道。
+    private var cloudConnected: Bool {
+        !appState.channelUsesLocalPlatform
+    }
+
     public var body: some View {
         NavigationStack {
             Form {
-                Section("频道") { TextField("频道名称", text: $name).textInputAutocapitalization(.never) }
+                Section("频道") {
+                    TextField("频道名称", text: $name)
+                        .textInputAutocapitalization(.never)
+                }
+                if cloudConnected {
+                    Section {
+                        Picker("放在", selection: $placement) {
+                            Text("本机").tag(ChannelLayer.local)
+                            Text("云端").tag(ChannelLayer.cloud)
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("channels.create.placement")
+                    } header: {
+                        Text("放在")
+                    }
+                }
                 if let errorText { Section { Text(errorText).foregroundStyle(.red).textSelection(.enabled) } }
             }
             .navigationTitle("新建频道")
@@ -5457,14 +5621,38 @@ public struct CreateChannelSheet: View {
         }
     }
     @MainActor private func create() async {
-        guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         isWorking = true
         defer { isWorking = false }
+        errorText = nil
+        let placeOnCloud = cloudConnected && placement == .cloud
         do {
-            _ = try await transport.createChannel(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+            if placeOnCloud {
+                guard let transport = appState.makeChannelTransport() else {
+                    errorText = "无法连接频道服务。"
+                    return
+                }
+                _ = try await transport.createChannel(name: trimmed)
+            } else {
+                guard let service = LocalPlatform.serviceOrNull() else {
+                    errorText = "无法连接频道服务。"
+                    return
+                }
+                _ = try service.dispatch(
+                    tool: "agent_channel_create",
+                    args: ["name": trimmed],
+                    callerId: LocalPlatform.appAgentID,
+                    callerName: LocalPlatform.appAgentName
+                )
+            }
             onCreated()
             dismiss()
-        } catch { errorText = "创建频道失败：\(error.localizedDescription)" }
+        } catch let error as LocalServiceError {
+            errorText = "创建频道失败：\(error.message)"
+        } catch {
+            errorText = "创建频道失败：\(error.localizedDescription)"
+        }
     }
 }
 
