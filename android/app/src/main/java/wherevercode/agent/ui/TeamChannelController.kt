@@ -103,6 +103,8 @@ data class TeamChannelSnapshot(
     val listMode: Boolean = false,
     /** 列表里每个频道/私聊的本机通知档（长按菜单静音项文案用）：id → 全部消息/仅@我/静音。 */
     val channelNotifyModes: Map<String, String> = emptyMap(),
+    /** 当前频道的层级标签（237，Issue #22）：本机 / 云端；对话层头部副标题用，私聊为空。 */
+    val activeLayerLabel: String = "",
 )
 
 /**
@@ -181,6 +183,8 @@ class TeamChannelController(
     private val onSectionTabChange: (Int) -> Unit = {},
     /** 对话层顶栏「‹」：回第一层列表页（与 iOS 导航返回同位）。 */
     private val onShowChannelList: () -> Unit = {},
+    /** 237：对话层顶栏/标题点按——打开「切换频道」面板（列表页降为面板，Issue #22）。 */
+    private val onOpenChannelSwitcher: () -> Unit = {},
     /** 列表行长按/管理列表：打开指定频道的设置页（第二轮对齐）。 */
     private val onChannelSettings: (String) -> Unit = {},
     /** 私聊设置入口（iOS 私聊设置同位）。 */
@@ -312,6 +316,7 @@ class TeamChannelController(
     /** 页头导航钮与标题（render 按层级更新：列表层 ☰＋「频道」，对话层 ‹＋当前频道名）。 */
     private lateinit var navButton: TextView
     private lateinit var titleText: TextView
+    private lateinit var subtitleText: TextView
 
     init {
         val titleRow = UiKit.horizontal(context)
@@ -322,16 +327,38 @@ class TeamChannelController(
                 navButton = this
                 setPadding(dp(16), dp(12), dp(6), dp(2))
                 setOnClickListener {
-                    if (snapshot?.listMode == false) onShowChannelList() else onOpenDrawer()
+                    val snap = snapshot
+                    if (snap != null && !snap.listMode) {
+                        if (snap.dmMode) onShowChannelList() else onOpenChannelSwitcher()
+                    } else {
+                        onOpenDrawer()
+                    }
                 }
             },
         )
         titleRow.addView(
-            UiKit.text(context, "频道", 20f, R.color.text_primary, bold = true).apply {
-                titleText = this
-                setPadding(dp(2), dp(12), dp(8), dp(2))
+            UiKit.vertical(context).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+                addView(
+                    UiKit.text(context, "频道", 20f, R.color.text_primary, bold = true).apply {
+                        titleText = this
+                        setPadding(dp(2), dp(12), dp(8), 0)
+                        setOnClickListener {
+                            val snap = snapshot
+                            if (snap != null && !snap.listMode && !snap.dmMode) {
+                                onOpenChannelSwitcher()
+                            }
+                        }
+                    },
+                )
+                addView(
+                    UiKit.text(context, "", 11f, R.color.text_tertiary).apply {
+                        subtitleText = this
+                        setPadding(dp(2), 0, dp(8), dp(2))
+                        visibility = View.GONE
+                    },
                 )
             },
         )
@@ -604,6 +631,8 @@ class TeamChannelController(
             bodyContainer.addView(listContainer)
             return
         }
+        // 237：分段（频道/私聊）常驻对话层（首页即对话，切换入口不丢）。
+        bodyContainer.addView(segmentRow(snapshot))
         if (!snapshot.dmMode) {
             bodyContainer.addView(sectionTabsRow(snapshot))
         }
@@ -817,11 +846,17 @@ class TeamChannelController(
         if (snapshot.listMode) {
             navButton.text = "☰"
             titleText.text = "频道"
+            if (::subtitleText.isInitialized) subtitleText.visibility = View.GONE
         } else {
             navButton.text = "‹"
             titleText.text = snapshot.channels
                 .firstOrNull { it.id == snapshot.activeChannelId }?.name
                 ?.takeIf { it.isNotBlank() } ?: "频道"
+            if (::subtitleText.isInitialized) {
+                subtitleText.text = snapshot.activeLayerLabel
+                subtitleText.visibility =
+                    if (snapshot.activeLayerLabel.isBlank()) View.GONE else View.VISIBLE
+            }
         }
     }
 
@@ -899,10 +934,18 @@ class TeamChannelController(
             }
         if (shown.isEmpty()) {
             col.addView(
-                channelListEmptyState(
-                    title = if (q.isEmpty()) "暂无频道" else "未找到匹配的频道",
-                    hint = "点击右上角「＋」可创建团队讨论频道",
-                ),
+                if (q.isEmpty()) {
+                    channelListEmptyState(
+                        title = "还没有频道",
+                        hint = "频道是多个 Agent 协作的对话空间，可以聊天、派发任务。",
+                        actionLabel = "新建频道",
+                    )
+                } else {
+                    channelListEmptyState(
+                        title = "未找到匹配的频道",
+                        hint = "点击右上角「＋」可创建团队讨论频道",
+                    )
+                },
             )
             return col
         }
@@ -1033,7 +1076,11 @@ class TeamChannelController(
             .show()
     }
 
-    private fun channelListEmptyState(title: String, hint: String): LinearLayout {
+    private fun channelListEmptyState(
+        title: String,
+        hint: String,
+        actionLabel: String? = null,
+    ): LinearLayout {
         val col = UiKit.vertical(context).apply {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             setPadding(0, dp(40), 0, dp(40))
@@ -1049,6 +1096,19 @@ class TeamChannelController(
                 setPadding(0, dp(6), 0, 0)
             },
         )
+        if (actionLabel != null) {
+            col.addView(
+                UiKit.text(context, actionLabel, 13f, R.color.on_accent, bold = true).apply {
+                    setBackgroundResource(R.drawable.bg_pill_dark)
+                    setPadding(dp(18), dp(9), dp(18), dp(9))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(14) }
+                    setOnClickListener { onCreateNew() }
+                },
+            )
+        }
         return col
     }
 
