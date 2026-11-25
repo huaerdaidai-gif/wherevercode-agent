@@ -6525,7 +6525,6 @@ class MainActivity : AppCompatActivity() {
         refreshTeamChannel()
     }
 
-    /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
     /**
      * 页头「＋ 新建」菜单（频道区对齐 iOS，Funk 2026-11-25 批）：只留
      * 列表级 4 项，与 iOS 同序——管理频道（进当前频道的设置页）／
@@ -6545,7 +6544,7 @@ class MainActivity : AppCompatActivity() {
                     teamChannelListMode = true
                     refreshTeamChannel()
                 }
-                3 -> showEntry(DrawerController.ID_MESSAGE_CENTER)
+                3 -> showEntry(DrawerRouter.ID_MESSAGE_CENTER)
             }
         }
     }
