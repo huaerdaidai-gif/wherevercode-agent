@@ -29,6 +29,14 @@ class LanPlatformServerTest {
     @Before
     fun setUp() {
         service = LocalChannelService(InMemoryLocalChannelPersistence()) { now }
+        // 237 起取消默认频道种子：夹具显式建一个频道（原种子频道的同等物，
+        // 本机 App 为 owner），各用例的「列表第一个频道」即它。
+        service.dispatch(
+            "agent_channel_create",
+            JSONObject().put("name", "本地频道"),
+            LocalPlatform.APP_AGENT_ID,
+            LocalPlatform.APP_AGENT_NAME,
+        )
         registry = LanTokenRegistry()
         server = LanPlatformServer({ service }, registry, bindHost = "127.0.0.1", requestedPort = 0)
         server.start()
