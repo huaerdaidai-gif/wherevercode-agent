@@ -6873,10 +6873,10 @@ class MainActivity : AppCompatActivity() {
         val cloudAvailable = hasSavedPlatformToken() && resolvedPlatformHost().isNotBlank()
         var chosenLayer = currentChannelLayer()
         if (chosenLayer == "cloud" && !cloudAvailable) chosenLayer = "local"
-        lateinit var dialog: AlertDialog
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val root = UiKit.vertical(this).apply {
             setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bg))
-            setPadding(0, 0, 0, dp(20))
         }
         val nameInput = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
@@ -6909,9 +6909,9 @@ class MainActivity : AppCompatActivity() {
         )
         topBar.addView(
             View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
-                )
+                // 高度必须给死值：空 View 配 WRAP_CONTENT 时按 AT_MOST
+                // 规格取满可用高度（238 装机实测把顶栏撑满整屏）。
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
             },
         )
         val createBtn = UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
@@ -7022,10 +7022,11 @@ class MainActivity : AppCompatActivity() {
             root.addView(track)
             refreshLayerSegs()
         }
-        // 宿主用频道设置页同款 AlertDialog＋ScrollView 容器：裸 Dialog 直挂根布局时，
-        // 本应用主题下子视图不渲染（238 装机实测：只剩顶栏两钮，标题/输入框缺席）。
-        val scroll = ScrollView(this).apply { addView(root) }
-        dialog = AlertDialog.Builder(this).setView(scroll).create()
+        dialog.setContentView(root)
+        dialog.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+        )
         dialog.show()
     }
 

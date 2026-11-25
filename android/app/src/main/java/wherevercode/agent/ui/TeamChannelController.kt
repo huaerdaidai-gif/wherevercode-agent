@@ -1422,9 +1422,10 @@ class TeamChannelController(
         })
         inner.addView(
             View(context).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
-                )
+                // 高度必须给死值：空 View 配 WRAP_CONTENT 时按 AT_MOST
+                // 规格取满可用高度（238 装机实测把工具行撑到 866px，
+                // 消息中心与消息空态被顶出可视区）。
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
             },
         )
         if (snapshot.showHistoryToggle) {
