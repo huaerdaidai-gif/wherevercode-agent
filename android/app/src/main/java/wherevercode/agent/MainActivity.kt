@@ -481,6 +481,8 @@ class MainActivity : AppCompatActivity() {
     private var teamChannelKeepConversation = false
     /** 最近一次从平台拉到的频道列表缓存（团队空间切换行与私聊列表共用）。 */
     private var teamChannelChannelsCache: List<ChannelSummary> = emptyList()
+    /** 云端层频道缓存（237 切换面板用）：当前端点在云端时随列表刷新同步更新。 */
+    private var teamChannelCloudCache: List<ChannelSummary> = emptyList()
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
     private var teamChannelSearchQuery = ""
     private var teamChannelSearchResults: List<wherevercode.agent.core.agent.PlatformChannelMessage>? = null
@@ -1773,14 +1775,18 @@ class MainActivity : AppCompatActivity() {
             },
             onToggleDmMode = { dm ->
                 teamChannelDmMode = dm
-                if (!dm) teamChannelActiveId = null
+                if (dm) {
+                    // 私聊分段落私聊列表层（237：频道分段回对话层，私聊仍走列表）。
+                    teamChannelListMode = true
+                } else {
+                    teamChannelActiveId = null
+                    teamChannelListMode = !hasResolvableChannelConversation()
+                }
                 startTeamChannelFeed()
                 refreshTeamChannel()
             },
-            onShowChannelList = {
-                teamChannelListMode = true
-                refreshTeamChannel()
-            },
+            onShowChannelList = { handleChannelBack() },
+            onOpenChannelSwitcher = { showChannelSwitcherPanel() },
             onStartDm = { agentId ->
                 teamChannelListMode = false
                 startTeamChannelDm(agentId)
@@ -1804,7 +1810,11 @@ class MainActivity : AppCompatActivity() {
             },
             onSchedulePost = { text, delaySeconds -> scheduleTeamChannelPost(text, delaySeconds) },
             onCancelScheduled = { id -> cancelTeamChannelScheduled(id) },
-            onNotifyModeChange = { mode -> setChannelNotifyMode(mode) },
+            onNotifyModeChange = { mode -> setChannelNotifyMode(activeTeamChannelId(), mode) },
+            onChannelSettings = { id -> showChannelSettings(id) },
+            onDmSettings = { id -> showDmSettings(id) },
+            onSetChannelNotify = { id, mode -> setChannelNotifyMode(id, mode) },
+            onToggleChannelArchived = { id, archived -> confirmArchiveChannel(id, archived) },
             onSearch = { query -> searchTeamChannel(query) },
             onSearchFiltered = { query, sender, fromTs, toTs, kind ->
                 searchTeamChannel(query, sender, fromTs, toTs, kind)
@@ -2087,9 +2097,13 @@ class MainActivity : AppCompatActivity() {
             }
             EntryScreen.MCP_PLUGINS -> refreshMcpPlugins()
             EntryScreen.TEAM_CHANNEL -> {
-                // 进频道先落第一层列表页（对齐 iOS）；深链/消息中心
-                // 直达对话的一次性标记在则保留对话层，消费即清。
-                if (!teamChannelKeepConversation) teamChannelListMode = true
+                // 237（Issue #22）：进频道先落当前频道对话（上次看的/唯一/
+                // 默认频道）；列表降为「切换频道」面板，无频道可落时才落
+                // 列表层（空态）。深链/消息中心直达对话的一次性标记在则
+                // 保留对话层，消费即清。
+                if (!teamChannelKeepConversation) {
+                    teamChannelListMode = !hasResolvableChannelConversation()
+                }
                 teamChannelKeepConversation = false
                 refreshTeamChannel()
                 startTeamChannelFeed()
@@ -5443,7 +5457,7 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
-                "channel_manage" -> showChannelSettings()
+                "channel_manage" -> showChannelManagementList()
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
@@ -6289,6 +6303,9 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             false
         }
+        if (channelLayerPref() == "local") {
+            localChannelEndpoint()?.let { return it }
+        }
         if (hasCredential) {
             val host = resolvedPlatformHost()
             if (host.isNotBlank()) {
@@ -6303,9 +6320,15 @@ class MainActivity : AppCompatActivity() {
         // 全时不再落未配置死页——频道走 App 内嵌的本地平台，零配置
         // 可用；远程凭证配全后上面的分支自动优先（多平台自由切换
         // 是三层三期）。本地服务没装起来时才保持原来的未配置态。
+        return localChannelEndpoint()
+    }
+
+    /** 本地层端点（App 内嵌本地平台）：该层记住的频道优先，其次旧共用记忆，最后本地默认频道（种子取消后可为空串）。 */
+    private fun localChannelEndpoint(): Pair<String, String>? {
         syncLocalPlatformAgents()
         val local = LocalPlatform.serviceOrNull() ?: return null
-        val savedLocal = savedActiveChannelId()?.takeIf { local.channelExists(it) }
+        val savedLocal = (savedActiveChannelIdForLayer("local") ?: savedActiveChannelId())
+            ?.takeIf { local.channelExists(it) }
         return LocalPlatform.LOCAL_HOST to (savedLocal ?: local.defaultChannelId())
     }
 
@@ -6491,6 +6514,12 @@ class MainActivity : AppCompatActivity() {
                 getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
                     .getString("notify_$activeId", null),
             ),
+            channelNotifyModes = teamChannelChannelsCache.associate { c ->
+                c.id to normalizeNotifyMode(
+                    getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                        .getString("notify_${c.id}", null),
+                )
+            },
             searchQuery = teamChannelSearchQuery,
             searchResults = teamChannelSearchResults,
             typingSenderName = teamChannelTypingSender,
@@ -6508,7 +6537,14 @@ class MainActivity : AppCompatActivity() {
             dispatchAvailable = dispatchAvailable,
             dispatchTasks = dispatchTasks,
             dispatchError = dispatchError,
-            listMode = teamChannelListMode,
+            listMode = teamChannelListMode || activeId.isBlank(),
+            activeLayerLabel = if (teamChannelDmMode) {
+                ""
+            } else if (LocalPlatform.isLocalHost(host)) {
+                "本机"
+            } else {
+                "云端"
+            },
         )
     }
 
@@ -6527,6 +6563,253 @@ class MainActivity : AppCompatActivity() {
         refreshTeamChannel()
     }
 
+    /** 237：当前是否有可直接落入的频道对话（上次看的/列表任一/本地层任一/端点默认）。 */
+    private fun hasResolvableChannelConversation(): Boolean {
+        if (teamChannelDmMode) return false
+        val remembered = teamChannelActiveId ?: savedActiveChannelId()
+        if (remembered != null && teamChannelChannelsCache.any { it.id == remembered }) return true
+        if (teamChannelChannelsCache.any { it.kind != "dm" && !it.archived }) return true
+        val local = try { LocalPlatform.serviceOrNull() } catch (_: Exception) { null }
+        if (local != null && local.localChannelIds().isNotEmpty()) return true
+        val endpoint = teamChannelEndpoint()
+        return endpoint != null && endpoint.second.isNotBlank()
+    }
+
+    /** 对话层「‹」/标题（237）：频道对话开切换面板；私聊对话回私聊列表。 */
+    private fun handleChannelBack() {
+        if (teamChannelDmMode) {
+            teamChannelListMode = true
+            refreshTeamChannel()
+        } else {
+            showChannelSwitcherPanel()
+        }
+    }
+
+    /** 当前端点所在层："local" / "cloud"。 */
+    private fun currentChannelLayer(): String =
+        if (LocalPlatform.isLocalHost(teamChannelEndpoint()?.first ?: "")) "local" else "cloud"
+
+    /** 本地层频道名单（进程内本地服务直查，切换面板「本机」组数据源）。 */
+    private fun localPanelChannels(): List<ChannelSummary> {
+        val service = try { LocalPlatform.serviceOrNull() } catch (_: Exception) { null }
+            ?: return emptyList()
+        return try {
+            val result = service.dispatch(
+                "agent_channel_list",
+                org.json.JSONObject(),
+                LocalPlatform.APP_AGENT_ID,
+                LocalPlatform.APP_AGENT_NAME,
+            )
+            val rows = result.optJSONArray("channels") ?: return emptyList()
+            (0 until rows.length()).mapNotNull { i ->
+                val row = rows.optJSONObject(i) ?: return@mapNotNull null
+                val participants = row.optJSONArray("participants")
+                val ids = if (participants != null) {
+                    (0 until participants.length()).mapNotNull { j ->
+                        participants.optJSONObject(j)?.optString("agent_id", "")
+                            ?.takeIf { pid -> pid.isNotEmpty() }
+                    }
+                } else {
+                    emptyList()
+                }
+                ChannelSummary(
+                    id = row.optString("id", ""),
+                    name = row.optString("name", ""),
+                    kind = row.optString("kind", "channel"),
+                    archived = row.optBoolean("archived", false),
+                    participantIds = ids,
+                )
+            }.filter { it.id.isNotEmpty() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun switcherGroupHeader(label: String): android.widget.TextView =
+        UiKit.text(this, label, 12f, R.color.text_tertiary, bold = true).apply {
+            setPadding(dp(20), dp(14), dp(20), dp(4))
+        }
+
+    private fun switcherChannelRow(
+        ch: ChannelSummary,
+        current: Boolean,
+        onClick: () -> Unit,
+    ): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+            setOnClickListener { onClick() }
+        }
+        row.addView(
+            UiKit.text(
+                this,
+                "# " + ch.name + (if (ch.archived) "（已归档）" else "") + (if (current) " ✓" else ""),
+                15f,
+                R.color.text_primary,
+                bold = true,
+            ),
+        )
+        val memberCount = ch.participantDetails.size.takeIf { it > 0 } ?: ch.participantIds.size
+        if (memberCount > 0) {
+            row.addView(UiKit.text(this, "$memberCount 位成员", 11f, R.color.text_tertiary))
+        }
+        return row
+    }
+
+    /** 从切换面板/新建落入某层某频道：记层、记该层当前频道、落对话层并重订推送。 */
+    private fun switchToChannelFromPanel(layer: String, channelId: String) {
+        setChannelLayerPref(layer)
+        teamChannelDmMode = false
+        teamChannelListMode = false
+        teamChannelActiveId = channelId
+        saveActiveChannelId(channelId)
+        teamChannelSearchResults = null
+        teamChannelBrowseMessages = null
+        teamChannelBrowseHighlightId = null
+        startTeamChannelFeed()
+        refreshTeamChannel()
+    }
+
+    /**
+     * 「切换频道」面板（237，Issue #22）：按本机/云端分组列真实频道（带搜索），
+     * 点行即切换并落对话；云端未配置时该组只给「连接云端」入口，不编造频道。
+     */
+    private fun showChannelSwitcherPanel() {
+        val cloudConfigured = hasSavedPlatformToken() && resolvedPlatformHost().isNotBlank()
+        val endpointLocal = currentChannelLayer() == "local"
+        val activeIdNow = activeTeamChannelId()
+        val localList = localPanelChannels()
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val search = EditText(this).apply {
+            hint = "搜索频道名称、简介或消息…"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            maxLines = 1
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+        var dialog: AlertDialog? = null
+        fun fill() {
+            rows.removeAllViews()
+            val q = search.text.toString().trim()
+            fun matches(ch: ChannelSummary) =
+                q.isEmpty() || ch.name.contains(q, ignoreCase = true)
+            rows.addView(switcherGroupHeader("本机"))
+            val locals = localList.filter { it.kind != "dm" && matches(it) }
+            if (locals.isEmpty()) {
+                rows.addView(
+                    UiKit.text(this, "暂无本机频道", 12f, R.color.text_tertiary).apply {
+                        setPadding(dp(20), dp(6), dp(20), dp(6))
+                    },
+                )
+            }
+            locals.forEach { ch ->
+                rows.addView(
+                    switcherChannelRow(ch, endpointLocal && ch.id == activeIdNow) {
+                        dialog?.dismiss()
+                        switchToChannelFromPanel("local", ch.id)
+                    },
+                )
+            }
+            rows.addView(switcherGroupHeader("云端"))
+            if (!cloudConfigured) {
+                rows.addView(
+                    UiKit.text(this, "连接云端", 14f, R.color.accent, bold = true).apply {
+                        setPadding(dp(20), dp(10), dp(20), dp(12))
+                        setOnClickListener {
+                            dialog?.dismiss()
+                            toast("云端未连接：请到底部账号（设置）里的「平台连接与令牌签发」连接云端。")
+                        }
+                    },
+                )
+            } else {
+                val clouds = teamChannelCloudCache.filter { it.kind != "dm" && matches(it) }
+                if (clouds.isEmpty()) {
+                    rows.addView(
+                        UiKit.text(this, "暂无云端频道", 12f, R.color.text_tertiary).apply {
+                            setPadding(dp(20), dp(6), dp(20), dp(6))
+                        },
+                    )
+                }
+                clouds.forEach { ch ->
+                    rows.addView(
+                        switcherChannelRow(ch, !endpointLocal && ch.id == activeIdNow) {
+                            dialog?.dismiss()
+                            switchToChannelFromPanel("cloud", ch.id)
+                        },
+                    )
+                }
+            }
+        }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { fill() }
+        })
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(search)
+            addView(android.widget.ScrollView(this@MainActivity).apply { addView(rows) })
+        }
+        dialog = AlertDialog.Builder(this).setTitle("切换频道").setView(rootLayout)
+            .setNegativeButton("关闭", null).create()
+        dialog.show()
+        fill()
+        if (cloudConfigured && endpointLocal && teamChannelCloudCache.isEmpty()) {
+            val host = resolvedPlatformHost()
+            Thread {
+                val fetched = runCatching { teamChannelTransport(host).listChannels() }.getOrNull()
+                if (fetched != null) {
+                    runOnUiThread {
+                        teamChannelCloudCache = fetched
+                        fill()
+                    }
+                }
+            }.start()
+        }
+    }
+
+    /** 在指定层新建频道并直接落进该频道（237：新建即落地，与「放在」选择一致）。 */
+    private fun createChannelOnLayer(layer: String, name: String) {
+        Thread {
+            var newId = ""
+            var failure: String? = null
+            try {
+                newId = if (layer == "local") {
+                    val service = LocalPlatform.serviceOrNull()
+                        ?: throw IllegalStateException("本地平台未就绪")
+                    service.dispatch(
+                        "agent_channel_create",
+                        org.json.JSONObject().put("name", name),
+                        LocalPlatform.APP_AGENT_ID,
+                        LocalPlatform.APP_AGENT_NAME,
+                    ).optString("id", "")
+                } else {
+                    teamChannelTransport(resolvedPlatformHost()).createChannel(name)
+                        .optString("id", "")
+                }
+                if (newId.isBlank()) {
+                    val list = if (layer == "local") {
+                        localPanelChannels()
+                    } else {
+                        teamChannelTransport(resolvedPlatformHost()).listChannels()
+                    }
+                    newId = list.lastOrNull { it.name == name }?.id
+                        ?: list.lastOrNull { it.name.startsWith(name) }?.id ?: ""
+                }
+            } catch (e: Exception) {
+                failure = (e.message ?: e.javaClass.simpleName).take(160)
+            }
+            runOnUiThread {
+                if (failure != null || newId.isBlank()) {
+                    toast("创建频道失败：${failure ?: "服务端未返回频道"}")
+                    return@runOnUiThread
+                }
+                switchToChannelFromPanel(layer, newId)
+                teamChannelNotice = "频道已创建。"
+                refreshTeamChannel()
+            }
+        }.start()
+    }
+
     /**
      * 页头「＋ 新建」菜单（频道区对齐 iOS，Funk 2026-11-25 批）：只留
      * 列表级 4 项，与 iOS 同序——管理频道（进当前频道的设置页）／
@@ -6534,10 +6817,32 @@ class MainActivity : AppCompatActivity() {
      * 删除、成员、Webhook、通知）全在频道设置页里，见 [showChannelSettings]。
      */
     private fun showChannelCreateMenu() {
-        val options = listOf("管理频道", "新建频道", "发起私聊", "打开消息中心")
+        // 第一项随当前层级变（第二轮对齐 iOS）：列表层是「管理频道」
+        // （频道名单 → 点行进该频道设置页）；频道对话层是「频道设置」；
+        // 私聊对话层是「私聊设置」。其余三项与 iOS 顶栏菜单同序。
+        val activeSummary = teamChannelChannelsCache.firstOrNull { it.id == activeTeamChannelId() }
+        val dmSummary = activeSummary?.takeIf { it.kind == "dm" }
+        val firstLabel: String
+        val firstAction: () -> Unit
+        when {
+            teamChannelListMode -> {
+                firstLabel = "管理频道"
+                firstAction = { showChannelManagementList() }
+            }
+            dmSummary != null -> {
+                firstLabel = "私聊设置"
+                val dmId = dmSummary.id
+                firstAction = { showDmSettings(dmId) }
+            }
+            else -> {
+                firstLabel = "频道设置"
+                firstAction = { showChannelSettings(activeTeamChannelId()) }
+            }
+        }
+        val options = listOf(firstLabel, "新建频道", "发起私聊", "打开消息中心")
         ListDialog.show(this, "新建", null, options) { which ->
             when (which) {
-                0 -> showChannelSettings()
+                0 -> firstAction()
                 1 -> showChannelNameDialog(create = true)
                 2 -> {
                     // 发起私聊：切到私聊分段列表页（方案 A），从频道
@@ -6558,22 +6863,82 @@ class MainActivity : AppCompatActivity() {
         return endpoint
     }
 
-    /** 新建频道／改名共用对话框（原「频道管理」菜单两项，逻辑未变）。 */
-    private fun showChannelNameDialog(create: Boolean) {
-        val channelId = if (create) null else requireChannelEndpoint()?.second ?: return
-        val input = EditText(this).apply { hint = if (create) "频道名称" else "新频道名称" }
-        AlertDialog.Builder(this).setTitle(if (create) "新建频道" else "修改频道名称").setView(input)
-            .setNegativeButton("取消", null).setPositiveButton("确定") { _, _ ->
+    /** 新建频道／改名共用对话框（237：新建预填「本地频道」；云端已配置时带「放在：本机/云端」，新建即落入新频道）。 */
+    private fun showChannelNameDialog(create: Boolean, targetChannelId: String? = null) {
+        val channelId = if (create) null else (targetChannelId ?: requireChannelEndpoint()?.second ?: return)
+        val input = EditText(this).apply {
+            hint = if (create) "频道名称" else "新频道名称"
+            if (create) {
+                setText("本地频道")
+                setSelection(text.length)
+            }
+        }
+        if (!create) {
+            AlertDialog.Builder(this).setTitle("修改频道名称").setView(input)
+                .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
+                    val name = input.text.toString().trim()
+                    if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
+                    performChannelManagement { it.renameChannel(channelId!!, name) }
+                }.show()
+            return
+        }
+        val cloudAvailable = hasSavedPlatformToken() && resolvedPlatformHost().isNotBlank()
+        if (!cloudAvailable) {
+            AlertDialog.Builder(this).setTitle("新建频道").setView(input)
+                .setNegativeButton("取消", null).setPositiveButton("创建") { _, _ ->
+                    val name = input.text.toString().trim()
+                    if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
+                    createChannelOnLayer(currentChannelLayer(), name)
+                }.show()
+            return
+        }
+        var chosenLayer = currentChannelLayer()
+        val chipLocal = UiKit.text(this, "本机", 13f, R.color.text_primary, bold = true)
+        val chipCloud = UiKit.text(this, "云端", 13f, R.color.text_primary, bold = true)
+        fun styleChips() {
+            chipLocal.setBackgroundResource(
+                if (chosenLayer == "local") R.drawable.bg_chip_accent else R.drawable.bg_chip,
+            )
+            chipCloud.setBackgroundResource(
+                if (chosenLayer == "cloud") R.drawable.bg_chip_accent else R.drawable.bg_chip,
+            )
+        }
+        chipLocal.apply {
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            setOnClickListener { chosenLayer = "local"; styleChips() }
+        }
+        chipCloud.apply {
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            setOnClickListener { chosenLayer = "cloud"; styleChips() }
+        }
+        styleChips()
+        val layerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(20), dp(6), dp(20), 0)
+            addView(chipLocal)
+            addView(chipCloud)
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(input)
+            addView(
+                UiKit.text(this@MainActivity, "放在", 12f, R.color.text_tertiary).apply {
+                    setPadding(dp(20), dp(10), dp(20), 0)
+                },
+            )
+            addView(layerRow)
+        }
+        AlertDialog.Builder(this).setTitle("新建频道").setView(container)
+            .setNegativeButton("取消", null).setPositiveButton("创建") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
-                if (create) performChannelManagement { it.createChannel(name) }
-                else performChannelManagement { it.renameChannel(channelId!!, name) }
+                createChannelOnLayer(chosenLayer, name)
             }.show()
     }
 
     /** 归档／取消归档（原菜单只有归档；按 iOS 频道设置页的开关式同项补上取消归档）。 */
-    private fun confirmArchiveChannel(archived: Boolean) {
-        val (_, channelId) = requireChannelEndpoint() ?: return
+    private fun confirmArchiveChannel(channelId: String, archived: Boolean) {
+        requireChannelEndpoint() ?: return
         if (archived) {
             AlertDialog.Builder(this).setTitle("取消归档频道？")
                 .setMessage("将把频道移出归档，恢复到频道列表中。")
@@ -6589,8 +6954,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 添加成员：候选 = 本机已添加的平台 Agent（原菜单同逻辑）。 */
-    private fun addChannelMember() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
+    private fun addChannelMember(channelId: String) {
+        requireChannelEndpoint() ?: return
         val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
             .filter { PlatformAgent.isPlatformAgentRecord(it) }
         if (candidates.isEmpty()) { toast("没有可用的平台 Agent。"); return }
@@ -6601,15 +6966,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 移除成员（原菜单同逻辑：创建者不可移除，服务端拒绝时显示真实原因）。 */
-    private fun removeChannelMember() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
-        val members = teamChannelMembers().filterNot { it.isLocalApp }
+    /** 移除成员（名单取目标频道参与者明细；确认文案与 iOS 同字）。 */
+    private fun removeChannelMember(channelId: String) {
+        requireChannelEndpoint() ?: return
+        val members = teamChannelChannelsCache.firstOrNull { it.id == channelId }
+            ?.participantDetails?.filterNot { it.isSelf }.orEmpty()
         if (members.isEmpty()) { toast("当前没有可见的频道成员可移除。创建者不可移除。"); return }
-        ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.displayName }) { index ->
+        ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.agentName }) { index ->
             val member = members[index]
             AlertDialog.Builder(this).setTitle("移除频道成员？")
-                .setMessage("将从频道移除 ${member.displayName}。创建者不可移除；若服务端拒绝，将显示其返回原因。")
+                .setMessage("确定将 ${member.agentName} 移出此频道？")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("移除") { _, _ ->
                     performChannelManagement { it.removeChannelMember(channelId, member.agentId) }
@@ -6617,21 +6983,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 设置成员角色（原菜单同逻辑：仅频道 owner 可改，服务端校验）。 */
-    private fun setChannelMemberRole() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
-        val members = mergedTeamChannelMembers().filterNot { it.isLocalApp }
+    /** 设置成员角色（名单取目标频道参与者明细；仅频道 owner 可改，服务端校验）。 */
+    private fun setChannelMemberRole(channelId: String) {
+        requireChannelEndpoint() ?: return
+        val members = teamChannelChannelsCache.firstOrNull { it.id == channelId }
+            ?.participantDetails?.filterNot { it.isSelf }.orEmpty()
         if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return }
         val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
-        ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { m ->
-            m.displayName + "（当前：" + (roleNames.firstOrNull { it.first == m.role }?.second ?: m.role) + "）"
+        ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { mm ->
+            mm.agentName + "（当前：" + (roleNames.firstOrNull { it.first == mm.role }?.second ?: mm.role) + "）"
         }) { index ->
             val member = members[index]
-            ListDialog.show(this, "设置 ${member.displayName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
+            ListDialog.show(this, "设置 ${member.agentName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
                 val newRole = roleNames[roleIndex].first
                 if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
                 AlertDialog.Builder(this).setTitle("更改成员角色？")
-                    .setMessage("把 ${member.displayName} 的角色改为${roleNames[roleIndex].second}。")
+                    .setMessage("把 ${member.agentName} 的角色改为${roleNames[roleIndex].second}。")
                     .setNegativeButton("取消", null)
                     .setPositiveButton("更改") { _, _ ->
                         performChannelManagement { it.setChannelMemberRole(channelId, member.agentId, newRole) }
@@ -6640,20 +7007,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 删除频道（原菜单同逻辑：仅 owner 可删，服务端授权校验，不可撤销）。 */
-    private fun deleteActiveChannel() {
-        val (_, channelId) = requireChannelEndpoint() ?: return
-        AlertDialog.Builder(this).setTitle("删除频道？")
-            .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
+    /** 删除频道（确认文案与 iOS 同字：仅 owner 有权限，服务端将验证权限）。 */
+    private fun deleteChannel(channelId: String) {
+        requireChannelEndpoint() ?: return
+        AlertDialog.Builder(this).setTitle("确定删除频道？")
+            .setMessage("删除无法撤销。仅频道 owner 有权限，服务端将验证权限。")
             .setNegativeButton("取消", null)
-            .setPositiveButton("删除") { _, _ ->
+            .setPositiveButton("删除频道") { _, _ ->
                 performChannelManagement { it.deleteChannel(channelId) }
             }.show()
     }
 
     /** 创建入帖 Webhook（原菜单同逻辑：服务端返回地址路径＋一次性密钥＋签名说明）。 */
-    private fun createChannelWebhook() {
-        val (host, channelId) = requireChannelEndpoint() ?: return
+    private fun createChannelWebhook(channelId: String) {
+        val (host, _) = requireChannelEndpoint() ?: return
         Thread {
             try {
                 val result = teamChannelTransport(host).createChannelWebhook(channelId)
@@ -6683,8 +7050,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 管理 Webhook：列表＋删除（原菜单同逻辑；secret 不回显，丢了删掉重建）。 */
-    private fun manageChannelWebhooks() {
-        val (host, channelId) = requireChannelEndpoint() ?: return
+    private fun manageChannelWebhooks(channelId: String) {
+        val (host, _) = requireChannelEndpoint() ?: return
         Thread {
             try {
                 val result = teamChannelTransport(host).listChannelWebhooks(channelId)
@@ -6729,31 +7096,38 @@ class MainActivity : AppCompatActivity() {
         else -> "全部消息"
     }
 
-    /** 逐频道通知档（本机偏好）：控制器成员行与频道设置页共用一处写。 */
-    private fun setChannelNotifyMode(mode: String) {
-        val channelId = activeTeamChannelId()
+    /** 逐频道通知档（本机偏好）：控制器成员行、频道/私聊设置页、列表长按共用一处写。 */
+    private fun setChannelNotifyMode(channelId: String, mode: String) {
         getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
             .edit().putString("notify_$channelId", mode).apply()
-        teamChannelNotice = "本频道通知：$mode"
+        teamChannelNotice =
+            if (channelId == activeTeamChannelId()) "本频道通知：$mode" else "通知已设为：$mode"
         refreshTeamChannel()
     }
 
+    /** 通知档说明文案（iOS 通知设置节同文案，随当前档位显示一行）。 */
+    private fun notifyModePrompt(mode: String): String = when (mode) {
+        "仅@我" -> "仅接收提及我的消息通知与未读提醒"
+        "静音" -> "不接收通知，不计入未读提醒"
+        else -> "接收所有新消息通知与未读计数"
+    }
+
     /**
-     * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构，Funk
-     * 2026-11-25 批）：频道信息（改名/归档/删除）／通知设置／入帖
-     * Webhook／频道成员四节。功能全是既有管理动作换摆法，一项不删；
-     * 通知档与 iOS 同词（全部消息/仅@我/静音），与成员行同值；旧值读时归一。
+     * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构）：频道信息
+     * （含 iOS 同有的频道性质/成员总数行，本机另留频道 ID 行）／通知设置
+     * （三档同词＋随档位说明一行）／入帖 Webhook／频道成员四节。
+     * 所有管理动作按传入的频道 id 执行，不再只认当前频道。
      */
-    private fun showChannelSettings() {
-        val endpoint = teamChannelEndpoint()
-        if (endpoint == null) {
+    private fun showChannelSettings(channelId: String) {
+        if (teamChannelEndpoint() == null) {
             toast("频道未连接；没有可管理的频道。")
             return
         }
-        val channelId = endpoint.second
         val summary = teamChannelChannelsCache.firstOrNull { it.id == channelId }
         val channelName = summary?.name?.takeIf { it.isNotBlank() } ?: "频道"
         val archived = summary?.archived == true
+        val memberTotal = summary?.participantDetails?.size?.takeIf { it > 0 }
+            ?: summary?.participantIds?.size ?: 0
         val notifyMode = normalizeNotifyMode(
             getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
                 .getString("notify_$channelId", null),
@@ -6796,25 +7170,117 @@ class MainActivity : AppCompatActivity() {
         sectionHeader("频道信息")
         infoLine("当前频道：$channelName")
         infoLine("频道 ID：$channelId")
-        actionRow("改名") { showChannelNameDialog(create = false) }
-        actionRow(if (archived) "取消归档" else "归档频道") { confirmArchiveChannel(archived) }
-        actionRow("删除频道", R.color.danger) { deleteActiveChannel() }
+        infoLine("频道性质：公开频道")
+        infoLine("成员总数：$memberTotal 人")
+        actionRow("改名") { showChannelNameDialog(create = false, targetChannelId = channelId) }
+        actionRow(if (archived) "取消归档" else "归档频道") { confirmArchiveChannel(channelId, archived) }
+        actionRow("删除频道", R.color.danger) { deleteChannel(channelId) }
         infoLine("仅频道 owner 可删除。删除权限由服务端校验。")
         sectionHeader("通知设置")
         listOf("全部消息", "仅@我", "静音").forEach { mode ->
-            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(mode) }
+            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(channelId, mode) }
         }
+        infoLine(notifyModePrompt(notifyMode))
         sectionHeader("入帖 Webhook")
-        actionRow("创建入帖 Webhook") { createChannelWebhook() }
-        actionRow("管理 Webhook") { manageChannelWebhooks() }
+        actionRow("创建入帖 Webhook") { createChannelWebhook(channelId) }
+        actionRow("管理 Webhook") { manageChannelWebhooks(channelId) }
         sectionHeader("频道成员")
-        actionRow("添加成员") { addChannelMember() }
-        actionRow("移除成员") { removeChannelMember() }
-        actionRow("设置成员角色") { setChannelMemberRole() }
+        actionRow("添加成员") { addChannelMember(channelId) }
+        actionRow("移除成员") { removeChannelMember(channelId) }
+        actionRow("设置成员角色") { setChannelMemberRole(channelId) }
 
         val scroll = ScrollView(this).apply { addView(container) }
         dialog = AlertDialog.Builder(this)
             .setTitle("频道设置")
+            .setView(scroll)
+            .setPositiveButton("完成", null)
+            .create()
+        dialog.show()
+    }
+
+    /** 管理频道（iOS 同构：先出频道名单，行尾标状态，点行进该频道的设置页）。 */
+    private fun showChannelManagementList() {
+        val channels = teamChannelChannelsCache.filter { it.kind != "dm" }
+        if (channels.isEmpty()) {
+            toast("暂无频道。")
+            return
+        }
+        val labels = channels.map { ch ->
+            "# ${ch.name}" + if (ch.archived) " · 已归档" else " · 活动中"
+        }
+        ListDialog.show(this, "管理频道", null, labels) { index ->
+            showChannelSettings(channels[index].id)
+        }
+    }
+
+    /** 频道角色中文名（与 iOS channelRoleLabel 同词）。 */
+    private fun channelRoleLabelText(role: String?): String = when (role) {
+        "owner" -> "创建者"
+        "coordinator" -> "协调员"
+        "member" -> "成员"
+        null -> "私聊"
+        else -> role
+    }
+
+    /** 私聊设置（iOS 私聊设置同节：私聊信息＋通知设置；通知档与频道共用本机偏好）。 */
+    private fun showDmSettings(dmId: String) {
+        val summary = teamChannelChannelsCache.firstOrNull { it.id == dmId }
+        val peer = summary?.participantDetails?.firstOrNull { !it.isSelf }
+        val peerName = peer?.agentName?.takeIf { it.isNotBlank() }
+            ?: summary?.name?.takeIf { it.isNotBlank() } ?: "私聊"
+        val identity = if (peer?.isAgent == false) "团队成员" else "平台 Agent"
+        val notifyMode = normalizeNotifyMode(
+            getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_$dmId", null),
+        )
+
+        lateinit var dialog: AlertDialog
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+            )
+        }
+        fun sectionHeader(label: String) {
+            container.addView(
+                UiKit.text(this, label, 13f, R.color.text_secondary, bold = true).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 16), 0, UiKit.dp(this@MainActivity, 4))
+                },
+            )
+        }
+        fun infoLine(text: String) {
+            container.addView(
+                UiKit.text(this, text, 12f, R.color.text_tertiary).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 2), 0, UiKit.dp(this@MainActivity, 2))
+                },
+            )
+        }
+        fun actionRow(label: String, onClick: () -> Unit) {
+            container.addView(
+                UiKit.text(this, label, 15f, R.color.text_primary).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 11), 0, UiKit.dp(this@MainActivity, 11))
+                    setOnClickListener {
+                        dialog.dismiss()
+                        onClick()
+                    }
+                },
+            )
+        }
+
+        sectionHeader("私聊信息")
+        infoLine("对象姓名：$peerName")
+        infoLine("身份类型：$identity")
+        infoLine("归属角色：${channelRoleLabelText(peer?.role)}")
+        sectionHeader("通知设置")
+        listOf("全部消息", "仅@我", "静音").forEach { mode ->
+            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(dmId, mode) }
+        }
+        infoLine(notifyModePrompt(notifyMode))
+
+        val scroll = ScrollView(this).apply { addView(container) }
+        dialog = AlertDialog.Builder(this)
+            .setTitle("私聊设置")
             .setView(scroll)
             .setPositiveButton("完成", null)
             .create()
@@ -6960,6 +7426,9 @@ class MainActivity : AppCompatActivity() {
                 val endpoint = teamChannelEndpoint()
                 if (endpoint != null) {
                     teamChannelChannelsCache = teamChannelTransport(endpoint.first).listChannels()
+                    if (!LocalPlatform.isLocalHost(endpoint.first)) {
+                        teamChannelCloudCache = teamChannelChannelsCache
+                    }
                 }
             } catch (_: Exception) {
             }
@@ -7227,11 +7696,33 @@ class MainActivity : AppCompatActivity() {
     private fun saveActiveChannelId(channelId: String) {
         val value = channelId.trim()
         if (value.isEmpty()) return
+        // 237：除共用记忆外，按频道所属层各记一份（本机层以本地服务在册为准）。
+        val isLocal = try {
+            LocalPlatform.serviceOrNull()?.channelExists(value) == true
+        } catch (_: Exception) {
+            false
+        }
         getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
             .edit()
             .putString(KEY_ACTIVE_CHANNEL_ID, value)
+            .putString(if (isLocal) KEY_ACTIVE_CHANNEL_ID_LOCAL else KEY_ACTIVE_CHANNEL_ID_CLOUD, value)
             .apply()
     }
+
+    /** 237：用户在切换面板/新建时选定的频道层（local / cloud；未选过为 null，走端点旧优先序）。 */
+    private fun channelLayerPref(): String? =
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .getString(KEY_CHANNEL_LAYER, null)?.takeIf { it == "local" || it == "cloud" }
+
+    private fun setChannelLayerPref(layer: String) {
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit().putString(KEY_CHANNEL_LAYER, layer).apply()
+    }
+
+    private fun savedActiveChannelIdForLayer(layer: String): String? =
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .getString(if (layer == "local") KEY_ACTIVE_CHANNEL_ID_LOCAL else KEY_ACTIVE_CHANNEL_ID_CLOUD, null)
+            ?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun persistActiveTeamChannel(channelId: String) {
         saveActiveChannelId(channelId)
@@ -14555,6 +15046,9 @@ class MainActivity : AppCompatActivity() {
         /** 任务角色名（W12）：与任务派工契约的 roles 同名。 */
         private val TASK_ROLE_NAMES = setOf("dev", "review", "pack")
         private const val KEY_ACTIVE_CHANNEL_ID = "active_channel_id"
+        private const val KEY_ACTIVE_CHANNEL_ID_LOCAL = "active_channel_id_local"
+        private const val KEY_ACTIVE_CHANNEL_ID_CLOUD = "active_channel_id_cloud"
+        private const val KEY_CHANNEL_LAYER = "channel_layer"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_ENTRY = "ui_entry"
         private const val KEY_IN_CONVERSATION = "ui_in_conversation"

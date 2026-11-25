@@ -16,9 +16,16 @@ final class LanPlatformServerTests: XCTestCase {
     private var registry: LanTokenRegistry!
     private var server: LanPlatformServer!
     private var port: UInt16 = 0
+    private var fixtureChannelId: String = ""
 
     override func setUp() async throws {
         service = LocalChannelService(persistence: InMemoryLocalChannelPersistence())
+        // 237 起取消默认频道种子：夹具显式建一个频道（原种子频道的同等物，
+        // 本机 App 为 owner），各用例的 defaultChannelId() 即它。
+        let createdChannel = try? service.dispatch(
+            tool: "agent_channel_create", args: ["name": "本地频道"],
+            callerId: LocalPlatform.appAgentID, callerName: LocalPlatform.appAgentName)
+        fixtureChannelId = createdChannel?["id"] as? String ?? "" 
         registry = LanTokenRegistry()
         let svc = service!
         server = LanPlatformServer(serviceProvider: { svc }, registry: registry, port: 0)
@@ -144,7 +151,7 @@ final class LanPlatformServerTests: XCTestCase {
 
     func testOwnerTokenCanDispatchMemberCannot() async throws {
         service.registerAgent(agentId: "dev1", agentName: "DevA")
-        let channelId = service.defaultChannelId()
+        let channelId = fixtureChannelId
         let startBody = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"start_task\",\"arguments\":{\"agent\":\"dev1\",\"project_id\":\"proj\",\"goal\":\"内网派单\",\"channel_id\":\"\(channelId)\"}}}"
         let member = registry.issue(agentName: "Mac")
         let denied = try await http("POST", "/api/open/v1/mcp", token: member.token, body: startBody)
@@ -178,7 +185,7 @@ final class LanPlatformServerTests: XCTestCase {
 
     func testMemberListJoinPostReadRoundtrip() async throws {
         let entry = registry.issue(agentName: "Mac")
-        let channelId = service.defaultChannelId()
+        let channelId = fixtureChannelId
 
         let (listStatus, listBody) = try await mcp(entry.token, "agent_channel_list")
         XCTAssertEqual(listStatus, 200)
@@ -199,7 +206,7 @@ final class LanPlatformServerTests: XCTestCase {
 
     func testNonMemberReadIsRefusedByLedger() async throws {
         let entry = registry.issue(agentName: "Guest")
-        let channelId = service.defaultChannelId()
+        let channelId = fixtureChannelId
         let (status, body) = try await mcp(entry.token, "agent_channel_messages", "{\"channel_id\":\"\(channelId)\"}")
         XCTAssertEqual(status, 200)
         XCTAssertTrue(isError(body), body)
@@ -262,7 +269,7 @@ final class LanPlatformServerTests: XCTestCase {
 
     func testWsNonMemberIs403AndGetsNoMessages() async throws {
         let entry = registry.issue(agentName: "Guest")
-        let channelId = service.defaultChannelId()
+        let channelId = fixtureChannelId
         let probe = wsConnect(channelId: channelId, token: entry.token)
         let refused = await waitFor(probe, "not_a_channel_member", timeoutSeconds: 3)
         XCTAssertTrue(refused, receivedText(probe))
@@ -272,7 +279,7 @@ final class LanPlatformServerTests: XCTestCase {
 
     func testWsMemberReceivesPushedMessage() async throws {
         let entry = registry.issue(agentName: "Mac")
-        let channelId = service.defaultChannelId()
+        let channelId = fixtureChannelId
         _ = try await mcp(entry.token, "agent_channel_join", "{\"channel_id\":\"\(channelId)\"}")
         let probe = wsConnect(channelId: channelId, token: entry.token)
         let upgraded = await waitFor(probe, "101", timeoutSeconds: 3)

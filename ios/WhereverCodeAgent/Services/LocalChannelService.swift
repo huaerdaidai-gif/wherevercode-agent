@@ -144,6 +144,7 @@ public final class LocalChannelService {
     private var effectKeys: [String: String] = [:]
     private var seqCounter: Int64 = 0
     private var storedDefaultChannelId: String = ""
+    private var seedCleanupV1Done: Bool = false
 
     private var listeners: [String: [LocalChannelListenerToken]] = [:]
 
@@ -282,7 +283,7 @@ public final class LocalChannelService {
         do {
             return try taskDispatch.ingestCloudDispatch(
                 task: task,
-                channelId: storedDefaultChannelId,
+                channelId: resolveLandingChannelId(requested: task["local_channel_id"] as? String),
                 localAssigneeId: LocalPlatform.appAgentID,
                 localAssigneeName: LocalPlatform.appAgentName)
         } catch let error as TaskDispatchError {
@@ -306,10 +307,13 @@ public final class LocalChannelService {
             }
     }
 
-    /// 本地默认频道 id（首次启动种子建好，之后稳定不变）。
+    /// 旧种子频道的 id（种子已取消：仅当该频道仍存在时返回，否则空串）。
     public func defaultChannelId() -> String {
         lock.lock(); defer { lock.unlock() }
-        return storedDefaultChannelId
+        if !storedDefaultChannelId.isEmpty && channels[storedDefaultChannelId] != nil {
+            return storedDefaultChannelId
+        }
+        return ""
     }
 
     public func channelExists(_ channelId: String) -> Bool {
@@ -325,24 +329,47 @@ public final class LocalChannelService {
 
     private func ensureSeed() {
         registerAgentLocked(agentId: LocalPlatform.appAgentID, agentName: LocalPlatform.appAgentName)
-        if storedDefaultChannelId.isEmpty || channels[storedDefaultChannelId] == nil {
-            let channel = Channel(
-                id: newId(),
-                name: Self.defaultChannelName,
-                kind: "channel",
-                archived: false,
-                historyVisible: true,
-                createdAt: clock()
-            )
-            channels[channel.id] = channel
-            channelOrder.append(channel.id)
-            members[channel.id] = [
-                Member(agentId: LocalPlatform.appAgentID, agentName: LocalPlatform.appAgentName, role: "owner", joinedAt: clock()),
-            ]
-            messages[channel.id] = []
-            storedDefaultChannelId = channel.id
-            persist()
+        cleanupSeededChannelIfNeeded()
+    }
+
+    /// 一次性清理（Issue #22）：旧版本自动种下的默认频道，若仍叫默认名且零消息，
+    /// 静默删除；有消息的一律保留。迁移标记防重复执行。
+    private func cleanupSeededChannelIfNeeded() {
+        if seedCleanupV1Done { return }
+        seedCleanupV1Done = true
+        let seededId = storedDefaultChannelId
+        if !seededId.isEmpty, let channel = channels[seededId],
+           channel.name == Self.defaultChannelName,
+           (messages[seededId] ?? []).isEmpty {
+            channels.removeValue(forKey: seededId)
+            channelOrder.removeAll { $0 == seededId }
+            members.removeValue(forKey: seededId)
+            messages.removeValue(forKey: seededId)
+            webhooks.removeAll { $0.channelId == seededId }
+            readMarkers = readMarkers.filter { !$0.key.hasPrefix(seededId + "|") }
+            storedDefaultChannelId = ""
         }
+        persist()
+    }
+
+    /// 派单落点规则（Issue #22）：显式指定 ＞ 唯一本地频道 ＞ 挂起待落地（返回空串）。
+    private func resolveLandingChannelId(requested: String?) -> String {
+        if let requested = requested?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !requested.isEmpty, channels[requested] != nil {
+            return requested
+        }
+        let locals = channelOrder.compactMap { channels[$0] }.filter { $0.kind == "channel" && !$0.archived }
+        if locals.count == 1 { return locals[0].id }
+        return ""
+    }
+
+    /// 新建频道重名自动加序号（Issue #22）：「本地频道」→「本地频道 2」→「本地频道 3」……
+    private func uniqueChannelName(_ name: String) -> String {
+        let taken = Set(channelOrder.compactMap { channels[$0] }.filter { !$0.archived }.map { $0.name })
+        if !taken.contains(name) { return name }
+        var n = 2
+        while taken.contains("\(name) \(n)") { n += 1 }
+        return "\(name) \(n)"
     }
 
     // ---- 实时推送（本地总线，喂给频道页的 WS 形状事件） --------------------
@@ -524,7 +551,7 @@ public final class LocalChannelService {
     }
 
     private func createChannel(_ args: [String: Any], callerId: String, callerName: String) throws -> [String: Any] {
-        let name = try reqText(args, "name", 100)
+        let name = uniqueChannelName(try reqText(args, "name", 100))
         let channel = Channel(id: newId(), name: name, kind: "channel", archived: false, historyVisible: true, createdAt: clock())
         channels[channel.id] = channel
         channelOrder.append(channel.id)
@@ -1036,6 +1063,7 @@ public final class LocalChannelService {
         var root: [String: Any] = [:]
         root["version"] = 1
         root["default_channel_id"] = storedDefaultChannelId
+        root["seed_cleanup_v1_done"] = seedCleanupV1Done
         root["seq"] = seqCounter
         root["agents"] = agentOrder.compactMap { agents[$0] }.map {
             ["id": $0.id, "name": $0.name, "roles": $0.roles] as [String: Any]
@@ -1131,6 +1159,7 @@ public final class LocalChannelService {
             return
         }
         storedDefaultChannelId = optString(root, "default_channel_id")
+        seedCleanupV1Done = optBool(root, "seed_cleanup_v1_done", false)
         seqCounter = Int64(optInt(root, "seq", 0))
         for row in (root["agents"] as? [[String: Any]]) ?? [] {
             let id = optString(row, "id")
