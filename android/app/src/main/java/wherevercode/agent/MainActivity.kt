@@ -475,6 +475,10 @@ class MainActivity : AppCompatActivity() {
     private var teamChannelActiveId: String? = null
     /** 私聊分段是否选中（方案 A 分段切换的状态在本机，不进服务端）。 */
     private var teamChannelDmMode = false
+    /** 频道区第一层列表页（对齐 iOS，Funk 2026-11-25 批）：true = 列表层，点频道/私聊行才进对话层。 */
+    private var teamChannelListMode = true
+    /** 深链/消息中心直达对话时置位：showScreen 的频道分支消费一次，不把落点弹回列表层。 */
+    private var teamChannelKeepConversation = false
     /** 最近一次从平台拉到的频道列表缓存（团队空间切换行与私聊列表共用）。 */
     private var teamChannelChannelsCache: List<ChannelSummary> = emptyList()
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
@@ -1757,6 +1761,7 @@ class MainActivity : AppCompatActivity() {
             onCreateNew = { showChannelCreateMenu() },
             onOpenDrawer = { openDrawer() },
             onSwitchChannel = { channelId ->
+                teamChannelListMode = false
                 teamChannelActiveId = channelId
                 if (!teamChannelDmMode) saveActiveChannelId(channelId)
                 teamChannelSearchResults = null
@@ -1772,7 +1777,14 @@ class MainActivity : AppCompatActivity() {
                 startTeamChannelFeed()
                 refreshTeamChannel()
             },
-            onStartDm = { agentId -> startTeamChannelDm(agentId) },
+            onShowChannelList = {
+                teamChannelListMode = true
+                refreshTeamChannel()
+            },
+            onStartDm = { agentId ->
+                teamChannelListMode = false
+                startTeamChannelDm(agentId)
+            },
             onMessageRecall = { messageId -> runTeamChannelAction("撤回") { t, ch -> t.recallMessage(ch, messageId) } },
             onMessageDelete = { messageId ->
                 runTeamChannelAction("删除", evictMessageId = messageId) { t, ch -> t.deleteMessage(ch, messageId) }
@@ -1792,13 +1804,7 @@ class MainActivity : AppCompatActivity() {
             },
             onSchedulePost = { text, delaySeconds -> scheduleTeamChannelPost(text, delaySeconds) },
             onCancelScheduled = { id -> cancelTeamChannelScheduled(id) },
-            onNotifyModeChange = { mode ->
-                val channelId = activeTeamChannelId()
-                getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
-                    .edit().putString("notify_$channelId", mode).apply()
-                teamChannelNotice = "本频道通知：$mode"
-                refreshTeamChannel()
-            },
+            onNotifyModeChange = { mode -> setChannelNotifyMode(mode) },
             onSearch = { query -> searchTeamChannel(query) },
             onSearchFiltered = { query, sender, fromTs, toTs, kind ->
                 searchTeamChannel(query, sender, fromTs, toTs, kind)
@@ -1841,7 +1847,10 @@ class MainActivity : AppCompatActivity() {
             this,
             onRefresh = { refreshMessageCenter() },
             onOpenEntry = { entry -> openMessageCenterEntry(entry) },
-            onClose = { showEntry(DrawerController.ID_TEAM_CHANNEL) },
+            onClose = {
+                teamChannelKeepConversation = true
+                showEntry(DrawerController.ID_TEAM_CHANNEL)
+            },
         )
         screenMessageCenter = messageCenterController.root
         container.addView(screenMessageCenter)
@@ -2078,6 +2087,10 @@ class MainActivity : AppCompatActivity() {
             }
             EntryScreen.MCP_PLUGINS -> refreshMcpPlugins()
             EntryScreen.TEAM_CHANNEL -> {
+                // 进频道先落第一层列表页（对齐 iOS）；深链/消息中心
+                // 直达对话的一次性标记在则保留对话层，消费即清。
+                if (!teamChannelKeepConversation) teamChannelListMode = true
+                teamChannelKeepConversation = false
                 refreshTeamChannel()
                 startTeamChannelFeed()
             }
@@ -5430,7 +5443,7 @@ class MainActivity : AppCompatActivity() {
             EntryRegistry.TargetKind.SUGGESTION -> applySuggestion(entry.target)
             EntryRegistry.TargetKind.ACTION -> when (entry.target) {
                 "cycle_theme" -> cycleTheme()
-                "channel_manage" -> showChannelCreateMenu()
+                "channel_manage" -> showChannelSettings()
                 else -> toast("${entry.title}待开发")
             }
             else -> toast("${entry.title}待开发")
@@ -6393,6 +6406,7 @@ class MainActivity : AppCompatActivity() {
                 unreadCapped = false,
                 roundsUsed = teamChannelRoundsUsed,
                 notice = teamChannelNotice,
+                listMode = true,
             )
         }
         val (host, channelId) = endpoint
@@ -6473,8 +6487,10 @@ class MainActivity : AppCompatActivity() {
                     synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
             ),
             scheduled = loadScheduledPosts().filter { it.channelId == activeId },
-            notifyMode = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
-                .getString("notify_$activeId", "全部") ?: "全部",
+            notifyMode = normalizeNotifyMode(
+                getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                    .getString("notify_$activeId", null),
+            ),
             searchQuery = teamChannelSearchQuery,
             searchResults = teamChannelSearchResults,
             typingSenderName = teamChannelTypingSender,
@@ -6492,6 +6508,7 @@ class MainActivity : AppCompatActivity() {
             dispatchAvailable = dispatchAvailable,
             dispatchTasks = dispatchTasks,
             dispatchError = dispatchError,
+            listMode = teamChannelListMode,
         )
     }
 
@@ -6510,163 +6527,298 @@ class MainActivity : AppCompatActivity() {
         refreshTeamChannel()
     }
 
-    /** 频道页管理：只用当前配置的真实 channel id 与平台现有管理工具。 */
+    /**
+     * 页头「＋ 新建」菜单（频道区对齐 iOS，Funk 2026-11-25 批）：只留
+     * 列表级 4 项，与 iOS 同序——管理频道（进当前频道的设置页）／
+     * 新建频道／发起私聊／打开消息中心。频道专属管理（改名、归档、
+     * 删除、成员、Webhook、通知）全在频道设置页里，见 [showChannelSettings]。
+     */
     private fun showChannelCreateMenu() {
-        val options = listOf("新建频道", "改名", "归档频道", "添加成员", "移除成员", "设置成员角色", "删除频道", "发起私聊", "创建入帖 Webhook", "管理 Webhook", "打开消息中心")
-        ListDialog.show(this, "频道管理", "频道 ID：${teamChannelEndpoint()?.second ?: "未连接"}。删除仅频道 owner 可操作，服务端会校验权限。", options) { which ->
-            if (which == 10) {
-                showEntry(DrawerRouter.ID_MESSAGE_CENTER)
-                return@show
-            }
-            if (which == 7) {
-                // 频道补全二期：发起私聊切到私聊分段（方案 A）；新私聊
-                // 从频道成员发起（控制器 onStartDm），不在此凭空建。
-                teamChannelDmMode = true
-                refreshTeamChannel()
-                return@show
-            }
-            val endpoint = teamChannelEndpoint()
-            val host = endpoint?.first
-            val channelId = endpoint?.second
-            if (which != 0 && (host == null || channelId == null)) {
-                toast("频道未连接；未执行管理操作。")
-                return@show
-            }
-            if (which == 8) {
-                // 频道补全二期：创建入帖 Webhook（第七节五项之一）。
-                Thread {
-                    try {
-                        val result = teamChannelTransport(host!!).createChannelWebhook(channelId!!)
-                        // 服务端真实返回：url_path（复数 channel-webhooks）＋
-                        // secret（只此一次）＋签名说明；没有 token 字段。
-                        val urlPath = result.optString("url_path", "")
-                        val secret = result.optString("secret", "")
-                        val signature = result.optString("signature", "")
-                        runOnUiThread {
-                            AlertDialog.Builder(this)
-                                .setTitle("频道 Webhook 已创建")
-                                .setMessage(
-                                    "入帖地址路径：$urlPath\n" +
-                                        "密钥（只显示这一次，请自行保存）：$secret\n" +
-                                        signature + "\n" +
-                                        "外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能在「管理 Webhook」里删掉重建。",
-                                )
-                                .setPositiveButton("好", null)
-                                .show()
-                        }
-                    } catch (e: Exception) {
-                        teamChannelNotice =
-                            "建 Webhook 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
-                        runOnUiThread { refreshTeamChannel() }
-                    }
-                }.start()
-                return@show
-            }
-            if (which == 9) {
-                // 管理 Webhook：列表＋删除（服务端 list/delete 工具现成；
-                // secret 不回显——库里只存哈希，丢了删掉重建）。
-                Thread {
-                    try {
-                        val result = teamChannelTransport(host!!).listChannelWebhooks(channelId!!)
-                        val hooks = result.optJSONArray("webhooks")
-                        val items = mutableListOf<Pair<String, String>>()
-                        if (hooks != null) {
-                            for (i in 0 until hooks.length()) {
-                                val h = hooks.optJSONObject(i) ?: continue
-                                val id = h.optString("webhook_id", "")
-                                if (id.isBlank()) continue
-                                val name = h.optString("name", "").ifBlank { id }
-                                items += id to "$name（建于 ${h.optString("created_at", "")}）"
-                            }
-                        }
-                        runOnUiThread {
-                            if (items.isEmpty()) {
-                                toast("本频道还没有 Webhook。")
-                                return@runOnUiThread
-                            }
-                            ListDialog.show(this, "管理 Webhook", "点一个可删除；删除后原地址立即失效。", items.map { it.second }) { index ->
-                                val (hookId, label) = items[index]
-                                AlertDialog.Builder(this).setTitle("删除这个 Webhook？")
-                                    .setMessage(label)
-                                    .setNegativeButton("取消", null)
-                                    .setPositiveButton("删除") { _, _ ->
-                                        performChannelManagement { it.deleteChannelWebhook(channelId!!, hookId) }
-                                    }.show()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        teamChannelNotice =
-                            "取 Webhook 列表失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
-                        runOnUiThread { refreshTeamChannel() }
-                    }
-                }.start()
-                return@show
-            }
-            if (which == 3) {
-                val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
-                    .filter { PlatformAgent.isPlatformAgentRecord(it) }
-                if (candidates.isEmpty()) { toast("没有可用的平台 Agent。") ; return@show }
-                ListDialog.show(this, "选择要添加的成员", null, candidates.map { it.displayName }) { index ->
-                    performChannelManagement { transport ->
-                        transport.addChannelMember(channelId!!, candidates[index].agentId)
-                    }
+        val options = listOf("管理频道", "新建频道", "发起私聊", "打开消息中心")
+        ListDialog.show(this, "新建", null, options) { which ->
+            when (which) {
+                0 -> showChannelSettings()
+                1 -> showChannelNameDialog(create = true)
+                2 -> {
+                    // 发起私聊：切到私聊分段列表页（方案 A），从频道
+                    // 成员名单点人发起（控制器 onStartDm），不在此凭空建。
+                    teamChannelDmMode = true
+                    teamChannelListMode = true
+                    refreshTeamChannel()
                 }
-            } else if (which == 4) {
-                val members = teamChannelMembers().filterNot { it.isLocalApp }
-                if (members.isEmpty()) { toast("当前没有可见的频道成员可移除。创建者不可移除。"); return@show }
-                ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.displayName }) { index ->
-                    val member = members[index]
-                    AlertDialog.Builder(this).setTitle("移除频道成员？")
-                        .setMessage("将从频道移除 ${member.displayName}。创建者不可移除；若服务端拒绝，将显示其返回原因。")
-                        .setNegativeButton("取消", null)
-                        .setPositiveButton("移除") { _, _ ->
-                            performChannelManagement { it.removeChannelMember(channelId!!, member.agentId) }
-                        }.show()
-                }
-            } else if (which == 5) {
-                // 角色管理：服务端只许频道 owner 改角色；非 owner 点了
-                // 会拿到真实拒绝原因（与移除/删除同一诚实口径）。
-                val members = mergedTeamChannelMembers().filterNot { it.isLocalApp }
-                if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return@show }
-                val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
-                ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { m ->
-                    m.displayName + "（当前：" + (roleNames.firstOrNull { it.first == m.role }?.second ?: m.role) + "）"
-                }) { index ->
-                    val member = members[index]
-                    ListDialog.show(this, "设置 ${member.displayName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
-                        val newRole = roleNames[roleIndex].first
-                        if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
-                        AlertDialog.Builder(this).setTitle("更改成员角色？")
-                            .setMessage("把 ${member.displayName} 的角色改为${roleNames[roleIndex].second}。")
-                            .setNegativeButton("取消", null)
-                            .setPositiveButton("更改") { _, _ ->
-                                performChannelManagement { it.setChannelMemberRole(channelId!!, member.agentId, newRole) }
-                            }.show()
-                    }
-                }
-            } else if (which == 6) {
-                AlertDialog.Builder(this).setTitle("删除频道？")
-                    .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
+                3 -> showEntry(DrawerRouter.ID_MESSAGE_CENTER)
+            }
+        }
+    }
+
+    /** 管理操作的目标端点（当前频道 = 已保存的当前选择）；未连接时如实提示。 */
+    private fun requireChannelEndpoint(): Pair<String, String>? {
+        val endpoint = teamChannelEndpoint()
+        if (endpoint == null) toast("频道未连接；未执行管理操作。")
+        return endpoint
+    }
+
+    /** 新建频道／改名共用对话框（原「频道管理」菜单两项，逻辑未变）。 */
+    private fun showChannelNameDialog(create: Boolean) {
+        val channelId = if (create) null else requireChannelEndpoint()?.second ?: return
+        val input = EditText(this).apply { hint = if (create) "频道名称" else "新频道名称" }
+        AlertDialog.Builder(this).setTitle(if (create) "新建频道" else "修改频道名称").setView(input)
+            .setNegativeButton("取消", null).setPositiveButton("确定") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
+                if (create) performChannelManagement { it.createChannel(name) }
+                else performChannelManagement { it.renameChannel(channelId!!, name) }
+            }.show()
+    }
+
+    /** 归档／取消归档（原菜单只有归档；按 iOS 频道设置页的开关式同项补上取消归档）。 */
+    private fun confirmArchiveChannel(archived: Boolean) {
+        val (_, channelId) = requireChannelEndpoint() ?: return
+        if (archived) {
+            AlertDialog.Builder(this).setTitle("取消归档频道？")
+                .setMessage("将把频道移出归档，恢复到频道列表中。")
+                .setNegativeButton("取消", null).setPositiveButton("取消归档") { _, _ ->
+                    performChannelManagement { it.setChannelArchived(channelId, false) }
+                }.show()
+        } else {
+            AlertDialog.Builder(this).setTitle("归档频道？").setMessage("将归档频道 $channelId。")
+                .setNegativeButton("取消", null).setPositiveButton("归档") { _, _ ->
+                    performChannelManagement { it.setChannelArchived(channelId, true) }
+                }.show()
+        }
+    }
+
+    /** 添加成员：候选 = 本机已添加的平台 Agent（原菜单同逻辑）。 */
+    private fun addChannelMember() {
+        val (_, channelId) = requireChannelEndpoint() ?: return
+        val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
+            .filter { PlatformAgent.isPlatformAgentRecord(it) }
+        if (candidates.isEmpty()) { toast("没有可用的平台 Agent。"); return }
+        ListDialog.show(this, "选择要添加的成员", null, candidates.map { it.displayName }) { index ->
+            performChannelManagement { transport ->
+                transport.addChannelMember(channelId, candidates[index].agentId)
+            }
+        }
+    }
+
+    /** 移除成员（原菜单同逻辑：创建者不可移除，服务端拒绝时显示真实原因）。 */
+    private fun removeChannelMember() {
+        val (_, channelId) = requireChannelEndpoint() ?: return
+        val members = teamChannelMembers().filterNot { it.isLocalApp }
+        if (members.isEmpty()) { toast("当前没有可见的频道成员可移除。创建者不可移除。"); return }
+        ListDialog.show(this, "选择要移除的成员", "创建者不可移除；当前无法可靠识别创建者，如服务端拒绝会显示真实原因。", members.map { it.displayName }) { index ->
+            val member = members[index]
+            AlertDialog.Builder(this).setTitle("移除频道成员？")
+                .setMessage("将从频道移除 ${member.displayName}。创建者不可移除；若服务端拒绝，将显示其返回原因。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("移除") { _, _ ->
+                    performChannelManagement { it.removeChannelMember(channelId, member.agentId) }
+                }.show()
+        }
+    }
+
+    /** 设置成员角色（原菜单同逻辑：仅频道 owner 可改，服务端校验）。 */
+    private fun setChannelMemberRole() {
+        val (_, channelId) = requireChannelEndpoint() ?: return
+        val members = mergedTeamChannelMembers().filterNot { it.isLocalApp }
+        if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return }
+        val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
+        ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { m ->
+            m.displayName + "（当前：" + (roleNames.firstOrNull { it.first == m.role }?.second ?: m.role) + "）"
+        }) { index ->
+            val member = members[index]
+            ListDialog.show(this, "设置 ${member.displayName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
+                val newRole = roleNames[roleIndex].first
+                if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
+                AlertDialog.Builder(this).setTitle("更改成员角色？")
+                    .setMessage("把 ${member.displayName} 的角色改为${roleNames[roleIndex].second}。")
                     .setNegativeButton("取消", null)
-                    .setPositiveButton("删除") { _, _ ->
-                        performChannelManagement { it.deleteChannel(channelId!!) }
-                    }.show()
-            } else if (which == 0 || which == 1) {
-                val input = EditText(this).apply { hint = if (which == 0) "频道名称" else "新频道名称" }
-                AlertDialog.Builder(this).setTitle(if (which == 0) "新建频道" else "修改频道名称").setView(input)
-                    .setNegativeButton("取消", null).setPositiveButton("确定") { _, _ ->
-                        val name = input.text.toString().trim()
-                        if (name.isBlank()) { toast("频道名称不能为空。"); return@setPositiveButton }
-                        if (which == 0) performChannelManagement { it.createChannel(name) }
-                        else performChannelManagement { it.renameChannel(channelId!!, name) }
-                    }.show()
-            } else {
-                AlertDialog.Builder(this).setTitle("归档频道？").setMessage("将归档频道 $channelId。")
-                    .setNegativeButton("取消", null).setPositiveButton("归档") { _, _ ->
-                        performChannelManagement { it.setChannelArchived(channelId!!, true) }
+                    .setPositiveButton("更改") { _, _ ->
+                        performChannelManagement { it.setChannelMemberRole(channelId, member.agentId, newRole) }
                     }.show()
             }
         }
+    }
+
+    /** 删除频道（原菜单同逻辑：仅 owner 可删，服务端授权校验，不可撤销）。 */
+    private fun deleteActiveChannel() {
+        val (_, channelId) = requireChannelEndpoint() ?: return
+        AlertDialog.Builder(this).setTitle("删除频道？")
+            .setMessage("仅频道 owner 可删除。当前客户端无法识别 owner，服务端将授权校验；若拒绝会显示真实错误。此操作不可撤销。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("删除") { _, _ ->
+                performChannelManagement { it.deleteChannel(channelId) }
+            }.show()
+    }
+
+    /** 创建入帖 Webhook（原菜单同逻辑：服务端返回地址路径＋一次性密钥＋签名说明）。 */
+    private fun createChannelWebhook() {
+        val (host, channelId) = requireChannelEndpoint() ?: return
+        Thread {
+            try {
+                val result = teamChannelTransport(host).createChannelWebhook(channelId)
+                // 服务端真实返回：url_path（复数 channel-webhooks）＋
+                // secret（只此一次）＋签名说明；没有 token 字段。
+                val urlPath = result.optString("url_path", "")
+                val secret = result.optString("secret", "")
+                val signature = result.optString("signature", "")
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("频道 Webhook 已创建")
+                        .setMessage(
+                            "入帖地址路径：$urlPath\n" +
+                                "密钥（只显示这一次，请自行保存）：$secret\n" +
+                                signature + "\n" +
+                                "外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能在「管理 Webhook」里删掉重建。",
+                        )
+                        .setPositiveButton("好", null)
+                        .show()
+                }
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "建 Webhook 失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+                runOnUiThread { refreshTeamChannel() }
+            }
+        }.start()
+    }
+
+    /** 管理 Webhook：列表＋删除（原菜单同逻辑；secret 不回显，丢了删掉重建）。 */
+    private fun manageChannelWebhooks() {
+        val (host, channelId) = requireChannelEndpoint() ?: return
+        Thread {
+            try {
+                val result = teamChannelTransport(host).listChannelWebhooks(channelId)
+                val hooks = result.optJSONArray("webhooks")
+                val items = mutableListOf<Pair<String, String>>()
+                if (hooks != null) {
+                    for (i in 0 until hooks.length()) {
+                        val h = hooks.optJSONObject(i) ?: continue
+                        val id = h.optString("webhook_id", "")
+                        if (id.isBlank()) continue
+                        val name = h.optString("name", "").ifBlank { id }
+                        items += id to "$name（建于 ${h.optString("created_at", "")}）"
+                    }
+                }
+                runOnUiThread {
+                    if (items.isEmpty()) {
+                        toast("本频道还没有 Webhook。")
+                        return@runOnUiThread
+                    }
+                    ListDialog.show(this, "管理 Webhook", "点一个可删除；删除后原地址立即失效。", items.map { it.second }) { index ->
+                        val (hookId, label) = items[index]
+                        AlertDialog.Builder(this).setTitle("删除这个 Webhook？")
+                            .setMessage(label)
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("删除") { _, _ ->
+                                performChannelManagement { it.deleteChannelWebhook(channelId, hookId) }
+                            }.show()
+                    }
+                }
+            } catch (e: Exception) {
+                teamChannelNotice =
+                    "取 Webhook 列表失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
+                runOnUiThread { refreshTeamChannel() }
+            }
+        }.start()
+    }
+
+    /** 通知档归一（与 iOS 同词）：全部消息/仅@我/静音；旧值（全部/免打扰）读时迁移。 */
+    private fun normalizeNotifyMode(raw: String?): String = when (raw) {
+        "仅@我" -> "仅@我"
+        "静音", "免打扰" -> "静音"
+        else -> "全部消息"
+    }
+
+    /** 逐频道通知档（本机偏好）：控制器成员行与频道设置页共用一处写。 */
+    private fun setChannelNotifyMode(mode: String) {
+        val channelId = activeTeamChannelId()
+        getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+            .edit().putString("notify_$channelId", mode).apply()
+        teamChannelNotice = "本频道通知：$mode"
+        refreshTeamChannel()
+    }
+
+    /**
+     * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构，Funk
+     * 2026-11-25 批）：频道信息（改名/归档/删除）／通知设置／入帖
+     * Webhook／频道成员四节。功能全是既有管理动作换摆法，一项不删；
+     * 通知档与 iOS 同词（全部消息/仅@我/静音），与成员行同值；旧值读时归一。
+     */
+    private fun showChannelSettings() {
+        val endpoint = teamChannelEndpoint()
+        if (endpoint == null) {
+            toast("频道未连接；没有可管理的频道。")
+            return
+        }
+        val channelId = endpoint.second
+        val summary = teamChannelChannelsCache.firstOrNull { it.id == channelId }
+        val channelName = summary?.name?.takeIf { it.isNotBlank() } ?: "频道"
+        val archived = summary?.archived == true
+        val notifyMode = normalizeNotifyMode(
+            getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_$channelId", null),
+        )
+
+        lateinit var dialog: AlertDialog
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+            )
+        }
+        fun sectionHeader(label: String) {
+            container.addView(
+                UiKit.text(this, label, 13f, R.color.text_secondary, bold = true).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 16), 0, UiKit.dp(this@MainActivity, 4))
+                },
+            )
+        }
+        fun infoLine(text: String) {
+            container.addView(
+                UiKit.text(this, text, 12f, R.color.text_tertiary).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 2), 0, UiKit.dp(this@MainActivity, 2))
+                },
+            )
+        }
+        fun actionRow(label: String, colorRes: Int = R.color.text_primary, onClick: () -> Unit) {
+            container.addView(
+                UiKit.text(this, label, 15f, colorRes).apply {
+                    setPadding(0, UiKit.dp(this@MainActivity, 11), 0, UiKit.dp(this@MainActivity, 11))
+                    setOnClickListener {
+                        dialog.dismiss()
+                        onClick()
+                    }
+                },
+            )
+        }
+
+        sectionHeader("频道信息")
+        infoLine("当前频道：$channelName")
+        infoLine("频道 ID：$channelId")
+        actionRow("改名") { showChannelNameDialog(create = false) }
+        actionRow(if (archived) "取消归档" else "归档频道") { confirmArchiveChannel(archived) }
+        actionRow("删除频道", R.color.danger) { deleteActiveChannel() }
+        infoLine("仅频道 owner 可删除。删除权限由服务端校验。")
+        sectionHeader("通知设置")
+        listOf("全部消息", "仅@我", "静音").forEach { mode ->
+            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(mode) }
+        }
+        sectionHeader("入帖 Webhook")
+        actionRow("创建入帖 Webhook") { createChannelWebhook() }
+        actionRow("管理 Webhook") { manageChannelWebhooks() }
+        sectionHeader("频道成员")
+        actionRow("添加成员") { addChannelMember() }
+        actionRow("移除成员") { removeChannelMember() }
+        actionRow("设置成员角色") { setChannelMemberRole() }
+
+        val scroll = ScrollView(this).apply { addView(container) }
+        dialog = AlertDialog.Builder(this)
+            .setTitle("频道设置")
+            .setView(scroll)
+            .setPositiveButton("完成", null)
+            .create()
+        dialog.show()
     }
 
     /** 管理调用不改变 feed 生命周期，保持 WS 推送优先与现有轮询兜底。 */
@@ -6751,6 +6903,8 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().remove("pending_channel_id").apply()
             teamChannelDmMode = summary.kind == "dm"
             teamChannelActiveId = target
+            teamChannelListMode = false
+            teamChannelKeepConversation = true
             if (!teamChannelDmMode) saveActiveChannelId(target)
             teamChannelSearchResults = null
             teamChannelBrowseMessages = null
@@ -6915,6 +7069,8 @@ class MainActivity : AppCompatActivity() {
     private fun openMessageCenterEntry(entry: MessageCenterEntry) {
         teamChannelDmMode = false
         teamChannelActiveId = entry.channelId
+        teamChannelListMode = false
+        teamChannelKeepConversation = true
         teamChannelSearchResults = null
         teamChannelActiveTopicRootId = null
         showEntry(DrawerController.ID_TEAM_CHANNEL)
