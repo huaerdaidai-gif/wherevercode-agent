@@ -580,7 +580,7 @@ class TeamChannelController(
             // 频道/私聊名单或空态；对话框铬（输入栏等）整套藏掉，
             // 提示行单独留着回显管理操作结果。
             setDialogChromeVisible(false, diagnostic != null)
-            if (!snapshot.notice.isNullOrBlank()) noticeLine.visibility = View.VISIBLE
+            if (noticeLine.text.isNotBlank()) noticeLine.visibility = View.VISIBLE
             bodyContainer.addView(segmentRow(snapshot))
             bodyContainer.addView(channelListSearchRow())
             val listContainer = UiKit.vertical(context)
