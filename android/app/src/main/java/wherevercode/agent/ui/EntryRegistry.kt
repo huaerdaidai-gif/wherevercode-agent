@@ -200,7 +200,7 @@ object EntryRegistry {
             "频", "ic_chat", null, null, "有界团队聊天 + 只读扇出。"),
         Entry("feature_channel_manage", "频道管理", Group.FEATURE,
             Status.IMPLEMENTED, TargetKind.ACTION, "channel_manage",
-            "管", null, "nav_channels", null, "支持新建、改名、归档及成员管理；无法确认频道 owner 时不提供删除。"),
+            "管", null, "nav_channels", null, "改名、归档、通知、成员、Webhook 与删除都在频道设置页；删除仅频道 owner 可操作，服务端校验。"),
         Entry("feature_channel_files", "频道文件", Group.FEATURE,
             Status.TODO, TargetKind.TODO, "",
             "件", null, "nav_channels",
