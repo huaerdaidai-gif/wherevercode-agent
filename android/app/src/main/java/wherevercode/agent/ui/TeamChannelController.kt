@@ -857,17 +857,17 @@ class TeamChannelController(
                 },
             )
         }
-        scroller.addView(chips)
-        row.addView(scroller)
-        // 逐频道通知档（本机偏好）：238 全部对齐批——与 iOS membersStrip
-        // 同行为，点「通知：…」进频道设置页改档（设置页内有通知节，
-        // 与此前点按循环切换等价可达）。
-        row.addView(
+        // 逐频道通知档（本机偏好）：与 iOS membersStrip 同位——「通知：…」
+        // 纯文字紧跟最后一个成员芯片、同在横滑流内；点按进频道设置页改档
+        // （设置页内有通知节，与此前点按循环切换等价可达）。
+        chips.addView(
             UiKit.text(context, "通知：${snapshot.notifyMode}", 11f, R.color.text_secondary).apply {
-                setPadding(dp(8), dp(3), 0, dp(3))
+                setPadding(dp(2), dp(3), 0, dp(3))
                 setOnClickListener { onChannelSettings(snapshot.activeChannelId) }
             },
         )
+        scroller.addView(chips)
+        row.addView(scroller)
         return row
     }
 
@@ -1004,6 +1004,7 @@ class TeamChannelController(
         row.addView(
             UiKit.text(context, "⋯", 20f, R.color.text_primary, bold = true).apply {
                 gravity = android.view.Gravity.CENTER
+                setBackgroundResource(R.drawable.bg_circle_btn)
                 layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
                 setOnClickListener { onChannelSettings(snapshot.activeChannelId) }
             },
@@ -1293,7 +1294,11 @@ class TeamChannelController(
             },
         )
         row.addView(
-            UiKit.text(context, "搜索", 12f, R.color.accent, bold = true).apply {
+            UiKit.text(
+                context, "搜索", 12f,
+                if (searchInput.text.isNullOrBlank()) R.color.text_tertiary else R.color.accent,
+                bold = true,
+            ).apply {
                 setPadding(dp(10), dp(6), dp(4), dp(6))
                 setOnClickListener { runSearch() }
             },
