@@ -24,6 +24,15 @@ final class SeatUplinkTests: XCTestCase {
         return service
     }
 
+    /// 237 起无默认频道：夹具唯一频道的 id（经频道列表读回）。
+    private func soleChannelId(_ service: LocalChannelService) -> String {
+        let listed = try? service.dispatch(
+            tool: "agent_channel_list", args: [:],
+            callerId: LocalPlatform.appAgentID, callerName: LocalPlatform.appAgentName)
+        let channels = listed?["channels"] as? [[String: Any]]
+        return channels?.first?["id"] as? String ?? ""
+    }
+
     // MARK: - 帧编解码
 
     func testFrameCodecRoundTripsSeatRegisterDispatchAckAndEvent() throws {
@@ -227,7 +236,7 @@ final class SeatUplinkTests: XCTestCase {
         XCTAssertEqual(register["type"] as? String, "seat_register")
         XCTAssertEqual(register["platform"] as? String, "ios")
         XCTAssertEqual(register["agent_id"] as? String, LocalPlatform.appAgentID)
-        XCTAssertEqual(register["channels"] as? [String], [service.defaultChannelId()])
+        XCTAssertEqual(register["channels"] as? [String], [soleChannelId(service)])
         XCTAssertNil(register["token"])
         XCTAssertFalse(harness.socket.sent.joined().contains("test-token"))
         harness.scheduler.advance(by: 29)
@@ -268,7 +277,7 @@ final class SeatUplinkTests: XCTestCase {
         XCTAssertEqual(task["task_id"] as? String, cloudId)
         XCTAssertEqual(task["state"] as? String, "queued")
         XCTAssertEqual(task["assignee_id"] as? String, LocalPlatform.appAgentID)
-        XCTAssertEqual(task["channel_id"] as? String, service.defaultChannelId())
+        XCTAssertEqual(task["channel_id"] as? String, soleChannelId(service))
         XCTAssertNotEqual(task["channel_id"] as? String, "cloud-chan")
         let acks = try harness.frames().filter { $0["type"] as? String == "task_ack" }
         XCTAssertEqual(acks.count, 1)
