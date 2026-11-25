@@ -6914,21 +6914,46 @@ class MainActivity : AppCompatActivity() {
                 )
             },
         )
-        topBar.addView(
-            UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
-                setBackgroundResource(R.drawable.bg_capsule_btn)
-                setPadding(dp(16), dp(8), dp(16), dp(8))
-                setOnClickListener {
-                    val name = nameInput.text.toString().trim()
-                    if (name.isEmpty()) {
-                        toast("频道名称不能为空。")
-                    } else {
-                        createChannelOnLayer(chosenLayer, name)
-                        dialog.dismiss()
-                    }
+        val createBtn = UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
+            setBackgroundResource(R.drawable.bg_capsule_btn)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            setOnClickListener {
+                val name = nameInput.text.toString().trim()
+                if (name.isEmpty()) {
+                    toast("频道名称不能为空。")
+                } else {
+                    createChannelOnLayer(chosenLayer, name)
+                    dialog.dismiss()
                 }
-            },
-        )
+            }
+        }
+        topBar.addView(createBtn)
+        // 名称为空时「创建」置灰（iOS 同态：空名不可创建的外观先行）。
+        nameInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val empty = s?.toString()?.trim().isNullOrEmpty()
+                createBtn.setTextColor(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        if (empty) R.color.text_tertiary else R.color.text_primary,
+                    ),
+                )
+            }
+
+            override fun beforeTextChanged(
+                s: CharSequence?,
+                start: Int,
+                count: Int,
+                after: Int,
+            ) = Unit
+
+            override fun onTextChanged(
+                s: CharSequence?,
+                start: Int,
+                before: Int,
+                count: Int,
+            ) = Unit
+        })
         root.addView(topBar)
         root.addView(
             UiKit.text(this, "新建频道", 28f, R.color.text_primary, bold = true).apply {

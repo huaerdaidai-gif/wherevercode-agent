@@ -444,7 +444,6 @@ class TeamChannelController(
             fun refreshModes() {
                 styleSegment(discussion, !asTask)
                 styleSegment(task, asTask)
-                composer.sendLabel?.text = if (asTask) "创建任务" else "发送"
                 composer.input.hint = if (asTask) "任务目标与验收要求…" else "给频道发一条短消息（≤4000 字），@名字 叫一位 Agent…"
             }
             fun modeSegment(label: String, taskMode: Boolean) =
@@ -502,9 +501,14 @@ class TeamChannelController(
         composer.input.setBackgroundResource(R.drawable.bg_input_pill)
         composer.input.setPadding(dp(16), dp(10), dp(16), dp(10))
         composer.sendLabel?.apply {
-            setBackgroundResource(R.drawable.bg_send_pill)
+            // 238 全部对齐批：发送钮与 iOS 同形——浅灰圆钮「↑」，两种
+            // 模式共用（模式由分段条与下方说明行表达，不再切文字）。
+            text = "↑"
+            setBackgroundResource(R.drawable.bg_circle_filled)
             setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.text_primary))
-            setPadding(dp(16), dp(8), dp(16), dp(8))
+            setPadding(0, 0, 0, 0)
+            minHeight = dp(40)
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
         }
         composerRow.addView(composer)
         bar.addView(composerRow)
@@ -637,6 +641,15 @@ class TeamChannelController(
                 LinearLayout.LayoutParams.WRAP_CONTENT
             }
             bodyContainer.layoutParams = lp
+        }
+        // 238 全部对齐批：连接状态行位置随层级——频道对话层由
+        // channelSelectorRow 挂进选择行左列（iOS workspace header
+        // 同位）；其余层级回到页头下方的根位置（index 1）。
+        val inChannelConversation = snapshot.configured && !snapshot.listMode && !snapshot.dmMode
+        if (!inChannelConversation && connectionLine.parent !== root) {
+            (connectionLine.parent as? android.view.ViewGroup)?.removeView(connectionLine)
+            connectionLine.setPadding(dp(16), 0, dp(16), dp(2))
+            root.addView(connectionLine, 1)
         }
         if (!snapshot.configured) {
             // 照片走查批 D：未配时只留页头与引导，对话框铬整套藏掉
@@ -846,18 +859,13 @@ class TeamChannelController(
         }
         scroller.addView(chips)
         row.addView(scroller)
-        // 逐频道通知档（本机偏好）：全部消息 → 仅@我 → 静音 循环切换。
+        // 逐频道通知档（本机偏好）：238 全部对齐批——与 iOS membersStrip
+        // 同行为，点「通知：…」进频道设置页改档（设置页内有通知节，
+        // 与此前点按循环切换等价可达）。
         row.addView(
             UiKit.text(context, "通知：${snapshot.notifyMode}", 11f, R.color.text_secondary).apply {
                 setPadding(dp(8), dp(3), 0, dp(3))
-                setOnClickListener {
-                    val next = when (snapshot.notifyMode) {
-                        "全部消息" -> "仅@我"
-                        "仅@我" -> "静音"
-                        else -> "全部消息"
-                    }
-                    onNotifyModeChange(next)
-                }
+                setOnClickListener { onChannelSettings(snapshot.activeChannelId) }
             },
         )
         return row
@@ -987,6 +995,11 @@ class TeamChannelController(
                 },
             )
         }
+        // 连接状态行挂进左列（iOS 同位：名/层级/连接状态三行一组）；
+        // 文本由 render 每轮写好，这里只换父容器。
+        (connectionLine.parent as? android.view.ViewGroup)?.removeView(connectionLine)
+        connectionLine.setPadding(0, dp(1), 0, 0)
+        left.addView(connectionLine)
         row.addView(left)
         row.addView(
             UiKit.text(context, "⋯", 20f, R.color.text_primary, bold = true).apply {
