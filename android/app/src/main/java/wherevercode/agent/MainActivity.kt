@@ -2648,7 +2648,7 @@ class MainActivity : AppCompatActivity() {
             // Agent 开关（2026-11-12）：选择器只列启用的 Agent——停用
             // 的不在这里出现（也不进建议）；全停用时如实提示去 Agent 页
             // 重新启用，不假装“暂无已添加 Agent”。
-            val enabled = agents.enabledAgents()
+            val enabled = agents.enabledAgents().filter { it.kind != AgentKind.LOCAL_MODEL }
             val suggestion = suggestAgentForCurrentChat(enabled)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -2667,49 +2667,124 @@ class MainActivity : AppCompatActivity() {
         suggestion: AgentPickerRow.Suggested?,
         allDisabled: Boolean = false,
     ) {
-        if (agents.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("选择对话方")
-                .setMessage(
-                    if (allDisabled) "Agent 都已停用：在 Agent 页把开关打开后可选。"
-                    else "暂无已添加 Agent",
-                )
-                .setPositiveButton("去 Agent 页添加") { _, _ -> showEntry(DrawerController.ID_AGENTS_TEAM) }
-                .setNeutralButton("配置模型") { _, _ -> showEntry(DrawerController.ID_TOOLS_CONNECTIONS) }
-                .setNegativeButton("取消", null)
-                .show()
-            return
+        // 对齐 iOS 选择器结构（2026-11-25 Funk 定：安卓照 iOS 改）：
+        // 分节面板——「智能建议」节（有建议给建议行、没有就明说暂无）、
+        // 「可选 Agent（设备 / 平台 / 云端）」节、「管理 Agent」入口，
+        // 节脚注是「单选规则」一行。选择器里不放模型入口。
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val gray = ContextCompat.getColor(this, android.R.color.darker_gray)
+        val accentValue = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.colorPrimary, accentValue, true)
+        val accent = accentValue.data
+        fun tappable(view: View) {
+            val tv = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+            view.setBackgroundResource(tv.resourceId)
+            view.isClickable = true
+            view.isFocusable = true
         }
-        val rows = mutableListOf<AgentPickerRow>()
-        suggestion?.let { rows += it }
-        agents.forEach { rows += AgentPickerRow.Plain(it) }
-        val labels = rows.map { row ->
-            when (row) {
-                is AgentPickerRow.Suggested ->
-                    "★ 建议：${row.agent.displayName} —— ${row.decision.shortReason}"
-                is AgentPickerRow.Plain ->
-                    row.agent.displayName + if (row.agent.dispatchable) "" else "（仅对话）"
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(8))
+        }
+        fun header(text: String) = TextView(this).apply {
+            this.text = text
+            textSize = 13f
+            setTextColor(gray)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        fun note(text: String) = TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            setTextColor(gray)
+            setPadding(0, dp(2), 0, dp(2))
+        }
+        fun row(name: String, sub: String?, onClick: () -> Unit): LinearLayout {
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(2), dp(8), dp(2), dp(8))
             }
-        }.toTypedArray()
-        AlertDialog.Builder(this)
+            box.addView(TextView(this).apply { text = name; textSize = 16f })
+            if (sub != null) {
+                box.addView(TextView(this).apply {
+                    text = sub
+                    textSize = 12f
+                    setTextColor(gray)
+                    setPadding(0, dp(2), 0, 0)
+                })
+            }
+            tappable(box)
+            box.setOnClickListener { onClick() }
+            return box
+        }
+        val dialog = AlertDialog.Builder(this)
             .setTitle("选择对话方")
-            .setItems(labels) { _, which ->
-                when (val row = rows[which]) {
-                    is AgentPickerRow.Suggested -> {
-                        // 点建议行 = 确认建议：记下决策，下一条任务建行时绑定。
-                        chatViewModel.acceptSuggestedAgent(row.decision.decisionId, row.agent.agentId)
-                        openAgentSession(row.agent)
-                    }
-                    is AgentPickerRow.Plain -> {
-                        // 点普通行 = 改派/手动选：建议作废，不再绑定。
-                        chatViewModel.clearPendingRouting()
-                        openAgentSession(row.agent)
-                    }
-                }
-            }
+            .setView(ScrollView(this).apply { addView(content) })
             .setNegativeButton("取消", null)
-            .show()
+            .create()
+
+        content.addView(header("智能建议"))
+        if (suggestion != null) {
+            content.addView(row(
+                "★ " + suggestion.agent.displayName,
+                suggestion.decision.shortReason,
+            ) {
+                dialog.dismiss()
+                // 点建议行 = 确认建议：记下决策，下一条任务建行时绑定。
+                chatViewModel.acceptSuggestedAgent(suggestion.decision.decisionId, suggestion.agent.agentId)
+                openAgentSession(suggestion.agent)
+            })
+        } else {
+            content.addView(note("暂无明确建议，请手动选择 Agent。"))
+        }
+
+        content.addView(header("可选 Agent（设备 / 平台 / 云端）"))
+        if (agents.isEmpty()) {
+            content.addView(note("暂无已启用的 Agent：可在「Agent 与团队」中添加，或在设备配对后连接。"))
+        } else {
+            agents.forEach { agent ->
+                val kindDesc = when {
+                    agent.kind == AgentKind.DEVICE -> "设备 Agent"
+                    agent.platformAgentId != null -> "平台 Agent"
+                    else -> "云端 Agent"
+                }
+                val place = agent.deviceId ?: agent.platformHost ?: "本地/云端"
+                content.addView(row(
+                    agent.displayName + if (agent.dispatchable) "" else "（仅对话）",
+                    "$kindDesc · $place",
+                ) {
+                    dialog.dismiss()
+                    // 点普通行 = 改派/手动选：建议作废，不再绑定。
+                    chatViewModel.clearPendingRouting()
+                    openAgentSession(agent)
+                })
+            }
+        }
+
+        val manage = TextView(this).apply {
+            text = "管理 Agent"
+            textSize = 16f
+            setTextColor(accent)
+            setPadding(dp(2), dp(12), dp(2), dp(8))
+        }
+        tappable(manage)
+        manage.setOnClickListener {
+            dialog.dismiss()
+            showEntry(DrawerController.ID_AGENTS_TEAM)
+        }
+        content.addView(manage)
+        content.addView(TextView(this).apply {
+            text = "单选规则：对话框仅保留一个勾选的 Agent，由用户自选对话方。"
+            textSize = 12f
+            setTextColor(gray)
+            setPadding(0, dp(2), 0, dp(4))
+        })
+
+        dialog.show()
     }
+
 
     /**
      * P1 建议：按当前聊天项目 + 开发任务类型跑一遍确定性路由。
