@@ -124,7 +124,7 @@ class TaskComposerTest {
         val views = descendants(channel.root)
         views.filterIsInstance<android.widget.EditText>().first().setText("draft goal")
         views.filterIsInstance<TextView>().single { it.text == "转为正式任务" }.performClick()
-        views.filterIsInstance<TextView>().single { it.text == "创建任务" }.performClick()
+        views.filterIsInstance<TextView>().single { it.text == "↑" }.performClick()
         assertEquals(1, drafts)
         assertEquals(0, posts)
         assertEquals("draft goal", views.filterIsInstance<android.widget.EditText>().first().text.toString())

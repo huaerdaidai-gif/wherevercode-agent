@@ -481,6 +481,10 @@ class MainActivity : AppCompatActivity() {
     private var teamChannelKeepConversation = false
     /** 最近一次从平台拉到的频道列表缓存（团队空间切换行与私聊列表共用）。 */
     private var teamChannelChannelsCache: List<ChannelSummary> = emptyList()
+
+    /** 238：频道列表至少成功加载过一次（活动频道存在性校验的云端依据）。 */
+    @Volatile
+    private var teamChannelListLoaded = false
     /** 云端层频道缓存（237 切换面板用）：当前端点在云端时随列表刷新同步更新。 */
     private var teamChannelCloudCache: List<ChannelSummary> = emptyList()
     /** 频道内搜索状态（词 + 最近一次结果；null 结果 = 未在搜索）。 */
@@ -1761,6 +1765,7 @@ class MainActivity : AppCompatActivity() {
             },
             onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
             onCreateNew = { showChannelCreateMenu() },
+            onCreateChannelDirect = { showCreateChannelPage() },
             onOpenDrawer = { openDrawer() },
             onSwitchChannel = { channelId ->
                 teamChannelListMode = false
@@ -6433,7 +6438,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
         val (host, channelId) = endpoint
-        val activeId = teamChannelActiveId ?: channelId
+        val activeId = resolveValidActiveChannelId(host, teamChannelActiveId ?: channelId)
         val (messages, feed) = teamChannelFeedSnapshot(activeId)
         val lastReadId = teamChannelLastReadId(activeId)
         // 218 计数口径 B（与 iOS 同一定义）：未读只按本机已读游标在
@@ -6843,7 +6848,7 @@ class MainActivity : AppCompatActivity() {
         ListDialog.show(this, "新建", null, options) { which ->
             when (which) {
                 0 -> firstAction()
-                1 -> showChannelNameDialog(create = true)
+                1 -> showCreateChannelPage()
                 2 -> {
                     // 发起私聊：切到私聊分段列表页（方案 A），从频道
                     // 成员名单点人发起（控制器 onStartDm），不在此凭空建。
@@ -6854,6 +6859,175 @@ class MainActivity : AppCompatActivity() {
                 3 -> showEntry(DrawerRouter.ID_MESSAGE_CENTER)
             }
         }
+    }
+
+    /**
+     * 新建频道整页（238 对齐批，与 iOS 新建 sheet 同形）：顶栏
+     * 「取消／创建」白胶囊钮＋大标题＋「频道」分节＋大圆角输入框
+     * （预填「本地频道」）；云端可用时带「放在」分段（本机/云端，
+     * 默认当前层）。创建仍走 [createChannelOnLayer]（含重名处理、
+     * 成功后落入新频道、失败 toast）；改名仍走原对话框，不动。
+     * 页头菜单与列表空态钮都直达本页（iOS 同行为）。
+     */
+    private fun showCreateChannelPage() {
+        val cloudAvailable = hasSavedPlatformToken() && resolvedPlatformHost().isNotBlank()
+        var chosenLayer = currentChannelLayer()
+        if (chosenLayer == "cloud" && !cloudAvailable) chosenLayer = "local"
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val root = UiKit.vertical(this).apply {
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bg))
+        }
+        val nameInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            minLines = 1
+            maxLines = 1
+            textSize = 16f
+            setText("本地频道")
+            setSelection(text.length)
+            setBackgroundResource(R.drawable.bg_input_card)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = dp(16)
+                rightMargin = dp(16)
+            }
+        }
+        // 顶栏：取消（左）／创建（右），白胶囊描边钮（iOS toolbar 同形）。
+        val topBar = UiKit.horizontal(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(14), dp(16), 0)
+        }
+        topBar.addView(
+            UiKit.text(this, "取消", 14f, R.color.text_primary).apply {
+                setBackgroundResource(R.drawable.bg_capsule_btn)
+                setPadding(dp(16), dp(8), dp(16), dp(8))
+                setOnClickListener { dialog.dismiss() }
+            },
+        )
+        topBar.addView(
+            View(this).apply {
+                // 高度必须给死值：空 View 配 WRAP_CONTENT 时按 AT_MOST
+                // 规格取满可用高度（238 装机实测把顶栏撑满整屏）。
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+            },
+        )
+        val createBtn = UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
+            setBackgroundResource(R.drawable.bg_capsule_btn)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            setOnClickListener {
+                val name = nameInput.text.toString().trim()
+                if (name.isEmpty()) {
+                    toast("频道名称不能为空。")
+                } else {
+                    createChannelOnLayer(chosenLayer, name)
+                    dialog.dismiss()
+                }
+            }
+        }
+        topBar.addView(createBtn)
+        // 名称为空时「创建」置灰（iOS 同态：空名不可创建的外观先行）。
+        nameInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val empty = s?.toString()?.trim().isNullOrEmpty()
+                createBtn.setTextColor(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        if (empty) R.color.text_tertiary else R.color.text_primary,
+                    ),
+                )
+            }
+
+            override fun beforeTextChanged(
+                s: CharSequence?,
+                start: Int,
+                count: Int,
+                after: Int,
+            ) = Unit
+
+            override fun onTextChanged(
+                s: CharSequence?,
+                start: Int,
+                before: Int,
+                count: Int,
+            ) = Unit
+        })
+        root.addView(topBar)
+        root.addView(
+            UiKit.text(this, "新建频道", 28f, R.color.text_primary, bold = true).apply {
+                setPadding(dp(16), dp(20), dp(16), 0)
+            },
+        )
+        root.addView(
+            UiKit.text(this, "频道", 13f, R.color.text_secondary, bold = true).apply {
+                setPadding(dp(32), dp(16), dp(16), dp(6))
+            },
+        )
+        root.addView(nameInput)
+        if (cloudAvailable) {
+            root.addView(
+                UiKit.text(this, "放在", 13f, R.color.text_secondary, bold = true).apply {
+                    setPadding(dp(32), dp(20), dp(16), dp(6))
+                },
+            )
+            val track = UiKit.horizontal(this).apply {
+                setBackgroundResource(R.drawable.bg_segment_track)
+                setPadding(dp(2), dp(2), dp(2), dp(2))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    leftMargin = dp(16)
+                    rightMargin = dp(16)
+                }
+            }
+            lateinit var localSeg: TextView
+            lateinit var cloudSeg: TextView
+            fun refreshLayerSegs() {
+                listOf(localSeg to "local", cloudSeg to "cloud").forEach { (view, layer) ->
+                    val active = chosenLayer == layer
+                    if (active) {
+                        view.setBackgroundResource(R.drawable.bg_segment_active)
+                    } else {
+                        view.background = null
+                    }
+                    view.setTypeface(
+                        null,
+                        if (active) {
+                            android.graphics.Typeface.BOLD
+                        } else {
+                            android.graphics.Typeface.NORMAL
+                        },
+                    )
+                }
+            }
+            fun layerSegment(label: String, layer: String): TextView =
+                UiKit.text(this, label, 13f, R.color.text_primary).apply {
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(dp(14), dp(6), dp(14), dp(6))
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                    setOnClickListener {
+                        chosenLayer = layer
+                        refreshLayerSegs()
+                    }
+                }
+            localSeg = layerSegment("本机", "local")
+            cloudSeg = layerSegment("云端", "cloud")
+            track.addView(localSeg)
+            track.addView(cloudSeg)
+            root.addView(track)
+            refreshLayerSegs()
+        }
+        dialog.setContentView(root)
+        dialog.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+        )
+        dialog.show()
     }
 
     /** 管理操作的目标端点（当前频道 = 已保存的当前选择）；未连接时如实提示。 */
@@ -7426,6 +7600,7 @@ class MainActivity : AppCompatActivity() {
                 val endpoint = teamChannelEndpoint()
                 if (endpoint != null) {
                     teamChannelChannelsCache = teamChannelTransport(endpoint.first).listChannels()
+                    teamChannelListLoaded = true
                     if (!LocalPlatform.isLocalHost(endpoint.first)) {
                         teamChannelCloudCache = teamChannelChannelsCache
                     }
@@ -7723,6 +7898,60 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
             .getString(if (layer == "local") KEY_ACTIVE_CHANNEL_ID_LOCAL else KEY_ACTIVE_CHANNEL_ID_CLOUD, null)
             ?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * 238（Issue #22 升级路径修复）：记住的活动频道可能已不存在——旧版种子
+     * 频道被一次性清理、或当前频道被删除后，持久化的活动 id 仍指向它。
+     * 危害不止是快照落到死频道：[activeTeamChannelId] 优先返回持久化记忆，
+     * 它与快照的 activeChannelId 对不上时，刷新会判定「不一致」而只重刷
+     * 不渲染，页面永久冻结在空白骨架（237 升级路径实证）。组装快照前先
+     * 校验两处记忆：持久化 id 与端点候选都按存在性过一遍，确认不存在就
+     * 清掉；候选为空时也不能跳过持久化 id 的校验。存在性判定：本地层问
+     * 本地服务（权威，含私聊），云端层看已成功加载的频道列表缓存；暂不
+     * 可判（离线首启、列表未加载）时不动任何状态，保持原行为。
+     */
+    private fun resolveValidActiveChannelId(host: String, candidate: String): String {
+        val saved = savedActiveChannelId()
+        if (saved != null && saved != candidate &&
+            channelExistsForGuard(host, saved) == false
+        ) {
+            clearSavedActiveChannelId(saved)
+        }
+        if (candidate.isBlank()) return candidate
+        if (channelExistsForGuard(host, candidate) == false) {
+            teamChannelActiveId = null
+            clearSavedActiveChannelId(candidate)
+            return ""
+        }
+        return candidate
+    }
+
+    /** 活动频道存在性判定：true/false 为确凿结论，null 为暂不可判。 */
+    private fun channelExistsForGuard(host: String, channelId: String): Boolean? = when {
+        LocalPlatform.isLocalHost(host) -> try {
+            LocalPlatform.serviceOrNull()?.channelExists(channelId)
+        } catch (_: Exception) {
+            null
+        }
+        teamChannelListLoaded -> teamChannelChannelsCache.any { it.id == channelId }
+        else -> null
+    }
+
+    /** 只清与失效值一致的持久化活动频道记忆，不动其他层的有效记忆。 */
+    private fun clearSavedActiveChannelId(staleId: String) {
+        val prefs = getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+        val editor = prefs.edit()
+        if (prefs.getString(KEY_ACTIVE_CHANNEL_ID, null) == staleId) {
+            editor.remove(KEY_ACTIVE_CHANNEL_ID)
+        }
+        if (prefs.getString(KEY_ACTIVE_CHANNEL_ID_LOCAL, null) == staleId) {
+            editor.remove(KEY_ACTIVE_CHANNEL_ID_LOCAL)
+        }
+        if (prefs.getString(KEY_ACTIVE_CHANNEL_ID_CLOUD, null) == staleId) {
+            editor.remove(KEY_ACTIVE_CHANNEL_ID_CLOUD)
+        }
+        editor.apply()
+    }
 
     private fun persistActiveTeamChannel(channelId: String) {
         saveActiveChannelId(channelId)

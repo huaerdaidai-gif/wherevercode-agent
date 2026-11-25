@@ -2,6 +2,7 @@ package wherevercode.agent.ui
 
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.TextView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -107,5 +108,52 @@ class TeamChannelControllerTest {
         assertFalse(texts.any { it.contains("Trust anchor") })
         visibleTexts(controller.root).first { it.text == "查看连接诊断" }.performClick()
         assertTrue(visibleTexts(controller.root).any { it.text.contains("Trust anchor") })
+    }
+
+    private fun allViews(view: View): List<View> {
+        val out = mutableListOf(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) out += allViews(view.getChildAt(i))
+        }
+        return out
+    }
+
+    private fun hasChannelSearchInput(root: View): Boolean =
+        allViews(root).any { it is EditText && it.hint?.contains("搜索频道名称") == true }
+
+    @Test
+    fun `channel list hides search row when empty and shows it when channels exist`() {
+        val controller = TeamChannelController(
+            RuntimeEnvironment.getApplication(),
+            onOpenChatWithAgent = {}, onPost = {}, onMarkRead = {}, onNewRound = {},
+            onRefresh = {}, onOpenAgentManagement = {},
+            onCreateTask = { _, _ -> },
+        )
+        controller.root.visibility = View.VISIBLE
+        val emptySnapshot = TeamChannelSnapshot(
+            configured = true,
+            setupHint = "",
+            channelId = "",
+            connectionState = ChannelConnectionState.LIVE,
+            connectionError = null,
+            members = emptyList(), messages = emptyList(),
+            unreadCount = 0, unreadCapped = false, roundsUsed = 0,
+            notice = null,
+            listMode = true,
+        )
+        controller.render(emptySnapshot)
+        val emptyTexts = visibleTexts(controller.root).map { it.text.toString() }
+        assertTrue(emptyTexts.contains("还没有频道"))
+        assertFalse(hasChannelSearchInput(controller.root))
+        controller.render(
+            emptySnapshot.copy(
+                channels = listOf(
+                    wherevercode.agent.core.agent.ChannelSummary(id = "c1", name = "本地频道"),
+                ),
+            ),
+        )
+        assertTrue(hasChannelSearchInput(controller.root))
+        val texts = visibleTexts(controller.root).map { it.text.toString() }
+        assertTrue(texts.any { it.contains("本地频道") })
     }
 }
