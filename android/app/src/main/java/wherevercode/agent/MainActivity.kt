@@ -2461,7 +2461,7 @@ class MainActivity : AppCompatActivity() {
                 titleOverrides = titles,
                 summaryOverrides = summaries,
                 memberLabel = { id ->
-                    if (id == TurnTaskRecorder.LOCAL_AGENT_ID) "本机 App"
+                    if (id == TurnTaskRecorder.LOCAL_AGENT_ID) LocalPlatform.APP_AGENT_NAME
                     else runCatching { agentStore.getAgent(id)?.displayName }.getOrNull() ?: id
                 },
                 timeLabel = { epochSeconds -> UiKit.shortTime(epochSeconds) },
@@ -6672,14 +6672,31 @@ class MainActivity : AppCompatActivity() {
             titleRow.addView(
                 UiKit.text(
                     this,
-                    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date((ch.lastMessageAtSeconds * 1000).toLong())),
+                    // 列表行时间规范（双端同一条规则）：今天 HH:mm／
+                    // 昨天／近 7 天星期几／更早日期。
+                    ChannelExtras.listTimeLabel(
+                        ch.lastMessageAtSeconds,
+                        System.currentTimeMillis() / 1000.0,
+                    ),
                     11f,
                     R.color.text_tertiary,
                 ),
             )
         }
         row.addView(titleRow)
+        // 预览行（与 iOS 同构）：最后消息正文；无消息时频道显「团队
+        // 频道」、私聊显「私聊」（iOS 的 topic 兜底同口径）。
+        row.addView(
+            UiKit.text(
+                this,
+                ch.lastMessageText.ifBlank { if (ch.kind == "dm") "私聊" else "团队频道" },
+                13f,
+                R.color.text_secondary,
+            ).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+        )
         // 全量对齐批（8.3）：副行与 iOS 同式——「团队频道」标 +「N 成员 ·
         // M Agent」；成员数缺明细时退回参与者 id 数，Agent 数只在有参与者
         // 明细时给（不编造）。本地名单已由 parseChannelSummary 带回明细

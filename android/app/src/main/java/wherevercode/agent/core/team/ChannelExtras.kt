@@ -17,6 +17,39 @@ object ChannelExtras {
     /** 界面提供的快捷反应（与 iOS 同一组）。 */
     val REACTION_CHOICES: List<String> = listOf("👍", "❤️", "🎉", "👀")
 
+    /**
+     * 列表行时间规范（双端同一条规则，与 iOS 同实现）：今天 HH:mm；
+     * 昨天「昨天」；近 7 天内（不含今天/昨天）星期几；更早 yyyy-MM-dd。
+     * 无效时间返回空串——不显示任何编造的时间。
+     */
+    fun listTimeLabel(epochSeconds: Double, nowSeconds: Double): String {
+        if (epochSeconds <= 0) return ""
+        fun dayStart(seconds: Double): Long {
+            val cal = java.util.Calendar.getInstance()
+            cal.timeInMillis = (seconds * 1000).toLong()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            return cal.timeInMillis
+        }
+        val dayMillis = 86_400_000L
+        val diffDays = (dayStart(nowSeconds) - dayStart(epochSeconds)) / dayMillis
+        val date = java.util.Date((epochSeconds * 1000).toLong())
+        return when {
+            diffDays <= 0L -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
+            diffDays == 1L -> "昨天"
+            diffDays < 7L -> {
+                val cal = java.util.Calendar.getInstance()
+                cal.timeInMillis = (epochSeconds * 1000).toLong()
+                listOf("星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六")[
+                    cal.get(java.util.Calendar.DAY_OF_WEEK) - 1
+                ]
+            }
+            else -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(date)
+        }
+    }
+
     /** 撤回消息在界面上的占位文案（正文已被平台清空）。 */
     const val RECALLED_PLACEHOLDER: String = "此消息已撤回"
 

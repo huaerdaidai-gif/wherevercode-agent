@@ -867,7 +867,7 @@ class TeamChannelController(
             chips.addView(
                 UiKit.text(
                     context,
-                    (if (member.isLocalApp) "本机 App" else member.displayName) +
+                    member.displayName +
                         channelRoleLabel(member.role).let { if (it.isEmpty()) "" else " · $it" },
                     11f,
                     R.color.text_primary,

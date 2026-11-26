@@ -220,7 +220,7 @@ object TeamChatRules {
  */
 fun buildChannelMembers(agents: List<AgentRecord>): List<TeamChannelMember> {
     val members = mutableListOf(
-        TeamChannelMember(agentId = "local-app", displayName = "本机 App", isLocalApp = true),
+        TeamChannelMember(agentId = "local-app", displayName = "WhereverCode Agent", isLocalApp = true),
     )
     val seen = mutableSetOf("local-app")
     // Agent 开关（2026-11-12）：停用的 Agent 不进频道（成员表里不出现，

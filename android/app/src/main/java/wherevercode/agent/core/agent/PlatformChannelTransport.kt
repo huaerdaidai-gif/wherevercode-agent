@@ -61,6 +61,8 @@ data class ChannelSummary(
     val participantDetails: List<ChannelParticipant> = emptyList(),
     /** 最后消息时间（epoch 秒；0 表示无数据，切换器行尾时间用）。 */
     val lastMessageAtSeconds: Double = 0.0,
+    /** 最后消息正文（切换器行预览用；空表示无数据）。 */
+    val lastMessageText: String = "",
 )
 
 /**
@@ -155,6 +157,8 @@ fun parseChannelSummary(obj: JSONObject): ChannelSummary {
         participantIds = details.map { it.agentId },
         participantDetails = details,
         lastMessageAtSeconds = obj.optDouble("last_message_at", 0.0),
+        lastMessageText = obj.optString("last_message_text", "")
+            .ifBlank { obj.optJSONObject("last_message")?.optString("text", "") ?: "" },
     )
 }
 

@@ -224,4 +224,37 @@ class ChannelExtrasTest {
         assertEquals("大厅 · 乙", view.forwardOf)
         assertEquals(3, view.reactions.single().count)
     }
+
+    @Test
+    fun `list time label follows the shared relative rule`() {
+        fun epoch(dayOffset: Int, hour: Int, minute: Int): Double {
+            val cal = java.util.Calendar.getInstance()
+            cal.add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
+            cal.set(java.util.Calendar.HOUR_OF_DAY, hour)
+            cal.set(java.util.Calendar.MINUTE, minute)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            return cal.timeInMillis / 1000.0
+        }
+        val now = epoch(0, 15, 30)
+        // 今天 → HH:mm
+        assertEquals("09:05", ChannelExtras.listTimeLabel(epoch(0, 9, 5), now))
+        // 昨天 → 昨天
+        assertEquals("昨天", ChannelExtras.listTimeLabel(epoch(-1, 23, 59), now))
+        // 近 7 天内 → 星期几（与 Calendar 口径一致）
+        val threeDaysAgo = epoch(-3, 12, 0)
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = (threeDaysAgo * 1000).toLong()
+        val weekday = listOf("星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六")[
+            cal.get(java.util.Calendar.DAY_OF_WEEK) - 1
+        ]
+        assertEquals(weekday, ChannelExtras.listTimeLabel(threeDaysAgo, now))
+        // 更早 → yyyy-MM-dd
+        val old = epoch(-30, 12, 0)
+        val expected = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date((old * 1000).toLong()))
+        assertEquals(expected, ChannelExtras.listTimeLabel(old, now))
+        // 无效时间 → 空串（不编造）
+        assertEquals("", ChannelExtras.listTimeLabel(0.0, now))
+    }
 }

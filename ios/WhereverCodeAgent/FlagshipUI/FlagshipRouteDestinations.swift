@@ -2367,10 +2367,13 @@ public struct V5ChannelItem: Identifiable, Equatable, Hashable {
         isPrivate: Bool = false,
         associatedProjectId: String? = nil,
         associatedProjectName: String? = nil,
-        memberCount: Int = 3,
-        agentCount: Int = 1,
+        // 规范化：计数与时间默认值改为 0/空——此前是设计稿占位假值
+        // （3 成员／1 Agent／12:00），映射层漏传就会把假值显示上屏；
+        // 生产构造只有 mapChannelItem 一处，现已全量传真实数据。
+        memberCount: Int = 0,
+        agentCount: Int = 0,
         lastMessageText: String = "",
-        lastMessageTime: String = "12:00",
+        lastMessageTime: String = "",
         unreadCount: Int = 0,
         isMuted: Bool = false,
         isIgnored: Bool = false,
@@ -2500,8 +2503,11 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
         senderName: String,
         isAgent: Bool,
         text: String,
-        timestamp: String = "12:00",
-        fullDateTime: String = "2026-11-15 12:00:00",
+        // 规范化：时间默认值改为空串——此前是写死的占位假值
+        // （12:00／2026-11-15 12:00:00），任何漏传时间的消息都会
+        // 把假时间显示上屏；真实消息一律由映射层传真实时间。
+        timestamp: String = "",
+        fullDateTime: String = "",
         replyToId: String? = nil,
         replyToText: String? = nil,
         linkedTaskId: String? = nil,
@@ -3386,30 +3392,50 @@ public struct ChannelsHomeView: View {
         return ChannelListCache().load()
     }
 
+    /// 列表行时间规范（双端同一条规则，与安卓 ChannelExtras
+    /// .listTimeLabel 同实现）：今天 HH:mm；昨天「昨天」；近 7 天内
+    /// （不含今天/昨天）星期几；更早 yyyy-MM-dd。无效时间返回空串。
+    private func channelListTimeLabel(_ epochSeconds: Double?) -> String {
+        guard let epochSeconds, epochSeconds > 0 else { return "" }
+        let calendar = Calendar.current
+        let date = Date(timeIntervalSince1970: epochSeconds)
+        let dayDiff = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: date),
+            to: calendar.startOfDay(for: Date())
+        ).day ?? 0
+        switch dayDiff {
+        case ..<1:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        case 1:
+            return "昨天"
+        case 2..<7:
+            let weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
+            return weekdays[calendar.component(.weekday, from: date) - 1]
+        default:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: date)
+        }
+    }
+
     private func mapChannelItem(_ c: ChannelInfo, layer: ChannelLayer) -> V5ChannelItem {
         // 全量对齐批（8.3）：Agent 数与行尾时间改读真实数据——此前未传，
         // 一直吃 V5ChannelItem 的占位默认值（1 Agent／12:00），与安卓
-        // 真值口径不一致。无参与者明细时保留原默认，不编造。
-        let agentCount = c.participantDetails.isEmpty
-            ? 1
-            : c.participantDetails.filter { $0.isAgent == true }.count
-        let lastMessageTime: String
-        if let at = c.lastMessageAt, at > 0 {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            lastMessageTime = formatter.string(from: Date(timeIntervalSince1970: at))
-        } else {
-            lastMessageTime = ""
-        }
+        // 真值口径不一致。Agent 数按参与者明细实算，无明细就是 0，
+        // 不编造。行尾时间按双端统一的相对时间规范呈现。
+        let agentCount = c.participantDetails.filter { $0.isAgent == true }.count
         return V5ChannelItem(
             id: c.id,
             name: c.displayName,
-            topic: "团队频道",
+            topic: c.isDM ? "私聊" : "团队频道",
             isPrivate: false,
             memberCount: c.participants.count,
             agentCount: agentCount,
             lastMessageText: c.lastMessageText ?? "",
-            lastMessageTime: lastMessageTime,
+            lastMessageTime: channelListTimeLabel(c.lastMessageAt),
             unreadCount: 0,
             isArchived: c.isArchived,
             layer: layer
@@ -4405,11 +4431,10 @@ public struct ChannelDetailWorkspaceView: View {
                                 .lineLimit(1)
                         }
                         .padding(.vertical, 2)
-                    } else if let replyTo = msg.replyToId, !replyTo.isEmpty {
-                        Text("回复 \(String(replyTo.prefix(8)))…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
+                    // 规范化：引用原文解析不到时不渲染任何占位——此前会把
+                    // 消息 ID 截断成「回复 10101010…」上屏，原始 ID 不是
+                    // 给人看的内容（话题内实测缺陷，6.5）。
 
                     if let forwardOf = msg.forwardOf, !forwardOf.isEmpty {
                         Text("转发自 \(forwardOf)")

@@ -391,7 +391,16 @@ class LocalChannelService(
         for (member in members[channel.id].orEmpty()) {
             participants.put(JSONObject().apply {
                 put("agent_id", member.agentId)
-                put("agent_name", member.agentName)
+                // 规范化：本机 App Agent 的显示名以现行产品名为准（存量
+                // 账本里的旧名在读出时归一，不让旧称谓继续出现在界面）。
+                put(
+                    "agent_name",
+                    if (member.agentId == LocalPlatform.APP_AGENT_ID) {
+                        LocalPlatform.APP_AGENT_NAME
+                    } else {
+                        member.agentName
+                    },
+                )
                 put("role", member.role)
                 put("is_self", viewerId != null && member.agentId == viewerId)
                 // 全量对齐批（8.3）：与平台口径同字段——成员是否注册在册
@@ -406,10 +415,14 @@ class LocalChannelService(
             put("archived", channel.archived)
             put("history_visible", channel.historyVisible)
             put("participants", participants)
-            // 全量对齐批（8.3）：最后消息时间（切换器行尾时间读真值；
-            // 无消息不带此字段）。
-            val lastMessageAt = messages[channel.id].orEmpty().maxOfOrNull { it.createdAt }
-            if (lastMessageAt != null) put("last_message_at", lastMessageAt)
+            // 全量对齐批（8.3）：最后消息时间与正文（切换器行尾时间与
+            // 预览行读真值；无消息不带这两个字段）。已撤回消息正文
+            // 按已撤回处理、不作预览。
+            val lastMessage = messages[channel.id].orEmpty().maxByOrNull { it.createdAt }
+            if (lastMessage != null) {
+                put("last_message_at", lastMessage.createdAt)
+                if (!lastMessage.recalled) put("last_message_text", lastMessage.text)
+            }
         }
     }
 
@@ -578,7 +591,16 @@ class LocalChannelService(
             put("id", message.id)
             put("channel_id", message.channelId)
             put("agent_id", message.agentId)
-            put("agent_name", message.agentName)
+            // 规范化：同 channelJson——本机 App Agent 显示名读出时归一
+            // 为现行产品名，存量消息快照里的旧名不继续上屏。
+            put(
+                "agent_name",
+                if (message.agentId == LocalPlatform.APP_AGENT_ID) {
+                    LocalPlatform.APP_AGENT_NAME
+                } else {
+                    message.agentName
+                },
+            )
             put("text", if (message.recalled) "" else message.text)
             put("created_at", message.createdAt)
             if (message.replyTo != null) put("reply_to", message.replyTo)

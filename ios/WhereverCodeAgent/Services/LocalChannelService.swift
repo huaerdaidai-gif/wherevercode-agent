@@ -499,10 +499,14 @@ public final class LocalChannelService {
             "history_visible": channel.historyVisible,
             "participants": participants,
         ]
-        // 全量对齐批（8.3）：最后消息时间（切换器行尾时间读真值；
-        // 无消息不带此字段）。
-        if let lastMessageAt = (messages[channel.id] ?? []).map(\.createdAt).max() {
-            json["last_message_at"] = lastMessageAt
+        // 全量对齐批（8.3）：最后消息时间与正文（切换器行尾时间与
+        // 预览行读真值；无消息不带这两个字段）。已撤回消息正文
+        // 按已撤回处理、不作预览（与安卓本地服务同口径）。
+        if let lastMessage = (messages[channel.id] ?? []).max(by: { $0.createdAt < $1.createdAt }) {
+            json["last_message_at"] = lastMessage.createdAt
+            if !lastMessage.recalled {
+                json["last_message_text"] = lastMessage.text
+            }
         }
         return json
     }
@@ -1201,7 +1205,11 @@ public final class LocalChannelService {
             let role = optString(row, "role", "member")
             members[channelId, default: []].append(Member(
                 agentId: agentId,
-                agentName: optString(row, "agent_name", agentId),
+                // 规范化：本机 App Agent 的显示名以现行产品名为准，
+                // 存量账本里的旧名在载入时归一。
+                agentName: agentId == LocalPlatform.appAgentID
+                    ? LocalPlatform.appAgentName
+                    : optString(row, "agent_name", agentId),
                 role: role.isEmpty ? "member" : role,
                 joinedAt: optDouble(row, "joined_at", 0)
             ))
@@ -1213,11 +1221,16 @@ public final class LocalChannelService {
             let replyTo = optString(row, "reply_to")
             let attachmentRef = optString(row, "attachment_ref")
             let forwardOf = optString(row, "forward_of")
+            let msgAgentId = optString(row, "agent_id")
             messages[channelId, default: []].append(Message(
                 id: id,
                 channelId: channelId,
-                agentId: optString(row, "agent_id"),
-                agentName: optString(row, "agent_name"),
+                agentId: msgAgentId,
+                // 规范化：同成员载入——本机 App Agent 显示名归一为
+                // 现行产品名，存量消息快照的旧名不继续上屏。
+                agentName: msgAgentId == LocalPlatform.appAgentID
+                    ? LocalPlatform.appAgentName
+                    : optString(row, "agent_name"),
                 text: optString(row, "text"),
                 replyTo: replyTo.isEmpty ? nil : replyTo,
                 createdAt: optDouble(row, "created_at", 0),
