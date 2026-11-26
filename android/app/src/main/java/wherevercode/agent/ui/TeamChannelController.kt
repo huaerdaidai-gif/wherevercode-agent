@@ -195,7 +195,7 @@ class TeamChannelController(
     /** 列表行长按：归档/取消归档指定频道。 */
     private val onToggleChannelArchived: (channelId: String, archived: Boolean) -> Unit = { _, _ -> },
     /** 「关联任务」（全量对齐批，与 iOS 长按菜单/＋菜单同位）：打开关联现有任务单。 */
-    private val onShowLinkTasks: () -> Unit = {},
+    private val onShowLinkTasks: (String) -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -495,7 +495,7 @@ class TeamChannelController(
                         when (options.getOrNull(which)) {
                             "加附件引用" -> onRequestAttachmentRef()
                             "定时发送" -> showScheduleMenu()
-                            "关联任务" -> onShowLinkTasks()
+                            "关联任务" -> onShowLinkTasks("")
                             "从网盘选择" -> noticeLine.text = "从网盘选择：待开发。"
                             "从项目选择" -> noticeLine.text = "从项目选择：待开发。"
                             "上传附件" -> onRequestAttachmentRef()
@@ -835,12 +835,26 @@ class TeamChannelController(
                         isOwn = view.senderId in snapshot.selfAgentIds,
                     ),
                 )
+                // 全量对齐批一（9.17）：从本条消息关联出的任务卡就地跟在
+                // 消息下方成卡（带状态与详情入口），不再只躺在任务分节。
+                snapshot.taskCards
+                    .filter { it.sourceMessageId == raw.id }
+                    .forEach { card ->
+                        bodyContainer.addView(taskCardView(card, snapshot.members))
+                    }
             }
         }
         // 全量对齐批：消息流不再常驻「开始新一轮」行（iOS 无此行）；
         // 轮次到顶时靠页头 roundLine 提示行点按解锁（见 render 开头）。
-        if (snapshot.taskCards.isNotEmpty() && snapshot.sectionTab != 2) {
-            bodyContainer.addView(taskCardsSection(snapshot.taskCards))
+        // 全量对齐批一：带来源消息的关联卡已在主循环里就地跟在消息下方
+        // 渲染，流末分节只收没有来源消息（或来源不在当前列表）的卡，
+        // 避免同卡两现。
+        val flowMessageIds = snapshot.messages.map { it.id }.toHashSet()
+        val endCards = snapshot.taskCards.filter {
+            it.sourceMessageId.isEmpty() || it.sourceMessageId !in flowMessageIds
+        }
+        if (endCards.isNotEmpty() && snapshot.sectionTab != 2) {
+            bodyContainer.addView(taskCardsSection(endCards, snapshot.members))
         }
         // 配好后对话框铬整套回来（含诊断钮按有无诊断显隐）。
         setDialogChromeVisible(true, diagnostic != null)
@@ -1793,7 +1807,7 @@ class TeamChannelController(
             UiKit.text(context, "＋ 新建关联", 12f, R.color.text_primary, bold = true).apply {
                 setBackgroundResource(R.drawable.bg_chip)
                 setPadding(dp(10), dp(6), dp(10), dp(6))
-                setOnClickListener { onShowLinkTasks() }
+                setOnClickListener { onShowLinkTasks("") }
             },
         )
         col.addView(header)
@@ -1801,13 +1815,20 @@ class TeamChannelController(
             col.addView(note("当前频道暂无关联的执行任务"))
             col.addView(note("在消息中长按或点击右上角可将任务关联至频道"))
         } else {
-            snapshot.taskCards.forEach { card -> col.addView(taskCardView(card)) }
+            snapshot.taskCards.forEach { card -> col.addView(taskCardView(card, snapshot.members)) }
         }
         return col
     }
 
-    /** 一张关联/派发任务卡（卡体与 [taskCardsSection] 同式，分节头由调用方给）。 */
-    private fun taskCardView(card: ChannelTaskCard): LinearLayout {
+    /**
+     * 一张关联/派发任务卡（全量对齐批一：与派单卡同式——标题＋状态标签、
+     * 负责人/轮次/ID 元信息行、派发时间、查看详情；带 taskId 的关联卡
+     * 整卡可点进派单详情，回显卡无 taskId 只展示）。
+     */
+    private fun taskCardView(
+        card: ChannelTaskCard,
+        members: List<TeamChannelMember> = emptyList(),
+    ): LinearLayout {
         val cardView = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
             setPadding(dp(10), dp(8), dp(10), dp(8))
@@ -1815,15 +1836,51 @@ class TeamChannelController(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(5) }
+            if (card.taskId.isNotEmpty()) {
+                setOnClickListener {
+                    showDispatchTaskDetailDialog(
+                        context, card.taskId,
+                        members.map { it.agentId to it.displayName },
+                    ) { onRefresh() }
+                }
+            }
         }
-        cardView.addView(
-            UiKit.text(context, card.goal.take(200), 12f, R.color.text_primary, bold = true),
+        val titleRow = UiKit.horizontal(context)
+        titleRow.addView(
+            UiKit.text(context, card.goal.take(200), 12f, R.color.text_primary, bold = true)
+                .apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                },
         )
+        if (card.stateLabel.isNotBlank()) {
+            titleRow.addView(
+                UiKit.text(context, card.stateLabel, 11f, R.color.text_secondary, bold = true),
+            )
+        }
+        cardView.addView(titleRow)
+        val meta = mutableListOf<String>()
+        if (card.assigneeName.isNotBlank()) meta += "负责人：${card.assigneeName}"
+        if (card.round > 0) meta += "第 ${card.round} 轮"
+        if (card.taskId.isNotEmpty()) meta += "ID：${card.taskId.take(8)}"
+        if (meta.isNotEmpty()) {
+            cardView.addView(
+                UiKit.text(context, meta.joinToString(" · "), 10f, R.color.text_tertiary)
+                    .apply { setPadding(0, dp(2), 0, 0) },
+            )
+        }
         val time = formatTime(card.createdAtSeconds)
         if (time.isNotBlank()) {
             cardView.addView(
                 UiKit.text(context, "派发于 $time", 10f, R.color.text_tertiary)
                     .apply { setPadding(0, dp(2), 0, 0) },
+            )
+        }
+        if (card.taskId.isNotEmpty()) {
+            cardView.addView(
+                UiKit.text(context, "查看详情 ›", 11f, R.color.accent, bold = true)
+                    .apply { setPadding(0, dp(4), 0, 0) },
             )
         }
         return cardView
@@ -2147,7 +2204,7 @@ class TeamChannelController(
         // 全量对齐批：菜单项与 iOS 同名「关联任务」，打开关联现有任务单
         // （原「转为正式任务」是把消息转成新任务，与 iOS 语义不同；
         // 转任务仍可走输入栏模式分段）。
-        add("关联任务") { onShowLinkTasks() }
+        add("关联任务") { onShowLinkTasks(message.messageId) }
         ListDialog.show(context, message.senderName, null, labels) { which ->
             handlers.getOrNull(which)?.invoke()
         }
@@ -2163,7 +2220,10 @@ class TeamChannelController(
     }
 
     /** 已从频道派发的任务卡区（回显）：只展示目标与去向，状态不在频道内改。 */
-    private fun taskCardsSection(cards: List<ChannelTaskCard>): LinearLayout {
+    private fun taskCardsSection(
+        cards: List<ChannelTaskCard>,
+        members: List<TeamChannelMember> = emptyList(),
+    ): LinearLayout {
         val col = UiKit.vertical(context).apply { setPadding(0, dp(10), 0, 0) }
         col.addView(
             UiKit.text(context, "已从频道派发", 14f, R.color.text_primary, bold = true),
@@ -2176,27 +2236,7 @@ class TeamChannelController(
                 R.color.text_tertiary,
             ).apply { setPadding(0, 0, 0, dp(6)) },
         )
-        cards.forEach { card ->
-            val cardView = UiKit.vertical(context).apply {
-                setBackgroundResource(R.drawable.bg_card)
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(5) }
-            }
-            cardView.addView(
-                UiKit.text(context, card.goal.take(200), 12f, R.color.text_primary, bold = true),
-            )
-            val time = formatTime(card.createdAtSeconds)
-            if (time.isNotBlank()) {
-                cardView.addView(
-                    UiKit.text(context, "派发于 $time", 10f, R.color.text_tertiary)
-                        .apply { setPadding(0, dp(2), 0, 0) },
-                )
-            }
-            col.addView(cardView)
-        }
+        cards.forEach { card -> col.addView(taskCardView(card, members)) }
         return col
     }
 

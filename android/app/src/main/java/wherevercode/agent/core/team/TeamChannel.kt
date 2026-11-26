@@ -1,5 +1,8 @@
 package wherevercode.agent.core.team
 
+import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 import wherevercode.agent.brain.BrainKind
 import wherevercode.agent.core.agent.AgentRecord
 import wherevercode.agent.core.agent.ChannelParticipant
@@ -74,13 +77,97 @@ fun channelTaskGoal(senderName: String, text: String): String {
 }
 
 /**
- * 本会话内从频道显式派发的一张任务卡（回显用）：任务本体与状态都在
- * 任务列表里，频道里只留这张「已派发」的凭据卡，不在频道内改状态。
+ * 频道里的一张任务卡：从频道显式派发的回显卡与「关联任务」关联出的
+ * 关联卡同账。关联卡带任务本体字段（taskId/状态/负责人/轮次），卡面
+ * 渲染时以任务服务的实时状态为准（快照字段只作离线回退）；任务本体
+ * 与状态变更都在任务列表里，频道内不改状态。卡按频道落盘持久化
+ * （[ChannelTaskCardStore]），重启不丢。
  */
 data class ChannelTaskCard(
     val goal: String,
     val createdAtSeconds: Double = 0.0,
+    /** 关联的派单任务 id；空＝频道派发回显卡（无任务本体可跳）。 */
+    val taskId: String = "",
+    val state: String = "",
+    val stateLabel: String = "",
+    val assigneeName: String = "",
+    val round: Int = 0,
+    /** 关联动作的来源消息 id（消息长按关联时记）；空＝从任务分节关联。 */
+    val sourceMessageId: String = "",
 )
+
+/**
+ * 频道任务卡的本机持久化（全量对齐批一）：按频道存卡，文件 =
+ * filesDir/channel_linked_tasks.json，结构
+ * {"channels": {"<channelId>": [ {card}, ... ] }}。读写失败一律降级
+ * 处理（读空、写静默），不许让一张卡把频道页打挂。
+ */
+object ChannelTaskCardStore {
+    private const val FILE_NAME = "channel_linked_tasks.json"
+
+    fun fileIn(filesDir: File): File = File(filesDir, FILE_NAME)
+
+    fun load(file: File): MutableMap<String, MutableList<ChannelTaskCard>> {
+        val out = mutableMapOf<String, MutableList<ChannelTaskCard>>()
+        try {
+            if (!file.exists()) return out
+            val root = JSONObject(file.readText(Charsets.UTF_8))
+            val channels = root.optJSONObject("channels") ?: return out
+            val keys = channels.keys()
+            while (keys.hasNext()) {
+                val channelId = keys.next()
+                val arr = channels.optJSONArray(channelId) ?: continue
+                val cards = mutableListOf<ChannelTaskCard>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    cards += ChannelTaskCard(
+                        goal = o.optString("goal"),
+                        createdAtSeconds = o.optDouble("created_at", 0.0),
+                        taskId = o.optString("task_id"),
+                        state = o.optString("state"),
+                        stateLabel = o.optString("state_label"),
+                        assigneeName = o.optString("assignee_name"),
+                        round = o.optInt("round", 0),
+                        sourceMessageId = o.optString("source_message_id"),
+                    )
+                }
+                out[channelId] = cards
+            }
+        } catch (_: Exception) {
+            return out
+        }
+        return out
+    }
+
+    fun save(file: File, byChannel: Map<String, List<ChannelTaskCard>>) {
+        try {
+            val channels = JSONObject()
+            for ((channelId, cards) in byChannel) {
+                val arr = JSONArray()
+                for (card in cards) {
+                    arr.put(
+                        JSONObject()
+                            .put("goal", card.goal)
+                            .put("created_at", card.createdAtSeconds)
+                            .put("task_id", card.taskId)
+                            .put("state", card.state)
+                            .put("state_label", card.stateLabel)
+                            .put("assignee_name", card.assigneeName)
+                            .put("round", card.round)
+                            .put("source_message_id", card.sourceMessageId),
+                    )
+                }
+                channels.put(channelId, arr)
+            }
+            file.writeText(
+                JSONObject().put("channels", channels).toString(),
+                Charsets.UTF_8,
+            )
+        } catch (_: Exception) {
+            // 落盘失败不冒泡：最多丢这一次持久化，频道功能不受影响。
+        }
+    }
+}
 
 /** 频道页的一位成员（本机 App 打头 + 注册表里的全部 Agent）。 */
 data class TeamChannelMember(

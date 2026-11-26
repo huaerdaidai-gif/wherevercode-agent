@@ -470,7 +470,44 @@ class MainActivity : AppCompatActivity() {
     /** 本会话已发轮次（发一条消息计一轮；上限见 TeamChatLimits.MAX_ROUNDS）。 */
     private var teamChannelRoundsUsed = 0
     /** 频道补全一期：本会话从频道显式派发的任务卡（回显用，任务本体在任务列表）。 */
-    private val channelTaskCards = mutableListOf<wherevercode.agent.core.team.ChannelTaskCard>()
+    /**
+     * 全量对齐批一：频道任务卡按频道持久化（关联卡带任务字段落盘，
+     * 重启不丢；派发回显卡同账）。快照构建时用派单任务实时状态刷新卡面。
+     */
+    private val channelTaskCardsByChannel: MutableMap<String, MutableList<wherevercode.agent.core.team.ChannelTaskCard>> by lazy {
+        wherevercode.agent.core.team.ChannelTaskCardStore.load(
+            wherevercode.agent.core.team.ChannelTaskCardStore.fileIn(filesDir),
+        )
+    }
+
+    private fun persistChannelTaskCards() {
+        wherevercode.agent.core.team.ChannelTaskCardStore.save(
+            wherevercode.agent.core.team.ChannelTaskCardStore.fileIn(filesDir),
+            channelTaskCardsByChannel,
+        )
+    }
+
+    /** 当前频道的任务卡（以派单任务实时状态刷新标题/状态/负责人/轮次）。 */
+    private fun channelTaskCardsFor(
+        channelId: String,
+        liveTasks: List<wherevercode.agent.ui.DispatchTaskItem>,
+    ): List<wherevercode.agent.core.team.ChannelTaskCard> {
+        val stored = synchronized(channelTaskCardsByChannel) {
+            channelTaskCardsByChannel[channelId]?.toList().orEmpty()
+        }
+        if (stored.isEmpty()) return stored
+        val liveById = liveTasks.associateBy { it.taskId }
+        return stored.map { card ->
+            val live = liveById[card.taskId] ?: return@map card
+            card.copy(
+                goal = live.title.ifBlank { card.goal },
+                state = live.state,
+                stateLabel = live.stateLabel,
+                assigneeName = live.assigneeName,
+                round = live.round,
+            )
+        }
+    }
     /** 频道页一次性提示（发帖失败原因等；下次刷新时由快照带出）。 */
     private var teamChannelNotice: String? = null
     /** 频道补全二/三期：当前查看的频道（null = 端点默认频道；切换频道/私聊时置位）。 */
@@ -1823,7 +1860,7 @@ class MainActivity : AppCompatActivity() {
             onDmSettings = { id -> showDmSettings(id) },
             onSetChannelNotify = { id, mode -> setChannelNotifyMode(id, mode) },
             onToggleChannelArchived = { id, archived -> confirmArchiveChannel(id, archived) },
-            onShowLinkTasks = { showLinkTasksDialog() },
+            onShowLinkTasks = { sourceId -> showLinkTasksDialog(sourceId) },
             onSearch = { query -> searchTeamChannel(query) },
             onSearchFiltered = { query, sender, fromTs, toTs, kind ->
                 searchTeamChannel(query, sender, fromTs, toTs, kind)
@@ -6502,7 +6539,7 @@ class MainActivity : AppCompatActivity() {
             unreadCapped = unreadCapped,
             roundsUsed = teamChannelRoundsUsed,
             notice = teamChannelNotice,
-            taskCards = synchronized(channelTaskCards) { channelTaskCards.toList() },
+            taskCards = channelTaskCardsFor(activeId, dispatchTasks),
             trustedAttributionPosterIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
                 synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
             // 全量对齐批（5.7 根因）：本机频道里 App 的发言身份就是协调者
@@ -6572,15 +6609,19 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 频道补全一期：一次显式派发真建单后，在频道里留一张任务卡回显。
-     * 只记本会话（不持久化）；任务状态以任务列表为准，频道不冒充进度。
+     * 全量对齐批一：回显卡与关联卡同账、按频道落盘持久化；任务状态
+     * 以任务列表为准，频道不冒充进度。
      */
     private fun recordChannelTaskCard(goal: String) {
-        synchronized(channelTaskCards) {
-            channelTaskCards += wherevercode.agent.core.team.ChannelTaskCard(
+        val channelId = activeTeamChannelId()
+        synchronized(channelTaskCardsByChannel) {
+            val list = channelTaskCardsByChannel.getOrPut(channelId) { mutableListOf() }
+            list += wherevercode.agent.core.team.ChannelTaskCard(
                 goal = goal,
                 createdAtSeconds = System.currentTimeMillis() / 1000.0,
             )
         }
+        persistChannelTaskCards()
         teamChannelNotice = "已从频道派发任务，进度与结果请在任务列表查看。"
         refreshTeamChannel()
     }
@@ -7976,7 +8017,7 @@ class MainActivity : AppCompatActivity() {
      * 本频道派单任务（内嵌任务服务）；选中即在本频道留一张关联卡
      * （本会话回显，与从频道派发的卡同账）。无候选时如实提示。
      */
-    private fun showLinkTasksDialog() {
+    private fun showLinkTasksDialog(sourceMessageId: String = "") {
         val channelId = activeTeamChannelId()
         val tasks = try {
             wherevercode.agent.ui.DispatchTaskClient.listChannelTasks(channelId)
@@ -7989,12 +8030,32 @@ class MainActivity : AppCompatActivity() {
         }
         ListDialog.show(this, "关联现有任务", null, tasks.map { it.title }) { index ->
             val task = tasks[index]
-            synchronized(channelTaskCards) {
-                channelTaskCards += wherevercode.agent.core.team.ChannelTaskCard(
-                    goal = task.title,
-                    createdAtSeconds = System.currentTimeMillis() / 1000.0,
-                )
+            // 全量对齐批一：关联卡带任务字段落盘（状态/负责人/轮次/ID），
+            // 同频道同任务重复关联只留一张（再关联时刷新快照字段与来源）。
+            val card = wherevercode.agent.core.team.ChannelTaskCard(
+                goal = task.title,
+                createdAtSeconds = System.currentTimeMillis() / 1000.0,
+                taskId = task.taskId,
+                state = task.state,
+                stateLabel = task.stateLabel,
+                assigneeName = task.assigneeName,
+                round = task.round,
+                sourceMessageId = sourceMessageId,
+            )
+            synchronized(channelTaskCardsByChannel) {
+                val list = channelTaskCardsByChannel.getOrPut(channelId) { mutableListOf() }
+                val existing = list.indexOfFirst {
+                    it.taskId == task.taskId && task.taskId.isNotEmpty()
+                }
+                if (existing >= 0) {
+                    list[existing] = card.copy(
+                        createdAtSeconds = list[existing].createdAtSeconds,
+                    )
+                } else {
+                    list += card
+                }
             }
+            persistChannelTaskCards()
             teamChannelNotice = "已关联任务：${task.title}"
             refreshTeamChannel()
         }
