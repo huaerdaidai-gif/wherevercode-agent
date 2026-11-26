@@ -167,10 +167,11 @@ class MessageCenterController(
         row.addView(
             UiKit.text(
                 context,
-                "%s · %s · 点按回到频道 %s".format(
+                // 全量对齐批：元信息行与 iOS 同式——只到「点按回到频道」，
+                // 不带频道 ID 截断尾巴。
+                "%s · %s · 点按回到频道".format(
                     entry.channelName,
                     formatTime(entry.createdAtSeconds),
-                    entry.channelId.take(8),
                 ),
                 10f,
                 R.color.text_tertiary,
