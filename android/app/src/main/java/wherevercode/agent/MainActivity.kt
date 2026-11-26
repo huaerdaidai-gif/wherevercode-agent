@@ -8634,12 +8634,57 @@ class MainActivity : AppCompatActivity() {
                 consumePendingChannelLink()
             } catch (_: Exception) {
             }
-            val snapshot = try {
+            var snapshot = try {
                 buildTeamChannelSnapshot()
             } catch (e: Exception) {
                 teamChannelNotice =
                     "频道刷新失败：${(e.message ?: e.javaClass.simpleName).take(200)}"
                 null
+            }
+            // 全量对齐批五（4.3）：未连接（STOPPED）且消息缓冲未绑定本
+            // 频道时，列表会呈空——iOS 同态下已加载内容照常呈现。此处在
+            // 本后台线程一次性直读最新一页回填缓冲（与 feed 同款去重/
+            // 排序/上限合并）并重组快照一次；频道本无消息时直读亦为空，
+            // 无副作用。
+            val snap0 = snapshot
+            if (snap0 != null && snap0.configured && !snap0.listMode &&
+                snap0.messages.isEmpty() &&
+                snap0.connectionState == ChannelConnectionState.STOPPED
+            ) {
+                try {
+                    val ep = teamChannelEndpoint()
+                    if (ep != null) {
+                        val fetched = teamChannelTransport(ep.first)
+                            .fetchMessages(snap0.activeChannelId, limit = 50)
+                        if (fetched.isNotEmpty()) {
+                            synchronized(teamChannelMessages) {
+                                if (teamChannelBufferId != snap0.activeChannelId) {
+                                    teamChannelMessages.clear()
+                                    teamChannelBufferId = snap0.activeChannelId
+                                }
+                                fetched.forEach { message ->
+                                    val index = teamChannelMessages.indexOfFirst { it.id == message.id }
+                                    if (index < 0) teamChannelMessages.add(message)
+                                    else teamChannelMessages[index] = message
+                                }
+                                teamChannelMessages.sortBy { it.createdAtSeconds }
+                                if (teamChannelMessages.size > 100) {
+                                    teamChannelMessages.subList(
+                                        0,
+                                        teamChannelMessages.size - 100,
+                                    ).clear()
+                                }
+                            }
+                            snapshot = try {
+                                buildTeamChannelSnapshot()
+                            } catch (_: Exception) {
+                                snap0
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // 直读失败保持原快照（未连接空态如实呈现）。
+                }
             }
             runOnUiThread {
                 teamChannelRefreshRunning = false

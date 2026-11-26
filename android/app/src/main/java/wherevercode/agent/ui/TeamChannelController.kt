@@ -798,6 +798,11 @@ class TeamChannelController(
             // 回复态（clearReply 内部已连带退出话题），不再分两步。
             val bannerTitle = activeThread?.topicTitle?.takeIf { it.isNotBlank() }
                 ?: activeThread?.messages?.firstOrNull()?.text?.take(40)
+                // 批五（6.3）：线程尚无回复时 groupTopicThreads 不成线程，
+                // 横幅回退到根消息原文（与 iOS activeTopicTitle 同义、
+                // 与线程标题同形：trim、换行转空格、取 30 字）。
+                ?: allViews.firstOrNull { it.messageId == activeRootId }?.text
+                    ?.trim()?.replace("\n", " ")?.take(30)?.takeIf { it.isNotBlank() }
                 ?: "话题讨论"
             val threadHeader = UiKit.horizontal(context).apply {
                 setPadding(dp(16), dp(8), dp(16), dp(8))
@@ -2286,7 +2291,7 @@ class TeamChannelController(
             row.addView(
                 UiKit.text(
                     context,
-                    "${formatTime(item.dueAtSeconds)} 发：${item.text.take(60)}",
+                    "${formatScheduledTime(item.dueAtSeconds)} 发：${item.text.take(60)}",
                     11f,
                     R.color.text_tertiary,
                 ).apply {
@@ -2555,6 +2560,23 @@ class TeamChannelController(
         UiKit.text(context, text, 12f, R.color.text_tertiary).apply {
             setPadding(0, dp(4), 0, dp(4))
         }
+
+    // 批五（4.18）：定时条时间跟随系统 24 小时制设置（与 iOS 系统
+    // 短时间样式同规）；消息行共用 formatTime 不动。
+    private fun formatScheduledTime(createdAtSeconds: Double): String {
+        if (createdAtSeconds <= 0) return ""
+        return try {
+            val pattern = if (android.text.format.DateFormat.is24HourFormat(context)) {
+                "HH:mm"
+            } else {
+                "h:mm a"
+            }
+            SimpleDateFormat(pattern, Locale.getDefault())
+                .format(Date((createdAtSeconds * 1000).toLong()))
+        } catch (_: Exception) {
+            ""
+        }
+    }
 
     private fun formatTime(createdAtSeconds: Double): String {
         if (createdAtSeconds <= 0) return ""

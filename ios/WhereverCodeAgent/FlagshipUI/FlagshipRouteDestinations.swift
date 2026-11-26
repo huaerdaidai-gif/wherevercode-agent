@@ -3578,6 +3578,30 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var sendErrorMessage = ""
     // 频道补全二/三期动作状态：定时队列、附件引用、转发、已读回执。
     @State private var scheduledPosts: [ScheduledChannelPost] = []
+    // 全量对齐批五：瞬时提示行（与安卓 noticeLine 同义，3.5 秒自动消；
+    // 4.16 历史开关与 4.18 定时设定/取消共用）。
+    @State private var transientNotice: String? = nil
+    @State private var transientNoticeToken: Int = 0
+
+    private func showTransientNotice(_ text: String) {
+        transientNoticeToken += 1
+        let token = transientNoticeToken
+        transientNotice = text
+        Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if transientNoticeToken == token {
+                transientNotice = nil
+            }
+        }
+    }
+
+    // 批五（4.18）：延时文案与安卓 scheduledDelayText 逐档镜像。
+    private func scheduledDelayText(_ delaySeconds: TimeInterval) -> String {
+        if delaySeconds <= 60 { return "约 1 分钟后" }
+        if delaySeconds < 3600 { return "约 \(Int(delaySeconds) / 60) 分钟后" }
+        if delaySeconds < 86400 { return "约 \(Int(delaySeconds) / 3600) 小时后" }
+        return "约 \(Int(delaySeconds) / 86400) 天后"
+    }
     @State private var pendingAttachmentRef: String? = nil
     @State private var showAttachmentInput = false
     @State private var attachmentDraft = ""
@@ -4015,6 +4039,14 @@ public struct ChannelDetailWorkspaceView: View {
                 toolsBar
                 if isBrowsing { browseBar }
             }
+            if let transientNotice {
+                Text(transientNotice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+            }
             messageCenterStrip
             if !scheduledForChannel.isEmpty {
                 scheduledStrip
@@ -4153,6 +4185,11 @@ public struct ChannelDetailWorkspaceView: View {
 
     private var scheduledStrip: some View {
         VStack(alignment: .leading, spacing: 2) {
+            // 批五（4.18）：分节标题与安卓同文。
+            Text("定时发送（待发）")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
             ForEach(scheduledForChannel) { item in
                 HStack {
                     Text("定时 \(Date(timeIntervalSince1970: item.dueAtSeconds), style: .time) 发：\(String(item.text.prefix(40)))")
@@ -4434,6 +4471,8 @@ public struct ChannelDetailWorkspaceView: View {
         do {
             _ = try await transport.setHistoryVisible(channelID: currentChannelId, visible: visible)
             historyVisibleOverride = visible
+            // 批五（4.16）：切换反馈行与安卓逐字一致。
+            showTransientNotice(visible ? "已开启：新成员可看全部历史。" : "已关闭：新成员只能看入群之后的消息。")
         } catch {
             actionError = (error as? McpError)?.message ?? "改历史开关失败。"
         }
@@ -4992,12 +5031,16 @@ public struct ChannelDetailWorkspaceView: View {
         composerText = ""
         replyingTo = nil
         pendingAttachmentRef = nil
+        // 批五（4.18）：设定反馈行与安卓逐字一致。
+        showTransientNotice("已设定时发送（\(scheduledDelayText(delaySeconds))），发送前可在频道页取消。")
     }
 
     private func cancelScheduled(_ item: ScheduledChannelPost) {
         loadScheduled()
         scheduledPosts.removeAll { $0.id == item.id }
         saveScheduled()
+        // 批五（4.18）：取消反馈行与安卓逐字一致。
+        showTransientNotice("已取消一条定时消息。")
     }
 
     private func flushScheduled() async {
