@@ -196,6 +196,8 @@ class TeamChannelController(
     private val onToggleChannelArchived: (channelId: String, archived: Boolean) -> Unit = { _, _ -> },
     /** 「关联任务」（全量对齐批，与 iOS 长按菜单/＋菜单同位）：打开关联现有任务单。 */
     private val onShowLinkTasks: (String) -> Unit = {},
+    /** 全量对齐批二：从频道移除文件（按消息 id，主 Activity 落盘过滤）。 */
+    private val onRemoveChannelFile: (String) -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -1766,16 +1768,185 @@ class TeamChannelController(
             col.addView(note("暂无共享文件"))
         } else {
             snapshot.channelFiles.forEach { raw ->
-                col.addView(
-                    messageRow(
-                        teamMessageFromChannel(raw, snapshot.trustedAttributionPosterIds),
-                        ChannelExtras.replyQuote(snapshot.channelFiles, raw),
-                        isOwn = raw.agentId in snapshot.selfAgentIds,
-                    ),
-                )
+                col.addView(channelFileRow(raw))
             }
         }
         return col
+    }
+
+    /** 频道文件条目解析结果（与 iOS channelFileEntry 同口径）。 */
+    private data class ChannelFileEntry(
+        val name: String,
+        val sizeText: String,
+        val linkUrl: String?,
+        val projectName: String?,
+    )
+
+    private fun parseChannelFileEntry(raw: PlatformChannelMessage): ChannelFileEntry {
+        val ref = raw.attachmentRef?.trim().orEmpty()
+        var name = ""
+        var sizeText = ""
+        var linkUrl: String? = null
+        var projectName: String? = null
+        if (ref.startsWith("{")) {
+            runCatching {
+                val obj = org.json.JSONObject(ref)
+                name = obj.optString("name")
+                val url = obj.optString("url")
+                if (url.isNotBlank()) {
+                    linkUrl = url
+                    if (name.isBlank()) name = url
+                }
+                projectName = obj.optString("project").trim().ifBlank { null }
+                val size = obj.optLong("size", 0L)
+                if (size > 0) sizeText = formatFileBytes(size)
+            }
+        }
+        if (linkUrl == null && (ref.startsWith("http://") || ref.startsWith("https://"))) {
+            linkUrl = ref
+        }
+        if (name.isBlank() && !ref.startsWith("{")) name = ref
+        if (name.isBlank()) name = raw.text.take(30).ifBlank { "附件" }
+        return ChannelFileEntry(name, sizeText, linkUrl, projectName)
+    }
+
+    private fun formatFileBytes(bytes: Long): String = when {
+        bytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / 1048576.0)
+        bytes >= 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+        else -> "$bytes B"
+    }
+
+    private fun fileToast(text: String) {
+        android.widget.Toast.makeText(
+            context, text, android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    /**
+     * 文件分段条目（全量对齐批二，与 iOS 文件行同构）：文件名＋
+     * 大小·上传者·时间元信息＋关联项目胶囊；点按出动作菜单——
+     * 打开引用／下载（仅链接型）／分享链接或复制引用／从频道移除，
+     * 动作按引用类型显隐，不做空按钮。
+     */
+    private fun channelFileRow(raw: PlatformChannelMessage): LinearLayout {
+        val entry = parseChannelFileEntry(raw)
+        val row = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) }
+        }
+        row.addView(UiKit.text(context, entry.name, 13f, R.color.text_primary, bold = true))
+        val timeText = if (raw.createdAtSeconds > 0) {
+            SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                .format(Date((raw.createdAtSeconds * 1000).toLong()))
+        } else {
+            ""
+        }
+        val meta = listOf(entry.sizeText, raw.agentName, timeText)
+            .filter { it.isNotBlank() }.joinToString(" · ")
+        if (meta.isNotBlank()) {
+            row.addView(UiKit.text(context, meta, 10f, R.color.text_tertiary))
+        }
+        entry.projectName?.let { project ->
+            row.addView(
+                UiKit.text(context, project, 10f, R.color.text_secondary).apply {
+                    setBackgroundResource(R.drawable.bg_chip)
+                    setPadding(dp(6), dp(2), dp(6), dp(2))
+                },
+            )
+        }
+        row.setOnClickListener { showChannelFileActions(raw, entry) }
+        return row
+    }
+
+    private fun showChannelFileActions(
+        raw: PlatformChannelMessage,
+        entry: ChannelFileEntry,
+    ) {
+        val ref = raw.attachmentRef?.trim().orEmpty()
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        labels += "打开引用"
+        actions += {
+            if (entry.linkUrl != null) {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(entry.linkUrl),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }.onFailure { fileToast("没有可打开此链接的应用") }
+            } else {
+                android.app.AlertDialog.Builder(context)
+                    .setTitle("附件引用")
+                    .setMessage(ref.ifBlank { "（空引用）" })
+                    .setPositiveButton("复制引用") { _, _ ->
+                        copyFileText(ref)
+                        fileToast("已复制引用")
+                    }
+                    .setNegativeButton("关闭", null)
+                    .show()
+            }
+        }
+        if (entry.linkUrl != null) {
+            labels += "下载到本地"
+            actions += { downloadChannelFile(entry) }
+            labels += "分享链接"
+            actions += {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_TEXT, entry.linkUrl)
+                }
+                context.startActivity(
+                    android.content.Intent.createChooser(send, "分享链接")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        } else {
+            labels += "复制引用"
+            actions += {
+                copyFileText(ref)
+                fileToast("已复制引用")
+            }
+        }
+        labels += "从频道移除"
+        actions += {
+            onRemoveChannelFile(raw.id)
+            fileToast("已从频道移除")
+        }
+        ListDialog.show(context, "频道文件", null, labels) { which ->
+            actions.getOrNull(which)?.invoke()
+        }
+    }
+
+    private fun copyFileText(text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+        clipboard.setPrimaryClip(
+            android.content.ClipData.newPlainText("file", text),
+        )
+    }
+
+    private fun downloadChannelFile(entry: ChannelFileEntry) {
+        val url = entry.linkUrl ?: return
+        runCatching {
+            val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
+                .setTitle(entry.name)
+                .setNotificationVisibility(
+                    android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
+                )
+                .setDestinationInExternalPublicDir(
+                    android.os.Environment.DIRECTORY_DOWNLOADS, entry.name,
+                )
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE)
+                as android.app.DownloadManager
+            dm.enqueue(request)
+            fileToast("已开始下载：${entry.name}")
+        }.onFailure { fileToast("下载失败：${it.message ?: "未知错误"}") }
     }
 
     /**

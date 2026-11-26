@@ -169,6 +169,57 @@ object ChannelTaskCardStore {
     }
 }
 
+/**
+ * 频道已移除文件落盘（全量对齐批二）：文件列表由消息 attachmentRef
+ * 重聚合，只删内存会在重进时恢复——已移除的消息 id 按频道落盘，
+ * 聚合时过滤。文件 filesDir/channel_removed_files.json，结构
+ * {"channels": {"<channelId>": ["<messageId>", ...]}}。读写失败降级。
+ */
+object ChannelRemovedFilesStore {
+    private const val FILE_NAME = "channel_removed_files.json"
+
+    fun fileIn(filesDir: File): File = File(filesDir, FILE_NAME)
+
+    fun load(file: File): MutableMap<String, MutableSet<String>> {
+        val out = mutableMapOf<String, MutableSet<String>>()
+        try {
+            if (!file.exists()) return out
+            val root = JSONObject(file.readText(Charsets.UTF_8))
+            val channels = root.optJSONObject("channels") ?: return out
+            val keys = channels.keys()
+            while (keys.hasNext()) {
+                val channelId = keys.next()
+                val arr = channels.optJSONArray(channelId) ?: continue
+                val ids = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let { ids += it }
+                }
+                out[channelId] = ids
+            }
+        } catch (_: Exception) {
+            return out
+        }
+        return out
+    }
+
+    fun save(file: File, byChannel: Map<String, Set<String>>) {
+        try {
+            val channels = JSONObject()
+            for ((channelId, ids) in byChannel) {
+                val arr = JSONArray()
+                for (id in ids) arr.put(id)
+                channels.put(channelId, arr)
+            }
+            file.writeText(
+                JSONObject().put("channels", channels).toString(),
+                Charsets.UTF_8,
+            )
+        } catch (_: Exception) {
+            // 落盘失败不冒泡：最多丢这一次持久化，频道功能不受影响。
+        }
+    }
+}
+
 /** 频道页的一位成员（本机 App 打头 + 注册表里的全部 Agent）。 */
 data class TeamChannelMember(
     val agentId: String,

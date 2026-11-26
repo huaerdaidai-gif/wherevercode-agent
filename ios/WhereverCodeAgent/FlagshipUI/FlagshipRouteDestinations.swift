@@ -2557,6 +2557,10 @@ public struct V5ChannelFile: Identifiable, Equatable, Hashable {
     public var associatedProjectName: String?
     public var associatedTaskId: String?
     public var sourceKind: String
+    /// 全量对齐批二：附件引用原文与可打开链接（引用制四动作的依据：
+    /// 预览/下载/分享只对带链接的引用成立，其余如实降级为复制引用）。
+    public var ref: String = ""
+    public var linkURL: String? = nil
 
     public init(
         id: String,
@@ -2567,7 +2571,9 @@ public struct V5ChannelFile: Identifiable, Equatable, Hashable {
         uploadTime: String = "11-15 12:00",
         associatedProjectName: String? = nil,
         associatedTaskId: String? = nil,
-        sourceKind: String = "local"
+        sourceKind: String = "local",
+        ref: String = "",
+        linkURL: String? = nil
     ) {
         self.id = id
         self.fileName = fileName
@@ -2578,6 +2584,8 @@ public struct V5ChannelFile: Identifiable, Equatable, Hashable {
         self.associatedProjectName = associatedProjectName
         self.associatedTaskId = associatedTaskId
         self.sourceKind = sourceKind
+        self.ref = ref
+        self.linkURL = linkURL
     }
 }
 
@@ -3509,6 +3517,8 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var isSending = false
     @State private var messages: [V5ChannelMessage] = []
     @State private var files: [V5ChannelFile] = []
+    /// 全量对齐批二：文件动作结果提示（预览引用原文/下载结果）。
+    @State private var fileActionNotice: String? = nil
     @State private var activeTasks: [LocalTask] = []
     @State private var connectionState: ChannelConnectionState = .stopped
     @State private var connectionError: String? = nil
@@ -5050,7 +5060,9 @@ public struct ChannelDetailWorkspaceView: View {
         do {
             let all = try await transport.pollMessages(channelID: currentChannelId, limit: 500)
             let converted = all.map { toV5Message($0) }
+            let removedFileIds = Self.removedChannelFileIds(channelId: currentChannelId)
             files = converted.reversed().compactMap { Self.channelFileEntry(from: $0) }
+                .filter { !removedFileIds.contains($0.id) }
         } catch {
             // 加载失败保留既有列表，不冒充空。
         }
@@ -5062,15 +5074,25 @@ public struct ChannelDetailWorkspaceView: View {
         var name = ""
         var kind = "file"
         var sizeText = ""
+        var linkURL: String? = nil
+        var projectName: String? = nil
         if let data = ref.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             name = (obj["name"] as? String) ?? ""
             kind = (obj["kind"] as? String) ?? "file"
-            if let url = obj["url"] as? String, name.isEmpty { name = url }
+            if let url = obj["url"] as? String {
+                linkURL = url
+                if name.isEmpty { name = url }
+            }
+            projectName = (obj["project"] as? String)?.trimmingCharacters(in: .whitespaces)
+            if projectName?.isEmpty == true { projectName = nil }
             if let size = (obj["size"] as? NSNumber)?.intValue, size > 0 {
                 sizeText = ByteCountFormatter.string(
                     fromByteCount: Int64(size), countStyle: .file)
             }
+        }
+        if linkURL == nil, ref.hasPrefix("http://") || ref.hasPrefix("https://") {
+            linkURL = ref
         }
         if name.isEmpty {
             // 非 JSON 的纯文本引用：引用本身即文件名（与安卓「附件：<ref>」同口径）。
@@ -5092,7 +5114,57 @@ public struct ChannelDetailWorkspaceView: View {
             fileType: kind,
             uploaderName: msg.senderName,
             uploadTime: timeText,
-            sourceKind: "local")
+            associatedProjectName: projectName,
+            sourceKind: "local",
+            ref: ref,
+            linkURL: linkURL)
+    }
+
+    /// 全量对齐批二：从频道移除落盘——文件由消息 attachmentRef 重聚合，
+    /// 只删内存会在重进文件页时恢复；已移除 id 按频道过滤聚合结果。
+    private static func removedChannelFileIds(channelId: String) -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: "removedChannelFiles.\(channelId)") ?? [])
+    }
+
+    private static func markChannelFileRemoved(channelId: String, fileId: String) {
+        var ids = removedChannelFileIds(channelId: channelId)
+        ids.insert(fileId)
+        UserDefaults.standard.set(Array(ids), forKey: "removedChannelFiles.\(channelId)")
+    }
+
+    /// 预览：URL 引用走系统打开；非 URL 引用展示引用原文（引用制下没有
+    /// 本体可预览，如实呈现引用本身，与安卓「附件引用」对话框同口径）。
+    private func previewChannelFile(_ file: V5ChannelFile) {
+        if let link = file.linkURL, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        } else {
+            fileActionNotice = "附件引用\n\(file.ref)"
+        }
+    }
+
+    /// 下载至本地：仅 URL 引用可真下载（落盘到 App 文档目录）；非 URL
+    /// 引用在菜单里不提供此动作（按类型显隐，不做空按钮）。
+    private func downloadChannelFile(_ file: V5ChannelFile) {
+        guard let link = file.linkURL, let url = URL(string: link) else { return }
+        Task {
+            do {
+                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let docs = FileManager.default.urls(
+                    for: .documentDirectory, in: .userDomainMask)[0]
+                let dest = docs.appendingPathComponent(
+                    file.fileName.isEmpty ? "下载文件" : file.fileName)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                fileActionNotice = "已下载至本地：\(dest.lastPathComponent)"
+            } catch {
+                fileActionNotice = "下载失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func removeChannelFile(_ file: V5ChannelFile) {
+        Self.markChannelFileRemoved(channelId: currentChannelId, fileId: file.id)
+        files.removeAll { $0.id == file.id }
     }
 
     private var filesTab: some View {
@@ -5157,12 +5229,20 @@ public struct ChannelDetailWorkspaceView: View {
                                 Spacer()
 
                                 Menu {
-                                    Button("预览文件") {}
-                                    Button("下载至本地") {}
-                                    Button("分享链接") {}
+                                    Button("预览文件") { previewChannelFile(file) }
+                                    if let link = file.linkURL, let url = URL(string: link) {
+                                        Button("下载至本地") { downloadChannelFile(file) }
+                                        ShareLink(item: url) {
+                                            Text("分享链接")
+                                        }
+                                    } else {
+                                        Button("复制引用") {
+                                            UIPasteboard.general.string = file.ref
+                                        }
+                                    }
                                     Divider()
                                     Button(role: .destructive) {
-                                        files.removeAll { $0.id == file.id }
+                                        removeChannelFile(file)
                                     } label: {
                                         Label("从频道移除", systemImage: "trash")
                                     }
@@ -5180,6 +5260,14 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
             .padding(16)
+        }
+        .alert("频道文件", isPresented: Binding(
+            get: { fileActionNotice != nil },
+            set: { if !$0 { fileActionNotice = nil } }
+        )) {
+            Button("好", role: .cancel) { fileActionNotice = nil }
+        } message: {
+            Text(fileActionNotice ?? "")
         }
     }
 

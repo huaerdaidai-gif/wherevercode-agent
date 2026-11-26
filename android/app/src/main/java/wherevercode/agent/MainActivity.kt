@@ -487,6 +487,28 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /** 全量对齐批二：频道已移除文件 id 集合（按频道落盘，聚合时过滤）。 */
+    private val removedChannelFilesByChannel: MutableMap<String, MutableSet<String>> by lazy {
+        wherevercode.agent.core.team.ChannelRemovedFilesStore.load(
+            wherevercode.agent.core.team.ChannelRemovedFilesStore.fileIn(filesDir),
+        )
+    }
+
+    private fun removedChannelFilesFor(channelId: String): Set<String> =
+        removedChannelFilesByChannel[channelId] ?: emptySet()
+
+    private fun removeChannelFile(messageId: String) {
+        val channelId = teamChannelFilesChannelId ?: return
+        val set = removedChannelFilesByChannel.getOrPut(channelId) { mutableSetOf() }
+        if (set.add(messageId)) {
+            wherevercode.agent.core.team.ChannelRemovedFilesStore.save(
+                wherevercode.agent.core.team.ChannelRemovedFilesStore.fileIn(filesDir),
+                removedChannelFilesByChannel,
+            )
+        }
+        refreshTeamChannel()
+    }
+
     /** 当前频道的任务卡（以派单任务实时状态刷新标题/状态/负责人/轮次）。 */
     private fun channelTaskCardsFor(
         channelId: String,
@@ -1861,6 +1883,7 @@ class MainActivity : AppCompatActivity() {
             onSetChannelNotify = { id, mode -> setChannelNotifyMode(id, mode) },
             onToggleChannelArchived = { id, archived -> confirmArchiveChannel(id, archived) },
             onShowLinkTasks = { sourceId -> showLinkTasksDialog(sourceId) },
+            onRemoveChannelFile = { messageId -> removeChannelFile(messageId) },
             onSearch = { query -> searchTeamChannel(query) },
             onSearchFiltered = { query, sender, fromTs, toTs, kind ->
                 searchTeamChannel(query, sender, fromTs, toTs, kind)
@@ -6591,7 +6614,11 @@ class MainActivity : AppCompatActivity() {
             canManageHistory = myHistoryRole == "owner" || myHistoryRole == "coordinator",
             showHistoryToggle = activeSummary != null && activeSummary.kind == "channel",
             sectionTab = teamChannelSectionTab,
-            channelFiles = if (teamChannelFilesChannelId == activeId) teamChannelFiles else emptyList(),
+            channelFiles = if (teamChannelFilesChannelId == activeId) {
+                teamChannelFiles.filter { it.id !in removedChannelFilesFor(activeId) }
+            } else {
+                emptyList()
+            },
             filesLoaded = teamChannelFilesChannelId == activeId && teamChannelFilesLoaded,
             dispatchAvailable = dispatchAvailable,
             dispatchTasks = dispatchTasks,
