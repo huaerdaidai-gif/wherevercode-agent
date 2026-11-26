@@ -150,6 +150,13 @@ class AgentScreenController(
          * 函数参数（见 onRediscover 注释）。
          */
         onDeleteRemote: ((RemoteDevice) -> Unit)? = null,
+        /**
+         * 远程设备卡片上的「详情」（控制对齐批一，2026-11-27）：点开
+         * 设备详情（标识与连接/测试连接/承载 Agent/目录授权/远程
+         * 文件/管理操作）。放在 onAddRemote 之前——onAddRemote 必须
+         * 是最后一个函数参数（见 onRediscover 注释）。
+         */
+        onOpenDetail: ((RemoteDevice) -> Unit)? = null,
         onAddRemote: (() -> Unit)? = null,
     ) {
         // 设备页只留两块（2026-11-19，与 Agent 页同逻辑）：
@@ -182,7 +189,7 @@ class AgentScreenController(
         }
         remoteDevices.forEach { row ->
             val record = pairings.firstOrNull { it.deviceId == row.device.deviceId }
-            list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote, record, onRevoke))
+            list.addView(remoteDeviceCard(row, onResumePairing, onRediscover, onEditRemote, onUpdateHand, onDeleteRemote, record, onRevoke, onOpenDetail))
         }
     }
 
@@ -207,6 +214,7 @@ class AgentScreenController(
          */
         pairingRecord: PairingRecord? = null,
         onRevokePairing: ((PairingRecord) -> Unit)? = null,
+        onOpenDetail: ((RemoteDevice) -> Unit)? = null,
     ): LinearLayout {
         val card = UiKit.vertical(context).apply {
             setBackgroundResource(R.drawable.bg_card)
@@ -354,6 +362,14 @@ class AgentScreenController(
                 }
                 card.addView(actions)
             }
+        }
+        // 设备详情入口（控制对齐批一，2026-11-27）：已配对/未配对都出，
+        // 整卡可点＋「详情」按钮双入口，与 iOS 点行进详情页对齐。
+        if (onOpenDetail != null) {
+            val detailRow = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
+            detailRow.addView(actionButton("详情") { onOpenDetail(row.device) })
+            card.addView(detailRow)
+            card.setOnClickListener { onOpenDetail(row.device) }
         }
         return card
     }

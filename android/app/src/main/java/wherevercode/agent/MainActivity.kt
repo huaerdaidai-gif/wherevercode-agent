@@ -3664,6 +3664,213 @@ class MainActivity : AppCompatActivity() {
      * 与会话都不删（Agent 在设备重新添加前会如实显示连不上）；配对
      * 记录也不动（撤销配对是设备卡上另一条既有动作）。
      */
+    /**
+     * 设备详情（控制对齐批一，2026-11-27）：安卓补齐 iOS 设备详情页
+     * 成套——标识与连接、测试连接并更新状态、承载 Agent 只读列表、
+     * 工作区目录授权、远程文件管理、管理操作。数据全部现读现算，
+     * 不缓存假状态；连不上、没 Agent 都如实写明，不假装成功。
+     */
+    private fun showDeviceDetail(device: RemoteDevice) {
+        var detailDialog: AlertDialog? = null
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        fun header(text: String) {
+            container.addView(UiKit.text(this, text, 13f, R.color.text_primary, bold = true).apply {
+                setPadding(0, dp(14), 0, dp(4))
+            })
+        }
+        fun line(text: String) {
+            container.addView(UiKit.text(this, text, 12f, R.color.text_secondary).apply {
+                setPadding(0, dp(2), 0, 0)
+            })
+        }
+        fun action(label: String, onClick: () -> Unit) {
+            container.addView(Button(this).apply {
+                text = label
+                setOnClickListener { onClick() }
+            })
+        }
+        val pairing = try {
+            loadPairingRecord(device.deviceId, brainComponents?.pairingTrustStore, pairingStore)
+        } catch (_: Exception) {
+            null
+        }
+        header("设备标识与连接")
+        line("名称：${device.displayName}")
+        line("设备 ID：${device.deviceId}")
+        line("内网地址：${device.host}:${device.port}")
+        line("公网直连：${device.publicHost.ifBlank { "未填" }}")
+        line(
+            "配对状态：" + when (pairing?.state) {
+                PairingState.CONFIRMED -> "已完成"
+                PairingState.PENDING -> "等待对方批准"
+                else -> device.lastServerStatus.ifBlank { "未完成" }
+            },
+        )
+        line("Hand 版本：${device.handVersion.ifBlank { "未知（旧版）" }}")
+        line(
+            "最近连接成功：" + if (device.lastSeenEpochSeconds > 0) {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(device.lastSeenEpochSeconds * 1000))
+            } else {
+                "从未在线"
+            },
+        )
+        val statusView = UiKit.text(this, "", 12f, R.color.text_secondary)
+        container.addView(statusView)
+        action("测试连接并更新状态") {
+            statusView.text = "正在连接探测…"
+            Thread {
+                try {
+                    val identity = deviceIdentityStore.getOrCreate()
+                    val probePeer = DiscoveredPeer(
+                        deviceId = "probe",
+                        displayName = device.displayName,
+                        host = device.publicHost.ifBlank { device.host },
+                        port = device.port,
+                        fingerprintSha256 = "",
+                        capabilities = listOf("hand"),
+                        fallbackHost = if (device.publicHost.isNotBlank() && device.publicHost != device.host) device.host else null,
+                    )
+                    val hello = runBlocking {
+                        directTransport.fetchHelloUnverified(probePeer, identity.deviceId, identity.publicKey)
+                    }
+                    try {
+                        remoteDeviceStore.saveDevice(
+                            device.copy(
+                                lastSeenEpochSeconds = System.currentTimeMillis() / 1000,
+                                lastServerStatus = hello.clientStatus,
+                                handVersion = hello.handVersion,
+                            ),
+                        )
+                    } catch (_: Exception) {
+                    }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            statusView.text = "连接成功：Hand 版本 ${hello.handVersion} · 设备报告 ${hello.agents.size} 个 Agent"
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            statusView.text = "连接失败：${e.message}"
+                        }
+                    }
+                }
+            }.start()
+        }
+        header("承载 Agent（只读关联信息）")
+        val deviceAgents = try {
+            agentStore.listAgents().filter { it.deviceId == device.deviceId }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (deviceAgents.isEmpty()) {
+            line("暂无承载 Agent。")
+        } else {
+            deviceAgents.forEach { agent ->
+                line("${agent.displayName} · 目录：${agent.deviceFolder ?: "未设"} · ${if (agent.enabled) "启用" else "停用"}")
+            }
+        }
+        fun targetForDevice(): RemoteTarget? =
+            deviceAgents.firstNotNullOfOrNull { resolveRemoteTarget(it) }
+        header("工作区目录授权")
+        val folderInput = EditText(this).apply {
+            hint = "工作目录路径"
+            setSingleLine(true)
+            setText(deviceAgents.firstOrNull()?.deviceFolder ?: "")
+        }
+        container.addView(folderInput)
+        val authResultView = UiKit.text(this, "", 12f, R.color.text_secondary)
+        container.addView(authResultView)
+        action("向目标机授权此目录") {
+            val folder = folderInput.text.toString().trim()
+            if (folder.isBlank()) {
+                authResultView.text = "先填工作目录路径。"
+                return@action
+            }
+            val target = targetForDevice()
+            if (target == null) {
+                authResultView.text = "该设备上还没有可用的 Agent 记录，先重新发现 Agent 后再授权。"
+                return@action
+            }
+            authResultView.text = "正在授权…"
+            Thread {
+                val result = runBlocking { authorizeProjectFolderOnce(target, folder) }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        authResultView.text = if (result.isSuccess) {
+                            "已授权：$folder"
+                        } else {
+                            "授权失败：${result.exceptionOrNull()?.message}"
+                        }
+                    }
+                }
+            }.start()
+        }
+        header("远程文件管理 (Hand 协议)")
+        val fileListView = UiKit.text(this, "", 12f, R.color.text_secondary)
+        container.addView(fileListView)
+        action("列出授权工作区文件") {
+            val target = targetForDevice()
+            if (target == null) {
+                fileListView.text = "该设备上还没有可用的 Agent 记录，无法列文件。"
+                return@action
+            }
+            fileListView.text = "正在列出…"
+            listRemoteFolderEntries(target, "") { outcome ->
+                fileListView.text = outcome.fold(
+                    onSuccess = { entries ->
+                        if (entries.isEmpty()) {
+                            "目录为空。"
+                        } else {
+                            "目录文件列表（${entries.size} 项）\n" +
+                                entries.take(10).joinToString("\n") { entry ->
+                                    (if (entry.isDir) "[目录] " else "[文件] ") + entry.name
+                                }
+                        }
+                    },
+                    onFailure = { error -> "列出失败：${error.message}" },
+                )
+            }
+        }
+        header("管理操作")
+        action("编辑地址") {
+            detailDialog?.dismiss()
+            showEditRemoteDeviceDialog(device)
+        }
+        action("更新 Hand") {
+            detailDialog?.dismiss()
+            handUpdateController?.updateDevice(device)
+        }
+        action("重新发现 Agent") {
+            detailDialog?.dismiss()
+            scanDevicesForAgents(listOf(device))
+        }
+        action("查看关联任务") {
+            detailDialog?.dismiss()
+            showEntry(DrawerController.ID_TASKS)
+        }
+        if (pairing != null) {
+            action("撤销配对") {
+                detailDialog?.dismiss()
+                revokePairing(pairing)
+            }
+        }
+        action("删除设备") {
+            detailDialog?.dismiss()
+            deleteRemoteDevice(device)
+        }
+        val scroll = ScrollView(this).apply { addView(container) }
+        detailDialog = AlertDialog.Builder(this)
+            .setTitle("设备详情")
+            .setView(scroll)
+            .setPositiveButton("完成", null)
+            .show()
+    }
+
     private fun deleteRemoteDevice(device: RemoteDevice) {
         AlertDialog.Builder(this)
             .setTitle("删除设备")
@@ -10793,6 +11000,11 @@ class MainActivity : AppCompatActivity() {
             onEditRemote = { device -> showEditRemoteDeviceDialog(device) },
             onUpdateHand = { device -> handUpdateController?.updateDevice(device) },
             onDeleteRemote = { device -> deleteRemoteDevice(device) },
+            // 设备卡「重新发现 Agent」（控制对齐批一，2026-11-27 补接线：
+            // 控制器按钮此前从未接线，点了也不出现）。单台重扫走与
+            // 批量发现同一条 scanDevicesForAgents 口径。
+            onRediscover = { device -> scanDevicesForAgents(listOf(device)) },
+            onOpenDetail = { device -> showDeviceDetail(device) },
         )
         scrollView.post { scrollView.scrollTo(0, savedY) }
     }
