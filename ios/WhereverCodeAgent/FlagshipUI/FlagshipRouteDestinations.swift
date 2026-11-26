@@ -3387,13 +3387,29 @@ public struct ChannelsHomeView: View {
     }
 
     private func mapChannelItem(_ c: ChannelInfo, layer: ChannelLayer) -> V5ChannelItem {
-        V5ChannelItem(
+        // 全量对齐批（8.3）：Agent 数与行尾时间改读真实数据——此前未传，
+        // 一直吃 V5ChannelItem 的占位默认值（1 Agent／12:00），与安卓
+        // 真值口径不一致。无参与者明细时保留原默认，不编造。
+        let agentCount = c.participantDetails.isEmpty
+            ? 1
+            : c.participantDetails.filter { $0.isAgent == true }.count
+        let lastMessageTime: String
+        if let at = c.lastMessageAt, at > 0 {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            lastMessageTime = formatter.string(from: Date(timeIntervalSince1970: at))
+        } else {
+            lastMessageTime = ""
+        }
+        return V5ChannelItem(
             id: c.id,
             name: c.displayName,
             topic: "团队频道",
             isPrivate: false,
             memberCount: c.participants.count,
+            agentCount: agentCount,
             lastMessageText: c.lastMessageText ?? "",
+            lastMessageTime: lastMessageTime,
             unreadCount: 0,
             isArchived: c.isArchived,
             layer: layer

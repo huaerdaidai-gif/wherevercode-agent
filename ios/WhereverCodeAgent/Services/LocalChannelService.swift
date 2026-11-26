@@ -486,9 +486,12 @@ public final class LocalChannelService {
                 "agent_name": member.agentName,
                 "role": member.role,
                 "is_self": viewerId != nil && member.agentId == viewerId,
+                // 全量对齐批（8.3）：与平台/安卓本地服务同字段——成员是否
+                // 注册在册 Agent，供切换器行「N Agent」计数读真值。
+                "is_agent": agents[member.agentId] != nil,
             ])
         }
-        return [
+        var json: [String: Any] = [
             "id": channel.id,
             "name": channel.name,
             "kind": channel.kind,
@@ -496,6 +499,12 @@ public final class LocalChannelService {
             "history_visible": channel.historyVisible,
             "participants": participants,
         ]
+        // 全量对齐批（8.3）：最后消息时间（切换器行尾时间读真值；
+        // 无消息不带此字段）。
+        if let lastMessageAt = (messages[channel.id] ?? []).map(\.createdAt).max() {
+            json["last_message_at"] = lastMessageAt
+        }
+        return json
     }
 
     private func requireChannel(_ channelId: String) throws -> Channel {
