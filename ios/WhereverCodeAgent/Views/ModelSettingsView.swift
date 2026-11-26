@@ -18,7 +18,6 @@ public struct ModelSettingsView: View {
     @State private var showDiscoveryPicker = false
     @State private var showRoutingPoolPicker = false
     @State private var showAddGeneric = false
-    @State private var newGenericLabel = ""
 
     public init(model: ModelSettingsModel) {
         self.model = model
@@ -52,30 +51,8 @@ public struct ModelSettingsView: View {
         .sheet(isPresented: $showRoutingPoolPicker) {
             ModelRoutingPoolPickerSheet(model: model)
         }
-        .alert("添加通用模型 API", isPresented: $showAddGeneric) {
-            TextField("名称（如 OpenAI）", text: $newGenericLabel)
-            Button("添加") {
-                let name = newGenericLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty {
-                    let modelId = UUID().uuidString
-                    let config = ModelConfig(
-                        modelId: modelId,
-                        kind: .modelApi,
-                        adapterId: GenericOpenAiBrainAdapter.adapterId,
-                        label: name,
-                        baseUrl: "https://api.openai.com/v1",
-                        model: "",
-                        authRef: "model-api:\(modelId)",
-                        extra: ["model_origin": "manual"]
-                    )
-                    model.saveConfig(config)
-                    editing = config
-                }
-                newGenericLabel = ""
-            }
-            Button("取消", role: .cancel) { newGenericLabel = "" }
-        } message: {
-            Text("填写模型名称，添加后在编辑页中设置地址与 API Key。")
+        .sheet(isPresented: $showAddGeneric) {
+            ModelGenericAddSheet(model: model)
         }
     }
 
@@ -239,6 +216,11 @@ public struct ModelSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                if model.currentModelId == config.modelId {
+                    Text("✓ 在用")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                }
                 Image(systemName: "chevron.right")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -472,6 +454,7 @@ private struct ModelFreeProviderPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedPreset: FreeProviderPreset?
+    @State private var showCustomProviderForm = false
     @State private var accountId = ""
     @State private var apiKey = ""
     @State private var isFetchingLiveModels = false
@@ -544,6 +527,19 @@ private struct ModelFreeProviderPickerSheet: View {
                         .padding(.vertical, 2)
                     }
                 }
+            }
+            Section {
+                Button("＋ 添加自定义服务商（名单上没有的）") {
+                    showCustomProviderForm = true
+                }
+            } footer: {
+                Text("名单上没有的免费服务商可以在这里加；加完与内置预设走同一条添加流程。存本机、标「自定义」，与内置名单分开。")
+            }
+        }
+        .sheet(isPresented: $showCustomProviderForm) {
+            ModelCustomProviderFormSheet(model: model) { preset in
+                selectedPreset = preset
+                step = .inputApiKey
             }
         }
     }
@@ -674,11 +670,213 @@ private struct ModelFreeProviderPickerSheet: View {
     }
 }
 
-// MARK: - 局域网与设备模型探测 Sheet
+// MARK: - 通用模型 API 添加 Sheet（手工添加：四栏表单＋测试连接＋保存，对齐安卓模型页手工表单）
+
+private struct ModelGenericAddSheet: View {
+    @ObservedObject var model: ModelSettingsModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var label = ""
+    @State private var baseUrl = ""
+    @State private var modelName = ""
+    @State private var apiKey = ""
+    @State private var isTesting = false
+    @State private var testMessage: String?
+
+    private var canSave: Bool {
+        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("名称（如 OpenAI）", text: $label)
+                    TextField("服务地址（https://…）", text: $baseUrl)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("模型标识（如 gpt-4o）", text: $modelName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("API Key（本机模型可留空）", text: $apiKey)
+                } header: { Text("手工添加").textCase(nil) } footer: {
+                    Text("API Key 安全保存在本机 Keychain 中，绝不上传至任何云端。")
+                }
+
+                Section {
+                    Button(isTesting ? "正在测试连接…" : "测试连接") {
+                        Task { await testConnection() }
+                    }
+                    .disabled(isTesting || baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if let testMessage {
+                        Text(testMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("测试连接会拉取该服务的模型列表，只证明服务可达并返回了模型。")
+                }
+            }
+            .navigationTitle("添加通用模型 API")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存模型") { save() }
+                        .disabled(!canSave)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func testConnection() async {
+        isTesting = true
+        testMessage = nil
+        defer { isTesting = false }
+        let address = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = await GenericOpenAiApiClient().listModels(apiKey: key.isEmpty ? "local" : key, baseUrl: address)
+        switch result {
+        case .success(let items):
+            if items.isEmpty {
+                testMessage = "服务可达，但没有返回任何模型；可手动填写模型标识。"
+            } else {
+                if modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    modelName = items[0].id
+                }
+                testMessage = "测试连接成功：读到 \(items.count) 个模型。"
+            }
+        case .failure(let err):
+            testMessage = "测试连接失败：\(err.message)"
+        }
+    }
+
+    private func save() {
+        model.addModelConfig(
+            label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+            baseUrl: baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: modelName.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            extra: ["model_origin": "manual"]
+        )
+        dismiss()
+    }
+}
+
+// MARK: - 自定义免费服务商录入 Sheet（对齐安卓 promptCustomFreeProvider 一套字段）
+
+private struct ModelCustomProviderFormSheet: View {
+    @ObservedObject var model: ModelSettingsModel
+    @Environment(\.dismiss) private var dismiss
+    var onSaved: (FreeProviderPreset) -> Void
+
+    @State private var name = ""
+    @State private var baseUrl = ""
+    @State private var listMode: FreeModelListMode = .live
+    @State private var fixedModelsText = ""
+    @State private var errorMessage: String?
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("服务商名称，如 某某云", text: $name)
+                    TextField("服务地址 Base URL，如 https://api.example.com/v1", text: $baseUrl)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: { Text("添加自定义免费服务商").textCase(nil) } footer: {
+                    Text("名单上没有的免费服务商可以在这里加；加完与内置预设走同一条添加流程。存本机、标「自定义」，与内置名单分开存。")
+                }
+
+                Section {
+                    Picker("模型名单怎么来", selection: $listMode) {
+                        Text("拉取模型列表（服务商有 /models 接口）").tag(FreeModelListMode.live)
+                        Text("固定名单（我填模型 ID）").tag(FreeModelListMode.fixed)
+                    }
+                    .pickerStyle(.inline)
+                    if listMode == .fixed {
+                        TextEditor(text: $fixedModelsText)
+                            .frame(minHeight: 96)
+                        Text("把这家免费可用的模型 ID 逐行填进来（以实际调用为准）。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: { Text("模型名单怎么来").textCase(nil) }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("添加自定义服务商")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存并继续") { save() }
+                        .disabled(!canSave)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var cleanUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        while cleanUrl.hasSuffix("/") { cleanUrl.removeLast() }
+        guard cleanUrl.hasPrefix("https://") || BrainConfigValidator.isLocalModelUrl(cleanUrl) else {
+            errorMessage = "服务地址只允许 https（本机/局域网模型可用 http）。"
+            return
+        }
+        var fixedModels: [String] = []
+        if listMode == .fixed {
+            fixedModels = fixedModelsText.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            guard !fixedModels.isEmpty else {
+                errorMessage = "固定名单至少填一个模型 ID。"
+                return
+            }
+        }
+        let store = model.customProviderStore
+        let existingIds = Set(FreeProviderPresets.presets.map(\.id) + store.list().map(\.id))
+        let preset = FreeProviderPreset(
+            id: CustomFreeProviders.customId(cleanName, existing: existingIds),
+            displayName: cleanName,
+            fixedModels: fixedModels,
+            listMode: listMode,
+            baseUrlTemplate: cleanUrl,
+            keyHelp: "填你在这家注册好的免费 API Key（只存本机 Keychain）。",
+            note: "自定义服务商：不在内置核验名单内，可用性以实际调用为准。"
+        )
+        store.add(preset)
+        dismiss()
+        onSaved(preset)
+    }
+}
+
+// MARK: - 局域网与设备模型探测 Sheet（自动发现：勾选来源→真探测→勾选添加）
 
 private struct ModelDeviceDiscoverySheet: View {
+    struct Source: Identifiable {
+        var id: String { host }
+        let label: String
+        let host: String
+    }
+
     struct Candidate: Identifiable {
-        var id: String { baseUrl + modelName }
+        var id: String { baseUrl + "|" + modelName }
+        let label: String
         let modelName: String
         let baseUrl: String
     }
@@ -686,19 +884,51 @@ private struct ModelDeviceDiscoverySheet: View {
     @ObservedObject var model: ModelSettingsModel
     @Environment(\.dismiss) private var dismiss
 
+    @State private var sources: [Source] = []
+    @State private var checkedSourceIds: Set<String> = []
     @State private var candidates: [Candidate] = []
-    @State private var isScanning = false
     @State private var selectedIndices: Set<Int> = []
+    @State private var isScanning = false
+    @State private var scanMessage: String?
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Button(isScanning ? "正在探测…" : "重新扫描") {
-                        scanEndpoints()
+                    ForEach(sources) { source in
+                        Button {
+                            if checkedSourceIds.contains(source.id) {
+                                checkedSourceIds.remove(source.id)
+                            } else {
+                                checkedSourceIds.insert(source.id)
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(source.label).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                                    Text(source.host).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: checkedSourceIds.contains(source.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(checkedSourceIds.contains(source.id) ? .blue : .secondary)
+                            }
+                        }
                     }
-                    .disabled(isScanning)
-                } header: { Text("探测已登记设备与局域网节点").textCase(nil) }
+                    Button(isScanning ? "正在探测…" : "开始探测") {
+                        scanCheckedSources()
+                    }
+                    .disabled(isScanning || checkedSourceIds.isEmpty)
+                } header: { Text("探测来源（勾选后才扫描）").textCase(nil) } footer: {
+                    Text("探每台来源上的 Ollama（11434）/ LM Studio（1234）/ vLLM（8000）的模型列表；发现只是来源，添加的模型不与设备绑定，删设备不删模型。")
+                }
+
+                if let scanMessage {
+                    Section {
+                        Text(scanMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 if !candidates.isEmpty {
                     Section {
@@ -712,7 +942,7 @@ private struct ModelDeviceDiscoverySheet: View {
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(cand.modelName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                                        Text("\(cand.label)：\(cand.modelName)").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                                         Text(cand.baseUrl).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
@@ -738,25 +968,75 @@ private struct ModelDeviceDiscoverySheet: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .onAppear { scanEndpoints() }
+            .onAppear { loadSources() }
         }
     }
 
-    private func scanEndpoints() {
-        isScanning = false
-        candidates = [
-            Candidate(modelName: "Ollama Local (llama3.2)", baseUrl: "http://127.0.0.1:11434/v1")
-        ]
+    /// 来源＝本机＋每台已登记设备（主机名取设备 baseUrl，同 DevicesView 的口径）。
+    /// 默认不勾；只有本机一个来源时默认勾本机（同安卓单来源直探）。
+    private func loadSources() {
+        guard sources.isEmpty else { return }
+        var list = [Source(label: "本机", host: "127.0.0.1")]
+        let devices = (try? LocalData.shared.agents.listAgents()) ?? []
+        for device in devices where device.isDeviceHost {
+            guard let raw = device.baseUrl else { continue }
+            let clean = raw.replacingOccurrences(of: "http://", with: "").replacingOccurrences(of: "https://", with: "")
+            let host = String(clean.split(separator: ":").first ?? "")
+            if !host.isEmpty && !list.contains(where: { $0.host == host }) {
+                list.append(Source(label: device.displayName, host: host))
+            }
+        }
+        sources = list
+        if list.count == 1 {
+            checkedSourceIds = ["127.0.0.1"]
+        }
+    }
+
+    private func scanCheckedSources() {
+        let targets = sources.filter { checkedSourceIds.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        isScanning = true
+        scanMessage = nil
+        candidates = []
+        selectedIndices = []
+        Task {
+            var found: [Candidate] = []
+            for source in targets {
+                let endpoints = await DeviceModelDiscovery.probeHost(source.host)
+                for endpoint in endpoints {
+                    for name in endpoint.models {
+                        found.append(Candidate(
+                            label: "\(source.label) · \(endpoint.serviceName)",
+                            modelName: name,
+                            baseUrl: endpoint.baseUrl
+                        ))
+                    }
+                }
+            }
+            await MainActor.run {
+                self.isScanning = false
+                self.candidates = found
+                self.selectedIndices = Set(found.indices)
+                if found.isEmpty {
+                    self.scanMessage = "没有发现模型端点：勾选的来源上都没有 Ollama / LM Studio / vLLM 在常用端口返回模型。"
+                }
+            }
+        }
     }
 
     private func addSelected() {
         for idx in selectedIndices {
             let cand = candidates[idx]
             model.addModelConfig(
-                label: cand.modelName,
+                label: "\(cand.label) · \(cand.modelName)",
                 baseUrl: cand.baseUrl,
                 model: cand.modelName,
-                apiKey: ""
+                apiKey: "local",
+                extra: [
+                    FreeProviderPresets.extraTier: FreeProviderPresets.tierFree,
+                    "discovery": "device",
+                    "model_origin": "device-discovered"
+                ]
             )
         }
         dismiss()

@@ -39,10 +39,19 @@ object ModelListRows {
         val isCurrent: Boolean,
         /** 自定义服务商（用户本机自加、不在内置名单内）落成的条目：列表与详情都要标注。 */
         val isCustomProvider: Boolean = false,
+        /** 免费额度条目（免费预设流程/设备发现落成，extra tier=free）：行尾标「免费」，与 iOS 行角标对齐。 */
+        val isFreeTier: Boolean = false,
     )
 
     /** 列表行里自定义条目的标注文案（本页自己的常量，不借大脑侧字符串）。 */
     const val CUSTOM_TAG: String = "自定义"
+
+    /** 列表行里免费条目的标注文案（与 iOS 行「免费」角标同义）。 */
+    const val FREE_TAG: String = "免费"
+
+    /** 这条连接是不是免费额度条目：免费预设流程与设备发现落配置时 extra 写 tier=free。 */
+    fun isFreeTier(config: BrainConfig): Boolean =
+        config.extra[FreeProviderPresets.EXTRA_TIER] == FreeProviderPresets.TIER_FREE
 
     /**
      * 来源标记的 extra 键（Bug② 定版，B2）：单独记来源，与服务商
@@ -262,7 +271,7 @@ object ModelListRows {
                     isCurrent = config.brainId == currentBrainId,
                 )
             }
-            row.copy(isCustomProvider = isCustomProvider(config))
+            row.copy(isCustomProvider = isCustomProvider(config), isFreeTier = isFreeTier(config))
         }.filterNotNull()
     }
 }

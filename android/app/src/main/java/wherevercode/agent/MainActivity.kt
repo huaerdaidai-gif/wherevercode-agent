@@ -15317,8 +15317,14 @@ class MainActivity : AppCompatActivity() {
             isConfigured = { brainId -> components.isBrainConfigured(brainId) },
             siwcSignedIn = components.authManager.isSignedIn(),
         )
+        // 已删内置模型的恢复行（对齐 iOS 4.18）：模型侧墓碑里记着、大脑
+        // 存储里还有种子副本、模型存储里已无条目的，列表末尾给
+        // 「＋ 重新添加 …」行——删模型时大脑副本一字未动，写回即原样。
+        val restorables = modelConfigStore.deletedBuiltinIds()
+            .filter { modelConfigStore.getEntry(it) == null }
+            .mapNotNull { components.configStore.getConfig(it) }
         modelListContainer.removeAllViews()
-        if (rows.isEmpty()) {
+        if (rows.isEmpty() && restorables.isEmpty()) {
             modelListContainer.addView(
                 UiKit.text(this, "还没有添加模型。用上面的服务商预设或手工表单添加。", 12f, R.color.text_secondary).apply {
                     setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -15340,6 +15346,34 @@ class MainActivity : AppCompatActivity() {
             val config = modelConfigStore.getEntry(row.brainId)?.toBrainConfig()
             modelListContainer.addView(buildModelListRow(row, config))
         }
+        for (seed in restorables) {
+            modelListContainer.addView(
+                UiKit.text(this, "＋ 重新添加 ${seed.label}", 12f, R.color.accent).apply {
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    setBackgroundResource(R.drawable.bg_card)
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { restoreModel(seed.brainId) }
+                },
+            )
+        }
+    }
+
+    /** 模型页恢复已删内置模型：种子副本写回独立模型存储 + 清模型侧墓碑 + 注册回引擎注册表。 */
+    private fun restoreModel(brainId: String) {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再重新添加。")
+            return
+        }
+        val seed = components.configStore.getConfig(brainId) ?: run {
+            note("无法重新添加该模型。")
+            return
+        }
+        modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(seed))
+        modelConfigStore.clearBuiltinDeleted(brainId)
+        BrainAdapterRegistry.registerConfig(seed)
+        refreshModelList()
+        note("已重新添加 ${seed.label}。")
     }
 
     /**
@@ -15372,9 +15406,11 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         textCol.addView(UiKit.text(this, row.title, 12f, R.color.text_primary, bold = true))
-        // 自定义服务商落成的条目在副行尾标注「自定义」，与内置名单分开呈现。
+        // 自定义服务商落成的条目在副行尾标注「自定义」，与内置名单分开呈现；
+        // 免费额度条目尾标「免费」（对齐 iOS 行角标）。
         val detailParts = listOfNotNull(row.detailText, row.statusText) +
-            if (row.isCustomProvider) listOf(ModelListRows.CUSTOM_TAG) else emptyList()
+            (if (row.isFreeTier) listOf(ModelListRows.FREE_TAG) else emptyList()) +
+            (if (row.isCustomProvider) listOf(ModelListRows.CUSTOM_TAG) else emptyList())
         val detail = detailParts.joinToString(" · ")
         textCol.addView(UiKit.text(this, detail, 11f, R.color.text_secondary))
         container.addView(textCol)
@@ -15474,17 +15510,16 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 编辑通用模型连接：预填本页表单（Key 留空 = 不换），名称不可改。 */
+    /** 编辑通用模型连接：预填本页表单（Key 留空 = 不换）；名称可改——保存按原 brainId 写回 label，不新建条目（对齐 iOS 模型编辑页）。 */
     private fun startEditModel(config: BrainConfig) {
         if (!::modelFormLabel.isInitialized) return
         editingModelId = config.brainId
         modelFormLabel.setText(config.label)
-        modelFormLabel.isEnabled = false
         modelFormBaseUrl.setText(config.baseUrl ?: "")
         modelFormModel.setText(config.model)
         modelFormApiKey.text.clear()
         modelFormBaseUrl.requestFocus()
-        note("正在编辑 ${config.label}：可改模型、地址；Key 留空表示不换，填了才换。名称不可改，改完点“保存模型”。")
+        note("正在编辑 ${config.label}：可改名称、模型、地址；Key 留空表示不换，填了才换。改完点“保存模型”。")
     }
 
     /** 退出模型编辑模式：恢复新增模式（名称栏可用、表单清空）。 */
