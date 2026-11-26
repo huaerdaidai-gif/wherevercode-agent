@@ -4,112 +4,84 @@
 
 **One workspace. Every Agent.**
 
-面向 Android 与 iOS 的开源 AI Agent 工作台：连接对话、项目、任务、模型与设备。
+**把你拥有的 AI Agent 汇集到一个 App，跨设备协作完成工作。**
 
-**Android · iOS · Multi-Agent · Apache-2.0**
+开源 · Android / iOS 原生 · 本地优先
+
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huaerdaidai-gif/wherevercode-agent)](https://github.com/huaerdaidai-gif/wherevercode-agent/releases/latest)
 
 [简体中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) · ![Android](https://img.shields.io/badge/Android-in%20development-informational) · ![iOS](https://img.shields.io/badge/iOS-in%20development-informational)
-
-[Android 开发说明](android/README.md) · [iOS 开发说明](ios/README.md) · [安全政策](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
-
 </div>
 
-> **开发中 / Work in progress（截至 2026-11-20 的文档核对）**：项目仍在快速迭代。源码存在、UI 可见、单元测试通过、模拟器运行、真机安装和端到端验收是不同的证据层级。不要把设计目标或历史交付记录当成当前 main 的已验收功能。本文不承诺可直接安装的稳定 APK / IPA。
+## 下载与快速开始
 
-## 项目是什么
+[Android APK](https://github.com/huaerdaidai-gif/wherevercode-agent/releases/download/v0.5.6/wherevercode-agent-0.5.6-238.apk) · [iOS IPA](https://github.com/huaerdaidai-gif/wherevercode-agent/releases/download/v0.5.6/WhereverCodeAgent-unsigned-0.5.6-238.ipa) · [Release v0.5.6](https://github.com/huaerdaidai-gif/wherevercode-agent/releases/tag/v0.5.6) · [All releases](https://github.com/huaerdaidai-gif/wherevercode-agent/releases)
 
-WhereverCode Agent 希望把 AI 对话、项目文件、任务执行、多 Agent 协作和设备控制放进一个**极简但功能完整**的移动工作台。Agent 不绑定固定厂商或角色；用户可以按任务选择模型、执行者与设备，并监督任务进度、审批和结果。
+当前发行版：**v0.5.6 / Build 238**（早期开发版）。Android 提供 APK；iOS 提供未签名 IPA，需使用 Sideloadly、AltStore 等方式自行签名侧载，并遵守 Apple 的限制。
 
-本仓库 `wherevercode-agent` 是独立 App 项目，**不是**旧的 `wherevercode` 平台。核心单兵能力不应以旧平台服务或频道作为强制依赖；远程协作能力则取决于实际接入的服务与权限。
+1. 安装 App，在「控制」中配置所需的模型或 Agent。
+2. 在要执行任务的电脑或兼容终端上，复制 App 提供的 Hand 安装命令，启动设备端组件，完成配对及授权。已有 CLI Agent 需要预先安装并登录。
+3. 选择对话方，开始对话或派工；需要多人协作时创建频道，并按所需网络模式配置连接。
 
-## 产品体验与双端统一
+无需为基本本地使用购买 VPS。模型服务可能需要自己的账号或 API key，免费额度及可用性由服务商决定。
 
-产品目标是 **Claude / Codex 式简洁界面、抽屉收纳、能力不缩水**。Android 与 iOS 应遵循相同的信息架构、菜单命名、状态语义和权限边界，而不是只追求页面外观相似。
+## 为什么 WhereverCode？
 
-| 区域 | 目标体验 |
+你可能已经在电脑上使用 Codex、Claude Code、Antigravity、Grok Build 或 Kiro，也有多个 AI 账号和设备。WhereverCode 不试图替代它们，而是提供统一的移动工作台，让已有 Agent 按任务协作。
+
+我们的目标是：**用户负责目标、决策和审批，Agent 负责派工、执行、汇报与交付。** 不绑定固定厂商或永久角色；代码和工作区优先保留在用户控制的设备上。调用云端 AI 时，授权发送的上下文仍会由对应服务处理。
+
+## 当前能力
+
+| 模块 | v0.5.6 状态 |
 | --- | --- |
-| **对话** | 自然语言交流、选择 Agent/模型、发起任务并查看执行反馈 |
-| **项目** | 项目来源、文件、上下文、交付物与任务关联 |
-| **频道 / 协作** | 在有权限的频道中交流、跟进任务；不能假定所有服务端能力都存在 |
-| **控制** | 设备、Agent、模型、连接、执行状态、审计与高级配置统一收纳 |
+| 对话与项目 | 原生移动工作台、手动选择对话方、项目及文件管理相关实现 |
+| 设备与 Agent | Hand 安装、配对、发现、远程执行及权限控制相关实现 |
+| 模型 | 独立模型管理、免费服务商预设与模型路由相关实现 |
+| 协作频道 | 双端本地频道、消息、成员、私聊、任务派工与状态反馈；全量双端对齐持续完善 |
+| 局域网 | 双端已有 LAN 服务端实现；按实际网络和授权配置使用 |
+| 云端协作 | 平台与 MCP 接入相关实现；v0.5.2 发布记录包含跨设备席位派单、离线补发及状态回流 |
+| 安全 | 配对、加密通信、任务凭证与执行权限相关实现 |
 
-导航结构是**产品目标**，不代表两端在 main 中已逐屏一致。2026-11-19 的双端对齐工作涉及频道入口、控制台与交互差异；应以最新审计、实际代码和设备截图逐项验收，不在 README 宣称“已全部统一”。
+上述为源码及发行记录支持的能力范围，不代表每条路径在当前版本均已完成真机端到端验收。v0.5.6 修复频道冻结，并进一步对齐 Android 频道页面与 iOS。
 
-## 当前实现与验证边界
+## 四类 Agent：一个工作台
 
-| 范围 | 仓库中可核实的线索 | 仍需独立验证 |
+| 席位 | 接入方式 | 状态 |
 | --- | --- | --- |
-| Android | Kotlin / Gradle / Chaquopy；本地任务、执行控制及 UI 相关源码与审计记录 | 当前 main 的完整构建、CLI 运行、真机执行、升级签名和双端 UI 对齐 |
-| iOS | Swift / SwiftUI 客户端源码及频道、任务、连接、Keychain 等开发文档 | 最新 main 的编译、签名、安装、真实服务端接线与 Android 行为一致性 |
-| 多 Agent / 多设备 | 本地执行、任务租约、控制栅栏、远程通信等代码和设计记录 | 每条跨设备路径的真实授权、执行回执、故障恢复与端到端验收 |
-| 自主循环 / 自动化 | 已有任务调度、重试和部分恢复机制的审计线索 | 耐久触发器、跨重启去重、预算、完整自动恢复等不能视为已交付 |
-| 安全 | 权限、停止确认、写入门禁、签名隔离等已有实现与要求 | 全仓审计、发布前密钥与许可证检查、实机回归 |
+| 设备 Agent | Hand 发现设备上的兼容 CLI Agent | 已有实现 |
+| 平台 Agent | 平台连接与 Webhook | 已有接入实现，唤醒能力持续完善 |
+| 云端 Agent | MCP 连接器 | 已有接入实现 |
+| 网页 Agent | 用户自己的 ChatGPT、Claude、Gemini、Grok 等网页账号 | App 集成研发方向 |
 
-证据状态统一采用：**规划中 → UI 入口 → 源码实现 → 自动化测试 → 模拟器验证 → 真机验证 → 端到端验收**。只标注有证据的最高级别；缺失证据写“未验证”，不猜测。
+单 Agent 对话由用户选择对话方；模型池的智能路由与 Agent 席位选择分开。四类席位统一热插拔及即时开关是持续完善的目标。
 
-2026-11-20 核对补充：基于 main 提交 42798529 的 Android 构建 203 已在小米 12 真机完成原位安装，并通过 versionCode 与 APK SHA-256 双重核对；iOS 构建 203 的未签名 IPA 已由 CI 产出，真机侧载验收尚未完成。双端逐屏复走尚未完成，本文不宣称已统一验收。
+## 三层网络架构
 
+- **本地层**：App 内本地频道服务；Android 另有默认关闭、绑定本机回环地址的 MCP 派工服务。
+- **内网层**：局域网服务和 Hand 连接，按权限使用，无需固定公网服务器。
+- **跨设备层**：现有平台连接支持远程协作；未来通过近场发现、公钥寻址、动态汇合点、NAT 穿透和中继兜底，逐步实现无需用户自购 VPS 的自组网。
 
-开发审计线索：[P0 审计与实施门禁](docs/p0/README.md)。该文档包含历史分支和当时的缺口，**不是当前 main 的完整验收报告**。
+三层全功能一致、自动故障转移及跨网络自组网仍是目标，不是当前交付承诺。
 
-## 构建与安装
+## 路线图
 
-### Android
+- [ ] 完成频道全量双端对齐：消息、编辑/撤回、文件引用、定时发送、派工及结构化回执。
+- [ ] 将桌面网页席位验证成果集成进 App，遵守服务商账号与自动化规则。
+- [ ] 完善设备、Agent、模型独立生命周期管理，席位热插拔与即时开关。
+- [ ] 实现额度感知、恢复时间报告、任务轮换与断点续传；模型路由优先使用可用免费资源。
+- [ ] 完善推送优先的协作信令与自主执行、审查、重试、恢复闭环。
+- [ ] 完成三层服务集成及无固定 VPS 的自组网。
 
-参考 [android/README.md](android/README.md) 中的构建要求与脚本。文档记录了 JDK 17、Gradle 8.2.1、Android SDK 34、Chaquopy 15.0.1 / Python 3.11 等环境要求；实际版本请优先以当前 Gradle 配置为准。
+开源免费不等于第三方 AI 服务无限免费；信令无需模型推理不等于任务执行不消耗 token。
 
-```sh
-# 配置 JAVA_HOME、ANDROID_HOME 与兼容的 Gradle 后
-./scripts/build-android-p0.sh
-```
+## 开发与贡献
 
-仓库可能不包含完整 Gradle Wrapper。默认 debug 包与正式包的包名、签名及数据隔离；**debug APK 不等于可覆盖升级的正式发行包**。安装前核对签名、版本、ABI 与运行环境。编译成功不代表内置 Node / Agent CLI 已可用。
+本仓库是独立 App 项目，不是旧版 `wherevercode` 平台。Android 使用 Kotlin/Gradle，iOS 使用 Swift/SwiftUI。
 
-### iOS
+[Android 构建](android/README.md) · [iOS 构建](ios/README.md) · [Hand 服务](server/README.md) · [历史 P0 审计](docs/p0/README.md) · [安全政策](SECURITY.md) · [贡献指南](CONTRIBUTING.md) · [Apache-2.0](LICENSE)
 
-参考 [ios/README.md](ios/README.md)。iOS 使用原生 Swift / SwiftUI 工程，构建需要兼容的 macOS / Xcode 环境；安装需要合规签名。**unsigned IPA 不是可直接安装的正式发布包**。iOS 文档包含阶段性服务端接口说明，是否仍准确须与当前服务端核对。
+欢迎试用、提交问题和贡献代码。请注明版本、设备与复现步骤；不要上传令牌、私钥、签名文件或私人工作区内容。
 
-目前不在首页提供未经核实的 APK / IPA 下载链接，也不将历史 CI 描述视为当前工作流存在的证明。
-
-## 自部署（单 Agent 版，现在就能用）
-
-你不需要任何服务器，也不需要向任何人申请账号：
-
-1. **装 App**：从本仓库 Release 下载 Android 签名包直接安装；iOS 下载未签名包，用 Sideloadly / AltStore 以自己的 Apple ID 自签安装。
-2. **填一个免费模型 key**：App 内「控制 → 模型」有 6 家免费模型服务商预设（Google AI Studio、OpenRouter、Groq、硅基流动、智谱 GLM、Cloudflare Workers AI），在服务商官网注册后把 key 填进 App 即可，零成本开始对话。付费模型完全可选，默认不进智能路由。
-3. **接入你的设备（Hand 一行命令）**：在你想派活的电脑/手机上打开终端，复制 App 里给出的那一行 Hand 命令，粘贴、回车——设备与上面的 Agent 即被 App 发现，之后就能在 App 里选 Agent 对话、派活。Hand 不是要另装的程序，全设备通用。
-
-**关于多 Agent 频道**：频道协作（多个 Agent 在同一频道里接力干活）依赖 MCP 服务器组件，本版尚未包含可运行的 MCP 服务器，将按档一/档二/档三逐步发布。MCP 服务器的部署形态已定版：本地（同机，与 App 集成，零部署）／内网·局域网／跨设备（公网·组网远程）三层拓扑都全功能可用、不降级；需要部署时至多在终端粘贴一行命令。在它发布之前，本版的可用范围就是上面的单 Agent 模式。
-
-## 架构原则
-
-- **模型与 Agent 可替换**：不把“推理大脑”或执行角色写死到单一厂商。
-- **本地优先、远程可选**：本地单兵可独立运行；跨设备连接必须明确授权。
-- **人可介入**：暂停、停止、改目标、审批、重试要以实际回执与状态机为准。
-- **执行可追踪**：区分“已请求”“已派发”“执行中”“已确认完成”和“失败/待确认”。
-- **默认安全**：工具、文件写入、设备控制和令牌操作遵守最小权限；失败不得伪报成功。
-
-## 路线图（目标，不等于完成承诺）
-
-1. **双端一致性**：按审计逐项统一导航、频道、控制台、空态、错误态与权限提示。
-2. **真实运行闭环**：完成 Android/iOS 构建、安装、关键操作和跨设备回执验收。
-3. **自主任务循环**：规划 → 执行 → 检查 → 纠错/重试 → 恢复，并提供明确的用户控制权。
-4. **开源交付体验**：经过核实的截图、版本说明、构建流程、许可证与贡献文档。
-
-## 截图与演示
-
-双端截图应来自**可追溯的当前版本**，注明平台、设备/模拟器、commit 与测试状态。设计原型与真实运行截图必须分开标注。完成核实后再加入首页展示，避免使用过时原型冒充当前产品。
-
-## 安全、贡献与许可证
-
-- [SECURITY.md](SECURITY.md)：漏洞报告与凭据处理。
-- [CONTRIBUTING.md](CONTRIBUTING.md)：贡献范围、测试证据和代码审查要求。
-- [LICENSE](LICENSE)：Apache License 2.0。
-
-不要提交 Token、私钥、签名文件、个人数据或私有基础设施配置。公开发布前须检查**全部可达 Git 历史、分支、标签及第三方许可证**；仅从最新提交删除敏感文件不等于清除历史。
-
----
-
-*WhereverCode Agent 为独立开源项目；兼容第三方 Agent、模型或服务不代表官方合作或背书。*
+*独立开源项目；提及第三方产品不代表官方合作或背书。*
