@@ -24,7 +24,7 @@ class MessageCenterController(
     private val onRefresh: () -> Unit,
     private val onOpenEntry: (MessageCenterEntry) -> Unit,
     /** 待落地任务被点按：由调用方弹频道选择并执行落地（9.19）。 */
-    private val onLandTask: (wherevercode.agent.core.message.PendingTaskEntry) -> Unit,
+    private val onLandTask: (wherevercode.agent.core.message.PendingTaskEntry) -> Unit = {},
     /** 关闭消息中心（回到上一个界面，由调用方决定落点）。 */
     private val onClose: () -> Unit,
 ) {

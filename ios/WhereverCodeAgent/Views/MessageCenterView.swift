@@ -216,6 +216,7 @@ struct MessageCenterView: View {
         case .mention: return "暂无 @我 的消息。"
         case .unread: return "暂无未读。已读状态由频道页自己推进，这里不会替你消费。"
         case .taskReceipt: return "暂无带任务归属的消息。"
+        case .pendingTask: return "暂无待落地任务。"
         }
     }
 
