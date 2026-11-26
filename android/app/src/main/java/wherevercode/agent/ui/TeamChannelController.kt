@@ -25,7 +25,6 @@ import wherevercode.agent.core.team.TeamChannelMember
 import wherevercode.agent.core.team.channelRoleLabel
 import wherevercode.agent.core.team.TRANSIENT_NOTICE_TTL_MS
 import wherevercode.agent.core.team.transientNoticeVisible
-import wherevercode.agent.core.team.channelTaskGoal
 import wherevercode.agent.core.team.TeamChatLimits
 import wherevercode.agent.core.team.TeamChatRules
 import wherevercode.agent.core.team.TeamThread
@@ -195,6 +194,8 @@ class TeamChannelController(
     private val onSetChannelNotify: (channelId: String, mode: String) -> Unit = { _, _ -> },
     /** 列表行长按：归档/取消归档指定频道。 */
     private val onToggleChannelArchived: (channelId: String, archived: Boolean) -> Unit = { _, _ -> },
+    /** 「关联任务」（全量对齐批，与 iOS 长按菜单/＋菜单同位）：打开关联现有任务单。 */
+    private val onShowLinkTasks: () -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -398,10 +399,11 @@ class TeamChannelController(
         root.addView(roundLine)
         noticeLine.setPadding(dp(16), 0, dp(16), dp(6))
         root.addView(noticeLine)
-        root.addView(replyBanner)
         root.addView(messageListView)
         root.addView(typingBanner)
         root.addView(mentionScroller)
+        // 全量对齐批：回复条移到输入栏正上方（iOS 回复条同位，此前在列表上方）。
+        root.addView(replyBanner)
         inputBar = buildInputBar()
         root.addView(inputBar)
         composer.input.addTextChangedListener(object : android.text.TextWatcher {
@@ -482,12 +484,21 @@ class TeamChannelController(
                     rightMargin = dp(8)
                 }
                 setOnClickListener {
+                    // 全量对齐批：＋菜单与 iOS 同集合同序六项。关联任务开
+                    // 关联单；从网盘/从项目选择在 iOS 侧同样未落地（网盘
+                    // 适配器卡均标待开发），点开如实给待开发提示；上传
+                    // 附件走本 App 的附件引用机制（引用制，不传二进制）。
                     val options = mutableListOf("加附件引用")
                     if (onSchedulePost != null) options.add("定时发送")
+                    options.addAll(listOf("关联任务", "从网盘选择", "从项目选择", "上传附件"))
                     ListDialog.show(context, "更多", null, options) { which ->
                         when (options.getOrNull(which)) {
                             "加附件引用" -> onRequestAttachmentRef()
                             "定时发送" -> showScheduleMenu()
+                            "关联任务" -> onShowLinkTasks()
+                            "从网盘选择" -> noticeLine.text = "从网盘选择：待开发。"
+                            "从项目选择" -> noticeLine.text = "从项目选择：待开发。"
+                            "上传附件" -> onRequestAttachmentRef()
                         }
                     }
                 }
@@ -720,18 +731,18 @@ class TeamChannelController(
             bodyContainer.addView(filterRow(snapshot))
             bodyContainer.addView(toolsRow(snapshot))
             snapshot.messageCenter?.let {
+                // 全量对齐批：计数随当前显示集（搜索/筛选结果集优先），与 iOS 同口径。
+                val countScope = snapshot.searchResults ?: snapshot.messages
                 bodyContainer.addView(
-                    messageCenterSection(it, ChannelExtras.pinnedMessages(snapshot.messages).size),
+                    messageCenterSection(it, ChannelExtras.pinnedMessages(countScope).size),
                 )
             }
         }
         if (snapshot.unreadCount > 0) {
             bodyContainer.addView(unreadRow(snapshot))
         }
-        val pinned = ChannelExtras.pinnedMessages(snapshot.messages)
-        if (pinned.isNotEmpty() && !snapshot.dmMode) {
-            bodyContainer.addView(pinnedSection(pinned))
-        }
+        // 全量对齐批：去掉列表上方的「置顶消息」常驻卡（iOS 对话页无此卡；
+        // 置顶计数仍在消息中心行内呈现）。
         if (snapshot.scheduled.isNotEmpty()) {
             bodyContainer.addView(scheduledSection(snapshot.scheduled))
         }
@@ -745,9 +756,7 @@ class TeamChannelController(
                     messagesEmptyState("没有找到匹配的消息", "换个关键词或清除搜索条件再试"),
                 )
             } else {
-                bodyContainer.addView(
-                    note("搜索“${snapshot.searchQuery}”：${searchResults.size} 条结果（点一条跳到原文；点“清除”回全量）"),
-                )
+                // 全量对齐批：iOS 搜索结果上方无结果说明行，此处不再加。
                 searchResults.forEach { raw ->
                     val rowView = messageRow(
                         teamMessageFromChannel(raw, snapshot.trustedAttributionPosterIds),
@@ -771,12 +780,29 @@ class TeamChannelController(
             val activeRootId = snapshot.activeTopicThreadRootId
             val topicThreads = groupTopicThreads(allViews)
             val activeThread = topicThreads.firstOrNull { it.rootMessageId == activeRootId }
-            val bannerTitle = activeThread?.let { teamThreadTitle(it) } ?: "话题讨论"
+            // 全量对齐批：话题横幅与 iOS 同式——单条横幅「当前话题：<话题
+            // 标题>」＋右侧「返回全部」；点返回全部一次同时清话题聚焦与
+            // 回复态（clearReply 内部已连带退出话题），不再分两步。
+            val bannerTitle = activeThread?.topicTitle?.takeIf { it.isNotBlank() }
+                ?: activeThread?.messages?.firstOrNull()?.text?.take(40)
+                ?: "话题讨论"
             val threadHeader = UiKit.horizontal(context).apply {
                 setPadding(dp(16), dp(8), dp(16), dp(8))
+                setBackgroundColor(
+                    androidx.core.content.ContextCompat.getColor(context, R.color.accent_soft),
+                )
+                gravity = android.view.Gravity.CENTER_VERTICAL
                 addView(
-                    UiKit.text(context, "当前话题：$bannerTitle（点此返回全部）", 12f, R.color.accent, bold = true).apply {
-                        setOnClickListener { onSelectTopicThread(null) }
+                    UiKit.text(context, "当前话题：$bannerTitle", 12f, R.color.accent, bold = true).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                        )
+                    },
+                )
+                addView(
+                    UiKit.text(context, "返回全部", 12f, R.color.accent, bold = true).apply {
+                        setPadding(dp(10), dp(2), dp(2), dp(2))
+                        setOnClickListener { clearReply() }
                     },
                 )
             }
@@ -1293,21 +1319,29 @@ class TeamChannelController(
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
-        row.addView(
-            UiKit.text(
-                context, "搜索", 12f,
-                if (searchInput.text.isNullOrBlank()) R.color.text_tertiary else R.color.accent,
-                bold = true,
-            ).apply {
-                setPadding(dp(10), dp(6), dp(4), dp(6))
-                setOnClickListener { runSearch() }
-            },
-        )
+        // 全量对齐批：与 iOS 同态——无结果集时是「搜索」钮；有结果集时
+        // 「搜索」钮隐去、只剩「清除」，且「话题」不带计数后缀。
+        if (snapshot.searchResults == null) {
+            row.addView(
+                UiKit.text(
+                    context, "搜索", 12f,
+                    if (searchInput.text.isNullOrBlank()) R.color.text_tertiary else R.color.accent,
+                    bold = true,
+                ).apply {
+                    setPadding(dp(10), dp(6), dp(4), dp(6))
+                    setOnClickListener { runSearch() }
+                },
+            )
+        }
         val topicCount = groupTopicThreads(
             snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) }
         ).size
         row.addView(
-            UiKit.text(context, if (topicCount > 0) "话题 ($topicCount)" else "话题", 12f, R.color.accent, bold = true).apply {
+            UiKit.text(
+                context,
+                if (snapshot.searchResults == null && topicCount > 0) "话题 ($topicCount)" else "话题",
+                12f, R.color.accent, bold = true,
+            ).apply {
                 setPadding(dp(10), dp(6), dp(4), dp(6))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1367,30 +1401,49 @@ class TeamChannelController(
         )
     }
 
-    /** 过滤行：成员 / 时间 / 分类三枚循环切换链接，点选即重跑搜索（238 对齐批：去掉「过滤：」标签，与 iOS filterBar 同形）。 */
+    /**
+     * 过滤行：成员 / 时间 / 分类三枚下拉菜单（全量对齐批，与 iOS filterBar
+     * 同形：点开出菜单选一项，不再点按循环）。选完即重跑搜索；选回
+     * 「全部」时列表即时恢复全量（本端无 iOS 的复位不重跑问题）。
+     */
     private fun filterRow(snapshot: TeamChannelSnapshot): View {
         val inner = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(8)) }
-        inner.addView(smallChip("成员：" + (filterSender ?: "全部"), first = true) {
+        inner.addView(smallChip("成员：" + (filterSender ?: "全部成员"), first = true) {
             val names = snapshot.members.map { it.displayName }
                 .filter { it.isNotBlank() }.distinct()
             val options = listOf<String?>(null) + names
-            val idx = options.indexOf(filterSender)
-            filterSender = options[(idx + 1) % options.size]
-            snapshot.let { render(it) }
-            runSearch()
+            ListDialog.show(
+                context, "成员", null,
+                options.map { it ?: "全部成员" },
+                selectedIndex = options.indexOf(filterSender).coerceAtLeast(0),
+            ) { which ->
+                filterSender = options.getOrNull(which)
+                snapshot.let { render(it) }
+                runSearch()
+            }
         })
         val rangeLabels = listOf("全部时间", "今天", "近7天", "近30天")
         inner.addView(smallChip("时间：" + rangeLabels[filterRangeIndex]) {
-            filterRangeIndex = (filterRangeIndex + 1) % rangeLabels.size
-            snapshot.let { render(it) }
-            runSearch()
+            ListDialog.show(
+                context, "时间", null, rangeLabels,
+                selectedIndex = filterRangeIndex,
+            ) { which ->
+                filterRangeIndex = which
+                snapshot.let { render(it) }
+                runSearch()
+            }
         })
         val kindLabels = listOf(null to "全部", "image" to "图片", "file" to "文件", "link" to "链接")
         val kindIndex = kindLabels.indexOfFirst { it.first == filterKind }.coerceAtLeast(0)
         inner.addView(smallChip("分类：" + kindLabels[kindIndex].second) {
-            filterKind = kindLabels[(kindIndex + 1) % kindLabels.size].first
-            snapshot.let { render(it) }
-            runSearch()
+            ListDialog.show(
+                context, "分类", null, kindLabels.map { it.second },
+                selectedIndex = kindIndex,
+            ) { which ->
+                filterKind = kindLabels.getOrNull(which)?.first
+                snapshot.let { render(it) }
+                runSearch()
+            }
         })
         return HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
@@ -1554,22 +1607,62 @@ class TeamChannelController(
             noticeLine.text = "当前频道暂无自由话题。点击任意消息下的「话题」即可发起。"
             return
         }
-        val titles = topicThreads.map { thread ->
-            val title = thread.topicTitle ?: "话题讨论"
-            val count = thread.messages.size
-            "话题 · $title ($count 条)"
+        // 全量对齐批：与 iOS 话题 sheet 同式——标题「自由话题列表」，条目
+        // 三行（标题／N 条消息／发送者：预览），底部 sheet 呈现。
+        val dialog = android.app.Dialog(context)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val sheet = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_channel_sheet)
+            setPadding(dp(20), dp(16), dp(20), dp(20))
         }
-        ListDialog.show(context, "频道自由话题列表", "选择话题进入串内讨论：", titles) { which ->
-            val chosen = topicThreads.getOrNull(which)
-            if (chosen != null) {
-                onSelectTopicThread(chosen.rootMessageId)
-                val root = chosen.messages.firstOrNull()
-                if (root != null) {
-                    replyingTo = root
-                    replyBanner.text = "正在话题回复 ${root.senderName}：${root.text.take(30)}（点此退出话题）"
-                    replyBanner.visibility = View.VISIBLE
+        sheet.addView(UiKit.text(context, "自由话题列表", 17f, R.color.text_primary, bold = true))
+        topicThreads.forEach { thread ->
+            val root = thread.messages.firstOrNull()
+            val row = UiKit.vertical(context).apply {
+                setPadding(0, dp(12), 0, dp(12))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    dialog.dismiss()
+                    onSelectTopicThread(thread.rootMessageId)
+                    if (root != null) {
+                        replyingTo = root
+                        replyBanner.text = "回复 ${root.senderName}：${root.text.take(30)}"
+                        replyBanner.visibility = View.VISIBLE
+                    }
                 }
             }
+            row.addView(
+                UiKit.text(
+                    context, thread.topicTitle ?: "话题讨论",
+                    14f, R.color.text_primary, bold = true,
+                ),
+            )
+            row.addView(
+                UiKit.text(context, "${thread.messages.size} 条消息", 11f, R.color.text_tertiary)
+                    .apply { setPadding(0, dp(2), 0, 0) },
+            )
+            if (root != null) {
+                row.addView(
+                    UiKit.text(
+                        context, "${root.senderName}：${root.text.take(40)}",
+                        11f, R.color.text_tertiary,
+                    ).apply { setPadding(0, dp(2), 0, 0) },
+                )
+            }
+            sheet.addView(row)
+        }
+        dialog.setContentView(sheet)
+        dialog.show()
+        dialog.window?.let { window ->
+            window.setBackgroundDrawable(
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+            )
+            window.setGravity(android.view.Gravity.BOTTOM)
+            window.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+            )
         }
     }
 
@@ -1597,13 +1690,23 @@ class TeamChannelController(
         outer.addView(track)
         return outer
     }
-    /** 文件分段：服务端 kind 过滤拉回的文件类消息（引用制呈现同消息行）。 */
+    /**
+     * 文件分段（全量对齐批，与 iOS 文件页签同结构）：「频道文件汇总 (N)」
+     * 标题 + 条目；空态文案与 iOS 同文「暂无共享文件」。条目仍是服务端
+     * kind 过滤拉回的文件类消息（引用制呈现同消息行）。
+     */
     private fun filesSection(snapshot: TeamChannelSnapshot): LinearLayout {
         val col = UiKit.vertical(context)
+        col.addView(
+            UiKit.text(
+                context, "频道文件汇总 (${snapshot.channelFiles.size})",
+                12f, R.color.text_primary, bold = true,
+            ).apply { setPadding(0, 0, 0, dp(6)) },
+        )
         if (!snapshot.filesLoaded) {
             col.addView(note("正在加载频道文件…"))
         } else if (snapshot.channelFiles.isEmpty()) {
-            col.addView(note("本频道暂无文件类消息（图片 / 文件 / 链接）。"))
+            col.addView(note("暂无共享文件"))
         } else {
             snapshot.channelFiles.forEach { raw ->
                 col.addView(
@@ -1627,16 +1730,60 @@ class TeamChannelController(
         val col = UiKit.vertical(context)
         if (snapshot.dispatchAvailable) {
             col.addView(dispatchTasksSection(snapshot))
-            col.addView(note("以下为本机协同任务卡（本会话回显），与上方派单任务是两套账。"))
         } else {
             col.addView(note("服务端暂无按频道的任务接口：此处只显示本机从本频道派发的任务，频道历史任务无法从服务端拉取，完整任务请到任务列表查看。"))
         }
+        // 全量对齐批：关联任务区与 iOS 同构——「频道关联任务 (N)」分节头 +
+        // 右上「＋ 新建关联」+ iOS 同文空态；去掉原「两套账」说明行。
+        val header = UiKit.horizontal(context).apply { setPadding(0, dp(10), 0, 0) }
+        header.addView(
+            UiKit.text(
+                context, "频道关联任务 (${snapshot.taskCards.size})",
+                12f, R.color.text_primary, bold = true,
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        header.addView(
+            UiKit.text(context, "＋ 新建关联", 12f, R.color.text_primary, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_chip)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                setOnClickListener { onShowLinkTasks() }
+            },
+        )
+        col.addView(header)
         if (snapshot.taskCards.isEmpty()) {
-            col.addView(note("本会话还没有从本频道派发的任务。用输入栏「转为正式任务」发送即在此留卡。"))
+            col.addView(note("当前频道暂无关联的执行任务"))
+            col.addView(note("在消息中长按或点击右上角可将任务关联至频道"))
         } else {
-            col.addView(taskCardsSection(snapshot.taskCards))
+            snapshot.taskCards.forEach { card -> col.addView(taskCardView(card)) }
         }
         return col
+    }
+
+    /** 一张关联/派发任务卡（卡体与 [taskCardsSection] 同式，分节头由调用方给）。 */
+    private fun taskCardView(card: ChannelTaskCard): LinearLayout {
+        val cardView = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(5) }
+        }
+        cardView.addView(
+            UiKit.text(context, card.goal.take(200), 12f, R.color.text_primary, bold = true),
+        )
+        val time = formatTime(card.createdAtSeconds)
+        if (time.isNotBlank()) {
+            cardView.addView(
+                UiKit.text(context, "派发于 $time", 10f, R.color.text_tertiary)
+                    .apply { setPadding(0, dp(2), 0, 0) },
+            )
+        }
+        return cardView
     }
 
     /**
@@ -1751,40 +1898,7 @@ class TeamChannelController(
         col.addView(
             UiKit.text(context, "计数按当前已加载消息统计", 10f, R.color.text_tertiary),
         )
-        center.mentionMessages.takeLast(5).forEach { m ->
-            col.addView(
-                UiKit.text(
-                    context,
-                    "@我 · ${m.agentName}：${ChannelExtras.displayText(m).take(60)}",
-                    11f,
-                    R.color.text_tertiary,
-                ).apply { setPadding(0, dp(2), 0, 0) },
-            )
-        }
-        return col
-    }
-
-    /** 置顶区（置顶消息常驻顶部，频道补全二期）。 */
-    private fun pinnedSection(pinned: List<PlatformChannelMessage>): LinearLayout {
-        val col = UiKit.vertical(context).apply {
-            setBackgroundResource(R.drawable.bg_card)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = dp(8) }
-        }
-        col.addView(UiKit.text(context, "置顶消息", 12f, R.color.text_primary, bold = true))
-        pinned.forEach { m ->
-            col.addView(
-                UiKit.text(
-                    context,
-                    "${m.agentName}：${ChannelExtras.displayText(m).take(120)}",
-                    12f,
-                    R.color.text_secondary,
-                ).apply { setPadding(0, dp(3), 0, 0) },
-            )
-        }
+        // 全量对齐批：去掉计数行下的 @我预览行（iOS 对话页无此行）。
         return col
     }
 
@@ -1935,21 +2049,8 @@ class TeamChannelController(
                     .apply { setPadding(0, dp(2), 0, 0) },
             )
         }
-        // @所有人渲染：只有 owner/协调者发的才算全员提及（亮起）；
-        // 其他人写的 @all 只当普通文本，并如实注一句不生效。
-        val snap = snapshot
-        if (snap != null && ChannelExtras.mentionsAllText(message.text)) {
-            val live = message.senderId in snap.trustedAttributionPosterIds ||
-                message.senderId in snap.selfAgentIds
-            col.addView(
-                UiKit.text(
-                    context,
-                    if (live) "＠所有人" else "（@所有人未生效：仅 owner/协调者可用）",
-                    11f,
-                    if (live) R.color.accent else R.color.text_tertiary,
-                ).apply { setPadding(0, dp(2), 0, 0) },
-            )
-        }
+        // 全量对齐批：@所有人不再在正文下另起一行标签（iOS 为正文内联
+        // 呈现）；发送侧的 owner/协调者门闩在 sendMessage 不变。
         if (!message.recalled) {
             col.setOnLongClickListener {
                 showMessageActions(message, isOwn)
@@ -1969,13 +2070,13 @@ class TeamChannelController(
         }
         add("回复") {
             replyingTo = message
-            replyBanner.text = "正在回复 ${message.senderName}：${message.text.take(30)}（点此取消）"
+            replyBanner.text = "回复 ${message.senderName}：${message.text.take(30)}"
             replyBanner.visibility = View.VISIBLE
         }
         add("发起话题") {
             onSelectTopicThread(message.messageId)
             replyingTo = message
-            replyBanner.text = "正在话题回复 ${message.senderName}：${message.text.take(30)}（点此退出话题）"
+            replyBanner.text = "回复 ${message.senderName}：${message.text.take(30)}"
             replyBanner.visibility = View.VISIBLE
         }
         add(if (message.pinned) "取消置顶" else "置顶") {
@@ -1993,18 +2094,17 @@ class TeamChannelController(
             add("撤回") { onMessageRecall(message.messageId) }
         }
         add("删除") { onMessageDelete(message.messageId) }
-        add("复制") {
+        add("复制文本") {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                 as android.content.ClipboardManager
             clipboard.setPrimaryClip(
                 android.content.ClipData.newPlainText("message", message.text),
             )
         }
-        if (onCreateTask != null) {
-            add("转为正式任务") {
-                onCreateTask.invoke(channelTaskGoal(message.senderName, message.text)) {}
-            }
-        }
+        // 全量对齐批：菜单项与 iOS 同名「关联任务」，打开关联现有任务单
+        // （原「转为正式任务」是把消息转成新任务，与 iOS 语义不同；
+        // 转任务仍可走输入栏模式分段）。
+        add("关联任务") { onShowLinkTasks() }
         ListDialog.show(context, message.senderName, null, labels) { which ->
             handlers.getOrNull(which)?.invoke()
         }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动图标前景（与 iOS App 图标同图：蓝框＋白色粗 W＋右下蓝点）。
+     108dp 自适应图标画布，主体收在中央安全区内。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M36,32 h36 a4,4 0 0,1 4,4 v36 a4,4 0 0,1 -4,4 h-36 a4,4 0 0,1 -4,-4 v-36 a4,4 0 0,1 4,-4"
+        android:strokeColor="#2F7CF6"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M41,45 L47,63 L54,49 L61,63 L67,45"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M73,68.5 a4.5,4.5 0 1,0 0.1,0 z"
+        android:fillColor="#2F7CF6" />
+</vector>

@@ -37,12 +37,16 @@ object ChannelExtras {
     fun displayText(message: PlatformChannelMessage): String =
         if (message.recalled) RECALLED_PLACEHOLDER else message.text
 
-    /** 回复引用行：“回复 <发送者>：<正文摘录>”；父消息不在列表里返回 null。 */
+    /**
+     * 回复引用行（全量对齐批，与 iOS 主列表同式）：“｜回复：<正文摘录>”；
+     * 父消息不在列表里返回 null。iOS 话题内的 ID 截断式引用行是其自身
+     * 缺陷，不作对齐目标——双端统一用本式。
+     */
     fun replyQuote(messages: List<PlatformChannelMessage>, message: PlatformChannelMessage): String? {
         val parentId = message.replyTo ?: return null
         val parent = messages.firstOrNull { it.id == parentId } ?: return null
         val excerpt = displayText(parent).replace("\n", " ").take(40)
-        return "回复 ${parent.agentName}：$excerpt"
+        return "｜回复：$excerpt"
     }
 
     /**

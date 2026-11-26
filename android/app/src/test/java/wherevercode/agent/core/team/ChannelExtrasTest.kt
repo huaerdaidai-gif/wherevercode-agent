@@ -72,7 +72,7 @@ class ChannelExtrasTest {
             msg("o", replyTo = "missing"),
         )
         val quote = ChannelExtras.replyQuote(messages, messages[1])
-        assertTrue(quote!!.startsWith("回复 成员p：父消息正文"))
+        assertTrue(quote!!.startsWith("｜回复：父消息正文"))
         assertNull(ChannelExtras.replyQuote(messages, messages[2]))
         assertNull(ChannelExtras.replyQuote(messages, messages[0]))
     }

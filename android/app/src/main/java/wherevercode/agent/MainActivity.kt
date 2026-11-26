@@ -1822,6 +1822,7 @@ class MainActivity : AppCompatActivity() {
             onDmSettings = { id -> showDmSettings(id) },
             onSetChannelNotify = { id, mode -> setChannelNotifyMode(id, mode) },
             onToggleChannelArchived = { id, archived -> confirmArchiveChannel(id, archived) },
+            onShowLinkTasks = { showLinkTasksDialog() },
             onSearch = { query -> searchTeamChannel(query) },
             onSearchFiltered = { query, sender, fromTs, toTs, kind ->
                 searchTeamChannel(query, sender, fromTs, toTs, kind)
@@ -6502,13 +6503,25 @@ class MainActivity : AppCompatActivity() {
             taskCards = synchronized(channelTaskCards) { channelTaskCards.toList() },
             trustedAttributionPosterIds = setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID) +
                 synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
-            selfAgentIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() },
+            // 全量对齐批（5.7 根因）：本机频道里 App 的发言身份就是协调者
+            // local-app，但自学集合在全新安装时学不到它，本人消息被判为
+            // 非本人、长按菜单不出「撤回」。本地层把协调者身份并入本人
+            // 集合（与 trustedAttributionPosterIds 的口径一致）；云端频道
+            // 的 local-app 是多席共用身份，不并入，避免误判他人消息。
+            selfAgentIds = synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } +
+                if (LocalPlatform.isLocalHost(host)) {
+                    setOf(wherevercode.agent.core.team.TeamVoice.COORDINATOR_ID)
+                } else {
+                    emptySet()
+                },
             channels = teamChannelChannelsCache,
             activeChannelId = activeId,
             dmMode = teamChannelDmMode,
             dmChannels = ChannelExtras.dmChannels(teamChannelChannelsCache),
+            // 全量对齐批（4.17）：计数随当前显示集——搜索/筛选生效时按
+            // 结果集统计（与 iOS 同口径），否则按全量消息统计。
             messageCenter = ChannelExtras.buildMessageCenter(
-                messages,
+                teamChannelSearchResults ?: messages,
                 teamChannelMembers()
                     .filter { it.isLocalApp || it.agentId in synchronized(teamChannelSelfAgentIds) { teamChannelSelfAgentIds.toSet() } }
                     .map { it.displayName } + listOf("本机 App"),
@@ -6650,16 +6663,29 @@ class MainActivity : AppCompatActivity() {
         row.addView(
             UiKit.text(
                 this,
-                "# " + ch.name + (if (ch.archived) "（已归档）" else "") + (if (current) " ✓" else ""),
+                (if (ch.kind == "dm") "" else "# ") + ch.name +
+                    (if (ch.archived) "（已归档）" else "") + (if (current) " ✓" else ""),
                 15f,
                 R.color.text_primary,
                 bold = true,
             ),
         )
+        // 全量对齐批（8.3）：副行与 iOS 同式——「团队频道」标 +「N 成员 ·
+        // M Agent」；成员数缺明细时退回参与者 id 数，Agent 数只在有参与者
+        // 明细时给（不编造）。iOS 行尾的时间本机无对应数据（频道名单不带
+        // 最后消息时间），缺省不显。
         val memberCount = ch.participantDetails.size.takeIf { it > 0 } ?: ch.participantIds.size
-        if (memberCount > 0) {
-            row.addView(UiKit.text(this, "$memberCount 位成员", 11f, R.color.text_tertiary))
+        val agentCount = if (ch.participantDetails.isNotEmpty()) {
+            ch.participantDetails.count { it.isAgent }
+        } else {
+            null
         }
+        val sub = StringBuilder(if (ch.kind == "dm") "私聊" else "团队频道")
+        if (memberCount > 0) {
+            sub.append(" · $memberCount 成员")
+            if (agentCount != null) sub.append(" · $agentCount Agent")
+        }
+        row.addView(UiKit.text(this, sub.toString(), 11f, R.color.text_tertiary))
         return row
     }
 
@@ -6693,12 +6719,79 @@ class MainActivity : AppCompatActivity() {
             maxLines = 1
             setPadding(dp(20), dp(12), dp(20), dp(12))
         }
-        var dialog: AlertDialog? = null
+        var dialog: android.app.Dialog? = null
+        // 全量对齐批（8.2）：面板内加「频道／私聊」分段（与 iOS 切换器同式）。
+        var dmTab = false
         fun fill() {
             rows.removeAllViews()
             val q = search.text.toString().trim()
             fun matches(ch: ChannelSummary) =
                 q.isEmpty() || ch.name.contains(q, ignoreCase = true)
+            if (dmTab) {
+                rows.addView(switcherGroupHeader("本机"))
+                val localDms = localList.filter { it.kind == "dm" && matches(it) }
+                if (localDms.isEmpty()) {
+                    rows.addView(
+                        UiKit.text(this, "暂无本机私聊", 12f, R.color.text_tertiary).apply {
+                            setPadding(dp(20), dp(6), dp(20), dp(6))
+                        },
+                    )
+                }
+                localDms.forEach { ch ->
+                    rows.addView(
+                        switcherChannelRow(ch, endpointLocal && ch.id == activeIdNow) {
+                            dialog?.dismiss()
+                            setChannelLayerPref("local")
+                            teamChannelDmMode = true
+                            teamChannelListMode = false
+                            teamChannelActiveId = ch.id
+                            teamChannelSearchResults = null
+                            teamChannelBrowseMessages = null
+                            teamChannelBrowseHighlightId = null
+                            startTeamChannelFeed()
+                            refreshTeamChannel()
+                        },
+                    )
+                }
+                rows.addView(switcherGroupHeader("云端"))
+                if (!cloudConfigured) {
+                    rows.addView(
+                        UiKit.text(this, "连接云端", 14f, R.color.accent, bold = true).apply {
+                            setPadding(dp(20), dp(10), dp(20), dp(12))
+                            setOnClickListener {
+                                dialog?.dismiss()
+                                toast("云端未连接：请到底部账号（设置）里的「平台连接与令牌签发」连接云端。")
+                            }
+                        },
+                    )
+                } else {
+                    val cloudDms = teamChannelCloudCache.filter { it.kind == "dm" && matches(it) }
+                    if (cloudDms.isEmpty()) {
+                        rows.addView(
+                            UiKit.text(this, "暂无云端私聊", 12f, R.color.text_tertiary).apply {
+                                setPadding(dp(20), dp(6), dp(20), dp(6))
+                            },
+                        )
+                    }
+                    cloudDms.forEach { ch ->
+                        rows.addView(
+                            switcherChannelRow(ch, !endpointLocal && ch.id == activeIdNow) {
+                                dialog?.dismiss()
+                                setChannelLayerPref("cloud")
+                                teamChannelDmMode = true
+                                teamChannelListMode = false
+                                teamChannelActiveId = ch.id
+                                teamChannelSearchResults = null
+                                teamChannelBrowseMessages = null
+                                teamChannelBrowseHighlightId = null
+                                startTeamChannelFeed()
+                                refreshTeamChannel()
+                            },
+                        )
+                    }
+                }
+                return
+            }
             rows.addView(switcherGroupHeader("本机"))
             val locals = localList.filter { it.kind != "dm" && matches(it) }
             if (locals.isEmpty()) {
@@ -6751,14 +6844,101 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) { fill() }
         })
+        // 全量对齐批（8.1）：居中对话框改底部 sheet（与 iOS 切换器同式）：
+        // 顶栏 ✕＋标题，分段与搜索在名单上方。
+        val segTrack = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundResource(R.drawable.bg_segment_track)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = dp(20)
+                rightMargin = dp(20)
+                topMargin = dp(10)
+            }
+        }
+        lateinit var segChannel: TextView
+        lateinit var segDm: TextView
+        fun refreshSegs() {
+            listOf(segChannel to false, segDm to true).forEach { (view, isDm) ->
+                val active = dmTab == isDm
+                if (active) {
+                    view.setBackgroundResource(R.drawable.bg_segment_active)
+                } else {
+                    view.background = null
+                }
+                view.setTypeface(
+                    null,
+                    if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+                )
+            }
+        }
+        fun seg(label: String, isDm: Boolean): TextView =
+            UiKit.text(this, label, 13f, R.color.text_primary).apply {
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(14), dp(6), dp(14), dp(6))
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+                setOnClickListener {
+                    dmTab = isDm
+                    refreshSegs()
+                    fill()
+                }
+            }
+        segChannel = seg("频道", false)
+        segDm = seg("私聊", true)
+        segTrack.addView(segChannel)
+        segTrack.addView(segDm)
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.bg_channel_sheet)
+            val topBar = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(6), dp(16), 0)
+            }
+            topBar.addView(
+                UiKit.text(this@MainActivity, "✕", 16f, R.color.text_primary).apply {
+                    setPadding(0, dp(8), 0, dp(8))
+                    minimumWidth = dp(44)
+                    minimumHeight = dp(44)
+                    gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+                    setOnClickListener { dialog?.dismiss() }
+                },
+            )
+            topBar.addView(
+                UiKit.text(this@MainActivity, "切换频道", 20f, R.color.text_primary, bold = true).apply {
+                    gravity = android.view.Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                },
+            )
+            topBar.addView(View(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(44), 1)
+            })
+            addView(topBar)
+            addView(segTrack)
             addView(search)
             addView(android.widget.ScrollView(this@MainActivity).apply { addView(rows) })
         }
-        dialog = AlertDialog.Builder(this).setTitle("切换频道").setView(rootLayout)
-            .setNegativeButton("关闭", null).create()
-        dialog.show()
+        val sheetDialog = android.app.Dialog(this)
+        sheetDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        sheetDialog.setContentView(rootLayout)
+        dialog = sheetDialog
+        sheetDialog.show()
+        sheetDialog.window?.let { window ->
+            window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window.setGravity(android.view.Gravity.BOTTOM)
+            window.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                resources.displayMetrics.heightPixels - dp(30),
+            )
+        }
+        refreshSegs()
         fill()
         if (cloudConfigured && endpointLocal && teamChannelCloudCache.isEmpty()) {
             val host = resolvedPlatformHost()
@@ -6842,8 +7022,11 @@ class MainActivity : AppCompatActivity() {
                 firstAction = { showDmSettings(dmId) }
             }
             else -> {
-                firstLabel = "频道设置"
-                firstAction = { showChannelSettings(activeTeamChannelId()) }
+                // 全量对齐批（1.10 实屏更正）：iOS 对话层＋菜单首项也是
+                // 「管理频道」进频道名单页，并非当前频道设置——此前按
+                // 「对话层=频道设置」的旧判断分层，与 iOS 实屏不符。
+                firstLabel = "管理频道"
+                firstAction = { showChannelManagementList() }
             }
         }
         val popupBody = LinearLayout(this).apply {
@@ -6865,11 +7048,9 @@ class MainActivity : AppCompatActivity() {
             Triple(firstLabel, R.drawable.ic_channel_manage, firstAction),
             Triple("新建频道", R.drawable.ic_hash, { showCreateChannelPage() }),
             Triple("发起私聊", R.drawable.ic_team, {
-                // 发起私聊：切到私聊分段列表页（方案 A），从频道
-                // 成员名单点人发起，不在此凭空创建私聊。
-                teamChannelDmMode = true
-                teamChannelListMode = true
-                refreshTeamChannel()
+                // 全量对齐批（2.3）：与 iOS 同式——开「发起私聊」sheet
+                // （当前频道成员选人＋确定），不再跳私聊分段列表页。
+                showStartDmSheet()
             }),
             Triple("打开消息中心", R.drawable.ic_channel_inbox, {
                 showEntry(DrawerRouter.ID_MESSAGE_CENTER)
@@ -6938,6 +7119,8 @@ class MainActivity : AppCompatActivity() {
             minLines = 1
             maxLines = 1
             textSize = 16f
+            // 全量对齐批（3.2）：清空后显示占位「频道名称」（与 iOS 同文）。
+            hint = "频道名称"
             setText("本地频道")
             setSelection(text.length)
             setBackgroundResource(R.drawable.bg_channel_input)
@@ -7270,7 +7453,7 @@ class MainActivity : AppCompatActivity() {
                             "入帖地址路径：$urlPath\n" +
                                 "密钥（只显示这一次，请自行保存）：$secret\n" +
                                 signature + "\n" +
-                                "外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥丢失只能在「管理 Webhook」里删掉重建。",
+                                "外部系统 POST {\"text\": \"…\"} 到平台地址加该路径即可入帖；密钥只显示这一次，请妥善保存。",
                         )
                         .setPositiveButton("好", null)
                         .show()
@@ -7348,8 +7531,8 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 频道设置页（对齐 iOS「管理频道 → 频道设置」分节结构）：频道信息
-     * （含 iOS 同有的频道性质/成员总数行，本机另留频道 ID 行）／通知设置
-     * （三档同词＋随档位说明一行）／入帖 Webhook／频道成员四节。
+     * （名称内嵌字段／频道性质/成员总数行）／通知设置（三档分段控件＋
+     * 随档位说明一行）／入帖 Webhook／频道成员（逐个列出）四节。
      * 所有管理动作按传入的频道 id 执行，不再只认当前频道。
      */
     private fun showChannelSettings(channelId: String) {
@@ -7367,12 +7550,15 @@ class MainActivity : AppCompatActivity() {
                 .getString("notify_$channelId", null),
         )
 
-        lateinit var dialog: AlertDialog
+        // 全量对齐批（§7）：居中对话框改底部 sheet，与 iOS 频道设置同构——
+        // 名称内嵌字段＋「保存名称」、通知三段控件、成员逐个内嵌列出
+        // （各自改角色/移除）；去掉频道 ID 行与「管理 Webhook」行。
+        lateinit var dialog: android.app.Dialog
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
                 UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
-                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 8),
+                UiKit.dp(this@MainActivity, 20), UiKit.dp(this@MainActivity, 16),
             )
         }
         fun sectionHeader(label: String) {
@@ -7401,35 +7587,244 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        topBar.addView(
+            UiKit.text(this, "频道设置", 20f, R.color.text_primary, bold = true).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        topBar.addView(
+            UiKit.text(this, "完成", 16f, R.color.text_primary, bold = true).apply {
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
+                setPadding(0, dp(8), 0, dp(8))
+                minimumWidth = dp(44)
+                minimumHeight = dp(44)
+                gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.END
+                setOnClickListener { dialog.dismiss() }
+            },
+        )
+        container.addView(topBar)
+
         sectionHeader("频道信息")
-        infoLine("当前频道：$channelName")
-        infoLine("频道 ID：$channelId")
+        val nameInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            minLines = 1
+            maxLines = 1
+            textSize = 16f
+            setText(channelName)
+            setSelection(text.length)
+            setBackgroundResource(R.drawable.bg_channel_input)
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        container.addView(nameInput)
+        val saveNameBtn = UiKit.text(this, "保存名称", 15f, R.color.text_primary, bold = true).apply {
+            setPadding(0, UiKit.dp(this@MainActivity, 11), 0, UiKit.dp(this@MainActivity, 4))
+        }
+        fun refreshSaveName() {
+            val ready = nameInput.text.toString().trim()
+                .let { it.isNotEmpty() && it != channelName }
+            saveNameBtn.isEnabled = ready
+            saveNameBtn.setTextColor(
+                ContextCompat.getColor(
+                    this@MainActivity,
+                    if (ready) R.color.channel_accent else R.color.text_tertiary,
+                ),
+            )
+        }
+        saveNameBtn.setOnClickListener {
+            val name = nameInput.text.toString().trim()
+            if (name.isEmpty()) {
+                toast("频道名称不能为空。")
+                return@setOnClickListener
+            }
+            dialog.dismiss()
+            performChannelManagement { it.renameChannel(channelId, name) }
+        }
+        nameInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { refreshSaveName() }
+        })
+        container.addView(saveNameBtn)
+        refreshSaveName()
         infoLine("频道性质：公开频道")
         infoLine("成员总数：$memberTotal 人")
-        actionRow("改名") { showChannelNameDialog(create = false, targetChannelId = channelId) }
         actionRow(if (archived) "取消归档" else "归档频道") { confirmArchiveChannel(channelId, archived) }
         actionRow("删除频道", R.color.danger) { deleteChannel(channelId) }
         infoLine("仅频道 owner 可删除。删除权限由服务端校验。")
         sectionHeader("通知设置")
-        listOf("全部消息", "仅@我", "静音").forEach { mode ->
-            actionRow(mode + if (mode == notifyMode) " ✓" else "") { setChannelNotifyMode(channelId, mode) }
+        var currentNotifyMode = notifyMode
+        val notifyPrompt = UiKit.text(this, notifyModePrompt(currentNotifyMode), 12f, R.color.text_tertiary).apply {
+            setPadding(0, UiKit.dp(this@MainActivity, 6), 0, 0)
         }
-        infoLine(notifyModePrompt(notifyMode))
+        val notifyTrack = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundResource(R.drawable.bg_segment_track)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        val notifySegs = mutableListOf<TextView>()
+        fun refreshNotifySegs() {
+            notifySegs.forEach { view ->
+                val active = view.text.toString() == currentNotifyMode
+                if (active) {
+                    view.setBackgroundResource(R.drawable.bg_segment_active)
+                } else {
+                    view.background = null
+                }
+                view.setTypeface(
+                    null,
+                    if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+                )
+            }
+            notifyPrompt.text = notifyModePrompt(currentNotifyMode)
+        }
+        listOf("全部消息", "仅@我", "静音").forEach { mode ->
+            val seg = UiKit.text(this, mode, 13f, R.color.text_primary).apply {
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(14), dp(6), dp(14), dp(6))
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+                setOnClickListener {
+                    if (currentNotifyMode != mode) {
+                        currentNotifyMode = mode
+                        refreshNotifySegs()
+                        setChannelNotifyMode(channelId, mode)
+                    }
+                }
+            }
+            notifySegs += seg
+            notifyTrack.addView(seg)
+        }
+        container.addView(notifyTrack)
+        container.addView(notifyPrompt)
+        refreshNotifySegs()
         sectionHeader("入帖 Webhook")
         actionRow("创建入帖 Webhook") { createChannelWebhook(channelId) }
-        actionRow("管理 Webhook") { manageChannelWebhooks(channelId) }
         sectionHeader("频道成员")
         actionRow("添加成员") { addChannelMember(channelId) }
-        actionRow("移除成员") { removeChannelMember(channelId) }
-        actionRow("设置成员角色") { setChannelMemberRole(channelId) }
+        val participants = summary?.participantDetails.orEmpty()
+        if (participants.isEmpty()) {
+            infoLine("暂无成员明细。")
+        }
+        participants.forEach { member ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, UiKit.dp(this@MainActivity, 8), 0, UiKit.dp(this@MainActivity, 8))
+            }
+            val nameCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            }
+            nameCol.addView(
+                UiKit.text(
+                    this,
+                    member.agentName.ifBlank { member.agentId } +
+                        if (member.isSelf) "（本机）" else "",
+                    15f, R.color.text_primary,
+                ),
+            )
+            nameCol.addView(
+                UiKit.text(
+                    this, channelRoleLabelText(member.role),
+                    11f, R.color.text_tertiary,
+                ),
+            )
+            row.addView(nameCol)
+            row.addView(
+                UiKit.text(this, "改角色", 13f, R.color.accent).apply {
+                    setPadding(dp(10), dp(6), dp(10), dp(6))
+                    setOnClickListener {
+                        dialog.dismiss()
+                        setChannelMemberRoleFor(channelId, member.agentId, member.agentName, member.role)
+                    }
+                },
+            )
+            if (member.isSelf || member.role == "owner") {
+                row.addView(
+                    UiKit.text(this, "不可移除", 13f, R.color.text_tertiary).apply {
+                        setPadding(dp(10), dp(6), 0, dp(6))
+                    },
+                )
+            } else {
+                row.addView(
+                    UiKit.text(this, "移除", 13f, R.color.danger).apply {
+                        setPadding(dp(10), dp(6), 0, dp(6))
+                        setOnClickListener {
+                            dialog.dismiss()
+                            AlertDialog.Builder(this@MainActivity).setTitle("移除频道成员？")
+                                .setMessage("确定将 ${member.agentName} 移出此频道？")
+                                .setNegativeButton("取消", null)
+                                .setPositiveButton("移除") { _, _ ->
+                                    performChannelManagement {
+                                        it.removeChannelMember(channelId, member.agentId)
+                                    }
+                                }.show()
+                        }
+                    },
+                )
+            }
+            container.addView(row)
+        }
 
         val scroll = ScrollView(this).apply { addView(container) }
-        dialog = AlertDialog.Builder(this)
-            .setTitle("频道设置")
-            .setView(scroll)
-            .setPositiveButton("完成", null)
-            .create()
+        val sheetRoot = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.bg_channel_sheet)
+            addView(scroll)
+        }
+        dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        dialog.setContentView(sheetRoot)
         dialog.show()
+        dialog.window?.let { window ->
+            window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window.setGravity(android.view.Gravity.BOTTOM)
+            window.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                resources.displayMetrics.heightPixels - dp(30),
+            )
+        }
+    }
+
+    /** 设置指定成员的角色（频道设置页成员行直达；仅频道 owner 可改，服务端校验）。 */
+    private fun setChannelMemberRoleFor(
+        channelId: String,
+        memberId: String,
+        memberName: String,
+        currentRole: String?,
+    ) {
+        requireChannelEndpoint() ?: return
+        val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
+        ListDialog.show(this, "设置 $memberName 的角色", null, roleNames.map { it.second }) { roleIndex ->
+            val newRole = roleNames[roleIndex].first
+            if (newRole == currentRole) {
+                toast("已经是这个角色了。")
+                return@show
+            }
+            AlertDialog.Builder(this).setTitle("更改成员角色？")
+                .setMessage("把 $memberName 的角色改为${roleNames[roleIndex].second}。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("更改") { _, _ ->
+                    performChannelManagement { it.setChannelMemberRole(channelId, memberId, newRole) }
+                }.show()
+        }
     }
 
     /** 管理频道（iOS 同构：先出频道名单，行尾标状态，点行进该频道的设置页）。 */
@@ -7444,6 +7839,136 @@ class MainActivity : AppCompatActivity() {
         }
         ListDialog.show(this, "管理频道", null, labels) { index ->
             showChannelSettings(channels[index].id)
+        }
+    }
+
+    /**
+     * 发起私聊 sheet（全量对齐批 2.3，与 iOS 同式）：顶栏 取消／发起私聊／
+     * 确定，分节「当前频道成员」，成员选择行（点开名单选人），说明文案
+     * 与 iOS 同文。名单 = 当前频道成员减本机（teamChannelDmCandidates）。
+     */
+    private fun showStartDmSheet() {
+        val candidates = teamChannelDmCandidates()
+        if (candidates.isEmpty()) {
+            toast("当前频道没有可私聊的成员。")
+            return
+        }
+        var chosen = candidates.first()
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val root = UiKit.vertical(this).apply {
+            setBackgroundResource(R.drawable.bg_channel_sheet)
+            setPadding(dp(20), dp(8), dp(20), dp(20))
+        }
+        val topBar = UiKit.horizontal(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        topBar.addView(
+            UiKit.text(this, "取消", 16f, R.color.text_primary).apply {
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
+                setPadding(0, dp(8), 0, dp(8))
+                minimumWidth = dp(44)
+                minimumHeight = dp(44)
+                gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+                setOnClickListener { dialog.dismiss() }
+            },
+        )
+        topBar.addView(
+            UiKit.text(this, "发起私聊", 20f, R.color.text_primary, bold = true).apply {
+                gravity = android.view.Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        topBar.addView(
+            UiKit.text(this, "确定", 16f, R.color.text_primary, bold = true).apply {
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
+                setPadding(0, dp(8), 0, dp(8))
+                minimumWidth = dp(44)
+                minimumHeight = dp(44)
+                gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.END
+                setOnClickListener {
+                    dialog.dismiss()
+                    teamChannelListMode = false
+                    startTeamChannelDm(chosen.agentId)
+                }
+            },
+        )
+        root.addView(topBar)
+        root.addView(
+            UiKit.text(this, "当前频道成员", 13f, R.color.text_secondary, bold = true).apply {
+                setPadding(dp(20), dp(20), 0, dp(6))
+            },
+        )
+        val picker = UiKit.horizontal(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+        }
+        val pickerLabel = UiKit.text(this, "选择成员", 13f, R.color.text_secondary).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+            )
+        }
+        val pickerValue = UiKit.text(
+            this, chosen.displayName + " ⌄", 15f, R.color.text_primary,
+        )
+        picker.addView(pickerLabel)
+        picker.addView(pickerValue)
+        picker.setOnClickListener {
+            ListDialog.show(
+                this, "选择成员", null,
+                candidates.map { it.displayName },
+                selectedIndex = candidates.indexOf(chosen).coerceAtLeast(0),
+            ) { index ->
+                chosen = candidates[index]
+                pickerValue.text = chosen.displayName + " ⌄"
+            }
+        }
+        root.addView(picker)
+        root.addView(
+            UiKit.text(this, "名单来自当前频道，已排除本机成员。", 12f, R.color.text_tertiary).apply {
+                setPadding(dp(20), dp(6), 0, 0)
+            },
+        )
+        dialog.setContentView(root)
+        dialog.show()
+        dialog.window?.let { window ->
+            window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window.setGravity(android.view.Gravity.BOTTOM)
+            window.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+            )
+        }
+    }
+
+    /**
+     * 关联现有任务单（全量对齐批，与 iOS「关联任务」sheet 同位）：候选 =
+     * 本频道派单任务（内嵌任务服务）；选中即在本频道留一张关联卡
+     * （本会话回显，与从频道派发的卡同账）。无候选时如实提示。
+     */
+    private fun showLinkTasksDialog() {
+        val channelId = activeTeamChannelId()
+        val tasks = try {
+            wherevercode.agent.ui.DispatchTaskClient.listChannelTasks(channelId)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (tasks.isEmpty()) {
+            toast("暂无可关联的任务。")
+            return
+        }
+        ListDialog.show(this, "关联现有任务", null, tasks.map { it.title }) { index ->
+            val task = tasks[index]
+            synchronized(channelTaskCards) {
+                channelTaskCards += wherevercode.agent.core.team.ChannelTaskCard(
+                    goal = task.title,
+                    createdAtSeconds = System.currentTimeMillis() / 1000.0,
+                )
+            }
+            teamChannelNotice = "已关联任务：${task.title}"
+            refreshTeamChannel()
         }
     }
 
