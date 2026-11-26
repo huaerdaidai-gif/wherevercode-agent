@@ -6941,22 +6941,22 @@ class MainActivity : AppCompatActivity() {
             setText("本地频道")
             setSelection(text.length)
             setBackgroundResource(R.drawable.bg_channel_input)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setPadding(dp(20), dp(10), dp(20), dp(10))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
-                leftMargin = dp(16)
-                rightMargin = dp(16)
+                leftMargin = dp(20)
+                rightMargin = dp(20)
             }
         }
         // 顶栏：取消／标题／创建，与 iOS 新建频道 sheet 的导航栏对齐。
         val topBar = UiKit.horizontal(this).apply {
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(14), dp(16), 0)
+            setPadding(dp(16), dp(6), dp(16), 0)
         }
         topBar.addView(
-            UiKit.text(this, "取消", 14f, R.color.text_primary).apply {
+            UiKit.text(this, "取消", 16f, R.color.text_primary).apply {
                 setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
                 setPadding(0, dp(8), 0, dp(8))
                 minimumWidth = dp(44)
@@ -6971,7 +6971,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
-        val createBtn = UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
+        val createBtn = UiKit.text(this, "创建", 16f, R.color.text_primary, bold = true).apply {
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
             setPadding(0, dp(8), 0, dp(8))
             minimumWidth = dp(44)
@@ -7018,14 +7018,14 @@ class MainActivity : AppCompatActivity() {
         root.addView(topBar)
         root.addView(
             UiKit.text(this, "频道", 13f, R.color.text_secondary, bold = true).apply {
-                setPadding(dp(32), dp(16), dp(16), dp(6))
+                setPadding(dp(40), dp(24), dp(16), dp(6))
             },
         )
         root.addView(nameInput)
         if (cloudAvailable) {
             root.addView(
                 UiKit.text(this, "放在", 13f, R.color.text_secondary, bold = true).apply {
-                    setPadding(dp(32), dp(20), dp(16), dp(6))
+                    setPadding(dp(40), dp(20), dp(16), dp(6))
                 },
             )
             val track = UiKit.horizontal(this).apply {
@@ -7035,8 +7035,8 @@ class MainActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ).apply {
-                    leftMargin = dp(16)
-                    rightMargin = dp(16)
+                    leftMargin = dp(20)
+                    rightMargin = dp(20)
                 }
             }
             lateinit var localSeg: TextView
@@ -7085,7 +7085,7 @@ class MainActivity : AppCompatActivity() {
             window.setGravity(android.view.Gravity.BOTTOM)
             window.setLayout(
                 android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                resources.displayMetrics.heightPixels - dp(68),
+                resources.displayMetrics.heightPixels - dp(30),
             )
         }
     }

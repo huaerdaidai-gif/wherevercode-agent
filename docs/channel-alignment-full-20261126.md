@@ -69,7 +69,7 @@
 
 | ID | 逐项核对 | 状态 |
 |---|---|---|
-| 3.1 | 新建页完整布局、标题、导航按钮、表单分组和键盘状态（238 已对齐主状态，须复核） | ⚠️未实屏验证（iOS build 238 的既存截图 `/tmp/wc-ios-1_10-ready.png` 与小米 CI build 212 改前截图 `/tmp/wc-android-3_1-create-form.png` 分别显示此表单；只属分开截图，未满足双端同时实屏核验。安卓候选已改为全宽底部 sheet、居中导航标题和紫色文字动作，待 CI build、装机及同屏复验。iOS 当前仍是空态；JXA CGEvent 点击坐标 `(1109,432)` 后新截图 `/tmp/wc-ios-after-jxa-click.png` 仍为空态；`CGRequestPostEventAccess()` / `CGPreflightPostEventAccess()` 均为 `false`，当前无法进入该表单作同时核验） |
+| 3.1 | 新建页完整布局、标题、导航按钮、表单分组和键盘状态（238 已对齐主状态，须复核） | ⚠️未实屏验证（iOS build 238 的既存表单截图 `/tmp/wc-ios-1_10-ready.png` 与小米 CI build 212 改前截图 `/tmp/wc-android-3_1-create-form.png` 分开取得，未满足双端同时实屏核验。小米 CI build 212 候选 `9125cda` 单端改后截图 `/tmp/wc-android-9125-create-form.png` SHA-256 `57a27705431bc798b9de91218b192e119cb08ccc6903e2b87d18f7664359926c`：按各自设备逻辑尺度与既存 iOS 截图比，sheet 顶部约低 38dp，标签左边距约多 8dp，输入框左右边距约少 4dp、竖向约高 8dp。Android 已据此继续调整顶部留白、动作字号、标签/输入框边距和输入框高度；新候选待 CI build、装机及复核。iOS 当前仍是空态；JXA CGEvent 点击坐标 `(1109,432)` 后新截图 `/tmp/wc-ios-after-jxa-click.png` 仍为空态；`CGRequestPostEventAccess()` / `CGPreflightPostEventAccess()` 均为 `false`，当前无法进入该表单作同时核验） |
 | 3.2 | 名称字段标签、占位/默认预填「本地频道」、光标与输入状态 | ⚠️未实屏验证（既存 iOS build 238 与小米 CI build 212 截图均显示「频道」标签和「本地频道」预填，但分开截图、不构成同时实屏验收；光标/输入态未验证。当前 iOS 空态上 JXA CGEvent 点击退出 0 但截图未变，事件发帖权限探测为 false） |
 | 3.3 | 云端可用时「放在」分段及「本机 / 云端」选项 | ⚠️未实屏验证（保存的两端改前表单截图均未显示「放在」分段；当前没有已配置云端的同一测试账号/状态，不能验证云端可用态） |
 | 3.4 | 云端不可用时放置选项隐藏/禁用形态和本机创建路径 | ⚠️未实屏验证（保存的改前截图未显示「放在」选项，但不是双端同时实屏；未能通过本机事件点击把当前 iOS 从频道空态导航到表单，不能据此确认两端隐藏形态及本机创建路径） |
