@@ -7449,29 +7449,20 @@ class MainActivity : AppCompatActivity() {
             }.show()
     }
 
-    /** 归档／取消归档（原菜单只有归档；按 iOS 频道设置页的开关式同项补上取消归档）。 */
+    /** 归档／取消归档（批三 7.8 对齐：即时生效、无二次确认；函数名沿用，三个调用点不变）。 */
     private fun confirmArchiveChannel(channelId: String, archived: Boolean) {
         requireChannelEndpoint() ?: return
-        if (archived) {
-            AlertDialog.Builder(this).setTitle("取消归档频道？")
-                .setMessage("将把频道移出归档，恢复到频道列表中。")
-                .setNegativeButton("取消", null).setPositiveButton("取消归档") { _, _ ->
-                    performChannelManagement { it.setChannelArchived(channelId, false) }
-                }.show()
-        } else {
-            AlertDialog.Builder(this).setTitle("归档频道？").setMessage("将归档频道 $channelId。")
-                .setNegativeButton("取消", null).setPositiveButton("归档") { _, _ ->
-                    performChannelManagement { it.setChannelArchived(channelId, true) }
-                }.show()
-        }
+        performChannelManagement { it.setChannelArchived(channelId, !archived) }
     }
 
-    /** 添加成员：候选 = 本机已添加的平台 Agent（原菜单同逻辑）。 */
+    /** 添加成员（批三 7.5：候选池 = 本机已注册的全部 Agent——设备／平台／云端，不再只限平台型；排除已在频道内的，零配置下也不再是死路）。 */
     private fun addChannelMember(channelId: String) {
         requireChannelEndpoint() ?: return
+        val inChannel = teamChannelChannelsCache.firstOrNull { it.id == channelId }
+            ?.participantDetails?.map { it.agentId }?.toSet().orEmpty()
         val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
-            .filter { PlatformAgent.isPlatformAgentRecord(it) }
-        if (candidates.isEmpty()) { toast("没有可用的平台 Agent。"); return }
+            .filter { it.agentId !in inChannel }
+        if (candidates.isEmpty()) { toast("没有可添加的成员。"); return }
         ListDialog.show(this, "选择要添加的成员", null, candidates.map { it.displayName }) { index ->
             performChannelManagement { transport ->
                 transport.addChannelMember(channelId, candidates[index].agentId)
@@ -7502,7 +7493,7 @@ class MainActivity : AppCompatActivity() {
         val members = teamChannelChannelsCache.firstOrNull { it.id == channelId }
             ?.participantDetails?.filterNot { it.isSelf }.orEmpty()
         if (members.isEmpty()) { toast("当前频道没有可设置角色的成员。"); return }
-        val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
+        val roleNames = listOf("owner" to "创建者", "coordinator" to "协调员", "member" to "成员")
         ListDialog.show(this, "选择要设置角色的成员", "只有频道 owner 能改角色；最后一个 owner 不能被降级。", members.map { mm ->
             mm.agentName + "（当前：" + (roleNames.firstOrNull { it.first == mm.role }?.second ?: mm.role) + "）"
         }) { index ->
@@ -7510,12 +7501,8 @@ class MainActivity : AppCompatActivity() {
             ListDialog.show(this, "设置 ${member.agentName} 的角色", null, roleNames.map { it.second }) { roleIndex ->
                 val newRole = roleNames[roleIndex].first
                 if (newRole == member.role) { toast("已经是这个角色了。"); return@show }
-                AlertDialog.Builder(this).setTitle("更改成员角色？")
-                    .setMessage("把 ${member.agentName} 的角色改为${roleNames[roleIndex].second}。")
-                    .setNegativeButton("取消", null)
-                    .setPositiveButton("更改") { _, _ ->
-                        performChannelManagement { it.setChannelMemberRole(channelId, member.agentId, newRole) }
-                    }.show()
+                // 批三（7.6）：对齐 iOS——选完即生效，无二次确认。
+                performChannelManagement { it.setChannelMemberRole(channelId, member.agentId, newRole) }
             }
         }
     }
@@ -7907,19 +7894,15 @@ class MainActivity : AppCompatActivity() {
         currentRole: String?,
     ) {
         requireChannelEndpoint() ?: return
-        val roleNames = listOf("owner" to "创建者（owner）", "coordinator" to "协调员", "member" to "成员")
+        val roleNames = listOf("owner" to "创建者", "coordinator" to "协调员", "member" to "成员")
         ListDialog.show(this, "设置 $memberName 的角色", null, roleNames.map { it.second }) { roleIndex ->
             val newRole = roleNames[roleIndex].first
             if (newRole == currentRole) {
                 toast("已经是这个角色了。")
                 return@show
             }
-            AlertDialog.Builder(this).setTitle("更改成员角色？")
-                .setMessage("把 $memberName 的角色改为${roleNames[roleIndex].second}。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("更改") { _, _ ->
-                    performChannelManagement { it.setChannelMemberRole(channelId, memberId, newRole) }
-                }.show()
+            // 批三（7.6）：对齐 iOS——选完即生效，无二次确认。
+            performChannelManagement { it.setChannelMemberRole(channelId, memberId, newRole) }
         }
     }
 

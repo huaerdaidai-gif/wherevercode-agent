@@ -2648,6 +2648,9 @@ public struct ChannelsHomeView: View {
     // 218 深链：带 channelId 跳转失败时的定性提示（无效/无权限/不存在）
     @State private var channelLinkError: String? = nil
 
+    // 批三（3.7）：创建成功后的落点提示行（与安卓创建后状态行同位）。
+    @State private var createLandingNotice: String? = nil
+
     // 频道数据与选中
     @State private var channels: [V5ChannelItem] = []
     @State private var activeWorkspaceChannel: V5ChannelItem? = nil
@@ -2710,6 +2713,15 @@ public struct ChannelsHomeView: View {
                 partitionPicker
             }
 
+            if let createLandingNotice {
+                Text(createLandingNotice)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+            }
+
             // 对话框直达（批D）：打开即当前频道的对话框（消息流+状态+
             // 发送区）；搜索/频道列表收进切换面板（点频道名开）。
             if !channelAvailable {
@@ -2766,8 +2778,17 @@ public struct ChannelsHomeView: View {
             }
         }
         .sheet(isPresented: $showCreateChannelSheet) {
-            CreateChannelSheet(appState: appState) {
-                Task { await refreshChannels() }
+            CreateChannelSheet(appState: appState) { newChannelID in
+                Task {
+                    await refreshChannels()
+                    // 批三（3.7）：创建成功自动进入新频道＋提示行（对齐安卓）。
+                    if let newChannelID, let ch = channels.first(where: { $0.id == newChannelID }) {
+                        activeWorkspaceChannel = ch
+                        activeWorkspaceDM = nil
+                        selectedPartition = .channels
+                        createLandingNotice = "频道已创建。"
+                    }
+                }
             }
         }
         .sheet(isPresented: $showManagementSheet) {
@@ -3135,6 +3156,7 @@ public struct ChannelsHomeView: View {
                 activeWorkspaceChannel = ch
                 activeWorkspaceDM = nil
                 selectedPartition = .channels
+                createLandingNotice = nil
                 showSwitchPanel = false
             } label: {
                 channelRow(ch, cacheLocked: cacheLocked)
@@ -3178,6 +3200,12 @@ public struct ChannelsHomeView: View {
                     Text(ch.name)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    if ch.isArchived {
+                        // 批三（7.8）：归档标记（与安卓切换器行同文同位）。
+                        Text("（已归档）")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                     if ch.isMuted {
                         Image(systemName: "bell.slash.fill")
                             .font(.system(size: 10))
@@ -3870,6 +3898,12 @@ public struct ChannelDetailWorkspaceView: View {
                     }
                     if let ch = channelItem, ch.isPrivate {
                         Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let ch = channelItem, ch.isArchived {
+                        // 批三（7.8）：归档态在对话页标题行可见（此前无任何标记）。
+                        Text("（已归档）")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -5122,14 +5156,35 @@ public struct ChannelDetailWorkspaceView: View {
 
     /// 全量对齐批二：从频道移除落盘——文件由消息 attachmentRef 重聚合，
     /// 只删内存会在重进文件页时恢复；已移除 id 按频道过滤聚合结果。
+    /// 存储用 Application Support 下的 JSON 文件（与安卓
+    /// ChannelRemovedFilesStore 同名同形）：实测本环境 UserDefaults
+    /// 写入只停留在 cfprefsd 缓存、模拟器重启即丢，文件落盘才可靠。
+    private static var removedFilesStoreURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("channel_removed_files.json")
+    }
+
+    private static func removedFilesStore() -> [String: [String]] {
+        guard let url = removedFilesStoreURL,
+              let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let channels = root["channels"] as? [String: [String]] else { return [:] }
+        return channels
+    }
+
     private static func removedChannelFileIds(channelId: String) -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: "removedChannelFiles.\(channelId)") ?? [])
+        Set(removedFilesStore()[channelId] ?? [])
     }
 
     private static func markChannelFileRemoved(channelId: String, fileId: String) {
-        var ids = removedChannelFileIds(channelId: channelId)
-        ids.insert(fileId)
-        UserDefaults.standard.set(Array(ids), forKey: "removedChannelFiles.\(channelId)")
+        guard let url = removedFilesStoreURL else { return }
+        var channels = removedFilesStore()
+        var ids = channels[channelId] ?? []
+        if !ids.contains(fileId) { ids.append(fileId) }
+        channels[channelId] = ids
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: ["channels": channels]) else { return }
+        try? data.write(to: url, options: [.atomic])
     }
 
     /// 预览：URL 引用走系统打开；非 URL 引用展示引用原文（引用制下没有
@@ -5771,7 +5826,8 @@ public struct AgentProfileSheet: View {
 
 public struct CreateChannelSheet: View {
     @ObservedObject public var appState: AppState
-    public var onCreated: () -> Void
+    /// 批三（3.7）：回传新频道 id，宿主据此刷新后直达新频道（对齐安卓创建后落点）。
+    public var onCreated: (String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name = LocalChannelService.defaultChannelName
     @State private var placement: ChannelLayer = .local
@@ -5822,25 +5878,26 @@ public struct CreateChannelSheet: View {
         errorText = nil
         let placeOnCloud = cloudConnected && placement == .cloud
         do {
+            let created: [String: Any]
             if placeOnCloud {
                 guard let transport = appState.makeChannelTransport() else {
                     errorText = "无法连接频道服务。"
                     return
                 }
-                _ = try await transport.createChannel(name: trimmed)
+                created = try await transport.createChannel(name: trimmed)
             } else {
                 guard let service = LocalPlatform.serviceOrNull() else {
                     errorText = "无法连接频道服务。"
                     return
                 }
-                _ = try service.dispatch(
+                created = try service.dispatch(
                     tool: "agent_channel_create",
                     args: ["name": trimmed],
                     callerId: LocalPlatform.appAgentID,
                     callerName: LocalPlatform.appAgentName
                 )
             }
-            onCreated()
+            onCreated(created["id"] as? String)
             dismiss()
         } catch let error as LocalServiceError {
             errorText = "创建频道失败：\(error.message)"
@@ -5952,6 +6009,8 @@ public struct ChannelSettingsSheet: View {
     @State private var memberPendingRemoval: V5ChannelMember?
     @State private var showMemberRemovalConfirmation = false
     @State private var showCreatorRemovalAlert = false
+    /// 批三（7.8）：归档行文案绑本页状态（channel 是启动快照，归档后不刷新）。
+    @State private var archivedState: Bool? = nil
     @State private var isMuted = false
     @State private var ignoresUnread = false
     @State private var notifyMode = "全部消息"
@@ -5991,7 +6050,7 @@ public struct ChannelSettingsSheet: View {
                 LabeledContent("频道性质", value: ch.isPrivate ? "私有频道" : "公开频道")
                 LabeledContent("成员总数", value: "\(members.count) 人")
                 Button("保存名称") { Task { await rename() } }.disabled(editedName == ch.name || isWorking)
-                Button(ch.isArchived ? "取消归档" : "归档频道") { Task { await setArchived(!ch.isArchived) } }.disabled(isWorking)
+                Button((archivedState ?? ch.isArchived) ? "取消归档" : "归档频道") { Task { await setArchived(!(archivedState ?? ch.isArchived)) } }.disabled(isWorking)
                 Button("删除频道", role: .destructive) { showDeleteConfirmation = true }.disabled(isWorking)
                 Text("仅频道 owner 可删除。删除权限由服务端校验。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -6107,11 +6166,46 @@ public struct ChannelSettingsSheet: View {
         }
     }
 
+    /// 批三（7.5）：添加成员候选 = 其他频道账本成员并集＋本机已注册 Agent，
+    /// 排除已在本频道内的与本机自己（此前只有已注册 Agent 一源，零配置下
+    /// 候选为空、入口整行消失，设置页里看不见添加成员）。
+    private struct AddCandidate: Identifiable {
+        let agentId: String
+        let name: String
+        var id: String { agentId }
+    }
+
+    private var addCandidates: [AddCandidate] {
+        var seen = Set(members.map { $0.id })
+        var result: [AddCandidate] = []
+        for other in appState.availableChannels where other.id != channelId {
+            for p in other.participantDetails where !p.isSelf && !seen.contains(p.id) {
+                seen.insert(p.id)
+                result.append(AddCandidate(agentId: p.id, name: p.name))
+            }
+        }
+        for agent in agents where !seen.contains(agent.agentId) {
+            seen.insert(agent.agentId)
+            result.append(AddCandidate(agentId: agent.agentId, name: agent.displayName))
+        }
+        return result
+    }
+
     private var channelMembersSection: some View {
         Section("频道成员") {
             ForEach(members) { member in memberRow(member) }
-            ForEach(agents.filter { agent in !members.contains(where: { $0.agentRecordId == agent.agentId }) }) { agent in
-                Button("添加 \(agent.displayName)") { Task { await add(agentID: agent.agentId) } }.disabled(isWorking)
+            if channel != nil {
+                if addCandidates.isEmpty {
+                    Text("暂无可添加的成员")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Menu("添加成员") {
+                        ForEach(addCandidates) { candidate in
+                            Button(candidate.name) { Task { await add(agentID: candidate.agentId) } }
+                        }
+                    }
+                    .disabled(isWorking)
+                }
             }
         }
     }
@@ -6179,6 +6273,7 @@ public struct ChannelSettingsSheet: View {
     @MainActor private func setArchived(_ archived: Bool) async {
         guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
         await perform { try await transport.setChannelArchived(channelID: channel.id, archived: archived) }
+        if errorText == nil { archivedState = archived }
     }
     @MainActor private func add(agentID: String) async {
         guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
