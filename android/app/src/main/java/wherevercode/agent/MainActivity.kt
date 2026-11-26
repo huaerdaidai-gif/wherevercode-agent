@@ -6919,12 +6919,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 新建频道整页（238 对齐批，与 iOS 新建 sheet 同形）：顶栏
-     * 「取消／创建」白胶囊钮＋大标题＋「频道」分节＋大圆角输入框
-     * （预填「本地频道」）；云端可用时带「放在」分段（本机/云端，
-     * 默认当前层）。创建仍走 [createChannelOnLayer]（含重名处理、
-     * 成功后落入新频道、失败 toast）；改名仍走原对话框，不动。
-     * 页头菜单与列表空态钮都直达本页（iOS 同行为）。
+     * 新建频道整页：对齐 iOS 238 sheet 的底部大页、居中导航标题、文字动作
+     * 和白色圆角名称框（预填「本地频道」）。云端可用时带「放在」分段
+     * （本机/云端，默认当前层）。创建仍走 [createChannelOnLayer]；改名
+     * 仍走原对话框，不动。页头菜单与列表空态钮都直达本页。
      */
     private fun showCreateChannelPage() {
         val cloudAvailable = hasSavedPlatformToken() && resolvedPlatformHost().isNotBlank()
@@ -6933,7 +6931,7 @@ class MainActivity : AppCompatActivity() {
         val dialog = android.app.Dialog(this)
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val root = UiKit.vertical(this).apply {
-            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bg))
+            setBackgroundResource(R.drawable.bg_channel_sheet)
         }
         val nameInput = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
@@ -6942,7 +6940,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 16f
             setText("本地频道")
             setSelection(text.length)
-            setBackgroundResource(R.drawable.bg_input_card)
+            setBackgroundResource(R.drawable.bg_channel_input)
             setPadding(dp(16), dp(14), dp(16), dp(14))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -6952,28 +6950,33 @@ class MainActivity : AppCompatActivity() {
                 rightMargin = dp(16)
             }
         }
-        // 顶栏：取消（左）／创建（右），白胶囊描边钮（iOS toolbar 同形）。
+        // 顶栏：取消／标题／创建，与 iOS 新建频道 sheet 的导航栏对齐。
         val topBar = UiKit.horizontal(this).apply {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(14), dp(16), 0)
         }
         topBar.addView(
             UiKit.text(this, "取消", 14f, R.color.text_primary).apply {
-                setBackgroundResource(R.drawable.bg_capsule_btn)
-                setPadding(dp(16), dp(8), dp(16), dp(8))
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
+                setPadding(0, dp(8), 0, dp(8))
+                minimumWidth = dp(44)
+                minimumHeight = dp(44)
+                gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
                 setOnClickListener { dialog.dismiss() }
             },
         )
         topBar.addView(
-            View(this).apply {
-                // 高度必须给死值：空 View 配 WRAP_CONTENT 时按 AT_MOST
-                // 规格取满可用高度（238 装机实测把顶栏撑满整屏）。
-                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+            UiKit.text(this, "新建频道", 20f, R.color.text_primary, bold = true).apply {
+                gravity = android.view.Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
         val createBtn = UiKit.text(this, "创建", 14f, R.color.text_primary, bold = true).apply {
-            setBackgroundResource(R.drawable.bg_capsule_btn)
-            setPadding(dp(16), dp(8), dp(16), dp(8))
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.channel_accent))
+            setPadding(0, dp(8), 0, dp(8))
+            minimumWidth = dp(44)
+            minimumHeight = dp(44)
+            gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.END
             setOnClickListener {
                 val name = nameInput.text.toString().trim()
                 if (name.isEmpty()) {
@@ -6989,10 +6992,11 @@ class MainActivity : AppCompatActivity() {
         nameInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {
                 val empty = s?.toString()?.trim().isNullOrEmpty()
+                createBtn.isEnabled = !empty
                 createBtn.setTextColor(
                     ContextCompat.getColor(
                         this@MainActivity,
-                        if (empty) R.color.text_tertiary else R.color.text_primary,
+                        if (empty) R.color.text_tertiary else R.color.channel_accent,
                     ),
                 )
             }
@@ -7012,11 +7016,6 @@ class MainActivity : AppCompatActivity() {
             ) = Unit
         })
         root.addView(topBar)
-        root.addView(
-            UiKit.text(this, "新建频道", 28f, R.color.text_primary, bold = true).apply {
-                setPadding(dp(16), dp(20), dp(16), 0)
-            },
-        )
         root.addView(
             UiKit.text(this, "频道", 13f, R.color.text_secondary, bold = true).apply {
                 setPadding(dp(32), dp(16), dp(16), dp(6))
@@ -7080,11 +7079,15 @@ class MainActivity : AppCompatActivity() {
             refreshLayerSegs()
         }
         dialog.setContentView(root)
-        dialog.window?.setLayout(
-            android.view.WindowManager.LayoutParams.MATCH_PARENT,
-            android.view.WindowManager.LayoutParams.MATCH_PARENT,
-        )
         dialog.show()
+        dialog.window?.let { window ->
+            window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window.setGravity(android.view.Gravity.BOTTOM)
+            window.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                resources.displayMetrics.heightPixels - dp(68),
+            )
+        }
     }
 
     /** 管理操作的目标端点（当前频道 = 已保存的当前选择）；未连接时如实提示。 */
