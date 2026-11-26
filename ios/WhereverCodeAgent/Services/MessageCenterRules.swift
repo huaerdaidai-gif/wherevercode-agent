@@ -13,6 +13,28 @@ public enum MessageCenterSection: String, CaseIterable, Sendable {
     case unread
     /// 任务回执：带任务归属头（任务卡状态）的消息。
     case taskReceipt
+    /// 待落地任务：已建单但尚未绑定频道的任务（9.19）。
+    case pendingTask
+}
+
+/// 待落地任务条目（9.19）：来自本地任务账本，不是频道消息。
+public struct PendingTaskEntry: Identifiable, Equatable, Sendable {
+    public var id: String { taskId }
+    public let taskId: String
+    public let title: String
+    public let goal: String
+    public let assigneeName: String
+    public let stateLabel: String
+    public let createdAtSeconds: Double
+    public init(taskId: String, title: String, goal: String, assigneeName: String,
+                stateLabel: String, createdAtSeconds: Double) {
+        self.taskId = taskId
+        self.title = title
+        self.goal = goal
+        self.assigneeName = assigneeName
+        self.stateLabel = stateLabel
+        self.createdAtSeconds = createdAtSeconds
+    }
 }
 
 /// 消息中心的一条聚合条目（同一条消息可同时出现在多个区）。
@@ -68,19 +90,23 @@ public struct MessageCenterChannelSource: Sendable {
     }
 }
 
-/// 消息中心聚合快照：三个区各一份条目（新→旧排序）。
+/// 消息中心聚合快照：各区一份条目（新→旧排序）。
 public struct MessageCenterSnapshot: Equatable, Sendable {
     public var mentions: [MessageCenterEntry]
     public var unread: [MessageCenterEntry]
     public var taskReceipts: [MessageCenterEntry]
+    /// 待落地任务（9.19）：本地任务账本里未绑定频道的任务。
+    public var pendingTasks: [PendingTaskEntry]
     public init(
         mentions: [MessageCenterEntry] = [],
         unread: [MessageCenterEntry] = [],
-        taskReceipts: [MessageCenterEntry] = []
+        taskReceipts: [MessageCenterEntry] = [],
+        pendingTasks: [PendingTaskEntry] = []
     ) {
         self.mentions = mentions
         self.unread = unread
         self.taskReceipts = taskReceipts
+        self.pendingTasks = pendingTasks
     }
 }
 

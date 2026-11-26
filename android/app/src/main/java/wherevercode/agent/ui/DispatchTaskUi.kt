@@ -147,23 +147,30 @@ object DispatchTaskClient {
 private fun dispatchTimeText(ts: Double): String =
     SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date((ts * 1000).toLong()))
 
-/** 派单表单（spec §7：选 Agent 必选、审查人可选、项目、goal、绑当前频道）。 */
+/**
+ * 派单表单（spec §7：选 Agent 必选、审查人可选、项目、goal、绑当前频道）。
+ * 全量对齐批：与 iOS 派单 sheet 同式——底部 sheet、顶栏 取消／派单／派出，
+ * 「派给谁」分节，执行 Agent 默认未选（「请选择」），任务目标框无占位
+ * 文案，未选执行者或目标为空时「派出」置灰不可点。
+ */
 fun showCreateDispatchTaskDialog(
     context: Context,
     channelId: String,
     agents: List<Pair<String, String>>,
     onDone: (String?) -> Unit,
 ) {
+    val dp = { v: Int -> UiKit.dp(context, v) }
     val content = UiKit.vertical(context).apply {
-        setPadding(UiKit.dp(context, 20), UiKit.dp(context, 8), UiKit.dp(context, 20), UiKit.dp(context, 16))
+        setBackgroundResource(R.drawable.bg_channel_sheet)
+        setPadding(dp(20), dp(8), dp(20), dp(16))
     }
     fun label(text: String) = UiKit.text(context, text, 13f, R.color.text_primary, bold = true).apply {
-        setPadding(0, UiKit.dp(context, 14), 0, UiKit.dp(context, 6))
+        setPadding(0, dp(14), 0, dp(6))
     }
     val agentInput = Spinner(context).apply {
         adapter = ArrayAdapter(
             context, android.R.layout.simple_spinner_dropdown_item,
-            agents.map { it.second },
+            listOf("请选择") + agents.map { it.second },
         )
     }
     val reviewerInput = Spinner(context).apply {
@@ -174,11 +181,99 @@ fun showCreateDispatchTaskDialog(
     }
     val projectInput = EditText(context).apply { hint = "项目标识" }
     val goalInput = EditText(context).apply {
-        hint = "任务目标与验收要求"
         minLines = 3
         maxLines = 8
     }
     val error = UiKit.text(context, "", 12f, R.color.danger)
+    val dialog = android.app.Dialog(context)
+    dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+    val sendBtn = UiKit.text(context, "派出", 16f, R.color.text_primary, bold = true).apply {
+        setPadding(0, dp(8), 0, dp(8))
+        minimumWidth = dp(44)
+        minimumHeight = dp(44)
+        gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.END
+    }
+    fun refreshSend() {
+        val ready = agentInput.selectedItemPosition > 0 &&
+            goalInput.text.toString().isNotBlank()
+        sendBtn.isEnabled = ready
+        sendBtn.setTextColor(
+            androidx.core.content.ContextCompat.getColor(
+                context,
+                if (ready) R.color.channel_accent else R.color.text_tertiary,
+            ),
+        )
+    }
+    sendBtn.setOnClickListener {
+        val agent = agents.getOrNull(agentInput.selectedItemPosition - 1)
+        val project = projectInput.text.toString().trim()
+        val goal = goalInput.text.toString().trim()
+        if (agent == null) {
+            error.text = "请选择执行 Agent"
+            return@setOnClickListener
+        }
+        if (project.isEmpty()) {
+            projectInput.error = "请填写项目标识"
+            return@setOnClickListener
+        }
+        if (goal.isEmpty()) {
+            goalInput.error = "请填写任务目标"
+            return@setOnClickListener
+        }
+        try {
+            val args = JSONObject()
+                .put("agent", agent.first)
+                .put("project_id", project)
+                .put("goal", goalInput.text.toString())
+                .put("channel_id", channelId)
+            val reviewer = agents.getOrNull(reviewerInput.selectedItemPosition - 1)
+            if (reviewer != null) args.put("reviewer", reviewer.first)
+            DispatchTaskClient.call("start_task", args)
+            dialog.dismiss()
+            onDone(null)
+        } catch (e: Exception) {
+            error.text = e.message ?: "派单失败"
+        }
+    }
+    agentInput.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(
+            parent: android.widget.AdapterView<*>?, view: android.view.View?,
+            position: Int, id: Long,
+        ) = refreshSend()
+
+        override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+    }
+    goalInput.addTextChangedListener(object : android.text.TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        override fun afterTextChanged(s: android.text.Editable?) = refreshSend()
+    })
+    val topBar = UiKit.horizontal(context).apply {
+        gravity = android.view.Gravity.CENTER_VERTICAL
+    }
+    topBar.addView(
+        UiKit.text(context, "取消", 16f, R.color.text_primary).apply {
+            setTextColor(
+                androidx.core.content.ContextCompat.getColor(context, R.color.channel_accent),
+            )
+            setPadding(0, dp(8), 0, dp(8))
+            minimumWidth = dp(44)
+            minimumHeight = dp(44)
+            gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+            setOnClickListener { dialog.dismiss() }
+        },
+    )
+    topBar.addView(
+        UiKit.text(context, "派单", 20f, R.color.text_primary, bold = true).apply {
+            gravity = android.view.Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+            )
+        },
+    )
+    topBar.addView(sendBtn)
+    content.addView(topBar)
+    content.addView(label("派给谁"))
     content.addView(label("执行 Agent"))
     content.addView(agentInput)
     content.addView(label("审查人（可选）"))
@@ -188,43 +283,19 @@ fun showCreateDispatchTaskDialog(
     content.addView(label("任务目标"))
     content.addView(goalInput)
     content.addView(error)
-    val dialog = AlertDialog.Builder(context).setTitle("派单")
-        .setView(ScrollView(context).apply { addView(content) })
-        .setPositiveButton("派出", null).setNegativeButton("取消", null).create()
-    dialog.setOnShowListener {
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val agent = agents.getOrNull(agentInput.selectedItemPosition)
-            val project = projectInput.text.toString().trim()
-            val goal = goalInput.text.toString().trim()
-            if (agent == null) {
-                error.text = "请选择执行 Agent"
-                return@setOnClickListener
-            }
-            if (project.isEmpty()) {
-                projectInput.error = "请填写项目标识"
-                return@setOnClickListener
-            }
-            if (goal.isEmpty()) {
-                goalInput.error = "请填写任务目标"
-                return@setOnClickListener
-            }
-            try {
-                val args = JSONObject()
-                    .put("agent", agent.first)
-                    .put("project_id", project)
-                    .put("goal", goalInput.text.toString())
-                    .put("channel_id", channelId)
-                val reviewer = agents.getOrNull(reviewerInput.selectedItemPosition - 1)
-                if (reviewer != null) args.put("reviewer", reviewer.first)
-                DispatchTaskClient.call("start_task", args)
-                dialog.dismiss()
-                onDone(null)
-            } catch (e: Exception) {
-                error.text = e.message ?: "派单失败"
-            }
-        }
-    }
+    dialog.setContentView(ScrollView(context).apply { addView(content) })
+    refreshSend()
     dialog.show()
+    dialog.window?.let { window ->
+        window.setBackgroundDrawable(
+            android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+        )
+        window.setGravity(android.view.Gravity.BOTTOM)
+        window.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+        )
+    }
 }
 
 /** 任务详情（交付信息 + 最近动态 + 权限矩阵操作）。 */

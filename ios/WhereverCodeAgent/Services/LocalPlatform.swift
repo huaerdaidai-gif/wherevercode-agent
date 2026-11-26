@@ -19,7 +19,7 @@ public enum LocalPlatform {
 
     /// 本机 App 在本地频道里的成员身份（与频道成员表同 id）。
     public static let appAgentID = "local-app"
-    public static let appAgentName = "本机 App"
+    public static let appAgentName = "WhereverCode Agent"
 
     /// 本地平台的 MCP 端点（形状与远程同构，请求永不真的出网）。
     public static let localEndpoint = URL(string: "https://local.platform/api/open/v1/mcp")!

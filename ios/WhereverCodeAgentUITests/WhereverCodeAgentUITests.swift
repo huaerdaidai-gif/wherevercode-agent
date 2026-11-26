@@ -98,10 +98,12 @@ final class WhereverCodeAgentUITests: XCTestCase {
         // --- Primary tab navigation across drawer items
         navigate(app, to: "channels")
         snap(app, "ui-04-channel-list")
-        // 频道三层一期·本地层契约（supersede 批D 未配凭证空态断言）：
-        // 未配平台凭证时频道页走 App 内嵌本地平台，直接打开本地频道
-        // 的对话框（标题＋消息输入框在位），不再落「频道还没法连」
-        // 未配置死页——下载即用，不先要地址/凭证（2026-11-13 定版）。
+        // 频道 238 契约（Issue #22 定版，supersede 2026-11-13「直接打开
+        // 本地频道对话框」旧断言）：未配平台凭证时频道页走 App 内嵌本地
+        // 平台，不落「频道还没法连」死页；全新安装无种子频道，频道页先
+        // 显示真实空态（「还没有频道」＋「新建频道」按钮）；新建表单预
+        // 填「本地频道」，创建后进入该频道对话框（标题＋消息输入框在
+        // 位）——下载即用，不先要地址/凭证。
         let channelHint = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "频道还没法连")
         ).firstMatch
@@ -109,17 +111,49 @@ final class WhereverCodeAgentUITests: XCTestCase {
             channelHint.exists,
             "Channels page must not fall back to the unconfigured hint; the local platform serves it"
         )
+        let emptyTitle = app.staticTexts["还没有频道"].firstMatch
+        XCTAssertTrue(
+            emptyTitle.waitForExistence(timeout: 10),
+            "Fresh install must show the real channel empty state (no seed channel)"
+        )
+        let emptyCreate = app.buttons["channels.empty.create"].firstMatch
+        XCTAssertTrue(
+            emptyCreate.waitForExistence(timeout: 10),
+            "Channel empty state must offer the create action"
+        )
+        emptyCreate.tap()
+        let nameField = app.textFields["频道名称"].firstMatch
+        XCTAssertTrue(
+            nameField.waitForExistence(timeout: 10),
+            "Create channel form must show the name field"
+        )
+        XCTAssertEqual(
+            nameField.value as? String,
+            "本地频道",
+            "Create channel form must be prefilled with the default local channel name"
+        )
+        app.buttons["创建"].firstMatch.tap()
         let localChannelTitle = app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "本地频道")
         ).firstMatch
+        let composer = app.descendants(matching: .any)["channel.composer.input"].firstMatch
+        if !composer.waitForExistence(timeout: 10) {
+            // 创建后若停在频道列表/切换面板，点选新建的本地频道进入对话框。
+            XCTAssertTrue(
+                localChannelTitle.waitForExistence(timeout: 10),
+                "Created local channel must be listed after creation"
+            )
+            localChannelTitle.tap()
+        }
         XCTAssertTrue(
             localChannelTitle.waitForExistence(timeout: 10),
             "Channels page must open the local channel in dialog-first form without platform configuration"
         )
         XCTAssertTrue(
-            app.descendants(matching: .any)["channel.composer.input"].waitForExistence(timeout: 10),
+            composer.waitForExistence(timeout: 10),
             "Local channel dialog must show the message composer"
         )
+        snap(app, "ui-04b-local-channel")
 
         navigate(app, to: "projects")
         snap(app, "ui-05-projects")

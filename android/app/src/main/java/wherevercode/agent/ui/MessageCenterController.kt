@@ -11,9 +11,10 @@ import wherevercode.agent.core.message.MessageCenterSnapshot
 
 /**
  * 消息中心控制器（P3-MSG 三期新增，独立于 TeamChannelController）：
- * 聚合频道里的 @我 / 未读 / 任务回执 三类条目。只读视图——不发送、
- * 不派任务、不执行代码；数据由 MainActivity 用 [MessageCenterLoader]
- * 只读拉回后 [render]，点条目经 [onOpenEntry] 跳到对应频道。
+ * 聚合频道里的 @我 / 未读 / 任务回执 三类条目，外加待落地任务区
+ * （9.19）。消息条目只读——不发送、不派任务、不执行代码；数据由
+ * MainActivity 用 [MessageCenterLoader] 只读拉回后 [render]，点条目
+ * 经 [onOpenEntry] 跳到对应频道；待落地任务点按经 [onLandTask] 落地。
  *
  * 条目呈现复用已摘入基线的共用对话框组件：列表宿主与频道页/单聊页
  * 共用 [MessageListView]（对话组件收敛），不另造滚动列表。
@@ -22,6 +23,8 @@ class MessageCenterController(
     private val context: Context,
     private val onRefresh: () -> Unit,
     private val onOpenEntry: (MessageCenterEntry) -> Unit,
+    /** 待落地任务被点按：由调用方弹频道选择并执行落地（9.19）。 */
+    private val onLandTask: (wherevercode.agent.core.message.PendingTaskEntry) -> Unit = {},
     /** 关闭消息中心（回到上一个界面，由调用方决定落点）。 */
     private val onClose: () -> Unit,
 ) {
@@ -84,7 +87,7 @@ class MessageCenterController(
         root.addView(
             UiKit.text(
                 context,
-                "聚合频道里的 @我、未读与任务回执；只读，点条目回到对应频道。",
+                "聚合频道里的 @我、未读与任务回执；点条目回到对应频道，待落地任务点按选择频道落地。",
                 11f,
                 R.color.text_tertiary,
             ).apply { setPadding(dp(16), dp(2), dp(16), dp(4)) },
@@ -118,6 +121,53 @@ class MessageCenterController(
             val task = entry.taskId.orEmpty()
             if (title != null) "任务 %s · %s".format(task, title) else "任务 %s".format(task)
         }
+        pendingSection(snapshot.pendingTasks)
+    }
+
+    /** 待落地任务区（9.19）：点条目选频道落地，落地后任务进该频道任务页。 */
+    private fun pendingSection(tasks: List<wherevercode.agent.core.message.PendingTaskEntry>) {
+        bodyContainer.addView(
+            UiKit.text(context, "待落地任务 · ${tasks.size}", 14f, R.color.text_primary, bold = true)
+                .apply { setPadding(0, dp(10), 0, dp(4)) },
+        )
+        if (tasks.isEmpty()) {
+            bodyContainer.addView(note("暂无待落地任务。派单未指定频道且本地不止一个频道时，任务会先挂在这里。"))
+            return
+        }
+        tasks.forEach { task -> bodyContainer.addView(pendingRow(task)) }
+    }
+
+    private fun pendingRow(task: wherevercode.agent.core.message.PendingTaskEntry): LinearLayout {
+        val row = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(5) }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onLandTask(task) }
+        }
+        row.addView(
+            UiKit.text(context, task.title.ifBlank { "（无标题）" }, 13f, R.color.text_primary, bold = true),
+        )
+        if (task.goal.isNotBlank()) {
+            row.addView(UiKit.text(context, task.goal.take(300), 12f, R.color.text_secondary))
+        }
+        row.addView(
+            UiKit.text(
+                context,
+                "执行人 %s · %s · %s · 点按选择频道落地".format(
+                    task.assigneeName.ifBlank { "未指定" },
+                    task.stateLabel,
+                    formatTime(task.createdAtSeconds),
+                ),
+                10f,
+                R.color.text_tertiary,
+            ),
+        )
+        return row
     }
 
     private fun section(
@@ -143,6 +193,7 @@ class MessageCenterController(
         MessageCenterSection.MENTION -> "暂无 @我 的消息。"
         MessageCenterSection.UNREAD -> "暂无未读。已读状态由频道页自己推进，这里不会替你消费。"
         MessageCenterSection.TASK_RECEIPT -> "暂无带任务归属的消息。"
+        MessageCenterSection.PENDING_TASK -> "暂无待落地任务。"
     }
 
     private fun entryRow(entry: MessageCenterEntry, subtitleText: String): LinearLayout {
@@ -167,10 +218,11 @@ class MessageCenterController(
         row.addView(
             UiKit.text(
                 context,
-                "%s · %s · 点按回到频道 %s".format(
+                // 全量对齐批：元信息行与 iOS 同式——只到「点按回到频道」，
+                // 不带频道 ID 截断尾巴。
+                "%s · %s · 点按回到频道".format(
                     entry.channelName,
                     formatTime(entry.createdAtSeconds),
-                    entry.channelId.take(8),
                 ),
                 10f,
                 R.color.text_tertiary,

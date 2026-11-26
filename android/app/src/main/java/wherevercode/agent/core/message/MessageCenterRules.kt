@@ -16,7 +16,20 @@ enum class MessageCenterSection {
 
     /** 任务回执：带任务归属头（任务卡状态）的消息。 */
     TASK_RECEIPT,
+
+    /** 待落地任务：已建单但尚未绑定频道的任务（9.19）。 */
+    PENDING_TASK,
 }
+
+/** 待落地任务条目（9.19）：来自本地任务账本，不是频道消息。 */
+data class PendingTaskEntry(
+    val taskId: String,
+    val title: String,
+    val goal: String,
+    val assigneeName: String,
+    val stateLabel: String,
+    val createdAtSeconds: Double,
+)
 
 /** 消息中心的一条聚合条目（同一条消息可同时出现在多个区）。 */
 data class MessageCenterEntry(
@@ -39,11 +52,13 @@ data class MessageCenterEntry(
 /** 一个待聚合的频道（id + 显示名）。 */
 data class MessageCenterChannelSource(val channelId: String, val channelName: String)
 
-/** 消息中心聚合快照：三个区各一份条目（新→旧排序）。 */
+/** 消息中心聚合快照：各区一份条目（新→旧排序）。 */
 data class MessageCenterSnapshot(
     val mentions: List<MessageCenterEntry> = emptyList(),
     val unread: List<MessageCenterEntry> = emptyList(),
     val taskReceipts: List<MessageCenterEntry> = emptyList(),
+    /** 待落地任务（9.19）：本地任务账本里未绑定频道的任务。 */
+    val pendingTasks: List<PendingTaskEntry> = emptyList(),
 )
 
 /**

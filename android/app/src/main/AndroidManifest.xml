@@ -30,8 +30,9 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:usesCleartextTraffic="true"
-        android:icon="@android:drawable/sym_def_app_icon"
-        android:label="WhereverCode"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="WhereverCode Agent"
         android:supportsRtl="true"
         android:theme="@style/Theme.WhereverCode">
         <!-- U6（阶段 3）：横屏布局未适配，明确锁定竖屏（K70 竖屏单手使用）。 -->

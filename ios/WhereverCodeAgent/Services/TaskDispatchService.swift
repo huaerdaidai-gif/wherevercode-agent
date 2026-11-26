@@ -140,7 +140,7 @@ public final class TaskDispatchService {
     private static let writebackKinds: Set<String> = [
         "created", "claimed", "submitted", "verdict", "approved",
         "changes_requested", "decided", "withdrawn", "reopened",
-        "reassigned", "lease_expired", "rounds_exceeded",
+        "reassigned", "lease_expired", "rounds_exceeded", "landed",
     ]
 
     /// spec §5 事件写回：本次调用新落账本的事件里，命中写回清单且
@@ -200,6 +200,40 @@ public final class TaskDispatchService {
                       kind: "deleted", text: "任务已删除")
             }
             store.persist()
+            return ["ok": true, "task": ownerView(task)]
+        } catch let error as TaskDispatchError {
+            store.restoreFromText(rollbackPoint)
+            throw error
+        }
+    }
+
+    /// UI 落地（9.19 挂账补齐）：把尚未绑定频道的任务绑定到指定频道，
+    /// 落地事件按 §5 写回频道。不是 MCP 工具，只供消息中心调用；
+    /// 频道存在性由 LocalChannelService 包装层校验。
+    public func uiLandTask(args: [String: Any], callerId: String,
+                           callerName: String? = nil) throws -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        rollbackPoint = store.snapshotText()
+        let seqBefore = store.eventSeq
+        do {
+            guard let task = stringArg(args, "task_id").flatMap({ store.tasks[$0] }) else {
+                throw TaskDispatchError("任务不存在", status: 404, code: "task_not_found")
+            }
+            if task.kind != "work" {
+                throw TaskDispatchError("只有工作任务可以落地")
+            }
+            if task.channelId != nil {
+                throw TaskDispatchError("任务已落地到频道")
+            }
+            guard let channelId = stringArg(args, "channel_id"), !channelId.isEmpty else {
+                throw TaskDispatchError("channel_id 不能为空")
+            }
+            task.channelId = channelId
+            touch(task)
+            event(taskId: task.taskId, who: callerName ?? callerId,
+                  kind: "landed", text: "任务已落地到频道")
+            store.persist()
+            writeBackEvents(afterSeq: seqBefore)
             return ["ok": true, "task": ownerView(task)]
         } catch let error as TaskDispatchError {
             store.restoreFromText(rollbackPoint)

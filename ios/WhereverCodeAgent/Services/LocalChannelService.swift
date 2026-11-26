@@ -193,6 +193,18 @@ public final class LocalChannelService {
             callerName: LocalPlatform.appAgentName)
     }
 
+    /// UI 落地任务（9.19）：把未绑定频道的任务落地到指定本地频道。
+    public func uiLandTask(taskId: String, channelId: String) throws -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        guard let channel = channels[channelId], !channel.archived, channel.kind != "dm" else {
+            throw LocalServiceError("落地目标频道不存在或不可用")
+        }
+        return try taskDispatch.uiLandTask(
+            args: ["task_id": taskId, "channel_id": channelId],
+            callerId: LocalPlatform.appAgentID,
+            callerName: LocalPlatform.appAgentName)
+    }
+
     /// spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
     /// 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
     /// 频道不存在/已归档时静默跳过——写回失败不回滚任务操作。
@@ -486,9 +498,12 @@ public final class LocalChannelService {
                 "agent_name": member.agentName,
                 "role": member.role,
                 "is_self": viewerId != nil && member.agentId == viewerId,
+                // 全量对齐批（8.3）：与平台/安卓本地服务同字段——成员是否
+                // 注册在册 Agent，供切换器行「N Agent」计数读真值。
+                "is_agent": agents[member.agentId] != nil,
             ])
         }
-        return [
+        var json: [String: Any] = [
             "id": channel.id,
             "name": channel.name,
             "kind": channel.kind,
@@ -496,6 +511,16 @@ public final class LocalChannelService {
             "history_visible": channel.historyVisible,
             "participants": participants,
         ]
+        // 全量对齐批（8.3）：最后消息时间与正文（切换器行尾时间与
+        // 预览行读真值；无消息不带这两个字段）。已撤回消息正文
+        // 按已撤回处理、不作预览（与安卓本地服务同口径）。
+        if let lastMessage = (messages[channel.id] ?? []).max(by: { $0.createdAt < $1.createdAt }) {
+            json["last_message_at"] = lastMessage.createdAt
+            if !lastMessage.recalled {
+                json["last_message_text"] = lastMessage.text
+            }
+        }
+        return json
     }
 
     private func requireChannel(_ channelId: String) throws -> Channel {
@@ -1192,7 +1217,11 @@ public final class LocalChannelService {
             let role = optString(row, "role", "member")
             members[channelId, default: []].append(Member(
                 agentId: agentId,
-                agentName: optString(row, "agent_name", agentId),
+                // 规范化：本机 App Agent 的显示名以现行产品名为准，
+                // 存量账本里的旧名在载入时归一。
+                agentName: agentId == LocalPlatform.appAgentID
+                    ? LocalPlatform.appAgentName
+                    : optString(row, "agent_name", agentId),
                 role: role.isEmpty ? "member" : role,
                 joinedAt: optDouble(row, "joined_at", 0)
             ))
@@ -1204,11 +1233,16 @@ public final class LocalChannelService {
             let replyTo = optString(row, "reply_to")
             let attachmentRef = optString(row, "attachment_ref")
             let forwardOf = optString(row, "forward_of")
+            let msgAgentId = optString(row, "agent_id")
             messages[channelId, default: []].append(Message(
                 id: id,
                 channelId: channelId,
-                agentId: optString(row, "agent_id"),
-                agentName: optString(row, "agent_name"),
+                agentId: msgAgentId,
+                // 规范化：同成员载入——本机 App Agent 显示名归一为
+                // 现行产品名，存量消息快照的旧名不继续上屏。
+                agentName: msgAgentId == LocalPlatform.appAgentID
+                    ? LocalPlatform.appAgentName
+                    : optString(row, "agent_name"),
                 text: optString(row, "text"),
                 replyTo: replyTo.isEmpty ? nil : replyTo,
                 createdAt: optDouble(row, "created_at", 0),

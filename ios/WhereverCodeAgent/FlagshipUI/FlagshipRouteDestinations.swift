@@ -2367,10 +2367,13 @@ public struct V5ChannelItem: Identifiable, Equatable, Hashable {
         isPrivate: Bool = false,
         associatedProjectId: String? = nil,
         associatedProjectName: String? = nil,
-        memberCount: Int = 3,
-        agentCount: Int = 1,
+        // 规范化：计数与时间默认值改为 0/空——此前是设计稿占位假值
+        // （3 成员／1 Agent／12:00），映射层漏传就会把假值显示上屏；
+        // 生产构造只有 mapChannelItem 一处，现已全量传真实数据。
+        memberCount: Int = 0,
+        agentCount: Int = 0,
         lastMessageText: String = "",
-        lastMessageTime: String = "12:00",
+        lastMessageTime: String = "",
         unreadCount: Int = 0,
         isMuted: Bool = false,
         isIgnored: Bool = false,
@@ -2500,8 +2503,11 @@ public struct V5ChannelMessage: Identifiable, Equatable, Hashable {
         senderName: String,
         isAgent: Bool,
         text: String,
-        timestamp: String = "12:00",
-        fullDateTime: String = "2026-11-15 12:00:00",
+        // 规范化：时间默认值改为空串——此前是写死的占位假值
+        // （12:00／2026-11-15 12:00:00），任何漏传时间的消息都会
+        // 把假时间显示上屏；真实消息一律由映射层传真实时间。
+        timestamp: String = "",
+        fullDateTime: String = "",
         replyToId: String? = nil,
         replyToText: String? = nil,
         linkedTaskId: String? = nil,
@@ -2551,6 +2557,10 @@ public struct V5ChannelFile: Identifiable, Equatable, Hashable {
     public var associatedProjectName: String?
     public var associatedTaskId: String?
     public var sourceKind: String
+    /// 全量对齐批二：附件引用原文与可打开链接（引用制四动作的依据：
+    /// 预览/下载/分享只对带链接的引用成立，其余如实降级为复制引用）。
+    public var ref: String = ""
+    public var linkURL: String? = nil
 
     public init(
         id: String,
@@ -2561,7 +2571,9 @@ public struct V5ChannelFile: Identifiable, Equatable, Hashable {
         uploadTime: String = "11-15 12:00",
         associatedProjectName: String? = nil,
         associatedTaskId: String? = nil,
-        sourceKind: String = "local"
+        sourceKind: String = "local",
+        ref: String = "",
+        linkURL: String? = nil
     ) {
         self.id = id
         self.fileName = fileName
@@ -2572,6 +2584,8 @@ public struct V5ChannelFile: Identifiable, Equatable, Hashable {
         self.associatedProjectName = associatedProjectName
         self.associatedTaskId = associatedTaskId
         self.sourceKind = sourceKind
+        self.ref = ref
+        self.linkURL = linkURL
     }
 }
 
@@ -2633,6 +2647,9 @@ public struct ChannelsHomeView: View {
     @State private var policyAlertMessage = ""
     // 218 深链：带 channelId 跳转失败时的定性提示（无效/无权限/不存在）
     @State private var channelLinkError: String? = nil
+
+    // 批三（3.7）：创建成功后的落点提示行（与安卓创建后状态行同位）。
+    @State private var createLandingNotice: String? = nil
 
     // 频道数据与选中
     @State private var channels: [V5ChannelItem] = []
@@ -2696,6 +2713,15 @@ public struct ChannelsHomeView: View {
                 partitionPicker
             }
 
+            if let createLandingNotice {
+                Text(createLandingNotice)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+            }
+
             // 对话框直达（批D）：打开即当前频道的对话框（消息流+状态+
             // 发送区）；搜索/频道列表收进切换面板（点频道名开）。
             if !channelAvailable {
@@ -2752,8 +2778,17 @@ public struct ChannelsHomeView: View {
             }
         }
         .sheet(isPresented: $showCreateChannelSheet) {
-            CreateChannelSheet(appState: appState) {
-                Task { await refreshChannels() }
+            CreateChannelSheet(appState: appState) { newChannelID in
+                Task {
+                    await refreshChannels()
+                    // 批三（3.7）：创建成功自动进入新频道＋提示行（对齐安卓）。
+                    if let newChannelID, let ch = channels.first(where: { $0.id == newChannelID }) {
+                        activeWorkspaceChannel = ch
+                        activeWorkspaceDM = nil
+                        selectedPartition = .channels
+                        createLandingNotice = "频道已创建。"
+                    }
+                }
             }
         }
         .sheet(isPresented: $showManagementSheet) {
@@ -2884,6 +2919,9 @@ public struct ChannelsHomeView: View {
                         channelsListView
                     }
                 } else {
+                    // 全量对齐批四（2.5）：私聊分段补同款搜索框（filteredDMs
+                    // 过滤逻辑本已存在，此前只有频道分段有框）。
+                    searchField
                     directMessagesListView
                 }
             }
@@ -3121,6 +3159,7 @@ public struct ChannelsHomeView: View {
                 activeWorkspaceChannel = ch
                 activeWorkspaceDM = nil
                 selectedPartition = .channels
+                createLandingNotice = nil
                 showSwitchPanel = false
             } label: {
                 channelRow(ch, cacheLocked: cacheLocked)
@@ -3164,6 +3203,18 @@ public struct ChannelsHomeView: View {
                     Text(ch.name)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
+                    if ch.isArchived {
+                        // 批三（7.8）：归档标记（与安卓切换器行同文同位）。
+                        Text("（已归档）")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    if ch.id == activeWorkspaceChannel?.id {
+                        // 批四（1.6）：当前频道 ✓（与安卓切换器行同标）。
+                        Text("✓")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
                     if ch.isMuted {
                         Image(systemName: "bell.slash.fill")
                             .font(.system(size: 10))
@@ -3195,7 +3246,8 @@ public struct ChannelsHomeView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
-                    Text("\(ch.memberCount) 成员 · \(ch.agentCount) Agent")
+                    // 批四（1.6）：类别词前缀与安卓副行同构（topic 即类别词）。
+                    Text("\(ch.topic.isEmpty ? "团队频道" : ch.topic) · \(ch.memberCount) 成员 · \(ch.agentCount) Agent")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -3386,14 +3438,50 @@ public struct ChannelsHomeView: View {
         return ChannelListCache().load()
     }
 
+    /// 列表行时间规范（双端同一条规则，与安卓 ChannelExtras
+    /// .listTimeLabel 同实现）：今天 HH:mm；昨天「昨天」；近 7 天内
+    /// （不含今天/昨天）星期几；更早 yyyy-MM-dd。无效时间返回空串。
+    private func channelListTimeLabel(_ epochSeconds: Double?) -> String {
+        guard let epochSeconds, epochSeconds > 0 else { return "" }
+        let calendar = Calendar.current
+        let date = Date(timeIntervalSince1970: epochSeconds)
+        let dayDiff = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: date),
+            to: calendar.startOfDay(for: Date())
+        ).day ?? 0
+        switch dayDiff {
+        case ..<1:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        case 1:
+            return "昨天"
+        case 2..<7:
+            let weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
+            return weekdays[calendar.component(.weekday, from: date) - 1]
+        default:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: date)
+        }
+    }
+
     private func mapChannelItem(_ c: ChannelInfo, layer: ChannelLayer) -> V5ChannelItem {
-        V5ChannelItem(
+        // 全量对齐批（8.3）：Agent 数与行尾时间改读真实数据——此前未传，
+        // 一直吃 V5ChannelItem 的占位默认值（1 Agent／12:00），与安卓
+        // 真值口径不一致。Agent 数按参与者明细实算，无明细就是 0，
+        // 不编造。行尾时间按双端统一的相对时间规范呈现。
+        let agentCount = c.participantDetails.filter { $0.isAgent == true }.count
+        return V5ChannelItem(
             id: c.id,
             name: c.displayName,
-            topic: "团队频道",
+            topic: c.isDM ? "私聊" : "团队频道",
             isPrivate: false,
             memberCount: c.participants.count,
+            agentCount: agentCount,
             lastMessageText: c.lastMessageText ?? "",
+            lastMessageTime: channelListTimeLabel(c.lastMessageAt),
             unreadCount: 0,
             isArchived: c.isArchived,
             layer: layer
@@ -3430,7 +3518,8 @@ public struct ChannelsHomeView: View {
                 isAgent: peer?.isAgent ?? true,
                 targetRole: peer?.role ?? "私聊",
                 lastMessageText: c.lastMessageText ?? "",
-                lastMessageTime: ""
+                // 全量对齐批四（2.2）：私聊行时间与频道行同源同规（原写死空串）。
+                lastMessageTime: channelListTimeLabel(c.lastMessageAt)
             )
         }
 
@@ -3467,6 +3556,8 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var isSending = false
     @State private var messages: [V5ChannelMessage] = []
     @State private var files: [V5ChannelFile] = []
+    /// 全量对齐批二：文件动作结果提示（预览引用原文/下载结果）。
+    @State private var fileActionNotice: String? = nil
     @State private var activeTasks: [LocalTask] = []
     @State private var connectionState: ChannelConnectionState = .stopped
     @State private var connectionError: String? = nil
@@ -3487,6 +3578,30 @@ public struct ChannelDetailWorkspaceView: View {
     @State private var sendErrorMessage = ""
     // 频道补全二/三期动作状态：定时队列、附件引用、转发、已读回执。
     @State private var scheduledPosts: [ScheduledChannelPost] = []
+    // 全量对齐批五：瞬时提示行（与安卓 noticeLine 同义，3.5 秒自动消；
+    // 4.16 历史开关与 4.18 定时设定/取消共用）。
+    @State private var transientNotice: String? = nil
+    @State private var transientNoticeToken: Int = 0
+
+    private func showTransientNotice(_ text: String) {
+        transientNoticeToken += 1
+        let token = transientNoticeToken
+        transientNotice = text
+        Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if transientNoticeToken == token {
+                transientNotice = nil
+            }
+        }
+    }
+
+    // 批五（4.18）：延时文案与安卓 scheduledDelayText 逐档镜像。
+    private func scheduledDelayText(_ delaySeconds: TimeInterval) -> String {
+        if delaySeconds <= 60 { return "约 1 分钟后" }
+        if delaySeconds < 3600 { return "约 \(Int(delaySeconds) / 60) 分钟后" }
+        if delaySeconds < 86400 { return "约 \(Int(delaySeconds) / 3600) 小时后" }
+        return "约 \(Int(delaySeconds) / 86400) 天后"
+    }
     @State private var pendingAttachmentRef: String? = nil
     @State private var showAttachmentInput = false
     @State private var attachmentDraft = ""
@@ -3565,6 +3680,11 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == .files {
+                Task { await loadChannelFiles() }
+            }
+        }
         // 218 标题一层：嵌入旗舰壳时导航标题留空，频道名只在页内
         // 标题行（切换面板入口）出现一次；独立打开时仍用频道名。
         .navigationTitle(embedded ? "" : displayName)
@@ -3816,6 +3936,12 @@ public struct ChannelDetailWorkspaceView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
+                    if let ch = channelItem, ch.isArchived {
+                        // 批三（7.8）：归档态在对话页标题行可见（此前无任何标记）。
+                        Text("（已归档）")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let ch = channelItem {
                     Text(ch.layer.label)
@@ -3912,6 +4038,14 @@ public struct ChannelDetailWorkspaceView: View {
                 filterBar
                 toolsBar
                 if isBrowsing { browseBar }
+            }
+            if let transientNotice {
+                Text(transientNotice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
             }
             messageCenterStrip
             if !scheduledForChannel.isEmpty {
@@ -4051,6 +4185,11 @@ public struct ChannelDetailWorkspaceView: View {
 
     private var scheduledStrip: some View {
         VStack(alignment: .leading, spacing: 2) {
+            // 批五（4.18）：分节标题与安卓同文。
+            Text("定时发送（待发）")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundStyle(Color(red: 0.20, green: 0.19, blue: 0.18))
             ForEach(scheduledForChannel) { item in
                 HStack {
                     Text("定时 \(Date(timeIntervalSince1970: item.dueAtSeconds), style: .time) 发：\(String(item.text.prefix(40)))")
@@ -4230,7 +4369,14 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     private func rerunSearchIfPossible() {
-        if searchCanRun { Task { await runSearch() } }
+        if searchCanRun {
+            Task { await runSearch() }
+        } else if isShowingSearchResults {
+            // 4.12 修复：筛选全部清掉（如成员选回「全部成员」且无其他
+            // 条件）时必须退出搜索结果态、恢复实时列表——此前直接
+            // no-op，过滤后的列表清不掉。
+            clearSearch()
+        }
     }
 
     private func searchWindow() -> (from: Int?, to: Int?) {
@@ -4325,6 +4471,8 @@ public struct ChannelDetailWorkspaceView: View {
         do {
             _ = try await transport.setHistoryVisible(channelID: currentChannelId, visible: visible)
             historyVisibleOverride = visible
+            // 批五（4.16）：切换反馈行与安卓逐字一致。
+            showTransientNotice(visible ? "已开启：新成员可看全部历史。" : "已关闭：新成员只能看入群之后的消息。")
         } catch {
             actionError = (error as? McpError)?.message ?? "改历史开关失败。"
         }
@@ -4389,11 +4537,10 @@ public struct ChannelDetailWorkspaceView: View {
                                 .lineLimit(1)
                         }
                         .padding(.vertical, 2)
-                    } else if let replyTo = msg.replyToId, !replyTo.isEmpty {
-                        Text("回复 \(String(replyTo.prefix(8)))…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
+                    // 规范化：引用原文解析不到时不渲染任何占位——此前会把
+                    // 消息 ID 截断成「回复 10101010…」上屏，原始 ID 不是
+                    // 给人看的内容（话题内实测缺陷，6.5）。
 
                     if let forwardOf = msg.forwardOf, !forwardOf.isEmpty {
                         Text("转发自 \(forwardOf)")
@@ -4884,12 +5031,16 @@ public struct ChannelDetailWorkspaceView: View {
         composerText = ""
         replyingTo = nil
         pendingAttachmentRef = nil
+        // 批五（4.18）：设定反馈行与安卓逐字一致。
+        showTransientNotice("已设定时发送（\(scheduledDelayText(delaySeconds))），发送前可在频道页取消。")
     }
 
     private func cancelScheduled(_ item: ScheduledChannelPost) {
         loadScheduled()
         scheduledPosts.removeAll { $0.id == item.id }
         saveScheduled()
+        // 批五（4.18）：取消反馈行与安卓逐字一致。
+        showTransientNotice("已取消一条定时消息。")
     }
 
     private func flushScheduled() async {
@@ -4989,6 +5140,142 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     // MARK: - 文件分区
+    /// 文件页签数据（10.7 补齐）：与安卓同口径——拉全量消息后按
+    /// attachmentRef 聚合成本地文件条目。此前 files 从未被填充，
+    /// 汇总恒为 0（iOS 侧缺口，本批补上）。
+    private func loadChannelFiles() async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            let all = try await transport.pollMessages(channelID: currentChannelId, limit: 500)
+            let converted = all.map { toV5Message($0) }
+            let removedFileIds = Self.removedChannelFileIds(channelId: currentChannelId)
+            files = converted.reversed().compactMap { Self.channelFileEntry(from: $0) }
+                .filter { !removedFileIds.contains($0.id) }
+        } catch {
+            // 加载失败保留既有列表，不冒充空。
+        }
+    }
+
+    /// 一条带附件引用的消息 → 文件汇总条目（引用 JSON 字段与双端种子同形）。
+    private static func channelFileEntry(from msg: V5ChannelMessage) -> V5ChannelFile? {
+        guard let ref = msg.attachmentRef, !ref.isEmpty else { return nil }
+        var name = ""
+        var kind = "file"
+        var sizeText = ""
+        var linkURL: String? = nil
+        var projectName: String? = nil
+        if let data = ref.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            name = (obj["name"] as? String) ?? ""
+            kind = (obj["kind"] as? String) ?? "file"
+            if let url = obj["url"] as? String {
+                linkURL = url
+                if name.isEmpty { name = url }
+            }
+            projectName = (obj["project"] as? String)?.trimmingCharacters(in: .whitespaces)
+            if projectName?.isEmpty == true { projectName = nil }
+            if let size = (obj["size"] as? NSNumber)?.intValue, size > 0 {
+                sizeText = ByteCountFormatter.string(
+                    fromByteCount: Int64(size), countStyle: .file)
+            }
+        }
+        if linkURL == nil, ref.hasPrefix("http://") || ref.hasPrefix("https://") {
+            linkURL = ref
+        }
+        if name.isEmpty {
+            // 非 JSON 的纯文本引用：引用本身即文件名（与安卓「附件：<ref>」同口径）。
+            let trimmedRef = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedRef.hasPrefix("{"), !trimmedRef.isEmpty {
+                name = trimmedRef
+            }
+        }
+        if name.isEmpty {
+            name = msg.text.isEmpty ? "附件" : String(msg.text.prefix(30))
+        }
+        let timeText = msg.fullDateTime.count >= 16
+            ? String(msg.fullDateTime.dropFirst(5).prefix(11))
+            : msg.timestamp
+        return V5ChannelFile(
+            id: "file-\(msg.id)",
+            fileName: name,
+            fileSize: sizeText,
+            fileType: kind,
+            uploaderName: msg.senderName,
+            uploadTime: timeText,
+            associatedProjectName: projectName,
+            sourceKind: "local",
+            ref: ref,
+            linkURL: linkURL)
+    }
+
+    /// 全量对齐批二：从频道移除落盘——文件由消息 attachmentRef 重聚合，
+    /// 只删内存会在重进文件页时恢复；已移除 id 按频道过滤聚合结果。
+    /// 存储用 Application Support 下的 JSON 文件（与安卓
+    /// ChannelRemovedFilesStore 同名同形）：实测本环境 UserDefaults
+    /// 写入只停留在 cfprefsd 缓存、模拟器重启即丢，文件落盘才可靠。
+    private static var removedFilesStoreURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("channel_removed_files.json")
+    }
+
+    private static func removedFilesStore() -> [String: [String]] {
+        guard let url = removedFilesStoreURL,
+              let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let channels = root["channels"] as? [String: [String]] else { return [:] }
+        return channels
+    }
+
+    private static func removedChannelFileIds(channelId: String) -> Set<String> {
+        Set(removedFilesStore()[channelId] ?? [])
+    }
+
+    private static func markChannelFileRemoved(channelId: String, fileId: String) {
+        guard let url = removedFilesStoreURL else { return }
+        var channels = removedFilesStore()
+        var ids = channels[channelId] ?? []
+        if !ids.contains(fileId) { ids.append(fileId) }
+        channels[channelId] = ids
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: ["channels": channels]) else { return }
+        try? data.write(to: url, options: [.atomic])
+    }
+
+    /// 预览：URL 引用走系统打开；非 URL 引用展示引用原文（引用制下没有
+    /// 本体可预览，如实呈现引用本身，与安卓「附件引用」对话框同口径）。
+    private func previewChannelFile(_ file: V5ChannelFile) {
+        if let link = file.linkURL, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        } else {
+            fileActionNotice = "附件引用\n\(file.ref)"
+        }
+    }
+
+    /// 下载至本地：仅 URL 引用可真下载（落盘到 App 文档目录）；非 URL
+    /// 引用在菜单里不提供此动作（按类型显隐，不做空按钮）。
+    private func downloadChannelFile(_ file: V5ChannelFile) {
+        guard let link = file.linkURL, let url = URL(string: link) else { return }
+        Task {
+            do {
+                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let docs = FileManager.default.urls(
+                    for: .documentDirectory, in: .userDomainMask)[0]
+                let dest = docs.appendingPathComponent(
+                    file.fileName.isEmpty ? "下载文件" : file.fileName)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                fileActionNotice = "已下载至本地：\(dest.lastPathComponent)"
+            } catch {
+                fileActionNotice = "下载失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func removeChannelFile(_ file: V5ChannelFile) {
+        Self.markChannelFileRemoved(channelId: currentChannelId, fileId: file.id)
+        files.removeAll { $0.id == file.id }
+    }
+
     private var filesTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -5051,12 +5338,20 @@ public struct ChannelDetailWorkspaceView: View {
                                 Spacer()
 
                                 Menu {
-                                    Button("预览文件") {}
-                                    Button("下载至本地") {}
-                                    Button("分享链接") {}
+                                    Button("预览文件") { previewChannelFile(file) }
+                                    if let link = file.linkURL, let url = URL(string: link) {
+                                        Button("下载至本地") { downloadChannelFile(file) }
+                                        ShareLink(item: url) {
+                                            Text("分享链接")
+                                        }
+                                    } else {
+                                        Button("复制引用") {
+                                            UIPasteboard.general.string = file.ref
+                                        }
+                                    }
                                     Divider()
                                     Button(role: .destructive) {
-                                        files.removeAll { $0.id == file.id }
+                                        removeChannelFile(file)
                                     } label: {
                                         Label("从频道移除", systemImage: "trash")
                                     }
@@ -5074,6 +5369,14 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
             .padding(16)
+        }
+        .alert("频道文件", isPresented: Binding(
+            get: { fileActionNotice != nil },
+            set: { if !$0 { fileActionNotice = nil } }
+        )) {
+            Button("好", role: .cancel) { fileActionNotice = nil }
+        } message: {
+            Text(fileActionNotice ?? "")
         }
     }
 
@@ -5577,7 +5880,8 @@ public struct AgentProfileSheet: View {
 
 public struct CreateChannelSheet: View {
     @ObservedObject public var appState: AppState
-    public var onCreated: () -> Void
+    /// 批三（3.7）：回传新频道 id，宿主据此刷新后直达新频道（对齐安卓创建后落点）。
+    public var onCreated: (String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name = LocalChannelService.defaultChannelName
     @State private var placement: ChannelLayer = .local
@@ -5628,25 +5932,26 @@ public struct CreateChannelSheet: View {
         errorText = nil
         let placeOnCloud = cloudConnected && placement == .cloud
         do {
+            let created: [String: Any]
             if placeOnCloud {
                 guard let transport = appState.makeChannelTransport() else {
                     errorText = "无法连接频道服务。"
                     return
                 }
-                _ = try await transport.createChannel(name: trimmed)
+                created = try await transport.createChannel(name: trimmed)
             } else {
                 guard let service = LocalPlatform.serviceOrNull() else {
                     errorText = "无法连接频道服务。"
                     return
                 }
-                _ = try service.dispatch(
+                created = try service.dispatch(
                     tool: "agent_channel_create",
                     args: ["name": trimmed],
                     callerId: LocalPlatform.appAgentID,
                     callerName: LocalPlatform.appAgentName
                 )
             }
-            onCreated()
+            onCreated(created["id"] as? String)
             dismiss()
         } catch let error as LocalServiceError {
             errorText = "创建频道失败：\(error.message)"
@@ -5758,6 +6063,8 @@ public struct ChannelSettingsSheet: View {
     @State private var memberPendingRemoval: V5ChannelMember?
     @State private var showMemberRemovalConfirmation = false
     @State private var showCreatorRemovalAlert = false
+    /// 批三（7.8）：归档行文案绑本页状态（channel 是启动快照，归档后不刷新）。
+    @State private var archivedState: Bool? = nil
     @State private var isMuted = false
     @State private var ignoresUnread = false
     @State private var notifyMode = "全部消息"
@@ -5797,7 +6104,7 @@ public struct ChannelSettingsSheet: View {
                 LabeledContent("频道性质", value: ch.isPrivate ? "私有频道" : "公开频道")
                 LabeledContent("成员总数", value: "\(members.count) 人")
                 Button("保存名称") { Task { await rename() } }.disabled(editedName == ch.name || isWorking)
-                Button(ch.isArchived ? "取消归档" : "归档频道") { Task { await setArchived(!ch.isArchived) } }.disabled(isWorking)
+                Button((archivedState ?? ch.isArchived) ? "取消归档" : "归档频道") { Task { await setArchived(!(archivedState ?? ch.isArchived)) } }.disabled(isWorking)
                 Button("删除频道", role: .destructive) { showDeleteConfirmation = true }.disabled(isWorking)
                 Text("仅频道 owner 可删除。删除权限由服务端校验。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -5913,11 +6220,46 @@ public struct ChannelSettingsSheet: View {
         }
     }
 
+    /// 批三（7.5）：添加成员候选 = 其他频道账本成员并集＋本机已注册 Agent，
+    /// 排除已在本频道内的与本机自己（此前只有已注册 Agent 一源，零配置下
+    /// 候选为空、入口整行消失，设置页里看不见添加成员）。
+    private struct AddCandidate: Identifiable {
+        let agentId: String
+        let name: String
+        var id: String { agentId }
+    }
+
+    private var addCandidates: [AddCandidate] {
+        var seen = Set(members.map { $0.id })
+        var result: [AddCandidate] = []
+        for other in appState.availableChannels where other.id != channelId {
+            for p in other.participantDetails where !p.isSelf && !seen.contains(p.id) {
+                seen.insert(p.id)
+                result.append(AddCandidate(agentId: p.id, name: p.name))
+            }
+        }
+        for agent in agents where !seen.contains(agent.agentId) {
+            seen.insert(agent.agentId)
+            result.append(AddCandidate(agentId: agent.agentId, name: agent.displayName))
+        }
+        return result
+    }
+
     private var channelMembersSection: some View {
         Section("频道成员") {
             ForEach(members) { member in memberRow(member) }
-            ForEach(agents.filter { agent in !members.contains(where: { $0.agentRecordId == agent.agentId }) }) { agent in
-                Button("添加 \(agent.displayName)") { Task { await add(agentID: agent.agentId) } }.disabled(isWorking)
+            if channel != nil {
+                if addCandidates.isEmpty {
+                    Text("暂无可添加的成员")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Menu("添加成员") {
+                        ForEach(addCandidates) { candidate in
+                            Button(candidate.name) { Task { await add(agentID: candidate.agentId) } }
+                        }
+                    }
+                    .disabled(isWorking)
+                }
             }
         }
     }
@@ -5985,6 +6327,7 @@ public struct ChannelSettingsSheet: View {
     @MainActor private func setArchived(_ archived: Bool) async {
         guard let channel, let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
         await perform { try await transport.setChannelArchived(channelID: channel.id, archived: archived) }
+        if errorText == nil { archivedState = archived }
     }
     @MainActor private func add(agentID: String) async {
         guard let transport = appState.makeChannelTransport() else { errorText = "无法连接频道服务。"; return }
@@ -6103,15 +6446,25 @@ public struct LinkTaskPickerSheet: View {
 
     public var body: some View {
         NavigationStack {
-            List {
-                ForEach(tasks, id: \.id) { task in
-                    Button {
-                        onSelect(task)
-                        dismiss()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(task.title).font(.headline)
-                            Text("状态: \(task.state) · 优先级: P\(task.priority)").font(.caption).foregroundStyle(.secondary)
+            Group {
+                if tasks.isEmpty {
+                    // 5.10 修复：空时给空态文案，不再是整页空白。
+                    ContentUnavailableView(
+                        "暂无可关联的任务",
+                        systemImage: "link.badge.plus",
+                        description: Text("可关联的是本机任务列表里的任务；先派发一个任务，它会出现在这里。"))
+                } else {
+                    List {
+                        ForEach(tasks, id: \.id) { task in
+                            Button {
+                                onSelect(task)
+                                dismiss()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(task.title).font(.headline)
+                                    Text("状态: \(task.state) · 优先级: P\(task.priority)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }

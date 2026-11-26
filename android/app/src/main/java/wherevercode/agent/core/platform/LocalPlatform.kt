@@ -30,7 +30,7 @@ object LocalPlatform {
 
     /** 本机 App 在本地频道里的成员身份（与频道成员表 buildChannelMembers 同 id）。 */
     const val APP_AGENT_ID: String = "local-app"
-    const val APP_AGENT_NAME: String = "本机 App"
+    const val APP_AGENT_NAME: String = "WhereverCode Agent"
 
     @Volatile
     private var service: LocalChannelService? = null
