@@ -127,6 +127,7 @@ import wherevercode.agent.core.agent.ManusTaskAdapter
 import wherevercode.agent.core.agent.ChannelConnectionState
 import wherevercode.agent.core.agent.channelConnectionStateLabel
 import wherevercode.agent.core.agent.ChannelSummary
+import wherevercode.agent.core.agent.parseChannelSummary
 import wherevercode.agent.core.agent.channelFeedRebindNeeded
 import wherevercode.agent.core.agent.McpChannelEventFeed
 import wherevercode.agent.core.agent.PlatformAgent
@@ -6623,22 +6624,10 @@ class MainActivity : AppCompatActivity() {
             val rows = result.optJSONArray("channels") ?: return emptyList()
             (0 until rows.length()).mapNotNull { i ->
                 val row = rows.optJSONObject(i) ?: return@mapNotNull null
-                val participants = row.optJSONArray("participants")
-                val ids = if (participants != null) {
-                    (0 until participants.length()).mapNotNull { j ->
-                        participants.optJSONObject(j)?.optString("agent_id", "")
-                            ?.takeIf { pid -> pid.isNotEmpty() }
-                    }
-                } else {
-                    emptyList()
-                }
-                ChannelSummary(
-                    id = row.optString("id", ""),
-                    name = row.optString("name", ""),
-                    kind = row.optString("kind", "channel"),
-                    archived = row.optBoolean("archived", false),
-                    participantIds = ids,
-                )
+                // 全量对齐批（8.3）：本地服务与平台同形状，直接走统一解析，
+                // 参与者明细（is_agent）与最后消息时间一并带回（原先只取 id，
+                // 切换器行因此缺 Agent 数与时间）。
+                parseChannelSummary(row)
             }.filter { it.id.isNotEmpty() }
         } catch (_: Exception) {
             emptyList()
@@ -6660,7 +6649,12 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(20), dp(10), dp(20), dp(10))
             setOnClickListener { onClick() }
         }
-        row.addView(
+        // 全量对齐批（8.3）：标题行与 iOS 同式——名称在左、最后消息时间
+        // 在右（HH:mm，真实数据；无消息不显）。
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        titleRow.addView(
             UiKit.text(
                 this,
                 (if (ch.kind == "dm") "" else "# ") + ch.name +
@@ -6668,12 +6662,28 @@ class MainActivity : AppCompatActivity() {
                 15f,
                 R.color.text_primary,
                 bold = true,
-            ),
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
         )
+        if (ch.lastMessageAtSeconds > 0) {
+            titleRow.addView(
+                UiKit.text(
+                    this,
+                    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                        .format(java.util.Date((ch.lastMessageAtSeconds * 1000).toLong())),
+                    11f,
+                    R.color.text_tertiary,
+                ),
+            )
+        }
+        row.addView(titleRow)
         // 全量对齐批（8.3）：副行与 iOS 同式——「团队频道」标 +「N 成员 ·
         // M Agent」；成员数缺明细时退回参与者 id 数，Agent 数只在有参与者
-        // 明细时给（不编造）。iOS 行尾的时间本机无对应数据（频道名单不带
-        // 最后消息时间），缺省不显。
+        // 明细时给（不编造）。本地名单已由 parseChannelSummary 带回明细
+        // （服务侧 is_agent 按注册在册判定），本机行同样有真值。
         val memberCount = ch.participantDetails.size.takeIf { it > 0 } ?: ch.participantIds.size
         val agentCount = if (ch.participantDetails.isNotEmpty()) {
             ch.participantDetails.count { it.isAgent == true }

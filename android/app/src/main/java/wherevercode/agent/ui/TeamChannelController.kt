@@ -1698,6 +1698,48 @@ class TeamChannelController(
      */
     private fun filesSection(snapshot: TeamChannelSnapshot): LinearLayout {
         val col = UiKit.vertical(context)
+        // 全量对齐批（10.8）：网盘适配器卡与 iOS 文件页签同构——四家
+        // 服务商均如实标「待开发」（入口先行、未实现不冒充，产品既定
+        // 口径）；iOS 侧该卡同样为待开发状态。
+        val driveCard = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) }
+        }
+        driveCard.addView(
+            UiKit.text(context, "统一网盘适配器", 13f, R.color.text_secondary, bold = true),
+        )
+        listOf("Google Drive", "OneDrive", "WebDAV", "Cloudreve")
+            .chunked(2)
+            .forEach { pair ->
+                val rowLayout = UiKit.horizontal(context).apply {
+                    setPadding(0, dp(6), 0, 0)
+                }
+                pair.forEach { name ->
+                    val cell = UiKit.vertical(context).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                        )
+                    }
+                    cell.addView(UiKit.text(context, name, 12f, R.color.text_primary))
+                    cell.addView(UiKit.text(context, "待开发", 11f, R.color.text_tertiary))
+                    rowLayout.addView(cell)
+                }
+                if (pair.size == 1) {
+                    rowLayout.addView(
+                        View(context).apply {
+                            layoutParams = LinearLayout.LayoutParams(
+                                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                            )
+                        },
+                    )
+                }
+                driveCard.addView(rowLayout)
+            }
+        col.addView(driveCard)
         col.addView(
             UiKit.text(
                 context, "频道文件汇总 (${snapshot.channelFiles.size})",

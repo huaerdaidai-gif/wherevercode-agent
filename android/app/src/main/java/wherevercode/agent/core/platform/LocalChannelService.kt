@@ -394,6 +394,9 @@ class LocalChannelService(
                 put("agent_name", member.agentName)
                 put("role", member.role)
                 put("is_self", viewerId != null && member.agentId == viewerId)
+                // 全量对齐批（8.3）：与平台口径同字段——成员是否注册在册
+                // Agent（供切换器行「N Agent」计数读真值，不编造）。
+                put("is_agent", agents.containsKey(member.agentId))
             })
         }
         return JSONObject().apply {
@@ -403,6 +406,10 @@ class LocalChannelService(
             put("archived", channel.archived)
             put("history_visible", channel.historyVisible)
             put("participants", participants)
+            // 全量对齐批（8.3）：最后消息时间（切换器行尾时间读真值；
+            // 无消息不带此字段）。
+            val lastMessageAt = messages[channel.id].orEmpty().maxOfOrNull { it.createdAt }
+            if (lastMessageAt != null) put("last_message_at", lastMessageAt)
         }
     }
 
