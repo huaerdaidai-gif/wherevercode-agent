@@ -7460,12 +7460,26 @@ class MainActivity : AppCompatActivity() {
         requireChannelEndpoint() ?: return
         val inChannel = teamChannelChannelsCache.firstOrNull { it.id == channelId }
             ?.participantDetails?.map { it.agentId }?.toSet().orEmpty()
-        val candidates = try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
-            .filter { it.agentId !in inChannel }
+        // 候选池与 iOS 同口径：本机已注册 Agent ∪ 各频道已知参与者（本地台账
+        // 成员如验收成员只在频道参与者名单里、不在 Agent 注册表里，只取注册表
+        // 会让零配置下永远无成员可加）。
+        val pool = LinkedHashMap<String, String>()
+        try { agentStore.listAgents() } catch (_: Exception) { emptyList() }
+            .forEach { pool[it.agentId] = it.displayName }
+        teamChannelChannelsCache.forEach { channel ->
+            channel.participantDetails.forEach { participant ->
+                if (!participant.isSelf && participant.agentId !in pool) {
+                    pool[participant.agentId] = participant.agentName
+                }
+            }
+        }
+        val candidates = pool.entries
+            .filter { it.key !in inChannel }
+            .map { (agentId, displayName) -> agentId to displayName }
         if (candidates.isEmpty()) { toast("没有可添加的成员。"); return }
-        ListDialog.show(this, "选择要添加的成员", null, candidates.map { it.displayName }) { index ->
+        ListDialog.show(this, "选择要添加的成员", null, candidates.map { it.second }) { index ->
             performChannelManagement { transport ->
-                transport.addChannelMember(channelId, candidates[index].agentId)
+                transport.addChannelMember(channelId, candidates[index].first)
             }
         }
     }
