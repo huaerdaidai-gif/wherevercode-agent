@@ -1866,6 +1866,7 @@ class MainActivity : AppCompatActivity() {
             this,
             onRefresh = { refreshMessageCenter() },
             onOpenEntry = { entry -> openMessageCenterEntry(entry) },
+            onLandTask = { task -> showLandingChannelPicker(task) },
             onClose = {
                 teamChannelKeepConversation = true
                 showEntry(DrawerController.ID_TEAM_CHANNEL)
@@ -8317,9 +8318,83 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 messageCenterRefreshRunning = false
                 if (!::messageCenterController.isInitialized) return@runOnUiThread
-                messageCenterController.render(snapshot)
+                messageCenterController.render(
+                    snapshot.copy(pendingTasks = loadPendingLandingTasks()),
+                )
             }
         }.start()
+    }
+
+    /** 待落地任务（9.19）：本地任务账本里未绑定频道、未终结的任务。 */
+    private fun loadPendingLandingTasks(): List<wherevercode.agent.core.message.PendingTaskEntry> {
+        val service = try { LocalPlatform.serviceOrNull() } catch (_: Exception) { null }
+            ?: return emptyList()
+        return try {
+            val result = service.dispatch(
+                "list_tasks",
+                org.json.JSONObject().put("limit", 200),
+                LocalPlatform.APP_AGENT_ID,
+                LocalPlatform.APP_AGENT_NAME,
+            )
+            val rows = result.optJSONArray("tasks") ?: return emptyList()
+            val terminal = setOf("approved", "done", "cancelled")
+            (0 until rows.length()).mapNotNull { i ->
+                val row = rows.optJSONObject(i) ?: return@mapNotNull null
+                if (!row.isNull("channel_id")) return@mapNotNull null
+                val state = row.optString("state", "")
+                if (state in terminal) return@mapNotNull null
+                wherevercode.agent.core.message.PendingTaskEntry(
+                    taskId = row.optString("task_id", ""),
+                    title = row.optString("title", ""),
+                    goal = row.optString("goal", ""),
+                    assigneeName = row.optString("assignee_name", ""),
+                    stateLabel = row.optString("state_label", state),
+                    createdAtSeconds = row.optDouble("created_at", 0.0),
+                )
+            }.filter { it.taskId.isNotEmpty() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 待落地任务落地（9.19）：选一个本地频道 → 绑定 → 刷新消息中心。 */
+    private fun showLandingChannelPicker(
+        task: wherevercode.agent.core.message.PendingTaskEntry,
+    ) {
+        val channels = localPanelChannels().filter { it.kind != "dm" && !it.archived }
+        if (channels.isEmpty()) {
+            toast("还没有可落地的频道，先新建一个频道。")
+            return
+        }
+        ListDialog.show(
+            this,
+            "落地到频道",
+            "把「${task.title}」落地到哪个频道？",
+            channels.map { it.name },
+        ) { which ->
+            val target = channels.getOrNull(which) ?: return@show
+            val service = try { LocalPlatform.serviceOrNull() } catch (_: Exception) { null }
+            if (service == null) {
+                toast("本地服务未就绪，无法落地。")
+                return@show
+            }
+            Thread {
+                val error = try {
+                    service.uiLandTask(task.taskId, target.id)
+                    null
+                } catch (e: Exception) {
+                    e.message ?: "落地失败"
+                }
+                runOnUiThread {
+                    if (error == null) {
+                        toast("已落地到「${target.name}」")
+                        refreshMessageCenter()
+                    } else {
+                        toast("落地失败：$error")
+                    }
+                }
+            }.start()
+        }
     }
 
     private fun openMessageCenterEntry(entry: MessageCenterEntry) {

@@ -193,6 +193,18 @@ public final class LocalChannelService {
             callerName: LocalPlatform.appAgentName)
     }
 
+    /// UI 落地任务（9.19）：把未绑定频道的任务落地到指定本地频道。
+    public func uiLandTask(taskId: String, channelId: String) throws -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        guard let channel = channels[channelId], !channel.archived, channel.kind != "dm" else {
+            throw LocalServiceError("落地目标频道不存在或不可用")
+        }
+        return try taskDispatch.uiLandTask(
+            args: ["task_id": taskId, "channel_id": channelId],
+            callerId: LocalPlatform.appAgentID,
+            callerName: LocalPlatform.appAgentName)
+    }
+
     /// spec §5 写回落点：以本机 App 身份把任务事件写成频道消息，
     /// 正文末尾带 [task:<id>] 引用行（W11 任务卡按它关联渲染）。
     /// 频道不存在/已归档时静默跳过——写回失败不回滚任务操作。

@@ -3607,6 +3607,11 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == .files {
+                Task { await loadChannelFiles() }
+            }
+        }
         // 218 标题一层：嵌入旗舰壳时导航标题留空，频道名只在页内
         // 标题行（切换面板入口）出现一次；独立打开时仍用频道名。
         .navigationTitle(embedded ? "" : displayName)
@@ -4272,7 +4277,14 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     private func rerunSearchIfPossible() {
-        if searchCanRun { Task { await runSearch() } }
+        if searchCanRun {
+            Task { await runSearch() }
+        } else if isShowingSearchResults {
+            // 4.12 修复：筛选全部清掉（如成员选回「全部成员」且无其他
+            // 条件）时必须退出搜索结果态、恢复实时列表——此前直接
+            // no-op，过滤后的列表清不掉。
+            clearSearch()
+        }
     }
 
     private func searchWindow() -> (from: Int?, to: Int?) {
@@ -5030,6 +5042,52 @@ public struct ChannelDetailWorkspaceView: View {
     }
 
     // MARK: - 文件分区
+    /// 文件页签数据（10.7 补齐）：与安卓同口径——拉全量消息后按
+    /// attachmentRef 聚合成本地文件条目。此前 files 从未被填充，
+    /// 汇总恒为 0（iOS 侧缺口，本批补上）。
+    private func loadChannelFiles() async {
+        guard let transport = appState.makeChannelTransport() else { return }
+        do {
+            let all = try await transport.pollMessages(channelID: currentChannelId, limit: 500)
+            let converted = all.map { toV5Message($0) }
+            files = converted.reversed().compactMap { Self.channelFileEntry(from: $0) }
+        } catch {
+            // 加载失败保留既有列表，不冒充空。
+        }
+    }
+
+    /// 一条带附件引用的消息 → 文件汇总条目（引用 JSON 字段与双端种子同形）。
+    private static func channelFileEntry(from msg: V5ChannelMessage) -> V5ChannelFile? {
+        guard let ref = msg.attachmentRef, !ref.isEmpty else { return nil }
+        var name = ""
+        var kind = "file"
+        var sizeText = ""
+        if let data = ref.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            name = (obj["name"] as? String) ?? ""
+            kind = (obj["kind"] as? String) ?? "file"
+            if let url = obj["url"] as? String, name.isEmpty { name = url }
+            if let size = (obj["size"] as? NSNumber)?.intValue, size > 0 {
+                sizeText = ByteCountFormatter.string(
+                    fromByteCount: Int64(size), countStyle: .file)
+            }
+        }
+        if name.isEmpty {
+            name = msg.text.isEmpty ? "附件" : String(msg.text.prefix(30))
+        }
+        let timeText = msg.fullDateTime.count >= 16
+            ? String(msg.fullDateTime.dropFirst(5).prefix(11))
+            : msg.timestamp
+        return V5ChannelFile(
+            id: "file-\(msg.id)",
+            fileName: name,
+            fileSize: sizeText,
+            fileType: kind,
+            uploaderName: msg.senderName,
+            uploadTime: timeText,
+            sourceKind: "local")
+    }
+
     private var filesTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -6144,15 +6202,25 @@ public struct LinkTaskPickerSheet: View {
 
     public var body: some View {
         NavigationStack {
-            List {
-                ForEach(tasks, id: \.id) { task in
-                    Button {
-                        onSelect(task)
-                        dismiss()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(task.title).font(.headline)
-                            Text("状态: \(task.state) · 优先级: P\(task.priority)").font(.caption).foregroundStyle(.secondary)
+            Group {
+                if tasks.isEmpty {
+                    // 5.10 修复：空时给空态文案，不再是整页空白。
+                    ContentUnavailableView(
+                        "暂无可关联的任务",
+                        systemImage: "link.badge.plus",
+                        description: Text("可关联的是本机任务列表里的任务；先派发一个任务，它会出现在这里。"))
+                } else {
+                    List {
+                        ForEach(tasks, id: \.id) { task in
+                            Button {
+                                onSelect(task)
+                                dismiss()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(task.title).font(.headline)
+                                    Text("状态: \(task.state) · 优先级: P\(task.priority)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }

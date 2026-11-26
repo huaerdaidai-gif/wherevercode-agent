@@ -80,7 +80,7 @@ class TaskDispatchService(
         private val WRITEBACK_KINDS = setOf(
             "created", "claimed", "submitted", "verdict", "approved",
             "changes_requested", "decided", "withdrawn", "reopened",
-            "reassigned", "lease_expired", "rounds_exceeded",
+            "reassigned", "lease_expired", "rounds_exceeded", "landed",
         )
 
         // 基线 _REF_RE / _SHA_RE / _URL_RE（证据格式门）。
@@ -291,6 +291,44 @@ class TaskDispatchService(
                 event(task.taskId, callerName, "deleted", "任务已删除")
             }
             store.persist()
+            return JSONObject().apply {
+                put("ok", true)
+                put("task", ownerView(task))
+            }
+        } catch (e: TaskDispatchException) {
+            store.restoreFromText(rollbackPoint)
+            throw e
+        }
+    }
+
+    /**
+     * UI 落地（9.19 挂账补齐）：把尚未绑定频道的任务绑定到指定频道，
+     * 落地事件按 §5 写回频道。不是 MCP 工具，只供消息中心调用；
+     * 频道存在性由 LocalChannelService 包装层校验。
+     */
+    fun uiLandTask(
+        args: JSONObject,
+        callerId: String,
+        callerName: String = callerId,
+    ): JSONObject {
+        rollbackPoint = store.snapshotText()
+        val seqBefore = store.eventSeq
+        try {
+            val task = stringArg(args, "task_id")?.let { store.tasks[it] }
+                ?: throw TaskDispatchException("任务不存在", 404, "task_not_found")
+            if (task.kind != "work") {
+                throw TaskDispatchException("只有工作任务可以落地")
+            }
+            if (task.channelId != null) {
+                throw TaskDispatchException("任务已落地到频道")
+            }
+            val channelId = stringArg(args, "channel_id")?.takeIf { it.isNotBlank() }
+                ?: throw TaskDispatchException("channel_id 不能为空")
+            task.channelId = channelId
+            touch(task)
+            event(task.taskId, callerName, "landed", "任务已落地到频道")
+            store.persist()
+            writeBackEvents(seqBefore)
             return JSONObject().apply {
                 put("ok", true)
                 put("task", ownerView(task))

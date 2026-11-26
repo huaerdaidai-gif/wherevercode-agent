@@ -331,6 +331,20 @@ class LocalChannelService(
             LocalPlatform.APP_AGENT_NAME,
         )
 
+    /** UI 落地任务（9.19）：把未绑定频道的任务落地到指定本地频道。 */
+    @Synchronized
+    fun uiLandTask(taskId: String, channelId: String): JSONObject {
+        val channel = channels[channelId]
+        if (channel == null || channel.archived || channel.kind == "dm") {
+            throw LocalServiceException("落地目标频道不存在或不可用")
+        }
+        return taskDispatch.uiLandTask(
+            JSONObject().put("task_id", taskId).put("channel_id", channelId),
+            LocalPlatform.APP_AGENT_ID,
+            LocalPlatform.APP_AGENT_NAME,
+        )
+    }
+
     // ---- 工具分发（与平台 MCP 工具同名同参同结果形状） ---------------------
 
     /**
