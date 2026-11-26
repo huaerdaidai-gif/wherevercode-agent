@@ -5073,6 +5073,13 @@ public struct ChannelDetailWorkspaceView: View {
             }
         }
         if name.isEmpty {
+            // 非 JSON 的纯文本引用：引用本身即文件名（与安卓「附件：<ref>」同口径）。
+            let trimmedRef = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedRef.hasPrefix("{"), !trimmedRef.isEmpty {
+                name = trimmedRef
+            }
+        }
+        if name.isEmpty {
             name = msg.text.isEmpty ? "附件" : String(msg.text.prefix(30))
         }
         let timeText = msg.fullDateTime.count >= 16
