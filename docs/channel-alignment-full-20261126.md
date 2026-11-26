@@ -17,6 +17,7 @@
 - iOS 基线 CI 的模拟器工件为 build 238、ad-hoc 签名；`codesign --verify --deep --strict` 通过。此前曾在新建模拟器上发生无效点击，该轮不计验收；后续改用已有 `WC237Fresh`（UDID `137A09E5-7282-4C02-BF68-094D849C8140`），每次先 `simctl launch`、检查 `~/Library/Logs/DiagnosticReports`，截图使用 `xcrun simctl io <UDID> screenshot`。点击前激活 Simulator，点击后新截图确认前台和画面变化。
 - 此清单提交时还没有任何频道页面完成双端同屏逐项复验。**以下全部保持 `⚠️未实屏验证`，不代表已对齐。** 238 已有列表、对话、新建页主状态将在原有基础上复核，不推翻既有实现结论。
 - 基线 CI 观察：iOS UI 导航测试报告 `Channels page must open the local channel in dialog-first form without platform configuration` 断言失败；iOS 单元测试 324 pass / 1 skipped。Android CI 有一个与本范围无关的 `DispatchClaimExecuteTest.cancel stops an in-flight execution and marks it cancelled` 超时失败，其余 3069 completed / 1 skipped。它们都不是双端实屏证据；本轮不改 iOS，也不处理非频道 Android 测试。
+- 2026-11-26 `WC237Fresh` 实屏启动卡点：设备已启动；CI build 238 ad-hoc app 的 `xcrun simctl install 137A09E5-7282-4C02-BF68-094D849C8140 /tmp/wc-ios-sim-main-ecdf709d/WhereverCodeAgent.app` 返回 exit 0。随后 `xcrun simctl launch 137A09E5-7282-4C02-BF68-094D849C8140 wherevercode.agent` 长时间无 stdout/stderr，未在本轮 10 分钟设备环境窗口内返回；中断时 exit 130。`xcrun simctl io 137A09E5-7282-4C02-BF68-094D849C8140 screenshot /tmp/wc-ios-wc237fresh-channel.png` 返回成功，但截图画面是 SpringBoard，不能作频道验收证据。启动后检查 `~/Library/Logs/DiagnosticReports` 近 10 分钟没有新的 `WhereverCodeAgent` 崩溃报告（仅找到 2026-11-21 的旧报告）。没有在 App 未前台时点击。第 1 类因此仍未完成；第 2–10 类尚未开始双端实屏核对。
 - 用户已指出已知待查缺口：待落地任务目前未在消息中心呈现（自 237 起挂账）。在实屏确认并决定补齐或定为缺口前，按本轮要求保留未验证状态，不能把它模糊写成一致。
 
 ## 状态汇总
