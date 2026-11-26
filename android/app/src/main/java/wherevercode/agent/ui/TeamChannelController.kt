@@ -102,6 +102,8 @@ data class TeamChannelSnapshot(
     val listMode: Boolean = false,
     /** 列表里每个频道/私聊的本机通知档（长按菜单静音项文案用）：id → 全部消息/仅@我/静音。 */
     val channelNotifyModes: Map<String, String> = emptyMap(),
+    /** 全量对齐批四：会话级「忽略消息」频道/私聊 id 集合（与 iOS 内存态同口径，不落盘）。 */
+    val ignoredChannelIds: Set<String> = emptySet(),
     /** 当前频道的层级标签（237，Issue #22）：本机 / 云端；对话层头部副标题用，私聊为空。 */
     val activeLayerLabel: String = "",
 )
@@ -198,6 +200,10 @@ class TeamChannelController(
     private val onShowLinkTasks: (String) -> Unit = {},
     /** 全量对齐批二：从频道移除文件（按消息 id，主 Activity 落盘过滤）。 */
     private val onRemoveChannelFile: (String) -> Unit = {},
+    /** 全量对齐批四：列表行长按——切换「忽略消息」（会话级，主 Activity 持有集合）。 */
+    private val onToggleChannelIgnored: (String) -> Unit = {},
+    /** 全量对齐批四：私聊行长按——关闭私聊（会话级隐藏，与 iOS 内存删除同口径）。 */
+    private val onCloseDm: (String) -> Unit = {},
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         visibility = View.GONE
@@ -1072,6 +1078,9 @@ class TeamChannelController(
 
     private val channelListSearchInput: EditText = EditText(context).apply {
         hint = "搜索频道名称、简介或消息…"
+        // 全量对齐批四（1.7）：搜索框铬与 iOS 统一——放大镜图标＋框内 ✕。
+        setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0)
+        compoundDrawablePadding = dp(6)
         inputType = InputType.TYPE_CLASS_TEXT
         minLines = 1
         maxLines = 1
@@ -1127,7 +1136,11 @@ class TeamChannelController(
         val q = channelListQuery.trim()
         val shown = if (q.isEmpty()) all
             else all.filter { ch ->
+                // 全量对齐批四（1.8）：过滤域与 iOS 对齐——名称＋类别词
+                // （团队频道）＋最近消息正文；原有成员名域保留（并集）。
                 ch.name.contains(q, ignoreCase = true) ||
+                    (if (ch.kind == "dm") "私聊" else "团队频道").contains(q, ignoreCase = true) ||
+                    ch.lastMessageText.contains(q, ignoreCase = true) ||
                     ch.participantDetails.any { it.agentName.contains(q, ignoreCase = true) }
             }
         if (shown.isEmpty()) {
@@ -1142,6 +1155,7 @@ class TeamChannelController(
                     channelListEmptyState(
                         title = "未找到匹配的频道",
                         hint = "点击右上角「＋」可创建团队讨论频道",
+                        iconGlyph = "#",
                     )
                 },
             )
@@ -1181,13 +1195,15 @@ class TeamChannelController(
         return row
     }
 
-    /** 频道行长按菜单（iOS 行长按同位：频道设置/静音/归档；静音走本机通知档，归档走服务端）。 */
+    /** 频道行长按菜单（全量对齐批四：与 iOS 行长按同目——免打扰/忽略/归档；频道设置为安卓并集项在首位；免打扰走本机通知档静音值，忽略走会话级集合，归档走服务端）。 */
     private fun showChannelRowMenu(ch: ChannelSummary) {
         val snap = snapshot ?: return
         val mode = snap.channelNotifyModes[ch.id] ?: "全部消息"
+        val ignored = ch.id in snap.ignoredChannelIds
         val items = arrayOf(
             "频道设置",
-            if (mode == "静音") "取消静音" else "设为静音",
+            if (mode == "静音") "取消免打扰" else "设为免打扰",
+            if (ignored) "取消忽略" else "忽略消息",
             if (ch.archived) "取消归档" else "归档频道",
         )
         android.app.AlertDialog.Builder(context)
@@ -1196,7 +1212,8 @@ class TeamChannelController(
                 when (which) {
                     0 -> onChannelSettings(ch.id)
                     1 -> onSetChannelNotify(ch.id, if (mode == "静音") "全部消息" else "静音")
-                    2 -> onToggleChannelArchived(ch.id, !ch.archived)
+                    2 -> onToggleChannelIgnored(ch.id)
+                    3 -> onToggleChannelArchived(ch.id, !ch.archived)
                 }
             }
             .show()
@@ -1208,7 +1225,10 @@ class TeamChannelController(
         val q = channelListQuery.trim()
         val shown = if (q.isEmpty()) snapshot.dmChannels
             else snapshot.dmChannels.filter { dm ->
+                // 全量对齐批四（2.5）：过滤域与 iOS filteredDMs 对齐——
+                // 名称/对方名/角色/最近消息正文。
                 dm.name.contains(q, ignoreCase = true) ||
+                    dm.lastMessageText.contains(q, ignoreCase = true) ||
                     dm.participantDetails.any {
                         it.agentName.contains(q, ignoreCase = true) ||
                             (it.role?.contains(q, ignoreCase = true) == true)
@@ -1219,6 +1239,7 @@ class TeamChannelController(
                 channelListEmptyState(
                     title = "暂无私聊",
                     hint = "点右上角「＋ 新建 → 发起私聊」，与频道成员开始 1:1 私聊\n（私聊只在频道成员之间，与单 Agent 对话并存）",
+                    iconGlyph = "👥",
                 ),
             )
         } else {
@@ -1242,8 +1263,12 @@ class TeamChannelController(
         return col
     }
 
+    /** 私聊行（全量对齐批四 2.2：与 iOS directMessageRow 同构——圆形头像＋名称＋身份徽标＋时间／最近消息预览／对方身份行）。 */
     private fun dmListRow(dm: ChannelSummary): LinearLayout {
-        val row = UiKit.vertical(context).apply {
+        val peer = dm.participantDetails.firstOrNull { !it.isSelf }
+        val displayName = peer?.agentName?.takeIf { it.isNotBlank() } ?: dm.name
+        val isAgent = peer?.isAgent != false
+        val row = UiKit.horizontal(context).apply {
             setPadding(dp(4), dp(10), dp(4), dp(10))
             setOnClickListener { onSwitchChannel(dm.id) }
             setOnLongClickListener {
@@ -1251,17 +1276,80 @@ class TeamChannelController(
                 true
             }
         }
-        row.addView(UiKit.text(context, dm.name, 15f, R.color.text_primary, bold = true))
+        // 头像：圆形底＋名称首字（Agent 暖橙、用户蓝灰，与 iOS 同色）。
+        val avatar = UiKit.text(
+            context,
+            displayName.trim().firstOrNull()?.toString() ?: "私",
+            16f,
+            R.color.on_accent,
+            bold = true,
+        ).apply {
+            gravity = android.view.Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(if (isAgent) 0xFFD98561.toInt() else 0xFF7394B3.toInt())
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                rightMargin = dp(12)
+            }
+        }
+        row.addView(avatar)
+        val col = UiKit.vertical(context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val titleRow = UiKit.horizontal(context)
+        titleRow.addView(
+            UiKit.text(context, displayName, 15f, R.color.text_primary, bold = true).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        titleRow.addView(
+            UiKit.text(context, if (isAgent) "Agent" else "用户", 10f, R.color.text_secondary, bold = true).apply {
+                setPadding(dp(6), dp(2), 0, dp(2))
+            },
+        )
+        if (dm.lastMessageAtSeconds > 0) {
+            titleRow.addView(
+                UiKit.text(
+                    context,
+                    ChannelExtras.listTimeLabel(dm.lastMessageAtSeconds, System.currentTimeMillis() / 1000.0),
+                    11f,
+                    R.color.text_tertiary,
+                ).apply { setPadding(dp(6), 0, 0, 0) },
+            )
+        }
+        col.addView(titleRow)
+        col.addView(
+            UiKit.text(
+                context,
+                dm.lastMessageText.ifBlank { "暂无新消息" },
+                13f,
+                R.color.text_secondary,
+            ).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(2), 0, 0)
+            },
+        )
+        col.addView(
+            UiKit.text(context, peer?.role?.takeIf { it.isNotBlank() } ?: "私聊", 11f, R.color.text_tertiary).apply {
+                setPadding(0, dp(2), 0, 0)
+            },
+        )
+        row.addView(col)
         return row
     }
 
-    /** 私聊行长按菜单（iOS 行长按同位：私聊设置/静音）。 */
+    /** 私聊行长按菜单（全量对齐批四 2.6：与 iOS 行长按同目——私聊设置（安卓并集项）/免打扰/忽略消息/关闭私聊）。 */
     private fun showDmRowMenu(dm: ChannelSummary) {
         val snap = snapshot ?: return
         val mode = snap.channelNotifyModes[dm.id] ?: "全部消息"
+        val ignored = dm.id in snap.ignoredChannelIds
         val items = arrayOf(
             "私聊设置",
-            if (mode == "静音") "取消静音" else "设为静音",
+            if (mode == "静音") "取消免打扰" else "设为免打扰",
+            if (ignored) "取消忽略" else "忽略消息",
+            "关闭私聊",
         )
         android.app.AlertDialog.Builder(context)
             .setTitle(dm.name)
@@ -1269,6 +1357,8 @@ class TeamChannelController(
                 when (which) {
                     0 -> onDmSettings(dm.id)
                     1 -> onSetChannelNotify(dm.id, if (mode == "静音") "全部消息" else "静音")
+                    2 -> onToggleChannelIgnored(dm.id)
+                    3 -> onCloseDm(dm.id)
                 }
             }
             .show()
@@ -1283,6 +1373,7 @@ class TeamChannelController(
         title: String,
         hint: String,
         actionLabel: String? = null,
+        iconGlyph: String? = null,
     ): LinearLayout {
         val col = UiKit.vertical(context).apply {
             gravity = android.view.Gravity.CENTER
@@ -1291,6 +1382,19 @@ class TeamChannelController(
                 LinearLayout.LayoutParams.MATCH_PARENT,
             )
             setPadding(dp(16), dp(40), dp(16), dp(40))
+        }
+        // 全量对齐批四（1.9/2.4）：空态图标与 iOS 同位（频道 #／私聊 👥），
+        // 在标题上方居中呈现；不传图标的空态保持原形。
+        if (iconGlyph != null) {
+            col.addView(
+                UiKit.text(context, iconGlyph, 36f, R.color.text_tertiary, bold = true).apply {
+                    gravity = android.view.Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { bottomMargin = dp(10) }
+                },
+            )
         }
         col.addView(
             UiKit.text(context, title, 20f, R.color.text_primary, bold = true).apply {

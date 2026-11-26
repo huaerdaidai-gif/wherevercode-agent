@@ -2919,6 +2919,9 @@ public struct ChannelsHomeView: View {
                         channelsListView
                     }
                 } else {
+                    // 全量对齐批四（2.5）：私聊分段补同款搜索框（filteredDMs
+                    // 过滤逻辑本已存在，此前只有频道分段有框）。
+                    searchField
                     directMessagesListView
                 }
             }
@@ -3206,6 +3209,12 @@ public struct ChannelsHomeView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
+                    if ch.id == activeWorkspaceChannel?.id {
+                        // 批四（1.6）：当前频道 ✓（与安卓切换器行同标）。
+                        Text("✓")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
                     if ch.isMuted {
                         Image(systemName: "bell.slash.fill")
                             .font(.system(size: 10))
@@ -3237,7 +3246,8 @@ public struct ChannelsHomeView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
-                    Text("\(ch.memberCount) 成员 · \(ch.agentCount) Agent")
+                    // 批四（1.6）：类别词前缀与安卓副行同构（topic 即类别词）。
+                    Text("\(ch.topic.isEmpty ? "团队频道" : ch.topic) · \(ch.memberCount) 成员 · \(ch.agentCount) Agent")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -3508,7 +3518,8 @@ public struct ChannelsHomeView: View {
                 isAgent: peer?.isAgent ?? true,
                 targetRole: peer?.role ?? "私聊",
                 lastMessageText: c.lastMessageText ?? "",
-                lastMessageTime: ""
+                // 全量对齐批四（2.2）：私聊行时间与频道行同源同规（原写死空串）。
+                lastMessageTime: channelListTimeLabel(c.lastMessageAt)
             )
         }
 

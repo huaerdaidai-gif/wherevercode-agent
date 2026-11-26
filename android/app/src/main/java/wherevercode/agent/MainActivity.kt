@@ -537,6 +537,10 @@ class MainActivity : AppCompatActivity() {
     private var teamChannelActiveId: String? = null
     /** 私聊分段是否选中（方案 A 分段切换的状态在本机，不进服务端）。 */
     private var teamChannelDmMode = false
+    /** 全量对齐批四：会话级「忽略消息」集合（与 iOS 内存态同口径，不落盘）。 */
+    private val teamChannelIgnoredIds = mutableSetOf<String>()
+    /** 全量对齐批四：会话级已关闭私聊集合（与 iOS 关闭私聊的内存删除同口径，不落盘）。 */
+    private val teamChannelClosedDmIds = mutableSetOf<String>()
     /** 频道区第一层列表页（对齐 iOS，Funk 2026-11-25 批）：true = 列表层，点频道/私聊行才进对话层。 */
     private var teamChannelListMode = true
     /** 深链/消息中心直达对话时置位：showScreen 的频道分支消费一次，不把落点弹回列表层。 */
@@ -1881,6 +1885,15 @@ class MainActivity : AppCompatActivity() {
             onChannelSettings = { id -> showChannelSettings(id) },
             onDmSettings = { id -> showDmSettings(id) },
             onSetChannelNotify = { id, mode -> setChannelNotifyMode(id, mode) },
+            onToggleChannelIgnored = { id ->
+                if (!teamChannelIgnoredIds.add(id)) teamChannelIgnoredIds.remove(id)
+                refreshTeamChannel()
+            },
+            onCloseDm = { id ->
+                teamChannelClosedDmIds += id
+                if (teamChannelActiveId == id) teamChannelListMode = true
+                refreshTeamChannel()
+            },
             onToggleChannelArchived = { id, archived -> confirmArchiveChannel(id, archived) },
             onShowLinkTasks = { sourceId -> showLinkTasksDialog(sourceId) },
             onRemoveChannelFile = { messageId -> removeChannelFile(messageId) },
@@ -6579,7 +6592,9 @@ class MainActivity : AppCompatActivity() {
             channels = teamChannelChannelsCache,
             activeChannelId = activeId,
             dmMode = teamChannelDmMode,
-            dmChannels = ChannelExtras.dmChannels(teamChannelChannelsCache),
+            dmChannels = ChannelExtras.dmChannels(teamChannelChannelsCache)
+                .filter { it.id !in teamChannelClosedDmIds },
+            ignoredChannelIds = teamChannelIgnoredIds.toSet(),
             // 全量对齐批（4.17）：计数随当前显示集——搜索/筛选生效时按
             // 结果集统计（与 iOS 同口径），否则按全量消息统计。
             messageCenter = ChannelExtras.buildMessageCenter(
@@ -6708,25 +6723,125 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(20), dp(14), dp(20), dp(4))
         }
 
+    /** 切换器行长按菜单（全量对齐批四 1.11/2.6：与 iOS 行长按同目）。 */
+    private fun showSwitcherRowMenu(
+        ch: ChannelSummary,
+        onChanged: () -> Unit,
+        onArchiveToggle: (() -> Unit)? = null,
+        onOpenDmSettings: (() -> Unit)? = null,
+        onCloseDm: (() -> Unit)? = null,
+    ) {
+        val mode = normalizeNotifyMode(
+            getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_${ch.id}", null),
+        )
+        val ignored = ch.id in teamChannelIgnoredIds
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        if (onOpenDmSettings != null) {
+            labels += "私聊设置"
+            actions += onOpenDmSettings
+        }
+        labels += if (mode == "静音") "取消免打扰" else "设为免打扰"
+        actions += {
+            setChannelNotifyMode(ch.id, if (mode == "静音") "全部消息" else "静音")
+            onChanged()
+        }
+        labels += if (ignored) "取消忽略" else "忽略消息"
+        actions += {
+            if (!teamChannelIgnoredIds.add(ch.id)) teamChannelIgnoredIds.remove(ch.id)
+            onChanged()
+        }
+        if (onArchiveToggle != null) {
+            labels += if (ch.archived) "取消归档" else "归档频道"
+            actions += onArchiveToggle
+        }
+        if (onCloseDm != null) {
+            labels += "关闭私聊"
+            actions += onCloseDm
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(ch.name)
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+            .show()
+    }
+
     private fun switcherChannelRow(
         ch: ChannelSummary,
         current: Boolean,
+        onLongPress: (() -> Unit)? = null,
         onClick: () -> Unit,
     ): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val outer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             setPadding(dp(20), dp(10), dp(20), dp(10))
             setOnClickListener { onClick() }
+            if (onLongPress != null) {
+                setOnLongClickListener {
+                    onLongPress()
+                    true
+                }
+            }
         }
+        // 全量对齐批四（1.6/2.2）：左侧视觉与 iOS 行同构——频道为圆角
+        // 「#」瓷砖，私聊为圆形头像（对方首字，Agent 暖橙/用户蓝灰）。
+        if (ch.kind == "dm") {
+            val peer = ch.participantDetails.firstOrNull { !it.isSelf }
+            val displayName = peer?.agentName?.takeIf { it.isNotBlank() } ?: ch.name
+            val isAgent = peer?.isAgent != false
+            outer.addView(
+                UiKit.text(
+                    this,
+                    displayName.trim().firstOrNull()?.toString() ?: "私",
+                    16f,
+                    R.color.on_accent,
+                    bold = true,
+                ).apply {
+                    gravity = android.view.Gravity.CENTER
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(if (isAgent) 0xFFD98561.toInt() else 0xFF7394B3.toInt())
+                    }
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                        rightMargin = dp(12)
+                    }
+                },
+            )
+        } else {
+            outer.addView(
+                UiKit.text(this, "#", 18f, R.color.text_primary, bold = true).apply {
+                    gravity = android.view.Gravity.CENTER
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                        cornerRadius = dp(12).toFloat()
+                        setColor(0xFFE0E5F0.toInt())
+                    }
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                        rightMargin = dp(12)
+                    }
+                },
+            )
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        outer.addView(row)
         // 全量对齐批（8.3）：标题行与 iOS 同式——名称在左、最后消息时间
         // 在右（HH:mm，真实数据；无消息不显）。
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
+        val titleText = if (ch.kind == "dm") {
+            ch.participantDetails.firstOrNull { !it.isSelf }?.agentName
+                ?.takeIf { it.isNotBlank() } ?: ch.name
+        } else {
+            ch.name
+        }
         titleRow.addView(
             UiKit.text(
                 this,
-                (if (ch.kind == "dm") "" else "# ") + ch.name +
+                titleText +
                     (if (ch.archived) "（已归档）" else "") + (if (current) " ✓" else ""),
                 15f,
                 R.color.text_primary,
@@ -6737,6 +6852,27 @@ class MainActivity : AppCompatActivity() {
                 )
             },
         )
+        // 全量对齐批四（2.2）：私聊行名称旁补身份徽标（与 iOS 同位同文）。
+        if (ch.kind == "dm") {
+            val peerIsAgent = ch.participantDetails.firstOrNull { !it.isSelf }?.isAgent != false
+            titleRow.addView(
+                UiKit.text(this, if (peerIsAgent) "Agent" else "用户", 10f, R.color.text_secondary, bold = true).apply {
+                    setPadding(dp(6), dp(2), dp(2), dp(2))
+                },
+            )
+        }
+        // 全量对齐批四（1.11）：静音（免打扰）标记与 iOS bell.slash 同位。
+        val rowNotifyMode = normalizeNotifyMode(
+            getSharedPreferences("team_channel_prefs", MODE_PRIVATE)
+                .getString("notify_${ch.id}", null),
+        )
+        if (rowNotifyMode == "静音") {
+            titleRow.addView(
+                UiKit.text(this, "🔕", 11f, R.color.text_tertiary).apply {
+                    setPadding(dp(4), dp(2), 0, dp(2))
+                },
+            )
+        }
         if (ch.lastMessageAtSeconds > 0) {
             titleRow.addView(
                 UiKit.text(
@@ -6777,12 +6913,18 @@ class MainActivity : AppCompatActivity() {
             null
         }
         val sub = StringBuilder(if (ch.kind == "dm") "私聊" else "团队频道")
+        // 全量对齐批四（2.2）：私聊副行补对方身份（iOS 身份行同内容）。
+        if (ch.kind == "dm") {
+            val peerRole = ch.participantDetails.firstOrNull { !it.isSelf }?.role
+                ?.takeIf { it.isNotBlank() }
+            if (peerRole != null) sub.append(" · $peerRole")
+        }
         if (memberCount > 0) {
             sub.append(" · $memberCount 成员")
             if (agentCount != null) sub.append(" · $agentCount Agent")
         }
         row.addView(UiKit.text(this, sub.toString(), 11f, R.color.text_tertiary))
-        return row
+        return outer
     }
 
     /** 从切换面板/新建落入某层某频道：记层、记该层当前频道、落对话层并重订推送。 */
@@ -6811,9 +6953,29 @@ class MainActivity : AppCompatActivity() {
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val search = EditText(this).apply {
             hint = "搜索频道名称、简介或消息…"
+            // 全量对齐批四（1.7）：搜索框铬与 iOS 统一——放大镜图标＋框内 ✕。
+            setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0)
+            compoundDrawablePadding = dp(6)
             inputType = android.text.InputType.TYPE_CLASS_TEXT
             maxLines = 1
-            setPadding(dp(20), dp(12), dp(20), dp(12))
+            setPadding(dp(20), dp(12), dp(8), dp(12))
+        }
+        val searchClear = UiKit.text(this, "✕", 14f, R.color.text_secondary).apply {
+            visibility = View.GONE
+            setPadding(dp(8), dp(12), dp(16), dp(12))
+            setOnClickListener { search.setText("") }
+        }
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(
+                search.apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                },
+            )
+            addView(searchClear)
         }
         var dialog: android.app.Dialog? = null
         // 全量对齐批（8.2）：面板内加「频道／私聊」分段（与 iOS 切换器同式）。
@@ -6821,11 +6983,78 @@ class MainActivity : AppCompatActivity() {
         fun fill() {
             rows.removeAllViews()
             val q = search.text.toString().trim()
-            fun matches(ch: ChannelSummary) =
-                q.isEmpty() || ch.name.contains(q, ignoreCase = true)
+            // 全量对齐批四（1.8/2.5）：过滤域与 iOS 对齐——频道按名称＋
+            // 类别词＋最近消息；私聊按名称/对方名＋角色＋最近消息。
+            fun matches(ch: ChannelSummary): Boolean {
+                if (q.isEmpty()) return true
+                if (ch.name.contains(q, ignoreCase = true)) return true
+                if (ch.lastMessageText.contains(q, ignoreCase = true)) return true
+                if (ch.kind == "dm") {
+                    return ch.participantDetails.any {
+                        it.agentName.contains(q, ignoreCase = true) ||
+                            (it.role?.contains(q, ignoreCase = true) == true)
+                    }
+                }
+                return "团队频道".contains(q, ignoreCase = true)
+            }
             if (dmTab) {
+                val localDms = localList.filter {
+                    it.kind == "dm" && it.id !in teamChannelClosedDmIds && matches(it)
+                }
+                val cloudDmsAll = if (cloudConfigured) {
+                    teamChannelCloudCache.filter {
+                        it.kind == "dm" && it.id !in teamChannelClosedDmIds && matches(it)
+                    }
+                } else {
+                    emptyList()
+                }
+                // 全量对齐批四（2.4）：双组皆空时与 iOS 同形——完整空态
+                // （图标＋标题＋引导），不再逐组灰字；云端未配置时空态后
+                // 仍保留「连接云端」入口（安卓并集内容）。
+                if (localDms.isEmpty() && cloudDmsAll.isEmpty()) {
+                    rows.addView(
+                        LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            gravity = android.view.Gravity.CENTER
+                            setPadding(dp(20), dp(48), dp(20), dp(24))
+                            addView(
+                                UiKit.text(this@MainActivity, "👥", 36f, R.color.text_tertiary, bold = true).apply {
+                                    gravity = android.view.Gravity.CENTER
+                                },
+                            )
+                            addView(
+                                UiKit.text(this@MainActivity, "暂无私聊", 17f, R.color.text_primary, bold = true).apply {
+                                    gravity = android.view.Gravity.CENTER
+                                    setPadding(0, dp(10), 0, 0)
+                                },
+                            )
+                            addView(
+                                UiKit.text(
+                                    this@MainActivity,
+                                    "点右上角「＋ 新建 → 发起私聊」，与频道成员开始 1:1 私聊\n（私聊只在频道成员之间，与单 Agent 对话并存）",
+                                    12f,
+                                    R.color.text_secondary,
+                                ).apply {
+                                    gravity = android.view.Gravity.CENTER
+                                    setPadding(0, dp(6), 0, 0)
+                                },
+                            )
+                        },
+                    )
+                    if (!cloudConfigured) {
+                        rows.addView(
+                            UiKit.text(this, "连接云端", 14f, R.color.accent, bold = true).apply {
+                                setPadding(dp(20), dp(10), dp(20), dp(12))
+                                setOnClickListener {
+                                    dialog?.dismiss()
+                                    toast("云端未连接：请到底部账号（设置）里的「平台连接与令牌签发」连接云端。")
+                                }
+                            },
+                        )
+                    }
+                    return
+                }
                 rows.addView(switcherGroupHeader("本机"))
-                val localDms = localList.filter { it.kind == "dm" && matches(it) }
                 if (localDms.isEmpty()) {
                     rows.addView(
                         UiKit.text(this, "暂无本机私聊", 12f, R.color.text_tertiary).apply {
@@ -6835,7 +7064,26 @@ class MainActivity : AppCompatActivity() {
                 }
                 localDms.forEach { ch ->
                     rows.addView(
-                        switcherChannelRow(ch, endpointLocal && ch.id == activeIdNow) {
+                        switcherChannelRow(
+                            ch,
+                            endpointLocal && ch.id == activeIdNow,
+                            onLongPress = {
+                                showSwitcherRowMenu(
+                                    ch,
+                                    onChanged = { fill() },
+                                    onOpenDmSettings = {
+                                        dialog?.dismiss()
+                                        showDmSettings(ch.id)
+                                    },
+                                    onCloseDm = {
+                                        teamChannelClosedDmIds += ch.id
+                                        if (teamChannelActiveId == ch.id) teamChannelListMode = true
+                                        fill()
+                                        refreshTeamChannel()
+                                    },
+                                )
+                            },
+                        ) {
                             dialog?.dismiss()
                             setChannelLayerPref("local")
                             teamChannelDmMode = true
@@ -6861,7 +7109,7 @@ class MainActivity : AppCompatActivity() {
                         },
                     )
                 } else {
-                    val cloudDms = teamChannelCloudCache.filter { it.kind == "dm" && matches(it) }
+                    val cloudDms = cloudDmsAll
                     if (cloudDms.isEmpty()) {
                         rows.addView(
                             UiKit.text(this, "暂无云端私聊", 12f, R.color.text_tertiary).apply {
@@ -6871,7 +7119,26 @@ class MainActivity : AppCompatActivity() {
                     }
                     cloudDms.forEach { ch ->
                         rows.addView(
-                            switcherChannelRow(ch, !endpointLocal && ch.id == activeIdNow) {
+                            switcherChannelRow(
+                                ch,
+                                !endpointLocal && ch.id == activeIdNow,
+                                onLongPress = {
+                                showSwitcherRowMenu(
+                                    ch,
+                                    onChanged = { fill() },
+                                    onOpenDmSettings = {
+                                        dialog?.dismiss()
+                                        showDmSettings(ch.id)
+                                    },
+                                    onCloseDm = {
+                                        teamChannelClosedDmIds += ch.id
+                                        if (teamChannelActiveId == ch.id) teamChannelListMode = true
+                                        fill()
+                                        refreshTeamChannel()
+                                    },
+                                )
+                            },
+                            ) {
                                 dialog?.dismiss()
                                 setChannelLayerPref("cloud")
                                 teamChannelDmMode = true
@@ -6888,8 +7155,36 @@ class MainActivity : AppCompatActivity() {
                 }
                 return
             }
-            rows.addView(switcherGroupHeader("本机"))
             val locals = localList.filter { it.kind != "dm" && matches(it) }
+            val cloudsAll = if (cloudConfigured) {
+                teamChannelCloudCache.filter { it.kind != "dm" && matches(it) }
+            } else {
+                emptyList()
+            }
+            // 全量对齐批四（1.9）：搜索无结果时与 iOS 同形——全局空态
+            // （# 大字＋「未找到匹配的频道」），不逐组灰字、不留云端组。
+            if (q.isNotEmpty() && locals.isEmpty() && cloudsAll.isEmpty()) {
+                rows.addView(
+                    LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = android.view.Gravity.CENTER
+                        setPadding(dp(20), dp(48), dp(20), dp(24))
+                        addView(
+                            UiKit.text(this@MainActivity, "#", 36f, R.color.text_tertiary, bold = true).apply {
+                                gravity = android.view.Gravity.CENTER
+                            },
+                        )
+                        addView(
+                            UiKit.text(this@MainActivity, "未找到匹配的频道", 17f, R.color.text_primary, bold = true).apply {
+                                gravity = android.view.Gravity.CENTER
+                                setPadding(0, dp(10), 0, 0)
+                            },
+                        )
+                    },
+                )
+                return
+            }
+            rows.addView(switcherGroupHeader("本机"))
             if (locals.isEmpty()) {
                 rows.addView(
                     UiKit.text(this, "暂无本机频道", 12f, R.color.text_tertiary).apply {
@@ -6899,7 +7194,20 @@ class MainActivity : AppCompatActivity() {
             }
             locals.forEach { ch ->
                 rows.addView(
-                    switcherChannelRow(ch, endpointLocal && ch.id == activeIdNow) {
+                    switcherChannelRow(
+                        ch,
+                        endpointLocal && ch.id == activeIdNow,
+                        onLongPress = {
+                            showSwitcherRowMenu(
+                                ch,
+                                onChanged = { fill() },
+                                onArchiveToggle = {
+                                    performChannelManagement { it.setChannelArchived(ch.id, !ch.archived) }
+                                    dialog?.dismiss()
+                                },
+                            )
+                        },
+                    ) {
                         dialog?.dismiss()
                         switchToChannelFromPanel("local", ch.id)
                     },
@@ -6917,7 +7225,7 @@ class MainActivity : AppCompatActivity() {
                     },
                 )
             } else {
-                val clouds = teamChannelCloudCache.filter { it.kind != "dm" && matches(it) }
+                val clouds = cloudsAll
                 if (clouds.isEmpty()) {
                     rows.addView(
                         UiKit.text(this, "暂无云端频道", 12f, R.color.text_tertiary).apply {
@@ -6927,7 +7235,20 @@ class MainActivity : AppCompatActivity() {
                 }
                 clouds.forEach { ch ->
                     rows.addView(
-                        switcherChannelRow(ch, !endpointLocal && ch.id == activeIdNow) {
+                        switcherChannelRow(
+                            ch,
+                            !endpointLocal && ch.id == activeIdNow,
+                            onLongPress = {
+                                showSwitcherRowMenu(
+                                    ch,
+                                    onChanged = { fill() },
+                                    onArchiveToggle = {
+                                        performChannelManagement { it.setChannelArchived(ch.id, !ch.archived) }
+                                        dialog?.dismiss()
+                                    },
+                                )
+                            },
+                        ) {
                             dialog?.dismiss()
                             switchToChannelFromPanel("cloud", ch.id)
                         },
@@ -6938,7 +7259,10 @@ class MainActivity : AppCompatActivity() {
         search.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) { fill() }
+            override fun afterTextChanged(s: android.text.Editable?) {
+                searchClear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+                fill()
+            }
         })
         // 全量对齐批（8.1）：居中对话框改底部 sheet（与 iOS 切换器同式）：
         // 顶栏 ✕＋标题，分段与搜索在名单上方。
@@ -7018,7 +7342,7 @@ class MainActivity : AppCompatActivity() {
             })
             addView(topBar)
             addView(segTrack)
-            addView(search)
+            addView(searchRow)
             addView(android.widget.ScrollView(this@MainActivity).apply { addView(rows) })
         }
         val sheetDialog = android.app.Dialog(this)
