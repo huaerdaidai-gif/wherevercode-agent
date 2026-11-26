@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -36,6 +37,7 @@ import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
@@ -1764,7 +1766,7 @@ class MainActivity : AppCompatActivity() {
                 refreshTeamChannel()
             },
             onOpenAgentManagement = { showEntry(DrawerController.ID_AGENTS_TEAM) },
-            onCreateNew = { showChannelCreateMenu() },
+            onCreateNew = { anchor -> showChannelCreateMenu(anchor) },
             onCreateChannelDirect = { showCreateChannelPage() },
             onOpenDrawer = { openDrawer() },
             onSwitchChannel = { channelId ->
@@ -6821,7 +6823,7 @@ class MainActivity : AppCompatActivity() {
      * 新建频道／发起私聊／打开消息中心。频道专属管理（改名、归档、
      * 删除、成员、Webhook、通知）全在频道设置页里，见 [showChannelSettings]。
      */
-    private fun showChannelCreateMenu() {
+    private fun showChannelCreateMenu(anchor: View) {
         // 第一项随当前层级变（第二轮对齐 iOS）：列表层是「管理频道」
         // （频道名单 → 点行进该频道设置页）；频道对话层是「频道设置」；
         // 私聊对话层是「私聊设置」。其余三项与 iOS 顶栏菜单同序。
@@ -6844,21 +6846,76 @@ class MainActivity : AppCompatActivity() {
                 firstAction = { showChannelSettings(activeTeamChannelId()) }
             }
         }
-        val options = listOf(firstLabel, "新建频道", "发起私聊", "打开消息中心")
-        ListDialog.show(this, "新建", null, options) { which ->
-            when (which) {
-                0 -> firstAction()
-                1 -> showCreateChannelPage()
-                2 -> {
-                    // 发起私聊：切到私聊分段列表页（方案 A），从频道
-                    // 成员名单点人发起（控制器 onStartDm），不在此凭空建。
-                    teamChannelDmMode = true
-                    teamChannelListMode = true
-                    refreshTeamChannel()
-                }
-                3 -> showEntry(DrawerRouter.ID_MESSAGE_CENTER)
-            }
+        val popupBody = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = UiKit.rounded(this@MainActivity, R.color.surface, 20)
+            clipToOutline = true
         }
+        val popup = PopupWindow(
+            popupBody,
+            UiKit.dp(this, 252),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true,
+        ).apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            elevation = UiKit.dp(this@MainActivity, 12).toFloat()
+            isOutsideTouchable = true
+        }
+        val menuItems = listOf(
+            Triple(firstLabel, R.drawable.ic_channel_manage, firstAction),
+            Triple("新建频道", R.drawable.ic_hash, { showCreateChannelPage() }),
+            Triple("发起私聊", R.drawable.ic_team, {
+                // 发起私聊：切到私聊分段列表页（方案 A），从频道
+                // 成员名单点人发起，不在此凭空创建私聊。
+                teamChannelDmMode = true
+                teamChannelListMode = true
+                refreshTeamChannel()
+            }),
+            Triple("打开消息中心", R.drawable.ic_channel_inbox, {
+                showEntry(DrawerRouter.ID_MESSAGE_CENTER)
+            }),
+        )
+        menuItems.forEachIndexed { index, (label, iconRes, action) ->
+            if (index > 0) {
+                popupBody.addView(View(this).apply {
+                    setBackgroundColor(UiKit.color(this@MainActivity, R.color.divider))
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        UiKit.dp(this@MainActivity, 1),
+                    )
+                })
+            }
+            popupBody.addView(
+                UiKit.horizontal(this).apply {
+                    setPadding(
+                        UiKit.dp(this@MainActivity, 18), 0,
+                        UiKit.dp(this@MainActivity, 18), 0,
+                    )
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        UiKit.dp(this@MainActivity, 48),
+                    )
+                    isClickable = true
+                    isFocusable = true
+                    addView(UiKit.icon(this@MainActivity, iconRes, 22, R.color.text_primary))
+                    addView(UiKit.text(this@MainActivity, label, 17f, R.color.text_primary).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+                        )
+                        setPadding(UiKit.dp(this@MainActivity, 14), 0, 0, 0)
+                    })
+                    setOnClickListener {
+                        popup.dismiss()
+                        action()
+                    }
+                },
+            )
+        }
+        popup.showAsDropDown(
+            anchor,
+            anchor.width - UiKit.dp(this, 252),
+            UiKit.dp(this, 8),
+        )
     }
 
     /**

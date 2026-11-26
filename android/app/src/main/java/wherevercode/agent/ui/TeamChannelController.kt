@@ -144,7 +144,7 @@ class TeamChannelController(
     /** 未连接空态里的「前往 Agent 管理」（双端对齐批D，与 iOS 同文同钮）。 */
     private val onOpenAgentManagement: () -> Unit = {},
     /** 页头「＋ 新建」（与 iOS 同位同序；菜单内容由调用方给）。 */
-    private val onCreateNew: () -> Unit = {},
+    private val onCreateNew: (View) -> Unit = {},
     /** 空态「新建频道」钮：与 iOS 空态钮同行为——直达新建频道页，不经页头菜单。 */
     private val onCreateChannelDirect: () -> Unit = {},
     /** 页内标题行 ☰（221 与 iOS 对齐：频道页自带页眉，进页藏壳层顶栏）。 */
@@ -380,7 +380,7 @@ class TeamChannelController(
                     rightMargin = dp(16)
                     topMargin = dp(10)
                 }
-                setOnClickListener { onCreateNew() }
+                setOnClickListener { onCreateNew(this) }
             },
         )
         root.addView(titleRow)
