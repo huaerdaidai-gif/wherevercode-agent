@@ -3314,13 +3314,19 @@ class MainActivity : AppCompatActivity() {
             // 填入上方输入框。持有与否以 pairingManager 的公钥记录为
             // 准（与 wsHandClient 的可建连条件一致）；Hand 侧仍会核
             // 本机的 client_status，未批准照样如实回失败。
-            if (pairingManager.peerPublicKey(hello.deviceId) != null) {
-                val refreshNotice = TextView(this@MainActivity).apply {
-                    setPadding(0, dp(6), 0, 0)
-                }
-                val refreshButton = Button(this@MainActivity).apply {
-                    text = "免命令行远程刷新配对码"
-                }
+            // 线程纪律（2026-11-27 实测修复）：peerPublicKey 会读
+            // Room 配对信任库，主线程直查抛 IllegalStateException，
+            // f50619e8 曾因此配对框一打开即崩。视图先以 GONE 建好，
+            // 后台查到本机持有该设备公钥再回主线程显示，语义不变。
+            val refreshNotice = TextView(this@MainActivity).apply {
+                setPadding(0, dp(6), 0, 0)
+                visibility = View.GONE
+            }
+            val refreshButton = Button(this@MainActivity).apply {
+                text = "免命令行远程刷新配对码"
+                visibility = View.GONE
+            }
+            run {
                 refreshButton.setOnClickListener {
                     refreshButton.isEnabled = false
                     refreshButton.text = "正在请求远端刷新…"
@@ -3368,6 +3374,20 @@ class MainActivity : AppCompatActivity() {
                 addView(refreshButton)
                 addView(refreshNotice)
             }
+            Thread {
+                val hasPeerKey = try {
+                    pairingManager.peerPublicKey(hello.deviceId) != null
+                } catch (e: Exception) {
+                    false
+                }
+                if (hasPeerKey) {
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        refreshButton.visibility = View.VISIBLE
+                        refreshNotice.visibility = View.VISIBLE
+                    }
+                }
+            }.start()
         }
         AlertDialog.Builder(this)
             .setTitle("配对：核对指纹 + 配对码")

@@ -830,12 +830,34 @@ private struct DeviceDetailSheet: View {
     @State private var showDeleteConfirm = false
     @State private var fileOpResult: String?
     @State private var isDeleted = false
+    @State private var isRediscovering = false
+    @State private var rediscoverResult: String?
+    @State private var showHandUpdateHint = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    LabeledContent("设备名称", value: device.displayName)
+                    HStack {
+                        Text("设备名称")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 64, alignment: .leading)
+                        // 改名（控制对齐批一，2026-11-27）：与下方地址同
+                        // 口径即改即存；清空输入时不把空名落盘，保留上
+                        // 一个非空名，字段本身可清空重打。
+                        TextField("设备名称", text: Binding(
+                            get: { device.displayName },
+                            set: { val in
+                                device.displayName = val
+                                if !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    try? LocalData.shared.agents.saveAgent(device)
+                                    onUpdated()
+                                }
+                            }
+                        ))
+                        .autocorrectionDisabled()
+                    }
                     LabeledContent("设备 ID", value: device.deviceId ?? device.agentId)
                     LabeledContent("连接状态") {
                         statusBadge(for: device.memberConnectionState)
@@ -890,6 +912,20 @@ private struct DeviceDetailSheet: View {
                             onNavigateRoute("agents")
                         }
                         .font(.caption)
+                        // 重新发现 Agent（控制对齐批一，2026-11-27，与
+                        // 安卓设备卡同名动作同语义）：重探 hello，把新
+                        // 出现的可用 Agent 按自动发现同一构造补建记录；
+                        // 已存在的（含绑在其他设备上的）不重复建、不改绑。
+                        Button(isRediscovering ? "正在重新发现…" : "重新发现 Agent") {
+                            rediscoverAgents()
+                        }
+                        .font(.caption)
+                        .disabled(isRediscovering)
+                        if let rediscoverResult {
+                            Text(rediscoverResult)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     } header: { Text("承载 Agent（只读关联信息 · \(hello.agents.count) 个）").textCase(nil) } footer: {
                         Text("设备仅作为执行宿主，点此卡片只管理设备连接本身；要修改、配置或增删 Agent，请前往 Agent 管理。")
                     }
@@ -947,6 +983,14 @@ private struct DeviceDetailSheet: View {
                 Section {
                     Button("查看关联任务") { onNavigateRoute("tasks") }
                     if isLocallyAuthorized {
+                        // 更新 Hand（控制对齐批一，2026-11-27）：入口先
+                        // 立起来；iOS 端尚未集成 Hand 自更新通道（安卓
+                        // 端已具备），点开给诚实说明，不假装能更新。
+                        Button("更新 Hand") {
+                            showHandUpdateHint = true
+                        }
+                    }
+                    if isLocallyAuthorized {
                         Button("取消配对并撤销凭据", role: .destructive) {
                             showUnpairConfirm = true
                         }
@@ -980,8 +1024,64 @@ private struct DeviceDetailSheet: View {
             } message: {
                 Text("确定删除设备「\(device.displayName)」吗？只删这条设备记录：这台设备上的 Agent 记录、项目和会话都不删，之后可以重新添加这台设备。")
             }
+            .alert("更新 Hand", isPresented: $showHandUpdateHint) {
+                Button("知道了", role: .cancel) { }
+            } message: {
+                Text("iOS 端暂未集成 Hand 自更新通道（安卓端可从设备卡片更新）。请在目标设备上运行 Hand 的更新命令，或用安卓端完成更新。")
+            }
             .onAppear {
                 probeRealConnection()
+            }
+        }
+    }
+
+    /// 重新发现 Agent（控制对齐批一，2026-11-27）：重探 hello 并补建
+    /// 新 Agent 记录。构造与去重与「添加 Agent」自动发现完全同口径
+    /// （fullId = 设备 id + Agent id；裸 id 已存在也跳过，防跨设备改绑）。
+    private func rediscoverAgents() {
+        guard let raw = device.baseUrl, !raw.isEmpty else { return }
+        let (host, port) = parseHostAndPort(raw)
+        isRediscovering = true
+        rediscoverResult = nil
+        Task {
+            do {
+                let hello = try await HandClient.shared.probeHello(host: host, port: port)
+                await MainActor.run {
+                    self.isRediscovering = false
+                    self.remoteHello = hello
+                    let devId = self.device.deviceId ?? self.device.agentId
+                    let existing = (try? LocalData.shared.agents.listAgents()) ?? []
+                    let existingIds = Set(existing.map(\.agentId))
+                    var added = 0
+                    var skipped = 0
+                    for ag in hello.agents where ag.available && !ag.folder.isEmpty {
+                        let fullId = "\(devId):\(ag.agentId)"
+                        if existingIds.contains(fullId) || existingIds.contains(ag.agentId) {
+                            skipped += 1
+                            continue
+                        }
+                        let rec = AgentRecord(
+                            agentId: fullId,
+                            displayName: "\(ag.displayName) (\(self.device.displayName))",
+                            kind: .device,
+                            access: .cli,
+                            baseUrl: self.device.baseUrl,
+                            lastTestSummary: "设备 Agent · \(ag.folder)",
+                            memberConnectionState: "CONNECTED",
+                            deviceId: devId,
+                            deviceFolder: ag.folder
+                        )
+                        try? LocalData.shared.agents.saveAgent(rec)
+                        added += 1
+                    }
+                    self.rediscoverResult = "重新发现完成：新增 \(added) 个 Agent，已有 \(skipped) 个未重复添加。"
+                    onUpdated()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isRediscovering = false
+                    self.rediscoverResult = "重新发现失败：\(error.localizedDescription)"
+                }
             }
         }
     }
