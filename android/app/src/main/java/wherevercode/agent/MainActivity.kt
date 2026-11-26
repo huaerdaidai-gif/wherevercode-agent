@@ -6676,7 +6676,7 @@ class MainActivity : AppCompatActivity() {
         // 最后消息时间），缺省不显。
         val memberCount = ch.participantDetails.size.takeIf { it > 0 } ?: ch.participantIds.size
         val agentCount = if (ch.participantDetails.isNotEmpty()) {
-            ch.participantDetails.count { it.isAgent }
+            ch.participantDetails.count { it.isAgent == true }
         } else {
             null
         }

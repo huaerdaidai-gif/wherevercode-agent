@@ -613,11 +613,16 @@ class TeamChannelController(
         diagnosticLine.text = diagnostic.orEmpty()
         diagnosticToggle.text = "查看连接诊断"
         // 218：去掉「第 X/3 轮」计数呈现（与 iOS 统一）；到顶提示保留。
-        roundLine.text = if (snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS) {
+        // 全量对齐批（Funk 2026-11-26「全部对齐」）：去掉消息流里常驻的
+        // 「开始新一轮」条（iOS 无此条）——到顶提示行本身可点即解锁，
+        // 与主流聊天软件「只在需要时出现」的做法一致。
+        val atRoundCap = snapshot.roundsUsed >= TeamChatLimits.MAX_ROUNDS
+        roundLine.text = if (atRoundCap) {
             "已到 ${TeamChatLimits.MAX_ROUNDS} 轮上限，点“开始新一轮”继续"
         } else {
             ""
         }
+        roundLine.setOnClickListener(if (atRoundCap) { { onNewRound() } } else { null })
         // 临时提示：同一条通知只在首次出现后的 TTL 内显示，过期自动
         // 隐去（延迟回调负责无新快照时也清行）；新通知重新计时。
         if (snapshot.notice != lastNoticeText) {
@@ -832,12 +837,8 @@ class TeamChannelController(
                 )
             }
         }
-        // 238 对齐批：零消息的空态与 iOS 同形（居中空态），不再叠
-        // 「开始新一轮」行；有消息时轮次行照旧（轮次用尽靠它解锁）。
-        val freshEmpty = snapshot.messages.isEmpty() && searchResults == null && browse == null
-        if (!freshEmpty) {
-            bodyContainer.addView(newRoundRow())
-        }
+        // 全量对齐批：消息流不再常驻「开始新一轮」行（iOS 无此行）；
+        // 轮次到顶时靠页头 roundLine 提示行点按解锁（见 render 开头）。
         if (snapshot.taskCards.isNotEmpty() && snapshot.sectionTab != 2) {
             bodyContainer.addView(taskCardsSection(snapshot.taskCards))
         }
@@ -2191,23 +2192,6 @@ class TeamChannelController(
             },
         )
         return col
-    }
-
-    private fun newRoundRow(): LinearLayout {
-        val row = UiKit.horizontal(context).apply { setPadding(0, dp(6), 0, dp(4)) }
-        row.addView(
-            UiKit.text(context, "开始新一轮", 12f, R.color.accent, bold = true).apply {
-                setBackgroundResource(R.drawable.bg_chip_accent)
-                setPadding(dp(14), dp(8), dp(14), dp(8))
-                setOnClickListener { onNewRound() }
-            },
-        )
-        row.addView(
-            UiKit.text(context, "一轮最多 3 条消息；新一轮从头计。", 10f, R.color.text_tertiary).apply {
-                setPadding(dp(10), 0, 0, 0)
-            },
-        )
-        return row
     }
 
     private fun note(text: String): TextView =
