@@ -156,6 +156,7 @@ import wherevercode.agent.core.install.AssetReader
 import wherevercode.agent.core.install.DeviceInstallController
 import wherevercode.agent.core.install.HandInstallBundleLoader
 import wherevercode.agent.core.install.JschSshSessionFactory
+import wherevercode.agent.core.mcp.HandAdminResult
 import wherevercode.agent.core.mcp.HandClient
 import wherevercode.agent.core.mcp.HandEvent
 import wherevercode.agent.core.mcp.HandRemoteAgentChatPort
@@ -3207,6 +3208,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun probeAndAddRemoteDevice(displayName: String, host: String, port: Int, publicHost: String = "") {
+        // agy 拦截（控制对齐批一，2026-11-27，与 iOS 同口径）：agy 是
+        // Agent，不得登记为设备——名字填 agy 或对方 hello 自报 agy
+        // 都当场拦下，指引去 Agent 页添加。
+        if (displayName.trim().lowercase() == "agy") {
+            toast("agy 是 Agent，不得登记为设备。请在 Agent 页面添加。")
+            return
+        }
         toast("正在连接 $host:$port…")
         Thread {
             try {
@@ -3231,6 +3239,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (hello.displayName.lowercase() == "agy") {
+                        toast("agy 是 Agent，不得登记为设备。请在 Agent 页面添加。")
+                        return@runOnUiThread
+                    }
                     showPairingDialog(displayName, host, port, hello, publicHost)
                 }
             } catch (e: Exception) {
@@ -3296,6 +3308,66 @@ class MainActivity : AppCompatActivity() {
                     setPadding(0, dp(6), 0, 0)
                 },
             )
+            // 远程刷新配对码（控制对齐批一，2026-11-27，与 iOS 同口径）：
+            // 本机已持有该设备的配对公钥（此前已获授权）时，可免去到
+            // 目标机跑命令——经密封管理通道请 Hand 轮换配对码并自动
+            // 填入上方输入框。持有与否以 pairingManager 的公钥记录为
+            // 准（与 wsHandClient 的可建连条件一致）；Hand 侧仍会核
+            // 本机的 client_status，未批准照样如实回失败。
+            if (pairingManager.peerPublicKey(hello.deviceId) != null) {
+                val refreshNotice = TextView(this@MainActivity).apply {
+                    setPadding(0, dp(6), 0, 0)
+                }
+                val refreshButton = Button(this@MainActivity).apply {
+                    text = "免命令行远程刷新配对码"
+                }
+                refreshButton.setOnClickListener {
+                    refreshButton.isEnabled = false
+                    refreshButton.text = "正在请求远端刷新…"
+                    Thread {
+                        val peer = DiscoveredPeer(
+                            deviceId = hello.deviceId,
+                            displayName = hello.displayName,
+                            host = publicHost.ifBlank { host },
+                            port = port,
+                            fingerprintSha256 = fingerprint,
+                            capabilities = listOf("hand"),
+                            fallbackHost = if (publicHost.isNotBlank() && publicHost != host) host else null,
+                        )
+                        val result = try {
+                            val client = wsHandClient(peer)
+                            if (client == null) {
+                                HandAdminResult.Failed("本地未持有该设备的配对公钥，无法发起授权刷新，请在目标机上直接运行 pair-code 命令。")
+                            } else {
+                                runBlocking { client.requestHandAdmin(peer, "rotate_pair_code", emptyMap()) }
+                            }
+                        } catch (e: Exception) {
+                            HandAdminResult.Failed("远程刷新失败：${e.message ?: e.javaClass.simpleName}")
+                        }
+                        runOnUiThread {
+                            if (isFinishing || isDestroyed) return@runOnUiThread
+                            refreshButton.isEnabled = true
+                            refreshButton.text = "免命令行远程刷新配对码"
+                            when (result) {
+                                is HandAdminResult.Ok -> {
+                                    val newCode = result.args["pair_code"]
+                                    if (newCode.isNullOrBlank()) {
+                                        refreshNotice.text = "远程刷新失败：回包里没有配对码。"
+                                    } else {
+                                        codeInput.setText(newCode)
+                                        refreshNotice.text = "已由已认证设备授权刷新新配对码：$newCode（${result.args["expires_in"] ?: "300"} 秒有效）"
+                                    }
+                                }
+                                is HandAdminResult.Failed -> {
+                                    refreshNotice.text = "远程刷新失败：${result.reason}"
+                                }
+                            }
+                        }
+                    }.start()
+                }
+                addView(refreshButton)
+                addView(refreshNotice)
+            }
         }
         AlertDialog.Builder(this)
             .setTitle("配对：核对指纹 + 配对码")
@@ -3749,13 +3821,17 @@ class MainActivity : AppCompatActivity() {
                     }
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed) {
-                            statusView.text = "连接成功：Hand 版本 ${hello.handVersion} · 设备报告 ${hello.agents.size} 个 Agent"
+                            statusView.text = if (hello.handVersion.isBlank()) {
+                                "连接成功：设备报告 ${hello.agents.size} 个 Agent（Hand 未报告版本号）"
+                            } else {
+                                "连接成功：Hand 版本 ${hello.handVersion} · 设备报告 ${hello.agents.size} 个 Agent"
+                            }
                         }
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed) {
-                            statusView.text = "连接失败：${e.message}"
+                            statusView.text = "连接失败：${e.message ?: e.javaClass.simpleName}"
                         }
                     }
                 }
@@ -3804,7 +3880,7 @@ class MainActivity : AppCompatActivity() {
                         authResultView.text = if (result.isSuccess) {
                             "已授权：$folder"
                         } else {
-                            "授权失败：${result.exceptionOrNull()?.message}"
+                            "授权失败：${result.exceptionOrNull()?.let { err -> err.message ?: err.javaClass.simpleName } ?: "未知错误"}"
                         }
                     }
                 }
@@ -3832,7 +3908,7 @@ class MainActivity : AppCompatActivity() {
                                 }
                         }
                     },
-                    onFailure = { error -> "列出失败：${error.message}" },
+                    onFailure = { error -> "列出失败：${error.message ?: error.javaClass.simpleName}" },
                 )
             }
         }
