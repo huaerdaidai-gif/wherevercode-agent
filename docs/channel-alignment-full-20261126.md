@@ -13,7 +13,7 @@
 ## 当前检查条件与限制
 
 - 本轮目标工作树在基线 `ecdf709d` 上是干净的，没有可确认的 13 个本地改动文件。本提交只先落逐项清单；未把其它工作树的内容带入。
-- 已按用户给定 SHA-256 校验 `/tmp/wc056.apk`，并在小米 12 原位安装后用 `dumpsys` 版本 `238 / 0.5.6-native.238+ecdf709d.20261125232618` 与设备 `base.apk` SHA-256 双验正式包。随后设备电量降到 7%；按要求已停止使用并熄屏充电，达到 50% 前不做任何设备操作。
+- 已按用户给定 SHA-256 校验 `/tmp/wc056.apk`，并在小米 12 原位安装后用 `dumpsys` 版本 `238 / 0.5.6-native.238+ecdf709d.20261125232618` 与设备 `base.apk` SHA-256 双验正式包。小米 12 插 USB 充电期间可正常进行本轮实屏对照；不设电量门槛。
 - iOS 基线 CI 的模拟器工件为 build 238、ad-hoc 签名；`codesign --verify --deep --strict` 通过。此前曾在新建模拟器上发生无效点击，该轮不计验收；后续改用已有 `WC237Fresh`（UDID `137A09E5-7282-4C02-BF68-094D849C8140`），每次先 `simctl launch`、检查 `~/Library/Logs/DiagnosticReports`，截图使用 `xcrun simctl io <UDID> screenshot`。点击前激活 Simulator，点击后新截图确认前台和画面变化。
 - 此清单提交时还没有任何频道页面完成双端同屏逐项复验。**以下全部保持 `⚠️未实屏验证`，不代表已对齐。** 238 已有列表、对话、新建页主状态将在原有基础上复核，不推翻既有实现结论。
 - 基线 CI 观察：iOS UI 导航测试报告 `Channels page must open the local channel in dialog-first form without platform configuration` 断言失败；iOS 单元测试 324 pass / 1 skipped。Android CI 有一个与本范围无关的 `DispatchClaimExecuteTest.cancel stops an in-flight execution and marks it cancelled` 超时失败，其余 3069 completed / 1 skipped。它们都不是双端实屏证据；本轮不改 iOS，也不处理非频道 Android 测试。
