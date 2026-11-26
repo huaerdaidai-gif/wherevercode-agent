@@ -10899,6 +10899,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTest(agent: AgentRecord) = testAgentConnection(agent)
             override fun onEdit(agent: AgentRecord) = showAgentForm(agent)
             override fun onRemove(agent: AgentRecord) = removeAgent(agent)
+            override fun onTools(agent: AgentRecord) = openConsoleSubpage(DrawerController.ID_MCP_PLUGINS)
             // Agent 开关（2026-11-12）：关掉只是停用，不是删除；保存后
             // 立即重画列表（热插拔，不用重启 App）。存失败时如实提示，
             // 不假装开关已翻（开关的视觉态由重画后的记录决定）。

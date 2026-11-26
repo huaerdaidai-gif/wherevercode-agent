@@ -44,6 +44,8 @@ class AgentScreenController(
         fun onTest(agent: AgentRecord)
         fun onEdit(agent: AgentRecord)
         fun onRemove(agent: AgentRecord)
+        /** 工具权限（批二 3.20，与 iOS 行钮对齐）→ MCP 页。 */
+        fun onTools(agent: AgentRecord)
         /**
          * 开关（maintainer 2026-11-12：每个 Agent 都要有开/关，支持热插拔）。
          * 关掉只是停用，不是删除；调用方保存后立即重画列表（不用重启 App）。
@@ -654,6 +656,7 @@ class AgentScreenController(
                 }
                 row.addView(actionButton("测试") { ops.onTest(record) })
             }
+            row.addView(actionButton("工具权限") { ops.onTools(record) })
             row.addView(actionButton("编辑") { ops.onEdit(record) })
             row.addView(actionButton("移除") { ops.onRemove(record) })
             card.addView(row)

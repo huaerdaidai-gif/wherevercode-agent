@@ -311,6 +311,7 @@ private struct ComposeTaskScreen: View {
     @ObservedObject var appState: AppState
     var onCreated: () -> Void
     var onNavigateRoute: (String) -> Void = { _ in }
+    var initialAgentId: String = ""
 
     @State private var title = ""
     @State private var description = ""
@@ -366,6 +367,10 @@ private struct ComposeTaskScreen: View {
                 .buttonStyle(.borderedProminent)
             }
             PrototypeRouteSections(routeId: "compose", appState: appState, onNavigateRoute: onNavigateRoute)
+        }
+        .onAppear {
+            // 批二（3.5）：从 Agent 行「指派任务」进来时预填指派对象
+            if assignedAgentId.isEmpty { assignedAgentId = initialAgentId }
         }
     }
 }
@@ -1412,6 +1417,9 @@ private struct CollaborationAndAgentsScreen: View {
     @State private var testResultMsg: String? = nil
     @State private var agentPendingDelete: AgentRecord? = nil
     @State private var showDeleteAgentConfirm = false
+    @State private var assignAgent: AgentRecord? = nil
+    @State private var editingAgent: AgentRecord? = nil
+    @State private var probingAgentId: String? = nil
 
     var body: some View {
         List {
@@ -1467,11 +1475,19 @@ private struct CollaborationAndAgentsScreen: View {
                                         .padding(.vertical, 1)
                                         .background(Color.orange.opacity(0.12), in: Capsule())
                                 }
+                                // 批二（3.19）：认证三态标，与安卓卡 loginLabel 同义同色
+                                Text(ag.loginState == .loggedIn ? "认证通过" : (ag.loginState == .notLoggedIn ? "认证失败" : "未验证"))
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(ag.loginState == .loggedIn ? .green : (ag.loginState == .notLoggedIn ? .red : .orange))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background((ag.loginState == .loggedIn ? Color.green : (ag.loginState == .notLoggedIn ? Color.red : Color.orange)).opacity(0.12), in: Capsule())
                                 Spacer()
                                 Toggle("启用", isOn: Binding(
                                     get: { ag.enabled },
                                     set: { val in
                                         try? LocalData.shared.agents.setEnabled(agentId: ag.agentId, enabled: val)
+                                        bannerMsg = val ? "已启用 \(ag.displayName)：可选、可进频道、可接派活。" : "已停用 \(ag.displayName)：不在选 Agent 里出现，不进频道，不接派活。"
                                         reload()
                                     }
                                 ))
@@ -1492,21 +1508,42 @@ private struct CollaborationAndAgentsScreen: View {
                                 }
                             }
                             HStack(spacing: 8) {
-                                if ag.kind == .device, let host = ag.baseUrl {
+                                if ag.kind == .device, ag.baseUrl != nil {
                                     Button(testingAgentId == ag.agentId ? "正在测试…" : "单兵运行测试") {
                                         executeSingleAgentTest(ag)
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.mini)
                                     .disabled(testingAgentId != nil)
+                                } else {
+                                    Button(probingAgentId == ag.agentId ? "正在测试…" : "测试连接") {
+                                        testConnection(ag)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.mini)
+                                    .disabled(probingAgentId != nil)
                                 }
                                 Button("对话执行") {
                                     onNavigateRoute("chat")
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.mini)
-
+                                if ag.dispatchable {
+                                    Button("指派任务") {
+                                        assignAgent = ag
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                }
+                                Spacer()
+                            }
+                            HStack(spacing: 8) {
                                 Button("工具权限") { onNavigateRoute("mcp") }.buttonStyle(.bordered).controlSize(.mini)
+                                Button("编辑") {
+                                    editingAgent = ag
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
                                 Spacer()
                                 Button("删除", role: .destructive) {
                                     agentPendingDelete = ag
@@ -1553,6 +1590,29 @@ private struct CollaborationAndAgentsScreen: View {
                 }
             )
         }
+        .sheet(item: $assignAgent) { ag in
+            NavigationStack {
+                ComposeTaskScreen(appState: appState, onCreated: {
+                    assignAgent = nil
+                    bannerMsg = "已创建任务并指派给「\(ag.displayName)」。"
+                }, onNavigateRoute: onNavigateRoute, initialAgentId: ag.agentId)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { assignAgent = nil }
+                    }
+                }
+            }
+        }
+        .sheet(item: $editingAgent) { ag in
+            AddAgentSheet(
+                onSaved: { savedName in
+                    reload()
+                    bannerMsg = "已保存 Agent「\(savedName)」。"
+                },
+                onBatchAdded: { _ in },
+                editing: ag
+            )
+        }
     }
 
     private func executeSingleAgentTest(_ ag: AgentRecord) {
@@ -1584,7 +1644,16 @@ private struct CollaborationAndAgentsScreen: View {
                 }
                 await MainActor.run {
                     self.testingAgentId = nil
+                    // 批二（3.19）：单兵测试是真实往返——成功即标认证通过，
+                    // 与安卓 markAgentVerifiedByRealRound 同义（非 hello 探测）。
+                    if var rec = (try? LocalData.shared.agents.getAgent(agentId: ag.agentId)) ?? nil {
+                        rec.loginState = .loggedIn
+                        rec.lastTestSummary = "认证通过：已在单兵运行测试中真实执行并返回输出（真实往返成功，非 hello 探测）。"
+                        rec.lastTestedAtEpochSeconds = Int64(Date().timeIntervalSince1970)
+                        try? LocalData.shared.agents.saveAgent(rec)
+                    }
                     self.testResultMsg = "单兵测试成功！输出：\(output.trimmingCharacters(in: .whitespacesAndNewlines))"
+                    self.reload()
                 }
             } catch {
                 await MainActor.run {
@@ -1592,6 +1661,76 @@ private struct CollaborationAndAgentsScreen: View {
                     self.testResultMsg = "单兵测试失败：\(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    private func persistTestResult(agentId: String, summary: String) {
+        if var rec = (try? LocalData.shared.agents.getAgent(agentId: agentId)) ?? nil {
+            rec.lastTestSummary = summary
+            rec.lastTestedAtEpochSeconds = Int64(Date().timeIntervalSince1970)
+            try? LocalData.shared.agents.saveAgent(rec)
+        }
+        testResultMsg = summary
+        reload()
+    }
+
+    /// 批二（3.6）通用测试连接：按类型做真实可达性探针并写回摘要；
+    /// iOS 上没有本机 CLI 运行环境、也读不到密钥值的类型如实说明，不伪造结果。
+    private func testConnection(_ ag: AgentRecord) {
+        if ag.brainKind == "MODEL_API" || ag.access == .api {
+            guard let raw = ag.baseUrl, !raw.isEmpty,
+                  let url = URL(string: raw.hasPrefix("http") ? raw : "https://\(raw)") else {
+                testResultMsg = "测试连接：\(ag.displayName) 未填服务地址，无法测试。"
+                return
+            }
+            probingAgentId = ag.agentId
+            testResultMsg = "正在测试 \(ag.displayName) 的连接…"
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.timeoutInterval = 10
+            Task {
+                do {
+                    let (_, resp) = try await URLSession.shared.data(for: req)
+                    let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    await MainActor.run {
+                        self.probingAgentId = nil
+                        self.persistTestResult(agentId: ag.agentId, summary: "连接测试：服务可达（HTTP \(code)）。仅证明端点可达；本机未存该 Agent 的密钥值，未做带密钥的调用验证。")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.probingAgentId = nil
+                        self.persistTestResult(agentId: ag.agentId, summary: "连接测试失败：\(error.localizedDescription)")
+                    }
+                }
+            }
+        } else if ag.brainKind == "PLATFORM_AGENT" {
+            guard let host = ag.platformHost, !host.isEmpty,
+                  let url = URL(string: "https://\(host)/api/open/v1/mcp") else {
+                testResultMsg = "测试连接：\(ag.displayName) 未填平台地址，无法测试。"
+                return
+            }
+            probingAgentId = ag.agentId
+            testResultMsg = "正在测试 \(ag.displayName) 的连接…"
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.timeoutInterval = 10
+            Task {
+                do {
+                    let (_, resp) = try await URLSession.shared.data(for: req)
+                    let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    await MainActor.run {
+                        self.probingAgentId = nil
+                        self.persistTestResult(agentId: ag.agentId, summary: "连接测试：平台端点可达（HTTP \(code)）。仅证明端点可达，未做带凭证的调用验证。")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.probingAgentId = nil
+                        self.persistTestResult(agentId: ag.agentId, summary: "连接测试失败：\(error.localizedDescription)")
+                    }
+                }
+            }
+        } else {
+            testResultMsg = "测试连接：\(ag.displayName) 的类型在 iOS 上没有可用的连接探针（订阅/本机 CLI 依赖本机运行环境、云端 Agent 由对方主动来连），未做实际探测，不伪造结果。"
         }
     }
 
@@ -1605,6 +1744,7 @@ private struct CollaborationAndAgentsScreen: View {
 private struct AddAgentSheet: View {
     var onSaved: (String) -> Void
     var onBatchAdded: (Int) -> Void
+    var editing: AgentRecord? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var newAgentId = ""
@@ -1624,6 +1764,47 @@ private struct AddAgentSheet: View {
     @State private var showDiscoveredAgentsPicker = false
     @State private var discoveredItems: [(device: AgentRecord, info: RemoteAgentInfo)] = []
     @State private var checkedDiscoveredIndices: Set<Int> = []
+
+    // 批二（3.11–3.16）：手动表单改 6 类分型＋专区，(kind/access/brainKind) 映射与安卓同义
+    private enum FormAgentType: String, CaseIterable {
+        case modelApi, subscription, localCli, deviceAgent, platformAgent, cloudAgent
+        var label: String {
+            switch self {
+            case .modelApi: return "云端模型 API（填服务地址 + 模型 + 密钥）"
+            case .subscription: return "订阅授权 Agent（已登录的 CLI 会员额度，无密钥框）"
+            case .localCli: return "本机 CLI Agent（填二进制名，如 codebuddy）"
+            case .deviceAgent: return "设备上的 Agent（远程设备上的 CLI）"
+            case .platformAgent: return "平台 Agent（走平台通道 + webhook 唤醒）"
+            case .cloudAgent: return "云端 Agent（MCP 连接器：对方 App 自己来领单）"
+            }
+        }
+    }
+
+    @State private var formType: FormAgentType = .modelApi
+    @State private var formAdapterId = ""
+    @State private var formBinary = ""
+    @State private var formModel = ""
+    @State private var formAuthRef = ""
+    @State private var formCapabilities = ""
+    @State private var formDispatchable = true
+    @State private var formKnownLimits = ""
+    @State private var formDeviceFolder = ""
+    @State private var formIsManus = false
+    @State private var formPlatformAgentId = ""
+    @State private var formPlatformHost = ""
+    @State private var formPlatformChannelId = ""
+    @State private var formWebhookUrl = ""
+    @State private var formWebhookSecretRef = ""
+    @State private var formDirectGithubRead = false
+    @State private var webhookTestStatus: String? = nil
+    @State private var formCloudHomeIsDevice = false
+    @State private var formCloudHomeDeviceId = ""
+    @State private var formRoleDev = true
+    @State private var formRoleReview = true
+    @State private var formRoleDeliver = false
+    @State private var formCanDispatch = true
+    @State private var formError: String? = nil
+    @State private var didPrefill = false
 
     var body: some View {
         NavigationStack {
@@ -1647,34 +1828,160 @@ private struct AddAgentSheet: View {
                     TextField("Agent 标识（如 my-codex）", text: $newAgentId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .disabled(editing != nil)
                     TextField("显示名称（如 Codex 工作节点）", text: $newAgentName)
-                    Picker("类型", selection: $newAgentKind) {
-                        Text("云端 Agent").tag(AgentKind.cloud)
-                        Text("设备 Agent").tag(AgentKind.device)
+                    Picker("类型", selection: $formType) {
+                        ForEach(FormAgentType.allCases, id: \.self) { t in
+                            Text(t.label).tag(t)
+                        }
                     }
-                    if newAgentKind == .device {
+                } header: { Text("手动配置 Agent").textCase(nil) } footer: {
+                    if editing != nil {
+                        Text("编辑已有 Agent：标识不可改，其余字段保存后即生效。")
+                    }
+                }
+
+                if formType == .modelApi {
+                    Section {
+                        TextField("服务地址，如 https://api.deepseek.com", text: $newAgentEndpoint)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField(formIsManus ? "档位：standard / lite / max" : "模型，如 deepseek-flash", text: $formModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("密钥引用名，如 key:deepseek-1；不填则无密钥", text: $formAuthRef)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Toggle("Manus（云端任务型 API：任务型接口，不走 /models 探针）", isOn: $formIsManus)
+                    } header: { Text("云端模型 API 配置").textCase(nil) } footer: {
+                        Text("密钥只存引用名，值只存本机钥匙串、不进记录；本表填引用名，值在模型/大脑配置里维护。")
+                    }
+                }
+
+                if formType == .subscription {
+                    Section {
+                        Text("订阅授权走已登录 CLI 的会员额度：没有服务地址、没有密钥框。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } header: { Text("订阅授权配置").textCase(nil) }
+                }
+
+                if formType == .localCli {
+                    Section {
+                        TextField("CLI 二进制名，如 codebuddy", text: $formBinary)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } header: { Text("本机 CLI 配置").textCase(nil) }
+                }
+
+                if formType == .deviceAgent {
+                    Section {
                         let registeredDevices = (try? LocalData.shared.agents.listAgents())?.filter { $0.kind == .device && $0.access == .app } ?? []
-                        Picker("绑定执行设备", selection: $newAgentDeviceId) {
-                            Text("未绑定设备").tag("")
-                            ForEach(registeredDevices) { dev in
-                                Text(dev.displayName).tag(dev.deviceId ?? dev.agentId)
+                        if registeredDevices.isEmpty {
+                            Text("还没加设备：请先去设备页添加远程设备，再回来加 Agent。")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else {
+                            Picker("绑定执行设备", selection: $newAgentDeviceId) {
+                                Text("未绑定设备").tag("")
+                                ForEach(registeredDevices) { dev in
+                                    Text(dev.displayName).tag(dev.deviceId ?? dev.agentId)
+                                }
                             }
                         }
-                    }
-                    Picker("接入方式", selection: $newAgentAccess) {
-                        ForEach(AgentAccess.allCases, id: \.self) { a in
-                            Text(a.rawValue).tag(a)
-                        }
-                    }
-                    TextField("服务或 Webhook 地址（可选）", text: $newAgentEndpoint)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        TextField("设备上的工作文件夹，如 /Users/example-user", text: $formDeviceFolder)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("设备上的 CLI 二进制名，如 codex", text: $formBinary)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } header: { Text("设备上的 Agent 配置").textCase(nil) }
+                }
 
-                    Button("保存 Agent") {
-                        saveManualAgent()
+                if formType == .platformAgent {
+                    Section {
+                        TextField("平台 Agent ID，如 example-agent", text: $formPlatformAgentId)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("平台地址主机名（必填）", text: $formPlatformHost)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("专用频道 ID（可选）", text: $formPlatformChannelId)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("webhook 地址（可选；只供测试通知用）", text: $formWebhookUrl)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("webhook 签名密钥引用名（可选）", text: $formWebhookSecretRef)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Toggle("直接读 GitHub（该 Agent 能直接读 GitHub 审查完整代码）", isOn: $formDirectGithubRead)
+                        Button("发一条测试通知") { sendWebhookTest() }
+                        if let webhookTestStatus {
+                            Text(webhookTestStatus).font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: { Text("平台 Agent 配置").textCase(nil) } footer: {
+                        Text("App 的平台凭证是 App 级的，在平台连接/MCP 页统一维护，本表不重复收。")
+                    }
+                }
+
+                if formType == .cloudAgent {
+                    Section {
+                        Picker("在哪干活", selection: $formCloudHomeIsDevice) {
+                            Text("云端").tag(false)
+                            Text("归到某设备下（只做分组，不改变权限）").tag(true)
+                        }
+                        if formCloudHomeIsDevice {
+                            let registeredDevices = (try? LocalData.shared.agents.listAgents())?.filter { $0.kind == .device && $0.access == .app } ?? []
+                            Picker("归属设备（分组）", selection: $formCloudHomeDeviceId) {
+                                Text("未选").tag("")
+                                ForEach(registeredDevices) { dev in
+                                    Text(dev.displayName).tag(dev.deviceId ?? dev.agentId)
+                                }
+                            }
+                        }
+                        Toggle("开发（领活写代码）", isOn: $formRoleDev)
+                        Toggle("审查（审查别人的交付）", isOn: $formRoleReview)
+                        Toggle("递代码（把交付的改动递给读不到 GitHub 的审查方）", isOn: $formRoleDeliver)
+                        Toggle("允许它派活（开着能给其他 Agent 派活，关掉只能领活、读、交结果）", isOn: $formCanDispatch)
+                        TextField("钥匙引用名，如 key:my-cloud-agent", text: $formAuthRef)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } header: { Text("云端 Agent 配置").textCase(nil) } footer: {
+                        Text("角色至少勾一个；钥匙引用名不填时保存自动生成 key:<标识>。钥匙值只存本机钥匙串。")
+                    }
+                }
+
+                if formType == .modelApi || formType == .subscription || formType == .localCli || formType == .deviceAgent {
+                    Section {
+                        TextField("适配器 id（可空，留空按类型默认）", text: $formAdapterId)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } header: { Text("适配器").textCase(nil) }
+                }
+
+                if formType != .cloudAgent {
+                    Section {
+                        TextField("能力，逗号分隔，如 dev,review；可空", text: $formCapabilities)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Toggle("可派单（不可派单的 Agent 只对话、不接任务）", isOn: $formDispatchable)
+                        TextField("已知限制，可空", text: $formKnownLimits)
+                    } header: { Text("通用能力与限制").textCase(nil) }
+                }
+
+                if let formError {
+                    Section {
+                        Text(formError).font(.caption).foregroundStyle(.red)
+                    }
+                }
+
+                Section {
+                    Button(editing == nil ? "保存 Agent" : "保存修改") {
+                        saveFormAgent()
                     }
                     .disabled(newAgentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && newAgentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                } header: { Text("手动配置 Agent").textCase(nil) }
+                }
 
                 if let scanErrorMessage {
                     Section {
@@ -1682,8 +1989,9 @@ private struct AddAgentSheet: View {
                     }
                 }
             }
-            .navigationTitle("添加 Agent")
+            .navigationTitle(editing == nil ? "添加 Agent" : "编辑 Agent")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { prefillIfNeeded() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
@@ -1905,26 +2213,217 @@ private struct AddAgentSheet: View {
         onBatchAdded(count)
     }
 
-    private func saveManualAgent() {
+    private static func detectType(_ r: AgentRecord) -> FormAgentType {
+        switch r.brainKind {
+        case "PLATFORM_AGENT": return .platformAgent
+        case "CLOUD_AGENT": return .cloudAgent
+        case "SUBSCRIPTION": return .subscription
+        case "AGENT_RUNTIME": return r.deviceId != nil ? .deviceAgent : .localCli
+        default:
+            if r.adapterId == AgentRecord.platformAdapterId { return .platformAgent }
+            if r.kind == .device { return .deviceAgent }
+            if r.access == .cli { return .localCli }
+            return .modelApi
+        }
+    }
+
+    private func prefillIfNeeded() {
+        guard !didPrefill else { return }
+        didPrefill = true
+        guard let r = editing else { return }
+        newAgentId = r.agentId
+        newAgentName = r.displayName
+        formType = Self.detectType(r)
+        formAdapterId = r.adapterId
+        formBinary = r.binary ?? ""
+        formModel = r.model ?? ""
+        formAuthRef = r.authRef ?? ""
+        formCapabilities = r.capabilities.joined(separator: ",")
+        formDispatchable = r.dispatchable
+        formKnownLimits = r.knownLimits ?? ""
+        newAgentEndpoint = r.baseUrl ?? ""
+        newAgentDeviceId = r.deviceId ?? ""
+        formDeviceFolder = r.deviceFolder ?? ""
+        formIsManus = r.adapterId == "manus"
+        formPlatformAgentId = r.platformAgentId ?? ""
+        formPlatformHost = r.platformHost ?? ""
+        formPlatformChannelId = r.platformChannelId ?? ""
+        formWebhookUrl = r.webhookUrl ?? ""
+        formWebhookSecretRef = r.webhookSecretRef ?? ""
+        formDirectGithubRead = r.directGithubRead
+        formCloudHomeIsDevice = r.cloudHomeDeviceId != nil
+        formCloudHomeDeviceId = r.cloudHomeDeviceId ?? ""
+        formRoleDev = r.cloudRoles.contains("dev")
+        formRoleReview = r.cloudRoles.contains("review")
+        formRoleDeliver = r.cloudRoles.contains("deliver")
+        formCanDispatch = r.canDispatch
+    }
+
+    private func saveFormAgent() {
         let cleanName = newAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawId = newAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalId = rawId.isEmpty ? "agent-\(UUID().uuidString.prefix(6).lowercased())" : rawId
-        guard !cleanName.isEmpty || !rawId.isEmpty else { return }
-        var rec = AgentRecord(
-            agentId: finalId,
-            displayName: cleanName.isEmpty ? finalId : cleanName,
-            kind: newAgentKind,
-            access: newAgentAccess,
-            baseUrl: newAgentEndpoint.isEmpty ? nil : newAgentEndpoint,
-            lastTestSummary: "本地已登记",
-            memberConnectionState: "NOT_CONNECTED"
-        )
-        if newAgentKind == .device && !newAgentDeviceId.isEmpty {
+        let finalId = editing?.agentId ?? (rawId.isEmpty ? "agent-\(UUID().uuidString.prefix(6).lowercased())" : rawId)
+        guard !cleanName.isEmpty || !rawId.isEmpty || editing != nil else { return }
+        formError = nil
+
+        // 编辑时从原记录起步：表单不管的字段（登录态/测试摘要/创建时间等）原样保留
+        var rec = editing ?? AgentRecord(agentId: finalId, displayName: cleanName.isEmpty ? finalId : cleanName)
+        rec.agentId = finalId
+        if !cleanName.isEmpty { rec.displayName = cleanName }
+        let caps = formCapabilities.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let limits = formKnownLimits.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch formType {
+        case .modelApi:
+            rec.kind = .cloud
+            rec.access = .api
+            rec.brainKind = "MODEL_API"
+            rec.adapterId = formIsManus ? "manus" : (formAdapterId.isEmpty ? "model-api-generic" : formAdapterId)
+            var url = newAgentEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if formIsManus && url.isEmpty { url = "https://api.manus.ai" }
+            rec.baseUrl = url.isEmpty ? nil : url
+            rec.model = formModel.isEmpty ? nil : formModel
+            rec.authRef = formAuthRef.isEmpty ? nil : formAuthRef
+            rec.binary = nil
+            rec.deviceId = nil
+            rec.deviceFolder = nil
+        case .subscription:
+            rec.kind = .cloud
+            rec.access = .cli
+            rec.brainKind = "SUBSCRIPTION"
+            rec.adapterId = formAdapterId.isEmpty ? "subscription" : formAdapterId
+            rec.baseUrl = nil
+            rec.authRef = nil
+            rec.binary = nil
+            rec.deviceId = nil
+            rec.deviceFolder = nil
+        case .localCli:
+            rec.kind = .cloud
+            rec.access = .cli
+            rec.brainKind = "AGENT_RUNTIME"
+            rec.adapterId = formAdapterId.isEmpty ? (formBinary.isEmpty ? "cli-generic" : formBinary) : formAdapterId
+            rec.binary = formBinary.isEmpty ? nil : formBinary
+            rec.baseUrl = nil
+            rec.deviceId = nil
+            rec.deviceFolder = nil
+        case .deviceAgent:
+            guard !newAgentDeviceId.isEmpty else {
+                formError = "还没选设备：请先去设备页添加远程设备，再回来选一台已添加的设备。"
+                return
+            }
+            rec.kind = .device
+            rec.access = .cli
+            rec.brainKind = "AGENT_RUNTIME"
+            rec.adapterId = formAdapterId.isEmpty ? (formBinary.isEmpty ? "cli-generic" : formBinary) : formAdapterId
+            rec.binary = formBinary.isEmpty ? nil : formBinary
             rec.deviceId = newAgentDeviceId
+            rec.deviceFolder = formDeviceFolder.isEmpty ? nil : formDeviceFolder
+            let host = (try? LocalData.shared.agents.listAgents())?.first(where: { ($0.deviceId ?? $0.agentId) == newAgentDeviceId })
+            rec.baseUrl = host?.baseUrl
+        case .platformAgent:
+            let pid = formPlatformAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let phost = formPlatformHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !pid.isEmpty else { formError = "平台 Agent 需要填写平台 Agent ID，如 example-agent。"; return }
+            guard !phost.isEmpty else { formError = "平台 Agent 需要填写平台地址主机名。"; return }
+            rec.kind = .cloud
+            rec.access = .webhook
+            rec.brainKind = "PLATFORM_AGENT"
+            rec.adapterId = AgentRecord.platformAdapterId
+            rec.platformAgentId = pid
+            rec.platformHost = phost
+            rec.platformChannelId = formPlatformChannelId.isEmpty ? nil : formPlatformChannelId
+            rec.webhookUrl = formWebhookUrl.isEmpty ? nil : formWebhookUrl
+            rec.webhookSecretRef = formWebhookSecretRef.isEmpty ? nil : formWebhookSecretRef
+            rec.directGithubRead = formDirectGithubRead
+            rec.binary = nil
+            rec.deviceId = nil
+            rec.deviceFolder = nil
+        case .cloudAgent:
+            var roles: [String] = []
+            if formRoleDev { roles.append("dev") }
+            if formRoleReview { roles.append("review") }
+            if formRoleDeliver { roles.append("deliver") }
+            guard !roles.isEmpty else { formError = "云端 Agent 至少要勾一个角色：开发、审查、递代码。"; return }
+            rec.kind = .cloud
+            rec.access = .connector
+            rec.brainKind = "CLOUD_AGENT"
+            rec.adapterId = "cloud-agent"
+            rec.cloudRoles = roles
+            rec.canDispatch = formCanDispatch
+            rec.cloudHomeDeviceId = (formCloudHomeIsDevice && !formCloudHomeDeviceId.isEmpty) ? formCloudHomeDeviceId : nil
+            rec.authRef = formAuthRef.isEmpty ? "key:\(finalId)" : formAuthRef
+            rec.binary = nil
+            rec.deviceId = nil
+            rec.deviceFolder = nil
+        }
+
+        // 换类型时清掉不属于当前类型的专属字段，避免脏数据跨类型残留
+        if formType != .platformAgent {
+            rec.platformAgentId = nil
+            rec.platformHost = nil
+            rec.platformChannelId = nil
+            rec.webhookUrl = nil
+            rec.webhookSecretRef = nil
+            rec.directGithubRead = false
+        }
+        if formType != .cloudAgent {
+            rec.cloudRoles = []
+            rec.cloudHomeDeviceId = nil
+        }
+        if formType != .cloudAgent {
+            rec.capabilities = caps
+            rec.dispatchable = formDispatchable
+            rec.knownLimits = limits.isEmpty ? nil : limits
+        }
+        if editing == nil {
+            rec.quotaRule = rec.kind == .cloud ? "按厂商额度" : "设备本地，不占云端额度"
+            rec.lastTestSummary = "本地已登记"
+            rec.memberConnectionState = "NOT_CONNECTED"
         }
         try? LocalData.shared.agents.saveAgent(rec)
         dismiss()
         onSaved(rec.displayName)
+    }
+
+    /// 平台 Agent 专区「发一条测试通知」：与安卓 PlatformWebhookTester 同款
+    /// 载荷与结论口径；iOS 表单只存签名密钥引用名、无密钥值，故本次不签名并如实注明。
+    private func sendWebhookTest() {
+        let hook = formWebhookUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hook.isEmpty else { webhookTestStatus = "请先填 webhook 地址。"; return }
+        let targetId = formPlatformAgentId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetId.isEmpty else { webhookTestStatus = "请先填平台 Agent ID。"; return }
+        guard let url = URL(string: hook) else { webhookTestStatus = "webhook 地址不是合法 URL。"; return }
+        webhookTestStatus = "正在发测试通知…"
+        let payload: [String: Any] = [
+            "event": "test_notification",
+            "source": "v5-app",
+            "agent_id": targetId,
+            "text": "WhereverCode V5 App 测试通知：只验证 webhook 端点可达，请忽略，不要当作真实任务。"
+        ]
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 10
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        let unsignedNote = formWebhookSecretRef.isEmpty ? "" : "（本机只存签名密钥引用名、无密钥值，本次未签名）"
+        Task {
+            do {
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                await MainActor.run {
+                    if (200..<300).contains(code) {
+                        self.webhookTestStatus = "测试通知已通：webhook 回 HTTP \(code)（只证明端点可达，不证明平台会用它唤醒对方）。\(unsignedNote)"
+                    } else {
+                        let preview = String(data: data, encoding: .utf8).map { String($0.prefix(80)) } ?? ""
+                        self.webhookTestStatus = "测试通知不通：webhook 回 HTTP \(code)（\(preview.isEmpty ? "无回包说明" : preview)）。\(unsignedNote)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.webhookTestStatus = "测试通知发不出去：\(error.localizedDescription)"
+                }
+            }
+        }
     }
 }
 
