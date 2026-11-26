@@ -27,7 +27,7 @@
 ## 最新检查点：双端测试样本已准备（2026-11-26）
 
 - 按监督方要求在两端本地账本注入同一份频道测试数据：本地频道「项目协调」「设计讨论」、成员私聊「验收成员」，共 9 条消息（本人/他人、两条回复组成的话题、@all、置顶、附件引用）及 2 条频道派单状态样本。账本 SHA-256：频道 `56284ddafb2bb82478d141e140d73ae7ecffc53b18b2c7307a275f92716504f7`；任务 `d65978dea20c687d29279cddb4c6a458a5c71b3737cd15fa6135b704c071fdf2`。这是本机验收夹具，不作为功能一致性证据。
-- 小米 12（serial `50223a6f`）已将 `wherevercode.agent.ci` 全新卸载并安装 CI run `45759371035` 的 `0094f9e6` debug APK；`dumpsys` 为 `versionCode=212`、`0.5.6-native.212+0094f9e6.20261126051202`。CI ZIP SHA-256 `b0f84f68da9d3cc7a013ba60223098045a8d58bb0eb80511e554e78d3f06308f`；安装前 APK 与设备拉回的 `base.apk` SHA-256 均为 `d8f45c2a3b42a096551309d9c2e86b2af88486d21cbaf0bee21b3671c121f6df`。USB 供电中。Android 当前频道对话页可见「项目协调」、两名成员、话题计数、置顶消息、本人与他人消息和输入栏；截图 `/tmp/wc-android-channel-nav.png` SHA-256 `2ec4ae7369a54e4108fc12e4db2bfe08292decae88e7d70d050f66b94b6ca75b`。屏幕上连接状态仍为「正在连接频道…」，不能据此判定已连接。
+- 小米 12（serial `50223a6f`）已将 `wherevercode.agent.ci` 全新卸载并安装 CI run `45759371035` 的 `0094f9e6` debug APK；`dumpsys` 为 `versionCode=212`、`0.5.6-native.212+0094f9e6.20261126051202`。CI ZIP SHA-256 `b0f84f68da9d3cc7a013ba60223098045a8d58bb0eb80511e554e78d3f06308f`；安装前 APK 与设备拉回的 `base.apk` SHA-256 均为 `d8f45c2a3b42a096551309d9c2e86b2af88486d21cbaf0bee21b3671c121f6df`。USB 供电中。Android 当前频道对话页可见「项目协调」、两名成员、话题计数、置顶消息、本人与他人消息和输入栏；截图 `/tmp/wc-android-channel-nav.png` SHA-256 `2ec4ae7369a54e4108fc12e4db2bfe08292decae88e7d70d050f66b94b6ca75b`。在确认 MainActivity 前台后实点 Android「＋ 新建」，新截图显示「频道设置 / 新建频道 / 发起私聊 / 打开消息中心」四项；再点「新建频道」出现表单，预填「本地频道」，稳定画面截图 SHA-256 `5e806dda33746690d36bf3a222d0eb904341eb5047bbb1609e6571e3177f397b`。这只是 Android 单端观察；1.10、3.1 未完成 iOS 复验仍为 ⚠。屏幕上连接状态仍为「正在连接频道…」，不能据此判定已连接。
 - iOS 保持 CI build 238 / app `wherevercode.agent`；启动后没有新增 `WhereverCodeAgent` 崩溃报告，进程仍在前台。JXA 本机事件路线的失败现况：Mac 桌面截图 1440×900，Simulator 窗口 `(932,43,355,767)`；iOS 截图 1179×2556，按屏幕区换算菜单点 `(986,182)`。首个脚本精确报错 `TypeError: $.usleep is not a function`，在投递前中止；修正后 JXA 输出 `posted calibrated click (986,182)`，但紧接的 `simctl io screenshot` SHA-256 前后相同 `f407550632941533965daa6ae27aab582ac502049fa2856f41e6864e7825edb9`，画面未变。`CGPreflightPostEventAccess() == false`、`AXIsProcessTrusted == false`。调用已编译的频道深链 `wherevercode://channel/<id>` 后，iOS 显示系统确认框“Open in ‘WhereverCode Agent’?”；当前截图 `/tmp/wc-ios-open-confirmation.png` SHA-256 `8c9c666fe7789d04117d9250bb3ad45a4b263c6148ea42f60dc847471bb88302`，尚未点 Open，因此没有 iOS 频道页或双端并排画面。QtScrcpy 窗口可见设备 `Phone-50223a6f`，尚未连上镜像；目前 Android 截图经 ADB 单独获取，未冒充 QtScrcpy 同屏验收。
 - `mcp__cua_repl` 初始化报错 `Native apps: Error: Sky Computer Use service startup request failed`。监督方已指定使用其可用点击通道；本机不再请求 Terminal 授权，也不再执行 JXA/AX 点击。1.10、3.1 和所有需点击条目继续保持 `⚠️未实屏验证`，直至收到监督方逐步截图。
 - 启动结论：iOS 首次 `simctl launch` 后的一张截图为白屏，但应用进程 PID `90917` 一直存活，诊断目录没有新增 `WhereverCodeAgent` 崩溃；约 5 秒后截图显示应用首页（`/tmp/wc-ios-seeded-after-wait.png`）。因此这是初始化期间的暂态首帧，不是闪退。Android 首次启动的系统通知权限框以返回键关闭，未作允许/拒绝选择；随后「稍后再看」跳过首次引导并进入应用。当前 Android 已在频道对话页，没有启动崩溃。
@@ -71,7 +71,7 @@
 | 1.7 | 搜索框图标、占位文案、聚焦与空词状态 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
 | 1.8 | 搜索词按频道名、简介/话题、最近消息过滤及命中结果 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
 | 1.9 | 搜索无结果的空态文案与返回列表行为 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
-| 1.10 | 顶部「＋ 新建」按钮及菜单中的管理频道、新建频道、发起私聊、打开消息中心条目 | ⚠️未实屏验证（Android 0094f9e 已全新安装但改后菜单尚未双端复验；iOS 停在系统 Open 确认框，本机 JXA 事件发布/辅助功能权限均为 false） |
+| 1.10 | 顶部「＋ 新建」按钮及菜单中的管理频道、新建频道、发起私聊、打开消息中心条目 | ⚠️未实屏验证（Android 0094f9e 单端已见四项菜单（截图 `/tmp/wc-android-0094-create-menu.png`，SHA-256 `bd5ba6e15172ab9998e08a3f0c7426d184057793847de031e67b3657c37ed97d`）；iOS build 238 尚未实点，等待当前 Open 确认框后的监督方截图） |
 | 1.11 | 频道行长按菜单：免打扰开关、忽略开关、归档/移出归档 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
 
 本类计数：`✅1 / 🔧0 / ❌0 / ⚠️10`。
@@ -97,7 +97,7 @@
 
 | ID | 逐项核对 | 状态 |
 |---|---|---|
-| 3.1 | 新建页完整布局、标题、导航按钮、表单分组和键盘状态（238 已对齐主状态，须复核） | ⚠️未实屏验证（Android 0094f9e 新包尚未重看表单；iOS 238 目前停在系统 Open 确认框，现无双端表单截图） |
+| 3.1 | 新建页完整布局、标题、导航按钮、表单分组和键盘状态（238 已对齐主状态，须复核） | ⚠️未实屏验证（Android 0094f9e 表单已单端显示，截图 `/tmp/wc-android-0094-create-form-stable.png`，SHA-256 `5e806dda33746690d36bf3a222d0eb904341eb5047bbb1609e6571e3177f397b`；iOS 238 仅有样本注入前旧截图 SHA-256 `b922a0642f28113de2e64e0a7a9b555ad090d765d9964fbccb0118dd2fc0a164`，当前 Open 确认框阻断本轮重看，键盘态未实点） |
 | 3.2 | 名称字段标签、占位/默认预填「本地频道」、光标与输入状态 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
 | 3.3 | 云端可用时「放在」分段及「本机 / 云端」选项 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
 | 3.4 | 云端不可用时放置选项隐藏/禁用形态和本机创建路径 | ⚠️未实屏验证（双端测试样本已准备；Android 0094f9e 已呈现频道对话样本，iOS 238 仍在系统 Open 确认框；本机 JXA 事件发布/辅助功能权限为 false，暂无双端同屏证据） |
