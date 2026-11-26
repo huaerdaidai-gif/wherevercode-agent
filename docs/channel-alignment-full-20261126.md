@@ -13,16 +13,18 @@
 ## 当前检查条件与限制
 
 - 本轮目标工作树在基线 `ecdf709d` 上是干净的，没有可确认的 13 个本地改动文件。本提交只先落逐项清单；未把其它工作树的内容带入。
-- 已按用户给定 SHA-256 校验 `/tmp/wc056.apk`，并在小米 12 原位安装后用 `dumpsys` 版本 `238 / 0.5.6-native.238+ecdf709d.20261125232618` 与设备 `base.apk` SHA-256 双验正式包。小米 12 插 USB 充电期间可正常进行本轮实屏对照；不设电量门槛。
-- iOS 基线 CI 的模拟器工件为 build 238、ad-hoc 签名；`codesign --verify --deep --strict` 通过。此前曾在新建模拟器上发生无效点击，该轮不计验收；后续改用已有 `WC237Fresh`（UDID `137A09E5-7282-4C02-BF68-094D849C8140`），每次先 `simctl launch`、检查 `~/Library/Logs/DiagnosticReports`，截图使用 `xcrun simctl io <UDID> screenshot`。点击前激活 Simulator，点击后新截图确认前台和画面变化。
-- 此清单提交时还没有任何频道页面完成双端同屏逐项复验。**以下全部保持 `⚠️未实屏验证`，不代表已对齐。** 238 已有列表、对话、新建页主状态将在原有基础上复核，不推翻既有实现结论。
-- 基线 CI 观察：iOS UI 导航测试报告 `Channels page must open the local channel in dialog-first form without platform configuration` 断言失败；iOS 单元测试 324 pass / 1 skipped。Android CI 有一个与本范围无关的 `DispatchClaimExecuteTest.cancel stops an in-flight execution and marks it cancelled` 超时失败，其余 3069 completed / 1 skipped。它们都不是双端实屏证据；本轮不改 iOS，也不处理非频道 Android 测试。
+- 小米 12（serial `50223a6f`）开工时未安装 `wherevercode.agent`。按用户要求完成全新安装：`/tmp/wc056.apk` SHA-256 与指定值一致；安装后 `dumpsys` 为 `238 / 0.5.6-native.238+ecdf709d.20261125232618`，设备 `base.apk` SHA-256 双验一致。USB 供电中，按用户纠正不设电量门槛。
+- iOS 基线 CI 的模拟器工件为 build 238、ad-hoc 签名；`codesign --verify --deep --strict` 通过。`WC237Fresh`（UDID `137A09E5-7282-4C02-BF68-094D849C8140`）的 `simctl launch` 长时间无响应；本轮改用已启动并可运行的 `ChannelAlignment238-20261126`（UDID `E5B47D53-D215-46EE-A077-BE58E4121868`）实屏。iOS 截图一律经 `xcrun simctl io <UDID> screenshot`。
+- 已完成的双端实屏项只有 1.1：iOS `ChannelAlignment238-20261126` 与小米 12 正式包 238 都显示零频道空态，标题、说明、分段、顶部「＋ 新建」及底部「新建频道」动作一致。截图 SHA-256：iOS `c7a4f6d9dcb0e791b5b58d91fbf9013d9a264c74b5b5d82b9c069c76197fc13f`；小米 `5f1ba6e1c68525c381b63f30dac954374026c307e6ce2a9e448efb4b656bc39c`。
+- 1.10 改前实屏：iOS build 238 在 `ChannelAlignment238-20261126` 显示锚定式四项图标菜单；小米 12 正式包 build 238 显示带「新建」标题和「取消」按钮、没有图标的对话框，确认不一致。安卓菜单随后在 commit `2b17db5f866d096a5aea525bf956531a8fadac27` 改为锚定式图标弹层（Android `MainActivity.kt` 的 `showChannelCreateMenu`、`TeamChannelController.kt` 的按钮锚点）。对应 CI run `45748801218` 编译/打包成功，debug 工件已安装为 `wherevercode.agent.ci`；其版本为 `0.5.6-native.212+2b17db5f.20261126033042`。**改后菜单尚未在小米与 iOS 双端同屏打开复验，因此 1.10 仍为 `⚠️未实屏验证`，不能标为已改一致。**
+- 1.10 改后复验当前受 Mac 点击通道阻断：PowerKing `window_list` / `app_activate` 返回 `McpServerError: Connection timed out`（`https://mac.tail0b9b9a.ts.net/mcp`）；CUA 返回 `Native apps: Error: Sky Computer Use service startup request failed`；AppleScript 查询 System Events 被系统拒绝 `(-1743)`；本地 CGEvent 前置检查为 `CGPreflightPostEventAccess=false`，该点击未改变 iOS 页面。不得将其算作点击或验证。后续如控制通道恢复，必须重新激活 Simulator 并对菜单实屏复验。
+- CI 观察：基线 iOS UI 导航测试报告 `Channels page must open the local channel in dialog-first form without platform configuration` 断言失败；iOS 单元测试 324 pass / 1 skipped。提交 `2b17db5` 的 Android CI 已成功编译并生成 APK，但 `testDebugUnitTest` 失败：3069 tests completed / 833 failed，多数失败栈落在 `MavenArtifactFetcher.java:129` 并由 `java.io.IOException` 引起。CI 不为绿，且 CI 绿本身不作为双端实屏依据。本轮不改 iOS，也不处理非频道功能。
 - 2026-11-26 `WC237Fresh` 实屏启动卡点：设备已启动；CI build 238 ad-hoc app 的 `xcrun simctl install 137A09E5-7282-4C02-BF68-094D849C8140 /tmp/wc-ios-sim-main-ecdf709d/WhereverCodeAgent.app` 返回 exit 0。随后 `xcrun simctl launch 137A09E5-7282-4C02-BF68-094D849C8140 wherevercode.agent` 长时间无 stdout/stderr，未在本轮 10 分钟设备环境窗口内返回；中断时 exit 130。`xcrun simctl io 137A09E5-7282-4C02-BF68-094D849C8140 screenshot /tmp/wc-ios-wc237fresh-channel.png` 返回成功，但截图画面是 SpringBoard，不能作频道验收证据。启动后检查 `~/Library/Logs/DiagnosticReports` 近 10 分钟没有新的 `WhereverCodeAgent` 崩溃报告。目录中有 2026-11-21 的旧崩溃报告；最新一份对应 build 211，原因 `SIGKILL (Code Signature Invalid)` / `Taskgated Invalid Signature`，不是本轮 build 238 CI ad-hoc 包，不能作为 build 238 启动原因。没有在 App 未前台时点击。第 1 类因此仍未完成；第 2–10 类尚未开始双端实屏核对。
 - 用户已指出已知待查缺口：待落地任务目前未在消息中心呈现（自 237 起挂账）。在实屏确认并决定补齐或定为缺口前，按本轮要求保留未验证状态，不能把它模糊写成一致。
 
 ## 状态汇总
 
-每个编号是一条独立核对项。当前共 112 项：`✅本就一致 0` / `🔧已改一致 0` / `❌缺口 0` / `⚠️未实屏验证 112`。每完成一类屏幕状态，更新该类状态和计数并推送分支。
+每个编号是一条独立核对项。当前共 112 项：`✅本就一致 1` / `🔧已改一致 0` / `❌缺口 0` / `⚠️未实屏验证 111`。只有双端同屏逐项复验通过后才计入一致/已改；每完成一类屏幕状态，更新该类状态和计数并推送分支。
 
 ## 1. 频道列表页
 
@@ -30,7 +32,7 @@
 
 | ID | 逐项核对 | 状态 |
 |---|---|---|
-| 1.1 | 零频道时页面空态标题、说明、图标/留白与新建动作 | ⚠️未实屏验证 |
+| 1.1 | 零频道时页面空态标题、说明、图标/留白与新建动作 | ✅本就一致（iOS `ChannelAlignment238-20261126` / 小米 12 正式包 build 238 双端实屏） |
 | 1.2 | 有频道时列表默认状态、频道行布局和点选行为（238 已对齐主状态，须复核） | ⚠️未实屏验证 |
 | 1.3 | 本机分组标题、顺序、频道行和组内空状态 | ⚠️未实屏验证 |
 | 1.4 | 云端分组标题、顺序、频道行和组内空状态 | ⚠️未实屏验证 |
@@ -39,10 +41,10 @@
 | 1.7 | 搜索框图标、占位文案、聚焦与空词状态 | ⚠️未实屏验证 |
 | 1.8 | 搜索词按频道名、简介/话题、最近消息过滤及命中结果 | ⚠️未实屏验证 |
 | 1.9 | 搜索无结果的空态文案与返回列表行为 | ⚠️未实屏验证 |
-| 1.10 | 顶部「＋ 新建」按钮及菜单中的管理频道、新建频道、发起私聊、打开消息中心条目 | ⚠️未实屏验证 |
+| 1.10 | 顶部「＋ 新建」按钮及菜单中的管理频道、新建频道、发起私聊、打开消息中心条目 | ⚠️未实屏验证（改前已实屏发现菜单样式差异；commit `2b17db5` 已改安卓，CI debug 包已装小米，但尚未在改后包及 iOS 上复验菜单） |
 | 1.11 | 频道行长按菜单：免打扰开关、忽略开关、归档/移出归档 | ⚠️未实屏验证 |
 
-本类计数：`✅0 / 🔧0 / ❌0 / ⚠️11`。
+本类计数：`✅1 / 🔧0 / ❌0 / ⚠️10`。
 
 ## 2. 频道／私聊分段
 
