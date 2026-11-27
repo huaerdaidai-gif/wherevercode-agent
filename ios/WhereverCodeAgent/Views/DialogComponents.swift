@@ -70,6 +70,21 @@ extension View {
 /// - 频道：LazyVStack、scrollTargetID 传 nil（不无条件滚底）；
 ///   showsScrollToBottomButton 开时另有口径：贴底时新消息保持
 ///   贴底、离底时右下角出 ↓ 拉底按钮（滚到 bottomTargetID）。
+/// ↓ 拉底按钮的几何量测通道（DialogMessageListView 内部用）。
+private struct DialogSentinelFrameKey: PreferenceKey {
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
+}
+
+private struct DialogViewportHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var lazy: Bool
     public var spacing: CGFloat
@@ -87,7 +102,18 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var showsScrollToBottomButton: Bool
     /// 拉底目标（最后一条消息的 id）；按钮与贴底跟随都滚到它。
     public var bottomTargetID: String?
-    @State private var isAtBottom = true
+    @State private var sentinelMinY: CGFloat? = nil
+    @State private var viewportHeight: CGFloat = 0
+
+    /// 贴底判定（几何实测，不靠哨兵 onAppear/onDisappear——LazyVStack
+    /// 视图回收时这两个回调不可靠：2026-11-27 模拟器实测，发送新消息
+    /// 把哨兵推离可见区后没收到 onDisappear，按钮被误藏）。
+    /// 哨兵未被实现（离底很远）= 未贴底；哨兵上沿进入视口下沿
+    /// 24pt 内 = 贴底。
+    private var isAtBottom: Bool {
+        guard let y = sentinelMinY else { return false }
+        return y <= viewportHeight + 24
+    }
     public var content: () -> Content
     public var trailing: () -> Trailing
 
@@ -129,6 +155,13 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
                         .padding(.bottom, bottomPadding)
                         .dialogTapContent(onTapContent)
                 }
+                .coordinateSpace(name: "dialogListScroll")
+                .background {
+                    GeometryReader { geo in
+                        Color.clear
+                            .preference(key: DialogViewportHeightKey.self, value: geo.size.height)
+                    }
+                }
                 if showsScrollToBottomButton, !isAtBottom, bottomTargetID != nil {
                     Button {
                         scrollToBottom(proxy)
@@ -145,6 +178,12 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
                     .padding(.bottom, 12)
                     .accessibilityIdentifier("dialog.scrollToBottom")
                 }
+            }
+            .onPreferenceChange(DialogSentinelFrameKey.self) { value in
+                sentinelMinY = value
+            }
+            .onPreferenceChange(DialogViewportHeightKey.self) { value in
+                viewportHeight = value
             }
             #if compiler(>=6.0)
             .onChange(of: scrollTrigger) { _, _ in scrollToTarget(proxy) }
@@ -171,14 +210,23 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         }
     }
 
-    /// 栈尾哨兵（仅拉底按钮开启时）：进出可见区即贴底状态变化。
+    /// 栈尾哨兵（仅拉底按钮开启时）：用 GeometryReader 实测自身在
+    /// 滚动坐标系中的上沿位置并上报，贴底判定见 isAtBottom。
     @ViewBuilder
     private var bottomSentinel: some View {
         if showsScrollToBottomButton {
             Color.clear
                 .frame(height: 1)
-                .onAppear { isAtBottom = true }
-                .onDisappear { isAtBottom = false }
+                .id("dialog.bottomSentinel")
+                .background {
+                    GeometryReader { geo in
+                        Color.clear
+                            .preference(
+                                key: DialogSentinelFrameKey.self,
+                                value: geo.frame(in: .named("dialogListScroll")).minY
+                            )
+                    }
+                }
         }
     }
 
@@ -193,8 +241,9 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        guard let bottomTargetID else { return }
-        withAnimation { proxy.scrollTo(bottomTargetID, anchor: .bottom) }
+        // 滚哨兵本身而不是最后一条消息：消息底边对齐视口下沿时哨兵
+        // 还差一截间距未入视野，到位后按钮迟迟不消失（2026-11-27 实测）。
+        withAnimation { proxy.scrollTo("dialog.bottomSentinel", anchor: .bottom) }
     }
 }
 
@@ -480,6 +529,11 @@ func mentionToken(in text: String) -> String? {
 /// Members matching the trailing @token (at most 8).
 func mentionMatches(in text: String, memberNames: [String]) -> [String] {
     guard let token = mentionToken(in: text) else { return [] }
+    // 只打了「@」还没输名字时列全员（与安卓 updateMentionBar 同口径；
+    // localizedCaseInsensitiveContains("") 恒为 false，必须特判）。
+    if token.isEmpty {
+        return Array(memberNames.filter { !$0.isEmpty }.prefix(8))
+    }
     return Array(
         memberNames.filter {
             $0.localizedCaseInsensitiveContains(token) &&
