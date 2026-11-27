@@ -2405,10 +2405,14 @@ private struct AddAgentSheet: View {
         req.timeoutInterval = 10
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        // 定格为 let 再进 Task：var 被并发闭包捕获在新工具链的严格
+        // 并发检查下是编译错误（reference to captured var in
+        // concurrently-executing code），会打挂 Debug 模拟器构建。
+        let request = req
         let unsignedNote = formWebhookSecretRef.isEmpty ? "" : "（本机只存签名密钥引用名、无密钥值，本次未签名）"
         Task {
             do {
-                let (data, resp) = try await URLSession.shared.data(for: req)
+                let (data, resp) = try await URLSession.shared.data(for: request)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                 await MainActor.run {
                     if (200..<300).contains(code) {
