@@ -3,6 +3,7 @@ package wherevercode.agent.ui
 import android.content.Context
 import android.text.InputType
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -597,6 +598,11 @@ class TeamChannelController(
         }
         noticeLine.text = ""
         composer.input.setText("")
+        // 发送后收键盘（2026-11-27 与 iOS 对齐：Funk 真机反馈——
+        // 发送完输入框自动收回，双端同口径）。
+        composer.input.clearFocus()
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(composer.input.windowToken, 0)
         val replyId = replyingTo?.messageId
         val attachment = pendingAttachmentRef
         clearReply()

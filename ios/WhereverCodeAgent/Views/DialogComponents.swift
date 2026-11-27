@@ -67,8 +67,9 @@ extension View {
 /// （Lazy）VStack，统一两页的列表结构与滚底口径。
 /// - 单聊：VStack、消息数变化时滚到最后一条；问候/发送中/错误行
 ///   经 content / trailing 插槽进来。
-/// - 频道：LazyVStack、不主动滚底（scrollTargetID 传 nil，与
-///   现状一致——原 ScrollViewReader 的 proxy 本就未用）。
+/// - 频道：LazyVStack、scrollTargetID 传 nil（不无条件滚底）；
+///   showsScrollToBottomButton 开时另有口径：贴底时新消息保持
+///   贴底、离底时右下角出 ↓ 拉底按钮（滚到 bottomTargetID）。
 public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var lazy: Bool
     public var spacing: CGFloat
@@ -81,6 +82,12 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var scrollTargetID: String?
     /// 点内容区回调（单聊收键盘用）；nil = 不装手势。
     public var onTapContent: (() -> Void)?
+    /// ↓ 拉底按钮开关（频道用，2026-11-27）：开时栈尾放哨兵跟踪
+    /// 是否贴底，离底显示按钮、贴底时新消息自动跟随。默认关。
+    public var showsScrollToBottomButton: Bool
+    /// 拉底目标（最后一条消息的 id）；按钮与贴底跟随都滚到它。
+    public var bottomTargetID: String?
+    @State private var isAtBottom = true
     public var content: () -> Content
     public var trailing: () -> Trailing
 
@@ -93,6 +100,8 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         scrollTrigger: Int,
         scrollTargetID: String? = nil,
         onTapContent: (() -> Void)? = nil,
+        showsScrollToBottomButton: Bool = false,
+        bottomTargetID: String? = nil,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
@@ -104,18 +113,38 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         self.scrollTrigger = scrollTrigger
         self.scrollTargetID = scrollTargetID
         self.onTapContent = onTapContent
+        self.showsScrollToBottomButton = showsScrollToBottomButton
+        self.bottomTargetID = bottomTargetID
         self.content = content
         self.trailing = trailing
     }
 
     public var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                stack
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.top, topPadding)
-                    .padding(.bottom, bottomPadding)
-                    .dialogTapContent(onTapContent)
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView {
+                    stack
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.top, topPadding)
+                        .padding(.bottom, bottomPadding)
+                        .dialogTapContent(onTapContent)
+                }
+                if showsScrollToBottomButton, !isAtBottom, bottomTargetID != nil {
+                    Button {
+                        scrollToBottom(proxy)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Color(red: 0.16, green: 0.15, blue: 0.14), in: Circle())
+                            .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    .accessibilityIdentifier("dialog.scrollToBottom")
+                }
             }
             #if compiler(>=6.0)
             .onChange(of: scrollTrigger) { _, _ in scrollToTarget(proxy) }
@@ -131,18 +160,41 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
             LazyVStack(spacing: spacing) {
                 content()
                 trailing()
+                bottomSentinel
             }
         } else {
             VStack(spacing: spacing) {
                 content()
                 trailing()
+                bottomSentinel
             }
         }
     }
 
+    /// 栈尾哨兵（仅拉底按钮开启时）：进出可见区即贴底状态变化。
+    @ViewBuilder
+    private var bottomSentinel: some View {
+        if showsScrollToBottomButton {
+            Color.clear
+                .frame(height: 1)
+                .onAppear { isAtBottom = true }
+                .onDisappear { isAtBottom = false }
+        }
+    }
+
     private func scrollToTarget(_ proxy: ScrollViewProxy) {
-        guard let scrollTargetID else { return }
-        withAnimation { proxy.scrollTo(scrollTargetID, anchor: .bottom) }
+        if let scrollTargetID {
+            withAnimation { proxy.scrollTo(scrollTargetID, anchor: .bottom) }
+        } else if showsScrollToBottomButton, isAtBottom {
+            // 频道口径：贴底时新消息保持贴底；离底不打扰，
+            // 由 ↓ 按钮等用户点（与主流聊天软件一致）。
+            scrollToBottom(proxy)
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        guard let bottomTargetID else { return }
+        withAnimation { proxy.scrollTo(bottomTargetID, anchor: .bottom) }
     }
 }
 
@@ -295,7 +347,14 @@ public struct DialogComposerView<Above: View, Leading: View, Accessory: View, Be
             .dialogAccessibilityID(inputAccessibilityID)
             .dialogOnTextChange(text, onTextChange)
         case .inline:
-            TextField(placeholder, text: $text)
+            Group {
+                if let focused {
+                    TextField(placeholder, text: $text)
+                        .focused(focused)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
+            }
                 .font(.system(size: 14))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)

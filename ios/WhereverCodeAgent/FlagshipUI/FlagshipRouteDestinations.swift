@@ -4395,6 +4395,7 @@ public struct ChannelDetailWorkspaceView: View {
 
     @State private var selectedTab: WorkspaceTab = .messages
     @State private var composerText = ""
+    @FocusState private var composerFocused: Bool
     @State private var sendAsTask = false
     @State private var showCreateTaskForm = false
     @State private var pendingTaskText = ""
@@ -4932,14 +4933,20 @@ public struct ChannelDetailWorkspaceView: View {
                     .background(Color.blue.opacity(0.1))
                 }
                 // 对话组件收敛：列表脚手架与单聊共用 DialogMessageListView
-                // （LazyVStack、不主动滚底，与原 ScrollViewReader 现状一致）。
+                // （LazyVStack；2026-11-27 Funk 真机反馈补齐：贴底跟随
+                // 新消息、离底出 ↓ 拉底按钮，与安卓「回到最新」对齐；
+                // 搜索/历史浏览态不启用，沿用退出浏览入口；点消息区
+                // 收键盘，与单聊 onTapContent 同口径）。
                 DialogMessageListView(
                     lazy: true,
                     spacing: 12,
                     horizontalPadding: 16,
                     topPadding: 12,
                     bottomPadding: 12,
-                    scrollTrigger: displayedMessages.count
+                    scrollTrigger: displayedMessages.count,
+                    onTapContent: { composerFocused = false },
+                    showsScrollToBottomButton: !isShowingSearchResults && !isBrowsing,
+                    bottomTargetID: displayedMessages.last?.id
                 ) {
                     ForEach(displayedMessages) { msg in
                         messageRow(msg)
@@ -5540,10 +5547,12 @@ public struct ChannelDetailWorkspaceView: View {
             sendButtonStyle: .accentGlyph,
             hasAttachment: selectedAttachment != nil,
             maxLength: 4000,
+            focused: $composerFocused,
             onSend: { sendMessage() },
             inputAccessibilityID: "channel.composer.input",
             sendAccessibilityID: "channel.composer.send"
         ) {
+            mentionBar
             // 发送方式（批D，与安卓频道发送区同构）：仅讨论 / 作为任务发送。
             Picker("发送方式", selection: $sendAsTask) {
                 Text("仅讨论").tag(false)
@@ -5709,6 +5718,51 @@ public struct ChannelDetailWorkspaceView: View {
 
     private var members: [V5ChannelMember] {
         channelParticipants.map(V5ChannelMember.init)
+    }
+
+    /// @ 候选名单（与安卓 updateMentionBar 同口径）：成员显示名去重
+    /// 保序；本人有 @所有人 权限时「所有人」列在最前。
+    private var mentionCandidateNames: [String] {
+        var names: [String] = []
+        if localCanMentionAll(in: currentChannelId) { names.append("所有人") }
+        for name in channelParticipants.map(\.name) where !name.isEmpty && !names.contains(name) {
+            names.append(name)
+        }
+        return names
+    }
+
+    /// @ 候选条（2026-11-27 补齐，与安卓 mentionBar 同构）：输入尾部
+    /// 出现 @token 时在输入区上方出成员候选，点选插入「@名字 」，
+    /// 不用手打全名。匹配/替换走 DialogComponents 的共享 helper
+    /// （mentionMatches / applyingMention——原 ChannelChatView 的
+    /// 遗产，218 收敛时 UI 丢失、本批重新接上）。
+    @ViewBuilder
+    private var mentionBar: some View {
+        let matches = mentionMatches(in: composerText, memberNames: mentionCandidateNames)
+        if !matches.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(matches, id: \.self) { name in
+                        Button {
+                            composerText = applyingMention(name, to: composerText)
+                        } label: {
+                            Text("@\(name)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color(red: 0.82, green: 0.49, blue: 0.35))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color.white, in: Capsule())
+                                .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+            .background(Color(red: 0.95, green: 0.94, blue: 0.92))
+            .accessibilityIdentifier("channel.mentionBar")
+        }
     }
 
     private func isOwnSender(_ senderID: String) -> Bool {
@@ -5963,6 +6017,7 @@ public struct ChannelDetailWorkspaceView: View {
                     effectKey: effectKey, attachmentRef: attachmentRef)
                 recordChannelPost(postedID)
                 composerText = ""
+                composerFocused = false
                 replyingTo = nil
                 selectedAttachment = nil
                 pendingAttachmentRef = nil
@@ -5974,6 +6029,7 @@ public struct ChannelDetailWorkspaceView: View {
                         effectKey: effectKey, attachmentRef: attachmentRef)
                     recordChannelPost(postedID)
                     composerText = ""
+                    composerFocused = false
                     replyingTo = nil
                     selectedAttachment = nil
                     pendingAttachmentRef = nil
