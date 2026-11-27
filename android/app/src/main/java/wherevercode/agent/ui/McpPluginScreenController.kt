@@ -36,6 +36,10 @@ class McpPluginScreenController(
     private val onSaveServer: (McpServerFormData, String?) -> Unit = { _, _ -> },
     private val onImportServers: (String) -> Unit = {},
     private val onManifests: () -> Unit = {},
+    private val onSavePlatformToken: (String) -> Unit = {},
+    private val onClearPlatformToken: () -> Unit = {},
+    private val onProbePlatformTools: () -> Unit = {},
+    private val onCallPlatformTool: (String) -> Unit = {},
 ) {
     /**
      * MCP 服务器表单（添加/编辑共用；existingId 为空 = 添加，
@@ -55,6 +59,24 @@ class McpPluginScreenController(
         val oauthClientId: String = "",
         val oauthScopes: String = "",
     )
+    /**
+     * V5 平台 MCP 节（控制对齐批四，与 iOS McpToolsInspectorScreen
+     * 同口径）：四态徽章、Token 保存/清除、真实 tools/call 验证与
+     * 远端工具实时探测的状态快照。tools 为 null = 尚未探测（不编数）。
+     */
+    data class PlatformState(
+        val baseUrl: String,
+        val hasToken: Boolean,
+        val connected: Boolean,
+        val tools: List<String>?,
+        val probing: Boolean,
+        val error: String?,
+        val callTool: String?,
+        val callSuccess: Boolean?,
+        val callResult: String?,
+        val calling: Boolean,
+    )
+
     data class McpServerRow(
         val id: String,
         val displayName: String,
@@ -79,6 +101,7 @@ class McpPluginScreenController(
     data class McpPluginScreenState(
         val servers: List<McpServerRow>,
         val plugins: List<PluginRow>,
+        val platform: PlatformState? = null,
         /** 七类扩展各自的登记数（与 Hand 侧同一套分类）。 */
         val kindCounts: Map<String, Int>,
         val note: String? = null,
@@ -96,6 +119,21 @@ class McpPluginScreenController(
     private val body: LinearLayout = UiKit.vertical(context)
 
     private var loading = false
+
+    /** 与 iOS 同一份内置 V5 平台工具清单（名称＋一句话说明）。 */
+    private val standardV5Tools: List<Pair<String, String>> = listOf(
+        "issue_agent_token" to "签发平台 Agent 访问令牌",
+        "agent_channel_list" to "拉取可见团队频道列表",
+        "agent_channel_join" to "加入指定团队频道",
+        "agent_channel_post" to "在频道发送消息",
+        "agent_channel_messages" to "增量拉取频道历史消息",
+        "agent_my_tasks" to "拉取分配给当前 Agent 的任务",
+        "agent_task_claim" to "认领任务（2小时租约）",
+        "agent_task_progress" to "汇报任务进度并续租",
+        "agent_task_heartbeat" to "发送任务心跳续租",
+        "agent_task_submit" to "提交任务成果（分支/Commit/PR）",
+        "agent_task_release" to "释放已认领的任务",
+    )
 
     init {
         root.addView(content)
@@ -152,6 +190,10 @@ class McpPluginScreenController(
                 },
             )
         }
+        state.platform?.let { platform ->
+            body.addView(platformCard(platform))
+            body.addView(builtinToolsCard())
+        }
         body.addView(sectionCard("MCP 服务器") {
             val actions = UiKit.horizontal(context)
             actions.addView(actionButton("＋ 添加服务器") { showServerForm(null) })
@@ -198,6 +240,172 @@ class McpPluginScreenController(
                 )
             }
         })
+    }
+
+    /** 四态徽章一格：标题＋✓ 就绪/✕ 未满足＋小注（与 iOS 同口径）。 */
+    private fun stateBadge(title: String, isOk: Boolean, note: String): LinearLayout {
+        val col = UiKit.vertical(context)
+        col.addView(UiKit.text(context, title, 11f, R.color.text_primary, bold = true))
+        col.addView(
+            UiKit.text(
+                context,
+                if (isOk) "✓ 就绪" else "✕ 未满足",
+                10f,
+                if (isOk) R.color.success else R.color.text_tertiary,
+                bold = true,
+            ).apply { setPadding(0, dp(2), 0, dp(2)) },
+        )
+        col.addView(UiKit.text(context, note, 9f, R.color.text_tertiary))
+        col.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        return col
+    }
+
+    /**
+     * V5 平台 MCP 卡（控制对齐批四）：与 iOS 平台节同构——四态徽章、
+     * 服务地址与凭证状态、Token 保存/清除、真实 tools/call 验证、
+     * 远端工具实时探测。探测/调用都走 MainActivity 的真平台传输，
+     * 失败如实显示原因，不标假状态。
+     */
+    private fun platformCard(platform: PlatformState): LinearLayout {
+        return sectionCard("V5 平台 MCP（平台连接）") { card ->
+            val badges = UiKit.horizontal(context).apply { setPadding(0, dp(4), 0, dp(8)) }
+            badges.addView(stateBadge("已连接", platform.connected, "通道畅通"))
+            badges.addView(stateBadge("已授权", platform.hasToken, "持有 Token"))
+            badges.addView(
+                stateBadge(
+                    "可调用",
+                    platform.tools != null,
+                    if (platform.tools != null) "${platform.tools.size} 项工具" else "未探测",
+                ),
+            )
+            badges.addView(
+                stateBadge(
+                    "已实际执行",
+                    platform.callSuccess == true,
+                    if (platform.callSuccess == true) "真实回执" else "未执行",
+                ),
+            )
+            card.addView(badges)
+            card.addView(UiKit.text(context, "服务地址　${platform.baseUrl}", 12f, R.color.text_secondary))
+            card.addView(
+                UiKit.text(
+                    context,
+                    "凭证状态　${if (platform.hasToken) "已保存 Token (已授权)" else "未配置 Token (未授权)"}",
+                    12f,
+                    R.color.text_secondary,
+                ).apply { setPadding(0, dp(2), 0, dp(6)) },
+            )
+            val tokenInput = EditText(context).apply {
+                hint = "粘贴平台 Token（v5_ 开头，仅存本机 Keystore）"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            card.addView(tokenInput)
+            val tokenRow = UiKit.horizontal(context).apply { setPadding(0, dp(6), 0, dp(10)) }
+            tokenRow.addView(actionButton("保存 Token 并探测工具") {
+                val clean = tokenInput.text.toString().trim()
+                if (clean.isNotEmpty()) onSavePlatformToken(clean)
+            })
+            if (platform.hasToken) {
+                tokenRow.addView(actionButton("清除凭证") { onClearPlatformToken() })
+            }
+            card.addView(tokenRow)
+
+            card.addView(
+                UiKit.text(context, "发起真实 MCP tools/call 验证", 13f, R.color.text_primary, bold = true)
+                    .apply { setPadding(0, 0, 0, dp(4)) },
+            )
+            val toolChoices = (listOf("agent_channel_list", "agent_my_tasks", "issue_agent_token") +
+                (platform.tools ?: emptyList())).distinct()
+            val toolSpinner = Spinner(context).apply {
+                adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, toolChoices)
+                val idx = toolChoices.indexOf(platform.callTool ?: "agent_channel_list")
+                if (idx >= 0) setSelection(idx)
+            }
+            card.addView(toolSpinner)
+            val callRow = UiKit.horizontal(context).apply { setPadding(0, dp(6), 0, dp(6)) }
+            callRow.addView(
+                actionButton(if (platform.calling) "正在向平台执行 tools/call…" else "执行真实 tools/call 调用") {
+                    if (!platform.calling && platform.hasToken) {
+                        onCallPlatformTool(toolChoices[toolSpinner.selectedItemPosition])
+                    }
+                },
+            )
+            card.addView(callRow)
+            if (platform.callSuccess != null && platform.callResult != null) {
+                val ok = platform.callSuccess == true
+                card.addView(
+                    UiKit.text(
+                        context,
+                        if (ok) "执行成功 (已实际执行)" else "执行失败",
+                        11f,
+                        if (ok) R.color.success else R.color.danger,
+                        bold = true,
+                    ),
+                )
+                card.addView(
+                    UiKit.text(context, platform.callResult, 10f, R.color.text_secondary)
+                        .apply { setPadding(0, dp(2), 0, dp(8)) },
+                )
+            }
+
+            card.addView(
+                UiKit.text(context, "远端 MCP 工具实时探测", 13f, R.color.text_primary, bold = true)
+                    .apply { setPadding(0, dp(2), 0, dp(4)) },
+            )
+            val probeRow = UiKit.horizontal(context)
+            probeRow.addView(
+                actionButton(if (platform.probing) "正在从平台拉取工具列表…" else "刷新远端 MCP 工具列表") {
+                    if (!platform.probing) onProbePlatformTools()
+                },
+            )
+            card.addView(probeRow)
+            platform.error?.let { err ->
+                card.addView(
+                    UiKit.text(context, err, 11f, R.color.danger)
+                        .apply { setPadding(0, dp(6), 0, 0) },
+                )
+            }
+            val tools = platform.tools
+            if (tools == null) {
+                card.addView(
+                    UiKit.text(
+                        context,
+                        if (platform.hasToken) {
+                            "点击上方「刷新远端 MCP 工具列表」从服务端实时拉取。"
+                        } else {
+                            "当前未配置平台 Token，远端实时工具列表未拉取；下方列出本客户端已对接的标准 V5 平台工具。"
+                        },
+                        11f,
+                        R.color.text_tertiary,
+                    ).apply { setPadding(0, dp(6), 0, 0) },
+                )
+            } else {
+                tools.forEach { name ->
+                    val row = UiKit.horizontal(context).apply { setPadding(0, dp(3), 0, dp(3)) }
+                    row.addView(
+                        UiKit.text(context, name, 12f, R.color.text_primary),
+                        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    row.addView(UiKit.text(context, "可调用", 10f, R.color.accent, bold = true))
+                    card.addView(row)
+                }
+            }
+        }
+    }
+
+    /** 客户端已内置对接的 V5 MCP 工具清单（与 iOS 同一份，规范标准）。 */
+    private fun builtinToolsCard(): LinearLayout {
+        return sectionCard("客户端已内置对接的 V5 MCP 工具（${standardV5Tools.size} 项）") { card ->
+            standardV5Tools.forEach { (name, summary) ->
+                val row = UiKit.horizontal(context).apply { setPadding(0, dp(4), 0, dp(4)) }
+                val texts = UiKit.vertical(context)
+                texts.addView(UiKit.text(context, name, 11f, R.color.text_primary, bold = true))
+                texts.addView(UiKit.text(context, summary, 10f, R.color.text_tertiary))
+                row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(UiKit.text(context, "规范标准", 10f, R.color.text_tertiary))
+                card.addView(row)
+            }
+        }
     }
 
     private fun sectionCard(title: String, fill: (LinearLayout) -> Unit): LinearLayout {

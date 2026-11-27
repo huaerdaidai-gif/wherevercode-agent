@@ -56,6 +56,7 @@ class ConsoleScreenController(
     private val onOpenConnections: () -> Unit = {},
     private val onToast: (String) -> Unit = {},
     private val onOpenModels: () -> Unit = {},
+    private val onOpenUsage: () -> Unit = {},
     private val modelsCount: () -> Int = { 0 },
     /** 平台根地址（已规范化：只要 scheme + host + 可选端口）。未配置时为空串。 */
     private val platformRoot: () -> String = { "" },
@@ -498,9 +499,9 @@ class ConsoleScreenController(
             title = "用量",
             subtitle = "查看模型调用消耗与任务预算策略",
             iconRes = R.drawable.ic_settings,
-            badge = "待开发",
-            isTodo = true,
-            onClick = { onToast("【待开发】用量尚未开发（只是界面，不产生计费调用）") },
+            badge = "本机记录",
+            isTodo = false,
+            onClick = { onOpenUsage() },
         ))
 
         return container

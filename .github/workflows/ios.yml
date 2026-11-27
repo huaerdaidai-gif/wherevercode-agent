@@ -214,8 +214,14 @@ jobs:
           fi
           mkdir -p .build/live-launch
           xcrun simctl list devices available > .build/live-launch/devices.txt
-          xcrun simctl install "$UDID" .build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app
-          xcrun simctl launch --terminate-running-process "$UDID" wherevercode.agent | tee .build/live-launch/launch.txt
+          # Install/launch wedge guard (2026-11-27, batch-5 evidence): on
+          # sick runner hosts simctl install hangs silently forever after
+          # a successful boot (two runs ate the full 20-min hard line).
+          # Same idle-cap pattern as the boot guard above: fail fast so
+          # the run goes red in minutes and can be re-dispatched.
+          run_with_idle_cap 180 300 xcrun simctl install "$UDID" .build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app
+          run_with_idle_cap 120 180 xcrun simctl launch --terminate-running-process "$UDID" wherevercode.agent > .build/live-launch/launch.txt
+          cat .build/live-launch/launch.txt
           sleep 5
           xcrun simctl io "$UDID" screenshot .build/live-launch/ios-home.png
 

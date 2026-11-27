@@ -310,6 +310,9 @@ import wherevercode.agent.ui.ChatAttachment
 import wherevercode.agent.ui.ChatAttachmentKind
 import wherevercode.agent.ui.ChatAttachments
 import wherevercode.agent.ui.ConsoleScreenController
+import wherevercode.agent.ui.PrivacyScreenController
+import wherevercode.agent.ui.ProfileScreenController
+import wherevercode.agent.ui.UsageScreenController
 import wherevercode.agent.ui.ChatComposerView
 import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.SettingsHomeController
@@ -433,6 +436,16 @@ class MainActivity : AppCompatActivity() {
     /** 正在进行的 MCP/插件刷新（后台线程）；进行中时新刷新跳过，等下一轮。 */
     @Volatile
     private var mcpPluginsRefreshRunning = false
+
+    // MCP 屏平台节（控制对齐批四）：远端探测/真实调用的会话内结果，
+    // 只存结果不存令牌；令牌本体只在 PlatformAgentCredentialStore。
+    private var mcpPlatformTools: List<String>? = null
+    private var mcpPlatformProbing = false
+    private var mcpPlatformError: String? = null
+    private var mcpPlatformCalling = false
+    private var mcpPlatformCallTool: String? = null
+    private var mcpPlatformCallSuccess: Boolean? = null
+    private var mcpPlatformCallResult: String? = null
 
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天。 */
     private lateinit var screenTeamChannel: View
@@ -799,6 +812,13 @@ class MainActivity : AppCompatActivity() {
     /** 2026-11-11（事件密度）：任务屏“运行事件”分组的展开状态（刷新后不丢）。 */
     private val expandedEventGroupKeys = mutableSetOf<String>()
     private var showAllEventGroups = false
+    private lateinit var profileScreenController: ProfileScreenController
+    private lateinit var privacyScreenController: PrivacyScreenController
+    private lateinit var usageScreenController: UsageScreenController
+
+    /** 当前盖在最上面的信息屏（个人资料/隐私与安全/用量）根布局；null = 没开。 */
+    private var infoScreenRoot: View? = null
+
     private lateinit var taskDetailController: TaskDetailController
     /** 阶段 3（U5/批 3c）：会话列表（聊天 Tab 首屏）与是否在对话内。 */
     private lateinit var sessionListController: SessionListController
@@ -1716,9 +1736,21 @@ class MainActivity : AppCompatActivity() {
             this,
             onBack = { hideSettings() },
             onOpenSection = { section -> openSettingsSection(section) },
-            onOpenScreen = { entryId -> showEntry(entryId) },
+            onOpenScreen = { entryId ->
+                when (entryId) {
+                    "settings_profile" -> showProfileScreen()
+                    "settings_privacy" -> showPrivacyScreen()
+                    "settings_usage" -> showUsageScreen()
+                    else -> showEntry(entryId)
+                }
+            },
             onCycleTheme = { cycleTheme() },
             onTodo = { title -> toast("【待开发】$title 尚未开发") },
+            profileName = {
+                getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE)
+                    .getString(KEY_PROFILE_NICKNAME, null)
+                    ?.takeIf { it.isNotBlank() } ?: "WhereverCode 用户"
+            },
             platformAddress = ::normalizedConsolePlatformRoot,
             platformStatus = {
                 if (platformCredentialStore.loadPlatformToken() != null) "平台已配置（凭证已存本机）"
@@ -1726,6 +1758,35 @@ class MainActivity : AppCompatActivity() {
             },
         )
         settingsRootLayout().addView(settingsHomeController.root, 0)
+        // 设置信息三屏（批五）：个人资料/隐私与安全/用量，盖在当前页之上
+        // 的覆盖层（与任务详情同法），返回即揭开，来源页原样不动。
+        profileScreenController = ProfileScreenController(
+            this,
+            onBack = { hideInfoScreens() },
+            initial = {
+                val p = getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE)
+                (p.getString(KEY_PROFILE_NICKNAME, "") ?: "") to
+                    (p.getString(KEY_PROFILE_EMAIL, "") ?: "")
+            },
+            onSave = { nickname, email ->
+                getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE).edit()
+                    .putString(KEY_PROFILE_NICKNAME, nickname)
+                    .putString(KEY_PROFILE_EMAIL, email)
+                    .apply()
+                toast("个人资料已保存")
+            },
+        )
+        container.addView(profileScreenController.root)
+        privacyScreenController = PrivacyScreenController(
+            this,
+            onBack = { hideInfoScreens() },
+        )
+        container.addView(privacyScreenController.root)
+        usageScreenController = UsageScreenController(
+            this,
+            onBack = { hideInfoScreens() },
+        )
+        container.addView(usageScreenController.root)
         taskDetailController = TaskDetailController(
             this,
             onBack = { hideTaskDetail() },
@@ -1781,6 +1842,7 @@ class MainActivity : AppCompatActivity() {
             onRefresh = { refreshConsole() },
             onOpenTasks = { openConsoleSubpage(DrawerController.ID_TASKS) },
             onOpenMcp = { openConsoleSubpage(DrawerController.ID_MCP_PLUGINS) },
+            onOpenUsage = { showUsageScreen() },
             onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
             onToast = { msg -> toast(msg) },
             platformRoot = { normalizedConsolePlatformRoot() },
@@ -1800,6 +1862,10 @@ class MainActivity : AppCompatActivity() {
             onSaveServer = { form, existingId -> saveMcpServer(form, existingId) },
             onImportServers = { json -> importMcpServers(json) },
             onManifests = { showExtensionManifests() },
+            onSavePlatformToken = { token -> saveMcpPlatformToken(token) },
+            onClearPlatformToken = { clearMcpPlatformToken() },
+            onProbePlatformTools = { probeMcpPlatformTools() },
+            onCallPlatformTool = { tool -> callMcpPlatformTool(tool) },
         )
         screenMcpPlugins = mcpPluginController.root
         container.addView(screenMcpPlugins)
@@ -6456,11 +6522,108 @@ class MainActivity : AppCompatActivity() {
                         .filter { it.isNotEmpty() }.joinToString("；"),
                 )
             }
+        val platformHost = resolvedPlatformHost()
+        val platformBaseUrl = if (PlatformAgent.isLanAddress(platformHost)) {
+            "http://$platformHost"
+        } else {
+            "https://$platformHost"
+        }
         return McpPluginScreenController.McpPluginScreenState(
             servers = servers,
             plugins = codePlugins + registryOnlyPlugins,
+            platform = McpPluginScreenController.PlatformState(
+                baseUrl = platformBaseUrl,
+                hasToken = platformCredentialStore.loadPlatformToken() != null,
+                connected = platformHost.isNotBlank() &&
+                    PlatformAgent.platformHostIssue(platformHost) == null,
+                tools = mcpPlatformTools,
+                probing = mcpPlatformProbing,
+                error = mcpPlatformError,
+                callTool = mcpPlatformCallTool,
+                callSuccess = mcpPlatformCallSuccess,
+                callResult = mcpPlatformCallResult,
+                calling = mcpPlatformCalling,
+            ),
             kindCounts = registry.countsByKind().mapKeys { it.key.id },
         )
+    }
+
+    /** MCP 屏平台节用的传输：App 平台凭证现取现用，端点随当前平台地址。 */
+    private fun mcpPlatformTransport() = PlatformChannelMcpTransport(
+        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+        endpoint = PlatformAgent.mcpEndpoint(resolvedPlatformHost()),
+    )
+
+    /** 保存平台 Token 后立即探测一次工具列表（与 iOS 同行为）。 */
+    private fun saveMcpPlatformToken(token: String) {
+        Thread {
+            try {
+                platformCredentialStore.savePlatformToken(token)
+                mcpPlatformError = null
+            } catch (e: Exception) {
+                mcpPlatformError = "保存 Token 失败：${(e.message ?: "未知错误").take(160)}"
+            }
+            runOnUiThread { refreshMcpPlugins() }
+            probeMcpPlatformTools()
+        }.start()
+    }
+
+    /** 清除平台凭证：探测/调用的会话内结果一并清掉，不留假状态。 */
+    private fun clearMcpPlatformToken() {
+        Thread {
+            platformCredentialStore.clearPlatformToken()
+            mcpPlatformTools = null
+            mcpPlatformError = null
+            mcpPlatformCallTool = null
+            mcpPlatformCallSuccess = null
+            mcpPlatformCallResult = null
+            runOnUiThread { refreshMcpPlugins() }
+        }.start()
+    }
+
+    /** 远端 MCP 工具实时探测（tools/list 真拉；失败如实写错误行）。 */
+    private fun probeMcpPlatformTools() {
+        if (mcpPlatformProbing) return
+        mcpPlatformProbing = true
+        runOnUiThread { refreshMcpPlugins() }
+        Thread {
+            try {
+                mcpPlatformTools = mcpPlatformTransport().listTools()
+                mcpPlatformError = null
+            } catch (e: Exception) {
+                mcpPlatformError = (e.message ?: "探测失败").take(300)
+            }
+            mcpPlatformProbing = false
+            runOnUiThread { refreshMcpPlugins() }
+        }.start()
+    }
+
+    /** 真实 tools/call 验证：回执原文（截断）展示，成功才点亮「已实际执行」。 */
+    private fun callMcpPlatformTool(tool: String) {
+        if (mcpPlatformCalling) return
+        mcpPlatformCalling = true
+        mcpPlatformCallTool = tool
+        runOnUiThread { refreshMcpPlugins() }
+        Thread {
+            try {
+                val args = if (tool == "issue_agent_token") {
+                    org.json.JSONObject().apply {
+                        put("agent_id", "chatgpt")
+                        put("name", "App 生成")
+                    }
+                } else {
+                    org.json.JSONObject()
+                }
+                val result = mcpPlatformTransport().callTool(tool, args)
+                mcpPlatformCallSuccess = true
+                mcpPlatformCallResult = result.toString(2).take(2000)
+            } catch (e: Exception) {
+                mcpPlatformCallSuccess = false
+                mcpPlatformCallResult = "调用错误：${(e.message ?: "未知错误").take(300)}"
+            }
+            mcpPlatformCalling = false
+            runOnUiThread { refreshMcpPlugins() }
+        }.start()
     }
 
     /** MCP 服务器启用开关：停用即断开；写注册表，后台做完刷新本屏。 */
@@ -10407,6 +10570,85 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── 设置信息三屏（批五）：覆盖层开关 ─────────────────────────────
+
+    private fun showInfoScreen(root: View) {
+        infoScreenRoot?.visibility = View.GONE
+        infoScreenRoot = root
+        root.visibility = View.VISIBLE
+        root.post { (root as? android.widget.ScrollView)?.fullScroll(View.FOCUS_UP) }
+    }
+
+    private fun hideInfoScreens() {
+        infoScreenRoot?.visibility = View.GONE
+        infoScreenRoot = null
+        // 从个人资料等覆盖层返回时刷新设置首页用户卡（昵称保存后立即生效，不等重进设置）
+        if (::settingsHomeController.isInitialized) settingsHomeController.render()
+    }
+
+    private fun showProfileScreen() {
+        profileScreenController.refresh()
+        showInfoScreen(profileScreenController.root)
+    }
+
+    private fun showPrivacyScreen() {
+        showInfoScreen(privacyScreenController.root)
+    }
+
+    private fun showUsageScreen() {
+        showInfoScreen(usageScreenController.root)
+        usageScreenController.renderLoading()
+        Thread {
+            val data = buildUsageData()
+            runOnUiThread {
+                if (infoScreenRoot == usageScreenController.root) {
+                    usageScreenController.render(data)
+                }
+            }
+        }.start()
+    }
+
+    /** 用量数据现取：引擎事件日志（内存）＋任务库，只数真实记录。 */
+    private fun buildUsageData(): UsageScreenController.UsageData {
+        val components = brainComponents
+            ?: return UsageScreenController.UsageData(
+                available = false,
+                modelCallCount = 0,
+                modelCallDetails = emptyList(),
+                totalEvents = 0,
+                kindCounts = emptyList(),
+                taskCountsLine = "",
+            )
+        val events = try {
+            components.eventLog.entries(null)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val modelCalls = events.filter { it.kind == "turn_done" }
+        val tasks = try {
+            components.taskStore.listTasks(null, null)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val taskLine = "进行中 ${tasks.count { it.state in ConsoleSnapshot.Snapshot.ACTIVE_STATES }} · " +
+            "等待 ${tasks.count { TaskStates.isClaimable(it.state) }} · " +
+            "已完成 ${tasks.count { it.state == "completed" }} · " +
+            "失败 ${tasks.count { it.state == "failed" }} · " +
+            "已停止 ${tasks.count { it.state == "cancelled" }}"
+        val kindCounts = events.groupingBy { it.kind }.eachCount().entries
+            .sortedByDescending { it.value }
+            .take(8)
+            .map { it.key to it.value }
+        return UsageScreenController.UsageData(
+            available = true,
+            modelCallCount = modelCalls.size,
+            modelCallDetails = modelCalls.takeLast(20).reversed().map { it.detail },
+            totalEvents = events.size,
+            kindCounts = kindCounts,
+            taskCountsLine = taskLine,
+        )
+    }
+
     /** 详情页产物链接：切到项目页并打开该文件（不存在时查看器如实报错）。 */
     private fun openDetailFile(relativePath: String) {
         hideTaskDetail()
@@ -10899,6 +11141,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTest(agent: AgentRecord) = testAgentConnection(agent)
             override fun onEdit(agent: AgentRecord) = showAgentForm(agent)
             override fun onRemove(agent: AgentRecord) = removeAgent(agent)
+            override fun onTools(agent: AgentRecord) = openConsoleSubpage(DrawerController.ID_MCP_PLUGINS)
             // Agent 开关（2026-11-12）：关掉只是停用，不是删除；保存后
             // 立即重画列表（热插拔，不用重启 App）。存失败时如实提示，
             // 不假装开关已翻（开关的视觉态由重画后的记录决定）。
@@ -15316,8 +15559,14 @@ class MainActivity : AppCompatActivity() {
             isConfigured = { brainId -> components.isBrainConfigured(brainId) },
             siwcSignedIn = components.authManager.isSignedIn(),
         )
+        // 已删内置模型的恢复行（对齐 iOS 4.18）：模型侧墓碑里记着、大脑
+        // 存储里还有种子副本、模型存储里已无条目的，列表末尾给
+        // 「＋ 重新添加 …」行——删模型时大脑副本一字未动，写回即原样。
+        val restorables = modelConfigStore.deletedBuiltinIds()
+            .filter { modelConfigStore.getEntry(it) == null }
+            .mapNotNull { components.configStore.getConfig(it) }
         modelListContainer.removeAllViews()
-        if (rows.isEmpty()) {
+        if (rows.isEmpty() && restorables.isEmpty()) {
             modelListContainer.addView(
                 UiKit.text(this, "还没有添加模型。用上面的服务商预设或手工表单添加。", 12f, R.color.text_secondary).apply {
                     setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -15339,6 +15588,34 @@ class MainActivity : AppCompatActivity() {
             val config = modelConfigStore.getEntry(row.brainId)?.toBrainConfig()
             modelListContainer.addView(buildModelListRow(row, config))
         }
+        for (seed in restorables) {
+            modelListContainer.addView(
+                UiKit.text(this, "＋ 重新添加 ${seed.label}", 12f, R.color.accent).apply {
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    setBackgroundResource(R.drawable.bg_card)
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { restoreModel(seed.brainId) }
+                },
+            )
+        }
+    }
+
+    /** 模型页恢复已删内置模型：种子副本写回独立模型存储 + 清模型侧墓碑 + 注册回引擎注册表。 */
+    private fun restoreModel(brainId: String) {
+        val components = brainComponents ?: run {
+            note("模型还在加载，请稍候再重新添加。")
+            return
+        }
+        val seed = components.configStore.getConfig(brainId) ?: run {
+            note("无法重新添加该模型。")
+            return
+        }
+        modelConfigStore.saveEntry(ModelEntry.fromBrainConfig(seed))
+        modelConfigStore.clearBuiltinDeleted(brainId)
+        BrainAdapterRegistry.registerConfig(seed)
+        refreshModelList()
+        note("已重新添加 ${seed.label}。")
     }
 
     /**
@@ -15371,9 +15648,11 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         textCol.addView(UiKit.text(this, row.title, 12f, R.color.text_primary, bold = true))
-        // 自定义服务商落成的条目在副行尾标注「自定义」，与内置名单分开呈现。
+        // 自定义服务商落成的条目在副行尾标注「自定义」，与内置名单分开呈现；
+        // 免费额度条目尾标「免费」（对齐 iOS 行角标）。
         val detailParts = listOfNotNull(row.detailText, row.statusText) +
-            if (row.isCustomProvider) listOf(ModelListRows.CUSTOM_TAG) else emptyList()
+            (if (row.isFreeTier) listOf(ModelListRows.FREE_TAG) else emptyList()) +
+            (if (row.isCustomProvider) listOf(ModelListRows.CUSTOM_TAG) else emptyList())
         val detail = detailParts.joinToString(" · ")
         textCol.addView(UiKit.text(this, detail, 11f, R.color.text_secondary))
         container.addView(textCol)
@@ -15473,17 +15752,16 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 编辑通用模型连接：预填本页表单（Key 留空 = 不换），名称不可改。 */
+    /** 编辑通用模型连接：预填本页表单（Key 留空 = 不换）；名称可改——保存按原 brainId 写回 label，不新建条目（对齐 iOS 模型编辑页）。 */
     private fun startEditModel(config: BrainConfig) {
         if (!::modelFormLabel.isInitialized) return
         editingModelId = config.brainId
         modelFormLabel.setText(config.label)
-        modelFormLabel.isEnabled = false
         modelFormBaseUrl.setText(config.baseUrl ?: "")
         modelFormModel.setText(config.model)
         modelFormApiKey.text.clear()
         modelFormBaseUrl.requestFocus()
-        note("正在编辑 ${config.label}：可改模型、地址；Key 留空表示不换，填了才换。名称不可改，改完点“保存模型”。")
+        note("正在编辑 ${config.label}：可改名称、模型、地址；Key 留空表示不换，填了才换。改完点“保存模型”。")
     }
 
     /** 退出模型编辑模式：恢复新增模式（名称栏可用、表单清空）。 */
@@ -16657,6 +16935,10 @@ class MainActivity : AppCompatActivity() {
             closeDrawer()
             return
         }
+        if (infoScreenRoot != null) {
+            hideInfoScreens()
+            return
+        }
         if (isSettingsEntry(currentEntry)) {
             onSettingsBack()
             return
@@ -16734,6 +17016,9 @@ class MainActivity : AppCompatActivity() {
         /** V5 C2-3-R3：引导持久化（SharedPreferences 文件名 + 键）。 */
         private const val PREFS_ONBOARDING = "onboarding_v5"
         private const val KEY_ONBOARDING_DONE = "onboarding_completed"
+        private const val PREFS_PROFILE = "profile_prefs"
+        private const val KEY_PROFILE_NICKNAME = "profile_nickname"
+        private const val KEY_PROFILE_EMAIL = "profile_email"
         private const val KEY_ONBOARDING_DIRECTION = "onboarding_direction"
         private const val KEY_ONBOARDING_STEP = "ui_onboarding_step"
         /** V5 按主流改（maintainer 2026-11-11）：“+”菜单网页搜索开关的持久化。 */
