@@ -10582,6 +10582,8 @@ class MainActivity : AppCompatActivity() {
     private fun hideInfoScreens() {
         infoScreenRoot?.visibility = View.GONE
         infoScreenRoot = null
+        // 从个人资料等覆盖层返回时刷新设置首页用户卡（昵称保存后立即生效，不等重进设置）
+        if (::settingsHomeController.isInitialized) settingsHomeController.render()
     }
 
     private fun showProfileScreen() {
