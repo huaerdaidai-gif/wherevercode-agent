@@ -7384,6 +7384,15 @@ public struct ControlHomeView: View {
         }
         .background(Color(red: 0.98, green: 0.975, blue: 0.965).ignoresSafeArea())
         .onAppear(perform: reloadLocalRecords)
+        .task {
+            // 与安卓控制台同口径：打开时每 5 秒自动刷新一次本机记录；
+            // .task 随页面离屏自动取消，不留后台轮询。
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if Task.isCancelled { break }
+                reloadLocalRecords()
+            }
+        }
         .alert("【待开发】Webhook 尚未开发", isPresented: $showWebhookNotice) {
             Button("我知道了", role: .cancel) {}
         }
