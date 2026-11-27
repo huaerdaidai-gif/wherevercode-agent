@@ -8318,10 +8318,10 @@ private struct ConsoleAutomationSubScreen: View {
 
                 Section {
                     HStack(spacing: 8) {
-                        webhookStateBadge(title: "1. 接收请求", state: "已连接", isOk: true)
-                        webhookStateBadge(title: "2. 验签合法", state: "已授权", isOk: true)
-                        webhookStateBadge(title: "3. 触发器就绪", state: "可调用", isOk: true)
-                        webhookStateBadge(title: "4. 真实建单", state: "已实际执行", isOk: simulatedWebhookResult != nil)
+                        webhookStateBadge(title: "1. 端点生成", state: webhookURLText == "未配置" ? "未配置" : "已生成", isOk: webhookURLText != "未配置")
+                        webhookStateBadge(title: "2. 验签合法", state: "本机未验证", isOk: false)
+                        webhookStateBadge(title: "3. 触发器就绪", state: "本机未验证", isOk: false)
+                        webhookStateBadge(title: "4. 模拟建单", state: simulatedWebhookResult != nil ? "已实际执行" : "未执行", isOk: simulatedWebhookResult != nil)
                     }
                     .padding(.vertical, 4)
 
@@ -8335,7 +8335,7 @@ private struct ConsoleAutomationSubScreen: View {
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
-                } header: { Text("唤醒四态全链路校验（已连接 → 已授权 → 可调用 → 已实际执行）").textCase(nil) }
+                } header: { Text("唤醒四态（本机口径：未验证不标绿）").textCase(nil) }
             case "wakepolicy":
                 Section {
                     LabeledContent("单小时最大唤醒频次", value: "10 次/小时")
@@ -8389,7 +8389,7 @@ private struct ConsoleAutomationSubScreen: View {
             taskId: String(taskId),
             sessionId: "ch-general",
             title: "[Webhook 唤醒] 收到 main 分支代码推送，触发自动化审查",
-            description: "来自 GitHub Actions Webhook 事件推送，HMAC 签名校验通过",
+            description: "本机模拟的 Git Push 事件（未收到真实 Webhook 请求，未做真实 HMAC 验签）",
             state: "queued",
             assignedAgentId: "codex",
             priority: 1
@@ -8398,8 +8398,8 @@ private struct ConsoleAutomationSubScreen: View {
             _ = try LocalData.shared.tasks.createTask(newTask)
             _ = try LocalData.shared.tasks.transition(taskId: newTask.taskId, to: "assigned", note: "Webhook 唤醒指派给 Codex")
             _ = try LocalData.shared.tasks.transition(taskId: newTask.taskId, to: "working", note: "Codex 开始执行自动化审查")
-            simulatedWebhookResult = "✓ 成功唤醒：已校验 HMAC-SHA256 签名，并在任务中心生成任务 \(newTask.taskId)（状态: working）。"
-            LocalData.shared.approvalStore.recordAudit("[WEBHOOK_WAKEUP] 事件=git_push 验签成功 -> 触发真实派工 \(newTask.taskId) (状态: 已实际执行)")
+            simulatedWebhookResult = "✓ 模拟唤醒完成：已在任务中心生成任务 \(newTask.taskId)（状态: working）。此为本机模拟，未收到真实 Webhook 请求、未做真实 HMAC 验签。"
+            LocalData.shared.approvalStore.recordAudit("[WEBHOOK_WAKEUP_SIM] 模拟 git_push 事件 -> 本机建单 \(newTask.taskId) (状态: 已实际执行；未收到真实 Webhook、未验签)")
         } catch {
             simulatedWebhookResult = "唤醒建单失败: \(error.localizedDescription)"
         }
