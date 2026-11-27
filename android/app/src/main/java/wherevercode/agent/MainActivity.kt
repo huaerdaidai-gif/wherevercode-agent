@@ -434,6 +434,16 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var mcpPluginsRefreshRunning = false
 
+    // MCP 屏平台节（控制对齐批四）：远端探测/真实调用的会话内结果，
+    // 只存结果不存令牌；令牌本体只在 PlatformAgentCredentialStore。
+    private var mcpPlatformTools: List<String>? = null
+    private var mcpPlatformProbing = false
+    private var mcpPlatformError: String? = null
+    private var mcpPlatformCalling = false
+    private var mcpPlatformCallTool: String? = null
+    private var mcpPlatformCallSuccess: Boolean? = null
+    private var mcpPlatformCallResult: String? = null
+
     /** V5 团队频道（P3，2026-11-11）：有界团队聊天。 */
     private lateinit var screenTeamChannel: View
     private lateinit var teamChannelController: TeamChannelController
@@ -1800,6 +1810,10 @@ class MainActivity : AppCompatActivity() {
             onSaveServer = { form, existingId -> saveMcpServer(form, existingId) },
             onImportServers = { json -> importMcpServers(json) },
             onManifests = { showExtensionManifests() },
+            onSavePlatformToken = { token -> saveMcpPlatformToken(token) },
+            onClearPlatformToken = { clearMcpPlatformToken() },
+            onProbePlatformTools = { probeMcpPlatformTools() },
+            onCallPlatformTool = { tool -> callMcpPlatformTool(tool) },
         )
         screenMcpPlugins = mcpPluginController.root
         container.addView(screenMcpPlugins)
@@ -6456,11 +6470,108 @@ class MainActivity : AppCompatActivity() {
                         .filter { it.isNotEmpty() }.joinToString("；"),
                 )
             }
+        val platformHost = resolvedPlatformHost()
+        val platformBaseUrl = if (PlatformAgent.isLanAddress(platformHost)) {
+            "http://$platformHost"
+        } else {
+            "https://$platformHost"
+        }
         return McpPluginScreenController.McpPluginScreenState(
             servers = servers,
             plugins = codePlugins + registryOnlyPlugins,
+            platform = McpPluginScreenController.PlatformState(
+                baseUrl = platformBaseUrl,
+                hasToken = platformCredentialStore.loadPlatformToken() != null,
+                connected = platformHost.isNotBlank() &&
+                    PlatformAgent.platformHostIssue(platformHost) == null,
+                tools = mcpPlatformTools,
+                probing = mcpPlatformProbing,
+                error = mcpPlatformError,
+                callTool = mcpPlatformCallTool,
+                callSuccess = mcpPlatformCallSuccess,
+                callResult = mcpPlatformCallResult,
+                calling = mcpPlatformCalling,
+            ),
             kindCounts = registry.countsByKind().mapKeys { it.key.id },
         )
+    }
+
+    /** MCP 屏平台节用的传输：App 平台凭证现取现用，端点随当前平台地址。 */
+    private fun mcpPlatformTransport() = PlatformChannelMcpTransport(
+        tokenProvider = { platformCredentialStore.loadPlatformToken() },
+        endpoint = PlatformAgent.mcpEndpoint(resolvedPlatformHost()),
+    )
+
+    /** 保存平台 Token 后立即探测一次工具列表（与 iOS 同行为）。 */
+    private fun saveMcpPlatformToken(token: String) {
+        Thread {
+            try {
+                platformCredentialStore.savePlatformToken(token)
+                mcpPlatformError = null
+            } catch (e: Exception) {
+                mcpPlatformError = "保存 Token 失败：${(e.message ?: "未知错误").take(160)}"
+            }
+            runOnUiThread { refreshMcpPlugins() }
+            probeMcpPlatformTools()
+        }.start()
+    }
+
+    /** 清除平台凭证：探测/调用的会话内结果一并清掉，不留假状态。 */
+    private fun clearMcpPlatformToken() {
+        Thread {
+            platformCredentialStore.clearPlatformToken()
+            mcpPlatformTools = null
+            mcpPlatformError = null
+            mcpPlatformCallTool = null
+            mcpPlatformCallSuccess = null
+            mcpPlatformCallResult = null
+            runOnUiThread { refreshMcpPlugins() }
+        }.start()
+    }
+
+    /** 远端 MCP 工具实时探测（tools/list 真拉；失败如实写错误行）。 */
+    private fun probeMcpPlatformTools() {
+        if (mcpPlatformProbing) return
+        mcpPlatformProbing = true
+        runOnUiThread { refreshMcpPlugins() }
+        Thread {
+            try {
+                mcpPlatformTools = mcpPlatformTransport().listTools()
+                mcpPlatformError = null
+            } catch (e: Exception) {
+                mcpPlatformError = (e.message ?: "探测失败").take(300)
+            }
+            mcpPlatformProbing = false
+            runOnUiThread { refreshMcpPlugins() }
+        }.start()
+    }
+
+    /** 真实 tools/call 验证：回执原文（截断）展示，成功才点亮「已实际执行」。 */
+    private fun callMcpPlatformTool(tool: String) {
+        if (mcpPlatformCalling) return
+        mcpPlatformCalling = true
+        mcpPlatformCallTool = tool
+        runOnUiThread { refreshMcpPlugins() }
+        Thread {
+            try {
+                val args = if (tool == "issue_agent_token") {
+                    org.json.JSONObject().apply {
+                        put("agent_id", "chatgpt")
+                        put("name", "App 生成")
+                    }
+                } else {
+                    org.json.JSONObject()
+                }
+                val result = mcpPlatformTransport().callTool(tool, args)
+                mcpPlatformCallSuccess = true
+                mcpPlatformCallResult = result.toString(2).take(2000)
+            } catch (e: Exception) {
+                mcpPlatformCallSuccess = false
+                mcpPlatformCallResult = "调用错误：${(e.message ?: "未知错误").take(300)}"
+            }
+            mcpPlatformCalling = false
+            runOnUiThread { refreshMcpPlugins() }
+        }.start()
     }
 
     /** MCP 服务器启用开关：停用即断开；写注册表，后台做完刷新本屏。 */

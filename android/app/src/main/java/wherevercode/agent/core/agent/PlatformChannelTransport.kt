@@ -655,6 +655,40 @@ class PlatformChannelMcpTransport(
     fun callTool(name: String, arguments: JSONObject): JSONObject = toolsCall(name, arguments)
 
     /**
+     * 列出平台 MCP 的工具名（`tools/list`；供 MCP 屏的远端工具实时
+     * 探测用，与 iOS McpClient.listToolNames 同口径）。传输失败、
+     * 平台报错或响应无法解析时抛 [IOException]，消息里绝不带令牌。
+     */
+    fun listTools(): List<String> {
+        val token = tokenProvider()?.takeIf { it.isNotBlank() }
+            ?: throw IOException("未配置平台 Agent 凭证。")
+        val body = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", UUID.randomUUID().toString())
+            put("method", "tools/list")
+            put("params", JSONObject())
+        }.toString()
+        val raw = httpClient.postJson(endpoint, token, body)
+        val envelope = try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            throw IOException("平台返回了无法解析的响应。")
+        }
+        val result = if (envelope.has("result")) {
+            envelope.optJSONObject("result") ?: JSONObject()
+        } else {
+            envelope
+        }
+        val tools = result.optJSONArray("tools") ?: return emptyList()
+        val names = ArrayList<String>()
+        for (i in 0 until tools.length()) {
+            val name = tools.optJSONObject(i)?.optString("name", "").orEmpty()
+            if (name.isNotBlank()) names.add(name)
+        }
+        return names
+    }
+
+    /**
      * 一次 MCP `tools/call`，返回工具的 JSON（第一个 content 项的
      * `text` 解析后）。传输失败、平台报错或响应无法解析时抛
      * [IOException]，消息里绝不带令牌。
