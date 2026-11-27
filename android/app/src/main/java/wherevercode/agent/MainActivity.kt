@@ -310,6 +310,9 @@ import wherevercode.agent.ui.ChatAttachment
 import wherevercode.agent.ui.ChatAttachmentKind
 import wherevercode.agent.ui.ChatAttachments
 import wherevercode.agent.ui.ConsoleScreenController
+import wherevercode.agent.ui.PrivacyScreenController
+import wherevercode.agent.ui.ProfileScreenController
+import wherevercode.agent.ui.UsageScreenController
 import wherevercode.agent.ui.ChatComposerView
 import wherevercode.agent.ui.MessageListView
 import wherevercode.agent.ui.SettingsHomeController
@@ -809,6 +812,13 @@ class MainActivity : AppCompatActivity() {
     /** 2026-11-11（事件密度）：任务屏“运行事件”分组的展开状态（刷新后不丢）。 */
     private val expandedEventGroupKeys = mutableSetOf<String>()
     private var showAllEventGroups = false
+    private lateinit var profileScreenController: ProfileScreenController
+    private lateinit var privacyScreenController: PrivacyScreenController
+    private lateinit var usageScreenController: UsageScreenController
+
+    /** 当前盖在最上面的信息屏（个人资料/隐私与安全/用量）根布局；null = 没开。 */
+    private var infoScreenRoot: View? = null
+
     private lateinit var taskDetailController: TaskDetailController
     /** 阶段 3（U5/批 3c）：会话列表（聊天 Tab 首屏）与是否在对话内。 */
     private lateinit var sessionListController: SessionListController
@@ -1726,9 +1736,21 @@ class MainActivity : AppCompatActivity() {
             this,
             onBack = { hideSettings() },
             onOpenSection = { section -> openSettingsSection(section) },
-            onOpenScreen = { entryId -> showEntry(entryId) },
+            onOpenScreen = { entryId ->
+                when (entryId) {
+                    "settings_profile" -> showProfileScreen()
+                    "settings_privacy" -> showPrivacyScreen()
+                    "settings_usage" -> showUsageScreen()
+                    else -> showEntry(entryId)
+                }
+            },
             onCycleTheme = { cycleTheme() },
             onTodo = { title -> toast("【待开发】$title 尚未开发") },
+            profileName = {
+                getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE)
+                    .getString(KEY_PROFILE_NICKNAME, null)
+                    ?.takeIf { it.isNotBlank() } ?: "WhereverCode 用户"
+            },
             platformAddress = ::normalizedConsolePlatformRoot,
             platformStatus = {
                 if (platformCredentialStore.loadPlatformToken() != null) "平台已配置（凭证已存本机）"
@@ -1736,6 +1758,35 @@ class MainActivity : AppCompatActivity() {
             },
         )
         settingsRootLayout().addView(settingsHomeController.root, 0)
+        // 设置信息三屏（批五）：个人资料/隐私与安全/用量，盖在当前页之上
+        // 的覆盖层（与任务详情同法），返回即揭开，来源页原样不动。
+        profileScreenController = ProfileScreenController(
+            this,
+            onBack = { hideInfoScreens() },
+            initial = {
+                val p = getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE)
+                (p.getString(KEY_PROFILE_NICKNAME, "") ?: "") to
+                    (p.getString(KEY_PROFILE_EMAIL, "") ?: "")
+            },
+            onSave = { nickname, email ->
+                getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE).edit()
+                    .putString(KEY_PROFILE_NICKNAME, nickname)
+                    .putString(KEY_PROFILE_EMAIL, email)
+                    .apply()
+                toast("个人资料已保存")
+            },
+        )
+        container.addView(profileScreenController.root)
+        privacyScreenController = PrivacyScreenController(
+            this,
+            onBack = { hideInfoScreens() },
+        )
+        container.addView(privacyScreenController.root)
+        usageScreenController = UsageScreenController(
+            this,
+            onBack = { hideInfoScreens() },
+        )
+        container.addView(usageScreenController.root)
         taskDetailController = TaskDetailController(
             this,
             onBack = { hideTaskDetail() },
@@ -1791,6 +1842,7 @@ class MainActivity : AppCompatActivity() {
             onRefresh = { refreshConsole() },
             onOpenTasks = { openConsoleSubpage(DrawerController.ID_TASKS) },
             onOpenMcp = { openConsoleSubpage(DrawerController.ID_MCP_PLUGINS) },
+            onOpenUsage = { showUsageScreen() },
             onOpenConnections = { showEntry(DrawerController.ID_TOOLS_CONNECTIONS) },
             onToast = { msg -> toast(msg) },
             platformRoot = { normalizedConsolePlatformRoot() },
@@ -10518,6 +10570,83 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── 设置信息三屏（批五）：覆盖层开关 ─────────────────────────────
+
+    private fun showInfoScreen(root: View) {
+        infoScreenRoot?.visibility = View.GONE
+        infoScreenRoot = root
+        root.visibility = View.VISIBLE
+        root.post { (root as? android.widget.ScrollView)?.fullScroll(View.FOCUS_UP) }
+    }
+
+    private fun hideInfoScreens() {
+        infoScreenRoot?.visibility = View.GONE
+        infoScreenRoot = null
+    }
+
+    private fun showProfileScreen() {
+        profileScreenController.refresh()
+        showInfoScreen(profileScreenController.root)
+    }
+
+    private fun showPrivacyScreen() {
+        showInfoScreen(privacyScreenController.root)
+    }
+
+    private fun showUsageScreen() {
+        showInfoScreen(usageScreenController.root)
+        usageScreenController.renderLoading()
+        Thread {
+            val data = buildUsageData()
+            runOnUiThread {
+                if (infoScreenRoot == usageScreenController.root) {
+                    usageScreenController.render(data)
+                }
+            }
+        }.start()
+    }
+
+    /** 用量数据现取：引擎事件日志（内存）＋任务库，只数真实记录。 */
+    private fun buildUsageData(): UsageScreenController.UsageData {
+        val components = brainComponents
+            ?: return UsageScreenController.UsageData(
+                available = false,
+                modelCallCount = 0,
+                modelCallDetails = emptyList(),
+                totalEvents = 0,
+                kindCounts = emptyList(),
+                taskCountsLine = "",
+            )
+        val events = try {
+            components.eventLog.entries(null)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val modelCalls = events.filter { it.kind == "turn_done" }
+        val tasks = try {
+            components.taskStore.listTasks(null, null)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val taskLine = "进行中 ${tasks.count { it.state in ConsoleSnapshot.ACTIVE_STATES }} · " +
+            "等待 ${tasks.count { TaskStates.isClaimable(it.state) }} · " +
+            "已完成 ${tasks.count { it.state == "completed" }} · " +
+            "失败 ${tasks.count { it.state == "failed" }} · " +
+            "已停止 ${tasks.count { it.state == "cancelled" }}"
+        val kindCounts = events.groupingBy { it.kind }.eachCount().entries
+            .sortedByDescending { it.value }
+            .take(8)
+            .map { it.key to it.value }
+        return UsageScreenController.UsageData(
+            available = true,
+            modelCallCount = modelCalls.size,
+            modelCallDetails = modelCalls.takeLast(20).reversed().map { it.detail },
+            totalEvents = events.size,
+            kindCounts = kindCounts,
+            taskCountsLine = taskLine,
+        )
+    }
+
     /** 详情页产物链接：切到项目页并打开该文件（不存在时查看器如实报错）。 */
     private fun openDetailFile(relativePath: String) {
         hideTaskDetail()
@@ -16804,6 +16933,10 @@ class MainActivity : AppCompatActivity() {
             closeDrawer()
             return
         }
+        if (infoScreenRoot != null) {
+            hideInfoScreens()
+            return
+        }
         if (isSettingsEntry(currentEntry)) {
             onSettingsBack()
             return
@@ -16881,6 +17014,9 @@ class MainActivity : AppCompatActivity() {
         /** V5 C2-3-R3：引导持久化（SharedPreferences 文件名 + 键）。 */
         private const val PREFS_ONBOARDING = "onboarding_v5"
         private const val KEY_ONBOARDING_DONE = "onboarding_completed"
+        private const val PREFS_PROFILE = "profile_prefs"
+        private const val KEY_PROFILE_NICKNAME = "profile_nickname"
+        private const val KEY_PROFILE_EMAIL = "profile_email"
         private const val KEY_ONBOARDING_DIRECTION = "onboarding_direction"
         private const val KEY_ONBOARDING_STEP = "ui_onboarding_step"
         /** V5 按主流改（maintainer 2026-11-11）：“+”菜单网页搜索开关的持久化。 */

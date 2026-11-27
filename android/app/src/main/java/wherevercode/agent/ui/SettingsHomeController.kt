@@ -26,6 +26,8 @@ class SettingsHomeController(
     private val onTodo: (String) -> Unit,
     private val platformStatus: () -> String,
     private val platformAddress: () -> String = { "" },
+    /** 用户卡昵称（个人资料里保存的值，现取；未保存时回落默认名）。 */
+    private val profileName: () -> String = { "WhereverCode 用户" },
 ) {
     val root: LinearLayout = UiKit.vertical(context).apply {
         tag = SettingsSections.HOME_TAG
@@ -35,6 +37,9 @@ class SettingsHomeController(
 
     private val statusText: TextView =
         UiKit.text(context, "", 12f, R.color.text_secondary)
+
+    private val userNameText: TextView =
+        UiKit.text(context, "WhereverCode 用户", 14f, R.color.text_primary, bold = true)
 
     private val addressText = UiKit.text(context, "", 14f, R.color.text_primary)
     private val addressState = UiKit.text(context, "", 14f, R.color.text_primary)
@@ -58,13 +63,13 @@ class SettingsHomeController(
         SectionGroup(
             "账户",
             listOf(
-                Row("个人资料", Dest.Todo("个人资料")),
+                Row("个人资料", Dest.Screen("settings_profile")),
                 Row("连接管理", Dest.Section(SettingsSections.Section.CONNECTIONS)),
                 Row("仓库授权", Dest.Section(SettingsSections.Section.REPOS)),
-                Row("隐私与安全", Dest.Todo("隐私与安全")),
+                Row("隐私与安全", Dest.Screen("settings_privacy")),
                 Row("跨端同步", Dest.Section(SettingsSections.Section.HAND)),
                 Row("备份与恢复", Dest.Todo("备份与恢复")),
-                Row("用量与预算", Dest.Todo("用量与预算")),
+                Row("用量与预算", Dest.Screen("settings_usage")),
             ),
         ),
         SectionGroup(
@@ -115,7 +120,7 @@ class SettingsHomeController(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12); bottomMargin = dp(4) }
         }
-        card.addView(UiKit.text(context, "WhereverCode 用户", 14f, R.color.text_primary, bold = true))
+        card.addView(userNameText)
         card.addView(UiKit.text(context, "本地优先 · 无需强制登录即可使用本地对话与项目工作区", 12f, R.color.text_secondary))
         root.addView(card)
 
@@ -154,6 +159,7 @@ class SettingsHomeController(
 
     /** 每次进首页时刷新平台状态文案（现取，不缓存）。 */
     fun render() {
+        userNameText.text = profileName()
         val address = platformAddress()
         addressText.text = "平台地址　" + address.ifBlank { "未配置" }
         addressState.text = "地址状态　" + if (address.isBlank()) "未配置" else "已配置"
