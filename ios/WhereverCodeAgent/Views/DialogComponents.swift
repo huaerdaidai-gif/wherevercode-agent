@@ -71,17 +71,91 @@ extension View {
 ///   showsScrollToBottomButton 开时另有口径：贴底时新消息保持
 ///   贴底、离底时右下角出 ↓ 拉底按钮（滚到 bottomTargetID）。
 /// ↓ 拉底按钮的几何量测通道（DialogMessageListView 内部用）。
-private struct DialogSentinelFrameKey: PreferenceKey {
-    static var defaultValue: CGFloat? = nil
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        value = nextValue() ?? value
-    }
-}
 
-private struct DialogViewportHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+/// 贴底探针：挂在滚动内容背景上，沿 superview 链找到底层
+/// UIScrollView，KVO 观察 contentOffset 与 contentSize，
+/// offset + 视口高 >= 内容高 - 24 即贴底（内容比视口矮时恒贴底）。
+/// 只在值变化时回报。SwiftUI 上报通道在本列表全灭后的兜底硬信号
+/// （见 DialogMessageListView.isAtBottom 的教训记录）。
+private struct DialogScrollProbe: UIViewRepresentable {
+    var onAtBottom: (Bool) -> Void
+    var onMetrics: ((String) -> Void)? = nil
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        context.coordinator.onAtBottom = onAtBottom
+        context.coordinator.onMetrics = onMetrics
+        DispatchQueue.main.async { context.coordinator.attach(from: view) }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onAtBottom = onAtBottom
+        context.coordinator.onMetrics = onMetrics
+        if context.coordinator.scrollView == nil {
+            DispatchQueue.main.async { context.coordinator.attach(from: uiView) }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var onAtBottom: ((Bool) -> Void)?
+        var onMetrics: ((String) -> Void)?
+        weak var scrollView: UIScrollView?
+        private weak var probeView: UIView?
+        private var retryPending = false
+        private var attachAttempts = 0
+        private var offsetObservation: NSKeyValueObservation?
+        private var sizeObservation: NSKeyValueObservation?
+        private var lastValue: Bool?
+
+        func attach(from view: UIView) {
+            guard scrollView == nil else { return }
+            probeView = view
+            var node: UIView? = view.superview
+            while let current = node {
+                if let sv = current as? UIScrollView {
+                    scrollView = sv
+                    let handler: (UIScrollView, Any) -> Void = { [weak self] sv, _ in
+                        self?.evaluate(sv)
+                    }
+                    offsetObservation = sv.observe(\.contentOffset, options: [.initial, .new], changeHandler: handler)
+                    sizeObservation = sv.observe(\.contentSize, options: [.initial, .new], changeHandler: handler)
+                    return
+                }
+                node = current.superview
+            }
+            // 没找到：链还没建好，自重试（0.3s 一次、上限 40 次），
+            // 不依赖父视图再渲染——静止后没人再调 updateUIView。
+            guard !retryPending, attachAttempts < 40 else { return }
+            retryPending = true
+            attachAttempts += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                self.retryPending = false
+                if self.scrollView == nil, let view = self.probeView {
+                    self.attach(from: view)
+                }
+            }
+        }
+
+        private func evaluate(_ sv: UIScrollView) {
+            // 指标回报不可省：它的状态写入让父视图在滚动期间持续
+            // 重渲染，updateUIView 的 attach 重试才不会饿死——去掉
+            // 回报通道后探针会偶发整体哑火（2026-11-27 二分实测：
+            // 带回报 = 双向正确，去回报 = 按钮常显）。
+            let dbg = "off \(Int(sv.contentOffset.y)) b \(Int(sv.bounds.height)) cs \(Int(sv.contentSize.height))"
+            let dbgCallback = onMetrics
+            DispatchQueue.main.async { dbgCallback?(dbg) }
+            let atBottom = sv.contentOffset.y + sv.bounds.height >= sv.contentSize.height - 24
+            guard atBottom != lastValue else { return }
+            lastValue = atBottom
+            let callback = onAtBottom
+            DispatchQueue.main.async { callback?(atBottom) }
+        }
     }
 }
 
@@ -102,22 +176,17 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var showsScrollToBottomButton: Bool
     /// 拉底目标（最后一条消息的 id）；按钮与贴底跟随都滚到它。
     public var bottomTargetID: String?
-    @State private var sentinelMinY: CGFloat? = nil
-    @State private var viewportHeight: CGFloat = 0
+    /// 贴底判定由底层 UIScrollView 的 contentOffset/contentSize
+    /// 实测（DialogScrollProbe 的 KVO 回报），不用 SwiftUI 上报
+    /// 通道——教训（2026-11-27，iOS 17.2 模拟器逐项实测）：
+    /// PreferenceKey 两个键恒不投递（状态恒 0）、scrollPosition
+    /// (id:) 绑定恒为 nil（加 scrollTargetLayout 也不投递）、哨兵
+    /// onAppear 按 LazyVStack 预实现窗口触发会误判。四路皆不可靠，
+    /// 只剩 UIKit 层 KVO 是硬信号。
+    @State private var probeAtBottom = false
+    @State private var probeMetrics = ""
 
-    /// 贴底判定（几何实测，不靠哨兵 onAppear/onDisappear——LazyVStack
-    /// 视图回收时这两个回调不可靠：2026-11-27 模拟器实测，发送新消息
-    /// 把哨兵推离可见区后没收到 onDisappear，按钮被误藏）。
-    /// 量测坐标系挂在列表的父容器（ZStack）上：滚动内容在该固定
-    /// 坐标系中的位置随偏移移动；若挂在 ScrollView 本身上，坐标系
-    /// 随内容一起动、量到的永远是内容平面位置，按钮永不消失
-    /// （2026-11-27 第二轮实测教训）。
-    /// 哨兵未被实现（离底很远）= 未贴底；哨兵上沿进入视口下沿
-    /// 24pt 内 = 贴底。
-    private var isAtBottom: Bool {
-        guard let y = sentinelMinY else { return false }
-        return y <= viewportHeight + 24
-    }
+    private var isAtBottom: Bool { probeAtBottom }
     public var content: () -> Content
     public var trailing: () -> Trailing
 
@@ -150,21 +219,14 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     }
 
     public var body: some View {
-        ScrollViewReader { proxy in
+        // 依赖锚（不可删）：body 必须真读一次 probeMetrics，探针的
+        // 指标写入才会触发重渲染、updateUIView 的 attach 重试才不
+        // 会饿死。只写不读的 @State 在 SwiftUI 里不使视图失效——
+        // 2026-11-27 二分实测：去掉这次读，探针整体哑火、按钮常显。
+        let _ = probeMetrics
+        return ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
-                ScrollView {
-                    stack
-                        .padding(.horizontal, horizontalPadding)
-                        .padding(.top, topPadding)
-                        .padding(.bottom, bottomPadding)
-                        .dialogTapContent(onTapContent)
-                }
-                .background {
-                    GeometryReader { geo in
-                        Color.clear
-                            .preference(key: DialogViewportHeightKey.self, value: geo.size.height)
-                    }
-                }
+                scrollView
                 if showsScrollToBottomButton, !isAtBottom, bottomTargetID != nil {
                     Button {
                         scrollToBottom(proxy)
@@ -182,19 +244,38 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
                     .accessibilityIdentifier("dialog.scrollToBottom")
                 }
             }
-            .coordinateSpace(name: "dialogListScroll")
-            .onPreferenceChange(DialogSentinelFrameKey.self) { value in
-                sentinelMinY = value
-            }
-            .onPreferenceChange(DialogViewportHeightKey.self) { value in
-                viewportHeight = value
-            }
             #if compiler(>=6.0)
             .onChange(of: scrollTrigger) { _, _ in scrollToTarget(proxy) }
             #else
             .onChange(of: scrollTrigger) { _ in scrollToTarget(proxy) }
             #endif
         }
+    }
+
+    /// 消息滚动区：拉底按钮开启时挂 scrollPosition 跟踪贴底
+    /// （判定见 isAtBottom）；关闭时就是普通滚动区，零影响。
+    @ViewBuilder
+    private var scrollView: some View {
+        if showsScrollToBottomButton {
+            ScrollView {
+                paddedStack
+                    .background {
+                        DialogScrollProbe(onAtBottom: { atBottom in
+                            if probeAtBottom != atBottom { probeAtBottom = atBottom }
+                        }, onMetrics: { probeMetrics = $0 })
+                    }
+            }
+        } else {
+            ScrollView { paddedStack }
+        }
+    }
+
+    private var paddedStack: some View {
+        stack
+            .padding(.horizontal, horizontalPadding)
+            .padding(.top, topPadding)
+            .padding(.bottom, bottomPadding)
+            .dialogTapContent(onTapContent)
     }
 
     @ViewBuilder
@@ -214,23 +295,14 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         }
     }
 
-    /// 栈尾哨兵（仅拉底按钮开启时）：用 GeometryReader 实测自身在
-    /// 滚动坐标系中的上沿位置并上报，贴底判定见 isAtBottom。
+    /// 栈尾哨兵（仅拉底按钮开启时）：只作滚底落点（scrollTo 目标），
+    /// 不再承担贴底量测（量测改走栈帧，见 isAtBottom 的教训记录）。
     @ViewBuilder
     private var bottomSentinel: some View {
         if showsScrollToBottomButton {
             Color.clear
                 .frame(height: 1)
                 .id("dialog.bottomSentinel")
-                .background {
-                    GeometryReader { geo in
-                        Color.clear
-                            .preference(
-                                key: DialogSentinelFrameKey.self,
-                                value: geo.frame(in: .named("dialogListScroll")).minY
-                            )
-                    }
-                }
         }
     }
 
