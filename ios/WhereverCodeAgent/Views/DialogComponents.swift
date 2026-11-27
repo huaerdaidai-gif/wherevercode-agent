@@ -108,6 +108,10 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     /// 贴底判定（几何实测，不靠哨兵 onAppear/onDisappear——LazyVStack
     /// 视图回收时这两个回调不可靠：2026-11-27 模拟器实测，发送新消息
     /// 把哨兵推离可见区后没收到 onDisappear，按钮被误藏）。
+    /// 量测坐标系挂在列表的父容器（ZStack）上：滚动内容在该固定
+    /// 坐标系中的位置随偏移移动；若挂在 ScrollView 本身上，坐标系
+    /// 随内容一起动、量到的永远是内容平面位置，按钮永不消失
+    /// （2026-11-27 第二轮实测教训）。
     /// 哨兵未被实现（离底很远）= 未贴底；哨兵上沿进入视口下沿
     /// 24pt 内 = 贴底。
     private var isAtBottom: Bool {
@@ -155,7 +159,6 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
                         .padding(.bottom, bottomPadding)
                         .dialogTapContent(onTapContent)
                 }
-                .coordinateSpace(name: "dialogListScroll")
                 .background {
                     GeometryReader { geo in
                         Color.clear
@@ -179,6 +182,7 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
                     .accessibilityIdentifier("dialog.scrollToBottom")
                 }
             }
+            .coordinateSpace(name: "dialogListScroll")
             .onPreferenceChange(DialogSentinelFrameKey.self) { value in
                 sentinelMinY = value
             }
