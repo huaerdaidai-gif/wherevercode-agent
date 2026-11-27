@@ -1,0 +1,163 @@
+# TEMPORARY diagnostic workflow #2 (2026-11-27): replicate ios.yml step 10
+# VERBATIM (same preceding Release build, shutdown+erase+boot+install+
+# launch+10 screenshots) with every sub-command individually capped and
+# its rc written to diag.txt, so the wedging sub-command identifies itself.
+# Delete after diagnosis.
+name: iOS Step10 Replica Diag (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  replica:
+    name: step10 verbatim replica
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out branch head
+        uses: actions/checkout@v4
+        with:
+          ref: 241afbc360a0518dca302d01b32989700004ac3f
+      - name: Select latest stable Xcode + pick simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+          sw_vers || true
+          uname -m
+          ls -d /Applications/Xcode*.app || true
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1 || true)"
+          if [ -n "$XCODE" ]; then echo "Using $XCODE"; sudo xcode-select -s "$XCODE"; fi
+          xcodebuild -version
+          xcrun simctl list runtimes
+          UDID="$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          phones = [d for runtimes in data['devices'].values() for d in runtimes
+                    if d.get('isAvailable') and 'iPhone' in d.get('name', '')]
+          phones.sort(key=lambda d: ('iPhone 17' not in d['name'], d['name']))
+          print(phones[0]['udid'] if phones else '')
+          ")"
+          if [ -z "$UDID" ]; then echo "No available iPhone simulator."; xcrun simctl list devices available; exit 1; fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $UDID"
+      - name: Build (unsigned, generic iOS device) - mirrors step 6
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build/derived \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Step 10 replica with per-subcommand verdicts
+        run: |
+          set -uo pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          : > diag.txt
+          mark() { echo "$(date +%T) $*" | tee -a diag.txt; }
+          run_with_idle_cap() {
+            local idle_cap="$1" total_cap="$2"; shift 2
+            local logf shown=0 waited=0 last_output=0 size rc
+            logf="$(mktemp)"
+            "$@" >"$logf" 2>&1 &
+            local pid=$!
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 10
+              waited=$((waited + 10))
+              size=$(stat -f %z "$logf")
+              if [ "$size" -gt "$shown" ]; then
+                tail -c +$((shown + 1)) "$logf"
+                shown=$size
+                last_output=$waited
+              fi
+              if [ $((waited - last_output)) -ge "$idle_cap" ]; then
+                echo "WEDGED: no output for ${idle_cap}s from: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+              if [ "$waited" -ge "$total_cap" ]; then
+                echo "TIMEOUT: total ${total_cap}s exceeded: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+            done
+            wait "$pid"; rc=$?
+            size=$(stat -f %z "$logf")
+            if [ "$size" -gt "$shown" ]; then
+              tail -c +$((shown + 1)) "$logf"
+            fi
+            rm -f "$logf"
+            return $rc
+          }
+          collect_diag() {
+            {
+              echo "--- simctl list devices ---"
+              xcrun simctl list devices 2>&1 | head -40
+              echo "--- ps CoreSimulator/installd ---"
+              ps aux | grep -E 'CoreSimulator|installd|launchd_sim' | grep -v grep | head -20
+              echo "--- CoreSimulator log dir ---"
+              ls -lt ~/Library/Logs/CoreSimulator/ 2>/dev/null | head -10
+              newest=$(ls -t ~/Library/Logs/CoreSimulator/*.log 2>/dev/null | head -1)
+              if [ -n "${newest:-}" ]; then echo "--- tail $newest ---"; tail -50 "$newest"; fi
+            } >> diag.txt 2>&1 || true
+          }
+          step_rc() { # name, rc
+            if [ "$2" = "124" ]; then mark "WEDGED $1 rc=124"; collect_diag;
+            else mark "DONE $1 rc=$2"; fi
+          }
+          mark "START replica UDID=$UDID"
+          run_with_idle_cap 60 600 xcodebuild build \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath .build/derived \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"
+          step_rc build-debug $?
+          APP_PATH=".build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app"
+          ls -la "$APP_PATH" >/dev/null 2>&1 && mark "APP exists" || mark "APP MISSING"
+          xcrun simctl shutdown "$UDID" >/dev/null 2>&1; step_rc shutdown-presim $?
+          run_with_idle_cap 60 120 xcrun simctl erase "$UDID"; step_rc erase $?
+          run_with_idle_cap 120 120 xcrun simctl boot "$UDID"; step_rc boot $?
+          run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; brc=$?
+          if [ $brc -ne 0 ]; then
+            if xcrun simctl list devices available | grep "$UDID" | grep -q "(Booted)"; then
+              mark "bootstatus rc=$brc but device Booted (fallback OK)"
+            else
+              mark "bootstatus rc=$brc and device NOT Booted"
+            fi
+          else
+            mark "DONE bootstatus rc=0"
+          fi
+          run_with_idle_cap 180 300 xcrun simctl install "$UDID" "$APP_PATH"; step_rc install $?
+          run_with_idle_cap 30 60 xcrun simctl launch "$UDID" wherevercode.agent; step_rc launch $?
+          sleep 3
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            run_with_idle_cap 15 30 xcrun simctl io "$UDID" screenshot "live-launch-$i.png" >/dev/null 2>&1
+            step_rc "screenshot-$i" $?
+            sleep 2
+          done
+          ls -la live-launch-*.png >> diag.txt 2>&1 || true
+          xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
+          xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
+          mark "END replica"
+          exit 0
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-step10-replica
+          path: diag.txt
+          retention-days: 7
+          if-no-files-found: warn
