@@ -117,20 +117,21 @@ jobs:
             else mark "DONE $1 rc=$2"; fi
           }
           mark "START replica UDID=$UDID"
+          rc=0
           run_with_idle_cap 60 600 xcodebuild build \
             -project ios/WhereverCodeAgent.xcodeproj \
             -scheme WhereverCodeAgent \
             -configuration Debug \
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath .build/derived \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"
-          step_rc build-debug $?
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-" || rc=$?
+          step_rc build-debug $rc
           APP_PATH=".build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app"
           ls -la "$APP_PATH" >/dev/null 2>&1 && mark "APP exists" || mark "APP MISSING"
-          xcrun simctl shutdown "$UDID" >/dev/null 2>&1; step_rc shutdown-presim $?
-          run_with_idle_cap 60 120 xcrun simctl erase "$UDID"; step_rc erase $?
-          run_with_idle_cap 120 120 xcrun simctl boot "$UDID"; step_rc boot $?
-          run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; brc=$?
+          rc=0; xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || rc=$?; step_rc shutdown-presim $rc
+          rc=0; run_with_idle_cap 60 120 xcrun simctl erase "$UDID" || rc=$?; step_rc erase $rc
+          rc=0; run_with_idle_cap 120 120 xcrun simctl boot "$UDID" || rc=$?; step_rc boot $rc
+          brc=0; run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b || brc=$?
           if [ $brc -ne 0 ]; then
             if xcrun simctl list devices available | grep "$UDID" | grep -q "(Booted)"; then
               mark "bootstatus rc=$brc but device Booted (fallback OK)"
@@ -140,12 +141,11 @@ jobs:
           else
             mark "DONE bootstatus rc=0"
           fi
-          run_with_idle_cap 180 300 xcrun simctl install "$UDID" "$APP_PATH"; step_rc install $?
-          run_with_idle_cap 30 60 xcrun simctl launch "$UDID" wherevercode.agent; step_rc launch $?
+          rc=0; run_with_idle_cap 180 300 xcrun simctl install "$UDID" "$APP_PATH" || rc=$?; step_rc install $rc
+          rc=0; run_with_idle_cap 30 60 xcrun simctl launch "$UDID" wherevercode.agent || rc=$?; step_rc launch $rc
           sleep 3
           for i in 1 2 3 4 5 6 7 8 9 10; do
-            run_with_idle_cap 15 30 xcrun simctl io "$UDID" screenshot "live-launch-$i.png" >/dev/null 2>&1
-            step_rc "screenshot-$i" $?
+            rc=0; run_with_idle_cap 15 30 xcrun simctl io "$UDID" screenshot "live-launch-$i.png" >/dev/null 2>&1 || rc=$?; step_rc "screenshot-$i" $rc
             sleep 2
           done
           ls -la live-launch-*.png >> diag.txt 2>&1 || true
