@@ -10628,7 +10628,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             emptyList()
         }
-        val taskLine = "进行中 ${tasks.count { it.state in ConsoleSnapshot.ACTIVE_STATES }} · " +
+        val taskLine = "进行中 ${tasks.count { it.state in ConsoleSnapshot.Snapshot.ACTIVE_STATES }} · " +
             "等待 ${tasks.count { TaskStates.isClaimable(it.state) }} · " +
             "已完成 ${tasks.count { it.state == "completed" }} · " +
             "失败 ${tasks.count { it.state == "failed" }} · " +
