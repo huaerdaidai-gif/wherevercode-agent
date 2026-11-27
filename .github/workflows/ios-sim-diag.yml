@@ -1,0 +1,475 @@
+# TEMPORARY diagnostic workflow (2026-11-27): localize the ios.yml step-10
+# simctl-install wedge. Three parallel cells, one dispatch, verdicts are
+# written into diag.txt artifacts (Actions logs are not API-readable here).
+#   A: old green head 998bf19e + pre-provisioned simulator (ios.yml's way)
+#   C: current head 8483da91 + freshly created simulator every run
+#   D: hello-world .app built with swiftc + pre-provisioned simulator
+# Delete this file once the fault layer is known.
+name: iOS Sim Install Diag (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cell-a:
+    name: A old-head preprovisioned-sim
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out old green head
+        uses: actions/checkout@v4
+        with:
+          ref: 998bf19eae62df14e4377d7b281b07cf362c6815
+      - name: Print runner environment
+        run: |
+          echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+          sw_vers || true
+          uname -m
+          ls -d /Applications/Xcode*.app || true
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1 || true)"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; echo "Using $XCODE"; fi
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Build Debug simulator app
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath .build/derived \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"
+          ls -la .build/derived/Build/Products/Debug-iphonesimulator/
+      - name: Install attempts with diagnostics
+        run: |
+          set -uo pipefail
+          : > diag.txt
+          echo "cell=A" >> diag.txt
+          run_with_idle_cap() {
+            local idle_cap="$1" total_cap="$2"; shift 2
+            local logf shown=0 waited=0 last_output=0 size rc
+            logf="$(mktemp)"
+            "$@" >"$logf" 2>&1 &
+            local pid=$!
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 10
+              waited=$((waited + 10))
+              size=$(stat -f %z "$logf")
+              if [ "$size" -gt "$shown" ]; then
+                tail -c +$((shown + 1)) "$logf"
+                shown=$size
+                last_output=$waited
+              fi
+              if [ $((waited - last_output)) -ge "$idle_cap" ]; then
+                echo "WEDGED: no output for ${idle_cap}s from: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+              if [ "$waited" -ge "$total_cap" ]; then
+                echo "TIMEOUT: total ${total_cap}s exceeded: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+            done
+            wait "$pid"; rc=$?
+            size=$(stat -f %z "$logf")
+            if [ "$size" -gt "$shown" ]; then
+              tail -c +$((shown + 1)) "$logf"
+            fi
+            rm -f "$logf"
+            return $rc
+          }
+          collect_diag() {
+            {
+              echo "--- simctl list devices ---"
+              xcrun simctl list devices 2>&1 | head -40
+              echo "--- ps CoreSimulator/installd ---"
+              ps aux | grep -E 'CoreSimulator|installd|launchd_sim' | grep -v grep | head -20
+              echo "--- CoreSimulator log dir ---"
+              ls -lt ~/Library/Logs/CoreSimulator/ 2>/dev/null | head -10
+              newest=$(ls -t ~/Library/Logs/CoreSimulator/*.log 2>/dev/null | head -1)
+              if [ -n "${newest:-}" ]; then echo "--- tail $newest ---"; tail -50 "$newest"; fi
+            } >> diag.txt 2>&1 || true
+          }
+          UDID="$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          phones = [d for runtimes in data['devices'].values() for d in runtimes
+                    if d.get('isAvailable') and 'iPhone' in d.get('name', '')]
+          phones.sort(key=lambda d: ('iPhone 17' not in d['name'], d['name']))
+          print(phones[0]['udid'] if phones else '')
+          ")"
+          echo "UDID=$UDID" | tee -a diag.txt
+          if [ -z "$UDID" ]; then echo "VERDICT cell=A result=NO_SIM" >> diag.txt; exit 1; fi
+          run_with_idle_cap 120 120 xcrun simctl boot "$UDID" || true
+          if ! run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; then
+            if ! xcrun simctl list devices available | grep "$UDID" | grep -q "(Booted)"; then
+              echo "VERDICT cell=A result=BOOT_FAIL" >> diag.txt
+              collect_diag
+              exit 1
+            fi
+            echo "device Booted despite bootstatus silence"
+          fi
+          APP=.build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app
+          ok=0
+          for i in 1 2; do
+            echo "=== install attempt $i $(date +%T) ==="
+            if run_with_idle_cap 180 300 xcrun simctl install "$UDID" "$APP"; then
+              echo "ATTEMPT$i OK" | tee -a diag.txt
+              ok=1
+            else
+              rc=$?
+              echo "ATTEMPT$i FAIL rc=$rc" | tee -a diag.txt
+              collect_diag
+            fi
+            xcrun simctl uninstall "$UDID" wherevercode.agent >/dev/null 2>&1 || true
+          done
+          if [ "$ok" = "1" ]; then
+            echo "VERDICT cell=A result=INSTALL_OK" >> diag.txt
+            exit 0
+          fi
+          echo "VERDICT cell=A result=INSTALL_FAIL" >> diag.txt
+          exit 1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-cell-a
+          path: diag.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+  cell-c:
+    name: C new-head fresh-sim
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out current branch head
+        uses: actions/checkout@v4
+        with:
+          ref: 8483da91e263f5347a41454013e07187c1f818d4
+      - name: Print runner environment
+        run: |
+          echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+          sw_vers || true
+          uname -m
+          ls -d /Applications/Xcode*.app || true
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1 || true)"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; echo "Using $XCODE"; fi
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Build Debug simulator app
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project ios/WhereverCodeAgent.xcodeproj \
+            -scheme WhereverCodeAgent \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath .build/derived \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"
+          ls -la .build/derived/Build/Products/Debug-iphonesimulator/
+      - name: Install attempts on freshly created simulator
+        run: |
+          set -uo pipefail
+          : > diag.txt
+          echo "cell=C" >> diag.txt
+          run_with_idle_cap() {
+            local idle_cap="$1" total_cap="$2"; shift 2
+            local logf shown=0 waited=0 last_output=0 size rc
+            logf="$(mktemp)"
+            "$@" >"$logf" 2>&1 &
+            local pid=$!
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 10
+              waited=$((waited + 10))
+              size=$(stat -f %z "$logf")
+              if [ "$size" -gt "$shown" ]; then
+                tail -c +$((shown + 1)) "$logf"
+                shown=$size
+                last_output=$waited
+              fi
+              if [ $((waited - last_output)) -ge "$idle_cap" ]; then
+                echo "WEDGED: no output for ${idle_cap}s from: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+              if [ "$waited" -ge "$total_cap" ]; then
+                echo "TIMEOUT: total ${total_cap}s exceeded: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+            done
+            wait "$pid"; rc=$?
+            size=$(stat -f %z "$logf")
+            if [ "$size" -gt "$shown" ]; then
+              tail -c +$((shown + 1)) "$logf"
+            fi
+            rm -f "$logf"
+            return $rc
+          }
+          collect_diag() {
+            {
+              echo "--- simctl list devices ---"
+              xcrun simctl list devices 2>&1 | head -40
+              echo "--- ps CoreSimulator/installd ---"
+              ps aux | grep -E 'CoreSimulator|installd|launchd_sim' | grep -v grep | head -20
+              echo "--- CoreSimulator log dir ---"
+              ls -lt ~/Library/Logs/CoreSimulator/ 2>/dev/null | head -10
+              newest=$(ls -t ~/Library/Logs/CoreSimulator/*.log 2>/dev/null | head -1)
+              if [ -n "${newest:-}" ]; then echo "--- tail $newest ---"; tail -50 "$newest"; fi
+            } >> diag.txt 2>&1 || true
+          }
+          RT="$(xcrun simctl list runtimes -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          rts = [r for r in data['runtimes'] if r.get('isAvailable') and r.get('name', '').startswith('iOS')]
+          rts.sort(key=lambda r: r.get('version', ''))
+          print(rts[-1]['identifier'] if rts else '')
+          ")"
+          DT="$(xcrun simctl list devicetypes -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          dts = [d for d in data['devicetypes'] if 'iPhone' in d.get('name', '')]
+          dts.sort(key=lambda d: ('iPhone 15' not in d['name'], d['name']))
+          print(dts[0]['identifier'] if dts else '')
+          ")"
+          echo "runtime=$RT devicetype=$DT" | tee -a diag.txt
+          if [ -z "$RT" ] || [ -z "$DT" ]; then echo "VERDICT cell=C result=NO_RUNTIME" >> diag.txt; exit 1; fi
+          UDID="$(xcrun simctl create DiagFresh "$DT" "$RT")"
+          echo "created UDID=$UDID" | tee -a diag.txt
+          run_with_idle_cap 120 120 xcrun simctl boot "$UDID" || true
+          if ! run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; then
+            if ! xcrun simctl list devices available | grep "$UDID" | grep -q "(Booted)"; then
+              echo "VERDICT cell=C result=BOOT_FAIL" >> diag.txt
+              collect_diag
+              exit 1
+            fi
+            echo "device Booted despite bootstatus silence"
+          fi
+          APP=.build/derived/Build/Products/Debug-iphonesimulator/WhereverCodeAgent.app
+          ok=0
+          for i in 1 2; do
+            echo "=== install attempt $i $(date +%T) ==="
+            if run_with_idle_cap 180 300 xcrun simctl install "$UDID" "$APP"; then
+              echo "ATTEMPT$i OK" | tee -a diag.txt
+              ok=1
+            else
+              rc=$?
+              echo "ATTEMPT$i FAIL rc=$rc" | tee -a diag.txt
+              collect_diag
+            fi
+            xcrun simctl uninstall "$UDID" wherevercode.agent >/dev/null 2>&1 || true
+          done
+          if [ "$ok" = "1" ]; then
+            echo "VERDICT cell=C result=INSTALL_OK" >> diag.txt
+            exit 0
+          fi
+          echo "VERDICT cell=C result=INSTALL_FAIL" >> diag.txt
+          exit 1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-cell-c
+          path: diag.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+  cell-d:
+    name: D hello-world preprovisioned-sim
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Print runner environment
+        run: |
+          echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+          sw_vers || true
+          uname -m
+          ls -d /Applications/Xcode*.app || true
+          XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1 || true)"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; echo "Using $XCODE"; fi
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Build hello-world app with swiftc
+        run: |
+          set -euo pipefail
+          mkdir -p HelloDiag.app
+          cat > main.swift <<'SWIFT'
+          import UIKit
+
+          final class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
+              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  let w = UIWindow(frame: UIScreen.main.bounds)
+                  let vc = UIViewController()
+                  vc.view.backgroundColor = .systemBackground
+                  let label = UILabel(frame: vc.view.bounds)
+                  label.text = "HelloDiag"
+                  label.textAlignment = .center
+                  vc.view.addSubview(label)
+                  w.rootViewController = vc
+                  w.makeKeyAndVisible()
+                  window = w
+                  return true
+              }
+          }
+
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
+          SWIFT
+          cat > HelloDiag.app/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleExecutable</key>
+              <string>HelloDiag</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.wc.diag.hello</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>HelloDiag</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>MinimumOSVersion</key>
+              <string>15.0</string>
+          </dict>
+          </plist>
+          PLIST
+          SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          ARCH="$(uname -m)"
+          echo "sdk=$SDK arch=$ARCH"
+          swiftc -target ${ARCH}-apple-ios15.0-simulator -sdk "$SDK" -O -o HelloDiag.app/HelloDiag main.swift
+          codesign --force --deep --sign - HelloDiag.app
+          ls -la HelloDiag.app
+      - name: Install attempts with diagnostics
+        run: |
+          set -uo pipefail
+          : > diag.txt
+          echo "cell=D" >> diag.txt
+          run_with_idle_cap() {
+            local idle_cap="$1" total_cap="$2"; shift 2
+            local logf shown=0 waited=0 last_output=0 size rc
+            logf="$(mktemp)"
+            "$@" >"$logf" 2>&1 &
+            local pid=$!
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 10
+              waited=$((waited + 10))
+              size=$(stat -f %z "$logf")
+              if [ "$size" -gt "$shown" ]; then
+                tail -c +$((shown + 1)) "$logf"
+                shown=$size
+                last_output=$waited
+              fi
+              if [ $((waited - last_output)) -ge "$idle_cap" ]; then
+                echo "WEDGED: no output for ${idle_cap}s from: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+              if [ "$waited" -ge "$total_cap" ]; then
+                echo "TIMEOUT: total ${total_cap}s exceeded: $*"
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                rm -f "$logf"
+                return 124
+              fi
+            done
+            wait "$pid"; rc=$?
+            size=$(stat -f %z "$logf")
+            if [ "$size" -gt "$shown" ]; then
+              tail -c +$((shown + 1)) "$logf"
+            fi
+            rm -f "$logf"
+            return $rc
+          }
+          collect_diag() {
+            {
+              echo "--- simctl list devices ---"
+              xcrun simctl list devices 2>&1 | head -40
+              echo "--- ps CoreSimulator/installd ---"
+              ps aux | grep -E 'CoreSimulator|installd|launchd_sim' | grep -v grep | head -20
+              echo "--- CoreSimulator log dir ---"
+              ls -lt ~/Library/Logs/CoreSimulator/ 2>/dev/null | head -10
+              newest=$(ls -t ~/Library/Logs/CoreSimulator/*.log 2>/dev/null | head -1)
+              if [ -n "${newest:-}" ]; then echo "--- tail $newest ---"; tail -50 "$newest"; fi
+            } >> diag.txt 2>&1 || true
+          }
+          UDID="$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          phones = [d for runtimes in data['devices'].values() for d in runtimes
+                    if d.get('isAvailable') and 'iPhone' in d.get('name', '')]
+          phones.sort(key=lambda d: ('iPhone 17' not in d['name'], d['name']))
+          print(phones[0]['udid'] if phones else '')
+          ")"
+          echo "UDID=$UDID" | tee -a diag.txt
+          if [ -z "$UDID" ]; then echo "VERDICT cell=D result=NO_SIM" >> diag.txt; exit 1; fi
+          run_with_idle_cap 120 120 xcrun simctl boot "$UDID" || true
+          if ! run_with_idle_cap 120 300 xcrun simctl bootstatus "$UDID" -b; then
+            if ! xcrun simctl list devices available | grep "$UDID" | grep -q "(Booted)"; then
+              echo "VERDICT cell=D result=BOOT_FAIL" >> diag.txt
+              collect_diag
+              exit 1
+            fi
+            echo "device Booted despite bootstatus silence"
+          fi
+          ok=0
+          for i in 1 2; do
+            echo "=== install attempt $i $(date +%T) ==="
+            if run_with_idle_cap 180 300 xcrun simctl install "$UDID" HelloDiag.app; then
+              echo "ATTEMPT$i OK" | tee -a diag.txt
+              ok=1
+            else
+              rc=$?
+              echo "ATTEMPT$i FAIL rc=$rc" | tee -a diag.txt
+              collect_diag
+            fi
+            xcrun simctl uninstall "$UDID" com.wc.diag.hello >/dev/null 2>&1 || true
+          done
+          if [ "$ok" = "1" ]; then
+            echo "VERDICT cell=D result=INSTALL_OK" >> diag.txt
+            exit 0
+          fi
+          echo "VERDICT cell=D result=INSTALL_FAIL" >> diag.txt
+          exit 1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-cell-d
+          path: diag.txt
+          retention-days: 7
+          if-no-files-found: warn
