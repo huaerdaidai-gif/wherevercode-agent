@@ -2501,6 +2501,19 @@ private struct McpToolsInspectorScreen: View {
     @State private var toolCallResult: String?
     @State private var toolCallSuccess: Bool?
 
+    // 通用 MCP 服务器 / 插件 / 扩展注册表（控制对齐批四）
+    @State private var genericServers: [GenericMcpServerConfig] = []
+    @State private var serverStatuses: [String: String] = [:]
+    @State private var serverBusy: Set<String> = []
+    @State private var showServerForm = false
+    @State private var serverDraft = GenericMcpServerConfig()
+    @State private var serverFormIsEdit = false
+    @State private var showImportSheet = false
+    @State private var importText = ""
+    @State private var importMessage: String?
+    @State private var pendingDeleteServer: GenericMcpServerConfig?
+    @State private var plugins: [V5PluginRecord] = []
+
     private let standardV5Tools: [(name: String, summary: String)] = [
         ("issue_agent_token", "签发平台 Agent 访问令牌"),
         ("agent_channel_list", "拉取可见团队频道列表"),
@@ -2685,12 +2698,209 @@ private struct McpToolsInspectorScreen: View {
                 }
             } header: { Text("客户端已内置对接的 V5 MCP 工具（\(standardV5Tools.count) 项）").textCase(nil) }
 
+            Section {
+                HStack {
+                    Button("＋ 添加服务器") {
+                        serverDraft = GenericMcpServerConfig()
+                        serverFormIsEdit = false
+                        showServerForm = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Spacer()
+                    Button("导入配置") {
+                        importText = ""
+                        importMessage = nil
+                        showImportSheet = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Text("添加：填地址就能连，支持 Streamable HTTP（主流）、SSE（老版）与 stdio（本机命令）；导入：粘贴标准 mcpServers JSON（Claude Desktop / VS Code 同款格式）。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if genericServers.isEmpty {
+                    Text("暂无 MCP 服务器。").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(genericServers) { server in
+                        genericServerRow(server)
+                    }
+                }
+            } header: { Text("通用 MCP 服务器").textCase(nil) }
+
+            Section {
+                if plugins.isEmpty {
+                    Text("暂无插件。").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(plugins) { plugin in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(plugin.name).font(.subheadline.weight(.semibold))
+                                Text("v\(plugin.version)").font(.caption2).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(plugin.status)
+                                    .font(.caption2).fontWeight(.bold)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(plugin.status == "已启用" ? Color.green.opacity(0.15) : Color.secondary.opacity(0.12), in: Capsule())
+                                    .foregroundStyle(plugin.status == "已启用" ? .green : .secondary)
+                            }
+                            Text(plugin.summary).font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Text("提供工具: \(plugin.providedTools.joined(separator: ", "))").font(.caption2).foregroundStyle(.secondary)
+                                Spacer()
+                                Button(plugin.status == "已启用" ? "禁用" : (plugin.status == "未安装" ? "安装并启用" : "启用")) {
+                                    plugins = V5PluginManager.togglePlugin(id: plugin.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            } header: { Text("插件").textCase(nil) }
+
+            Section {
+                let counts = IosExtensionRegistry.countsByKind()
+                let mcpCount = (counts[.mcp] ?? 0) + genericServers.count
+                let summary = IosExtensionKind.allCases
+                    .sorted { $0.rawValue < $1.rawValue }
+                    .map { kind in "\(kind.rawValue) \(kind == .mcp ? mcpCount : (counts[kind] ?? 0)) 个" }
+                    .joined(separator: " · ")
+                Text(summary).font(.caption)
+                Text("MCP 服务器与插件在两边是同一套身份（同名、同类）；其余五类先只登记，不在此屏提供操作。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } header: { Text("扩展注册表（七类，与 Hand 侧同一套分类）").textCase(nil) }
+
             PrototypeRouteSections(routeId: "mcp", appState: appState, onNavigateRoute: onNavigateRoute)
         }
         .task {
+            genericServers = GenericMcpServerStore.list()
+            plugins = V5PluginManager.listPlugins()
             if appState.hasToken && toolNames.isEmpty {
                 await fetchTools()
             }
+        }
+        .sheet(isPresented: $showServerForm) {
+            GenericMcpServerFormSheet(draft: serverDraft, isEdit: serverFormIsEdit) { saved in
+                GenericMcpServerStore.upsert(saved)
+                genericServers = GenericMcpServerStore.list()
+            }
+        }
+        .sheet(isPresented: $showImportSheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("粘贴标准 mcpServers JSON（Claude Desktop / VS Code 同款格式）。同名服务器会覆盖配置，启用开关保留。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $importText)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxHeight: .infinity)
+                    if let importMessage {
+                        Text(importMessage).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                .padding()
+                .navigationTitle("导入 MCP 服务器")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showImportSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("导入") {
+                            let parsed = GenericMcpImport.parse(importText)
+                            if parsed.isEmpty {
+                                importMessage = "没有解析出服务器：请粘贴含 mcpServers 的 JSON。"
+                            } else {
+                                for var config in parsed {
+                                    if let existing = genericServers.first(where: { $0.name == config.name }) {
+                                        config.enabled = existing.enabled
+                                    }
+                                    GenericMcpServerStore.upsert(config)
+                                }
+                                genericServers = GenericMcpServerStore.list()
+                                showImportSheet = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .alert("删除 MCP 服务器", isPresented: Binding(
+            get: { pendingDeleteServer != nil },
+            set: { if !$0 { pendingDeleteServer = nil } }
+        )) {
+            Button("删除", role: .destructive) {
+                if let server = pendingDeleteServer {
+                    GenericMcpServerStore.remove(name: server.name)
+                    serverStatuses[server.name] = nil
+                    genericServers = GenericMcpServerStore.list()
+                }
+                pendingDeleteServer = nil
+            }
+            Button("取消", role: .cancel) { pendingDeleteServer = nil }
+        } message: {
+            Text("删除 MCP 服务器“\(pendingDeleteServer?.name ?? "")”？已连接时会先断开。内置服务器删不掉（只能停用）。")
+        }
+    }
+
+    private func genericServerRow(_ server: GenericMcpServerConfig) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(server.name).font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(serverStatuses[server.name] ?? (server.enabled ? "未连接" : "未启用"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text(server.transportLabel).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Toggle("启用", isOn: Binding(
+                    get: { server.enabled },
+                    set: { newValue in
+                        GenericMcpServerStore.setEnabled(name: server.name, enabled: newValue)
+                        genericServers = GenericMcpServerStore.list()
+                    }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+                Text(server.enabled ? "已启用" : "已停用").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                if server.enabled {
+                    Button(serverStatuses[server.name]?.hasPrefix("已连接") == true ? "测连通" : "连接") {
+                        connectGenericServer(server)
+                    }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                    .disabled(serverBusy.contains(server.name))
+                }
+                Button("编辑") {
+                    serverDraft = server
+                    serverFormIsEdit = true
+                    showServerForm = true
+                }
+                .buttonStyle(.bordered).controlSize(.mini)
+                Button("删除", role: .destructive) {
+                    pendingDeleteServer = server
+                }
+                .buttonStyle(.bordered).controlSize(.mini)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func connectGenericServer(_ server: GenericMcpServerConfig) {
+        serverBusy.insert(server.name)
+        serverStatuses[server.name] = "正在连接…"
+        Task {
+            do {
+                let names = try await GenericMcpClient(config: server).listTools()
+                serverStatuses[server.name] = "已连接 · \(names.count) 个工具"
+            } catch let error as GenericMcpError {
+                serverStatuses[server.name] = "连接失败：\(error.text)"
+            } catch {
+                serverStatuses[server.name] = "连接失败：\(error.localizedDescription)"
+            }
+            serverBusy.remove(server.name)
         }
     }
 
@@ -2755,6 +2965,143 @@ private struct McpToolsInspectorScreen: View {
             toolCallResult = "调用错误: \(error.localizedDescription)"
             LocalData.shared.approvalStore.recordAudit("[MCP_EXEC_ERR] \(selectedToolToExecute) 调用失败 -> \(error.localizedDescription)")
         }
+    }
+}
+
+/// 通用 MCP 服务器添加/编辑表单（控制对齐批四，与安卓表单同构：
+/// 名称编辑时不可改、传输三选、地址/命令随传输切换、请求头一行
+/// 一个、OAuth 字段 stdio 时隐藏；校验口径与安卓一致）。
+private struct GenericMcpServerFormSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let isEdit: Bool
+    var onSave: (GenericMcpServerConfig) -> Void
+    private let originalEnabled: Bool
+    @State private var name: String
+    @State private var transport: String
+    @State private var address: String
+    @State private var headersText: String
+    @State private var oauth: Bool
+    @State private var oauthClientId: String
+    @State private var oauthScopes: String
+    @State private var errorText: String?
+
+    init(draft: GenericMcpServerConfig, isEdit: Bool, onSave: @escaping (GenericMcpServerConfig) -> Void) {
+        self.isEdit = isEdit
+        self.onSave = onSave
+        self.originalEnabled = draft.enabled
+        _name = State(initialValue: draft.name)
+        _transport = State(initialValue: draft.transport)
+        _address = State(initialValue: draft.transport == "stdio" ? draft.command : draft.url)
+        _headersText = State(initialValue: draft.headers.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
+        _oauth = State(initialValue: draft.oauth)
+        _oauthClientId = State(initialValue: draft.oauthClientId)
+        _oauthScopes = State(initialValue: draft.oauthScopes)
+    }
+
+    private var addressLabel: String {
+        switch transport {
+        case "sse": return "服务器地址（https://…/sse）"
+        case "stdio": return "启动命令（如 npx -y @modelcontextprotocol/server-filesystem /tmp）"
+        default: return "服务器地址（https://…/mcp）"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("服务器名（唯一，如 filesystem）", text: $name)
+                        .disabled(isEdit)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: { Text("名称").textCase(nil) }
+                Section {
+                    Picker("传输", selection: $transport) {
+                        Text("Streamable HTTP（主流）").tag("http")
+                        Text("SSE（老版兼容）").tag("sse")
+                        Text("stdio（本机命令）").tag("stdio")
+                    }
+                } header: { Text("传输").textCase(nil) }
+                Section {
+                    TextField(addressLabel, text: $address)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: { Text("地址 / 命令").textCase(nil) }
+                Section {
+                    TextEditor(text: $headersText)
+                        .frame(minHeight: 60)
+                        .font(.system(.caption, design: .monospaced))
+                    Text("值可写 keychain:<引用名>，连接时从本机钥匙串解析，不落明文。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } header: { Text("请求头（可选，一行一个，如 Authorization: Bearer keychain:xxx）").textCase(nil) }
+                if transport != "stdio" {
+                    Section {
+                        Toggle("走 OAuth 2.1 登录（401 时开浏览器授权）", isOn: $oauth)
+                        TextField("OAuth 客户端 id（可空，默认 wherevercode-agent）", text: $oauthClientId)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("OAuth scope（可选，空格分隔）", text: $oauthScopes)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } header: { Text("OAuth").textCase(nil) }
+                }
+                if let errorText {
+                    Section {
+                        Text(errorText).font(.caption).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(isEdit ? "编辑 MCP 服务器" : "添加 MCP 服务器")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { save() }
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanName.isEmpty {
+            errorText = "请填服务器名。"
+            return
+        }
+        if cleanAddress.isEmpty {
+            errorText = transport == "stdio" ? "请填启动命令。" : "请填服务器地址。"
+            return
+        }
+        var headers: [String: String] = [:]
+        for rawLine in headersText.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            guard let idx = line.firstIndex(of: ":") else {
+                errorText = "请求头格式不对：每行写成“头名: 值”。"
+                return
+            }
+            let key = line[..<idx].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: idx)...].trimmingCharacters(in: .whitespaces)
+            if key.isEmpty || value.isEmpty {
+                errorText = "请求头格式不对：每行写成“头名: 值”。"
+                return
+            }
+            headers[key] = value
+        }
+        onSave(GenericMcpServerConfig(
+            name: cleanName,
+            transport: transport,
+            url: transport == "stdio" ? "" : cleanAddress,
+            command: transport == "stdio" ? cleanAddress : "",
+            headers: headers,
+            oauth: oauth && transport != "stdio",
+            oauthClientId: oauthClientId.trimmingCharacters(in: .whitespacesAndNewlines),
+            oauthScopes: oauthScopes.trimmingCharacters(in: .whitespacesAndNewlines),
+            enabled: originalEnabled
+        ))
+        dismiss()
     }
 }
 
