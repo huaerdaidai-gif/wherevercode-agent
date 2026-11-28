@@ -314,6 +314,23 @@ class PlatformChannelTransportTest {
     }
 
     @Test
+    fun `http error message extracts jsonrpc error message envelope`() {
+        val body = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", 7)
+            put("error", JSONObject().apply {
+                put("code", -32600)
+                put("message", "请求格式不对")
+            })
+        }.toString()
+
+        assertEquals(
+            "平台返回 HTTP 400：请求格式不对",
+            UrlConnectionPlatformHttpClient.httpErrorMessage(400, body),
+        )
+    }
+
+    @Test
     fun `http error message falls back to status only without a usable body`() {
         assertEquals(
             "平台返回 HTTP 401",
