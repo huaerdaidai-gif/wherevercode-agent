@@ -64,10 +64,10 @@ class WebSeatSession(
     private var webViewRef: WebView? = null
 
     /** 必须在主线程调用：取（或建）本席位的 WebView。 */
+    @SuppressLint("SetJavaScriptEnabled")
     fun webViewOnMain(): WebView {
         webViewRef?.let { return it }
         val created = host.createWebView()
-        @SuppressLint("SetJavaScriptEnabled")
         created.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -253,9 +253,15 @@ class WebSeatEngine(
     fun start() {
         if (running) return
         running = true
-        for (seat in seats()) {
-            refreshStatus(seat)
-            if (seat.enabled && store.hasToken(seat.seatId)) startLoop(seat)
+        // 席位是外围功能：状态刷新要碰令牌仓库（Keystore），出任何问题
+        // 只降级本功能，绝不能把异常抛进宿主 Activity 的生命周期。
+        try {
+            for (seat in seats()) {
+                refreshStatus(seat)
+                if (seat.enabled && store.hasToken(seat.seatId)) startLoop(seat)
+            }
+        } catch (t: Throwable) {
+            // 令牌仓库不可用时席位保持未启动，管理页会如实显示状态。
         }
         notifyChanged()
     }
@@ -264,11 +270,15 @@ class WebSeatEngine(
         running = false
         loops.values.forEach { it.cancel() }
         loops.clear()
-        for (seat in seats()) {
-            if (seat.enabled) {
-                statuses[seat.seatId] =
-                    if (store.hasToken(seat.seatId)) WebSeatStatus.RESTING else WebSeatStatus.NEEDS_TOKEN
+        try {
+            for (seat in seats()) {
+                if (seat.enabled) {
+                    statuses[seat.seatId] =
+                        if (store.hasToken(seat.seatId)) WebSeatStatus.RESTING else WebSeatStatus.NEEDS_TOKEN
+                }
             }
+        } catch (t: Throwable) {
+            // 同 start()：令牌仓库不可用只影响状态标注，不抛进宿主。
         }
         notifyChanged()
     }

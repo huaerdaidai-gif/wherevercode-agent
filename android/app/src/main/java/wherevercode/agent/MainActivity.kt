@@ -1024,7 +1024,7 @@ class MainActivity : AppCompatActivity() {
     private val webSeatStore: WebSeatStore by lazy {
         WebSeatStore(
             applicationContext,
-            BrainKeyStoreAgentSecretStore(BrainKeyStore(applicationContext)),
+            { BrainKeyStoreAgentSecretStore(brainKeyStore) },
         )
     }
     private val webSeatHost: WebSeatHost by lazy { WebSeatHost(this) }

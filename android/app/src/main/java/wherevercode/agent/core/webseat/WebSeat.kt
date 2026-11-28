@@ -119,8 +119,11 @@ data class WebSeatRecord(
  */
 class WebSeatStore(
     context: Context,
-    private val secrets: AgentSecretStore,
+    secretsProvider: () -> AgentSecretStore,
 ) {
+    // 令牌仓库懒构造：背后的 BrainKeyStore 构造即碰 AndroidKeyStore，
+    // 绝不能在 Activity 启动/恢复路径上触发（无 Keystore 的环境会直接抛）。
+    private val secrets: AgentSecretStore by lazy { secretsProvider() }
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
