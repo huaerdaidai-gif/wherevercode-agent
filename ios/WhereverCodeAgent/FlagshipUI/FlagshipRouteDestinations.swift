@@ -4418,7 +4418,9 @@ public struct ChannelDetailWorkspaceView: View {
     public var embedded: Bool = false
     public var onOpenSwitchPanel: () -> Void = {}
 
-    @State private var selectedTab: WorkspaceTab = .messages
+    @State private var showFilesPage = false
+    @State private var showTasksPage = false
+    @State private var showSearchTools = false
     @State private var composerText = ""
     @FocusState private var composerFocused: Bool
     @State private var sendAsTask = false
@@ -4503,13 +4505,6 @@ public struct ChannelDetailWorkspaceView: View {
         channelItem?.id ?? dmItem?.id ?? "ch-general"
     }
 
-    public enum WorkspaceTab: String, CaseIterable, Identifiable {
-        case messages = "消息"
-        case files = "文件"
-        case tasks = "任务"
-
-        public var id: String { rawValue }
-    }
 
     public init(
         appState: AppState,
@@ -4540,23 +4535,9 @@ public struct ChannelDetailWorkspaceView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topWorkspaceHeader
-            tabPicker
-
-            switch selectedTab {
-            case .messages:
-                messagesTab
-            case .files:
-                filesTab
-            case .tasks:
-                tasksTab
-            }
+            messagesTab
         }
         .background(Color(red: 0.969, green: 0.969, blue: 0.961).ignoresSafeArea())
-        .onChange(of: selectedTab) { _, newValue in
-            if newValue == .files {
-                Task { await loadChannelFiles() }
-            }
-        }
         // 218 标题一层：嵌入旗舰壳时导航标题留空，频道名只在页内
         // 标题行（切换面板入口）出现一次；独立打开时仍用频道名。
         .navigationTitle(embedded ? "" : displayName)
@@ -4602,6 +4583,31 @@ public struct ChannelDetailWorkspaceView: View {
                     }
                 }
             )
+        }
+        .sheet(isPresented: $showFilesPage) {
+            NavigationStack {
+                filesTab
+                    .navigationTitle("频道文件")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showFilesPage = false }
+                        }
+                    }
+            }
+            .onAppear { Task { await loadChannelFiles() } }
+        }
+        .sheet(isPresented: $showTasksPage) {
+            NavigationStack {
+                tasksTab
+                    .navigationTitle("任务")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showTasksPage = false }
+                        }
+                    }
+            }
         }
         .sheet(isPresented: $showingDatePicker) {
             NavigationStack {
@@ -4850,35 +4856,56 @@ public struct ChannelDetailWorkspaceView: View {
                 }
             }
             Spacer()
-            // 218：频道设置入口从导航栏 toolbar 搬进页内标题行。
-            // 此前 toolbar 的 ⋯ 在旗舰壳嵌入时渲染得出但点击无响应
-            // （216/217 实机复现），页内按钮与「＋新建」同一层级，
-            // 点击路径已实机验证可靠。
-            Button {
-                showChannelSettingsSheet = true
+            // 218：入口在页内标题行（toolbar 的 ⋯ 在旗舰壳嵌入时
+            // 点击无响应，216/217 实机复现）。
+            // 全页化（Funk 2026-11-28 批准效果图）：此钮升级为频道
+            // 菜单——文件/任务/搜索/话题/跳日期/历史开关/消息中心
+            // 计数全部收进菜单，页面只留消息与输入框。
+            Menu {
+                if channelItem != nil {
+                    Button {
+                        showFilesPage = true
+                    } label: { Label("频道文件", systemImage: "folder") }
+                    Button {
+                        showTasksPage = true
+                    } label: { Label("任务列表", systemImage: "checklist") }
+                    Button {
+                        showSearchTools.toggle()
+                    } label: { Label("搜索消息", systemImage: "magnifyingglass") }
+                    Button {
+                        showTopicThreadsSheet = true
+                    } label: { Label(topicThreadsCount > 0 ? "话题列表 (\(topicThreadsCount))" : "话题列表", systemImage: "bubble.left.and.bubble.right") }
+                    Button {
+                        showingDatePicker = true
+                    } label: { Label("跳到日期", systemImage: "calendar") }
+                    if canManageHistory {
+                        Button {
+                            Task { await setHistoryVisible(!historyVisibleNow) }
+                        } label: { Label("新成员看历史：\(historyVisibleNow ? "开" : "关")", systemImage: "clock.arrow.circlepath") }
+                    }
+                    Section {
+                        Button {
+                        } label: {
+                            Text("未读 \(messageCenterCounts.unread) · @我未读 \(messageCenterCounts.mentions) · 置顶 \(messageCenterCounts.pinned)（按当前已加载消息统计）")
+                        }
+                        .disabled(true)
+                    }
+                    Divider()
+                }
+                Button {
+                    showChannelSettingsSheet = true
+                } label: { Label("频道设置", systemImage: "gearshape") }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 20))
                     .foregroundStyle(Color(red: 0.16, green: 0.15, blue: 0.14))
                     .frame(width: 38, height: 38)
             }
-            .buttonStyle(.plain)
             .accessibilityIdentifier("channel.settingsButton")
-            .accessibilityLabel("频道设置")
+            .accessibilityLabel("频道菜单")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-    }
-
-    private var tabPicker: some View {
-        Picker("内部分区", selection: $selectedTab) {
-            ForEach(WorkspaceTab.allCases) { tab in
-                Text(tab.rawValue).tag(tab)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 6)
     }
 
     // MARK: - 消息分区
@@ -4905,10 +4932,10 @@ public struct ChannelDetailWorkspaceView: View {
     private var messagesTab: some View {
         VStack(spacing: 0) {
             if channelItem != nil {
-                membersStrip
-                searchBar
-                filterBar
-                toolsBar
+                if showSearchTools || isShowingSearchResults {
+                    searchBar
+                    filterBar
+                }
                 if isBrowsing { browseBar }
             }
             if let transientNotice {
@@ -4919,7 +4946,6 @@ public struct ChannelDetailWorkspaceView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 2)
             }
-            messageCenterStrip
             if !scheduledForChannel.isEmpty {
                 scheduledStrip
             }
@@ -4997,7 +5023,7 @@ public struct ChannelDetailWorkspaceView: View {
     /// 三项都是当前已加载窗口内统计、不是全局数，条内明示范围；
     /// 去重由 feed/刷新按消息 id 保证（startFeed /
     /// refreshChannelMessages）。
-    private var messageCenterStrip: some View {
+    private var messageCenterCounts: (unread: Int, mentions: Int, pinned: Int) {
         let lastSeen = (try? LocalData.shared.cursors.lastSeenMessageId(channelId: currentChannelId)) ?? nil
         let unread: Int
         let unreadSlice: [V5ChannelMessage]
@@ -5035,29 +5061,7 @@ public struct ChannelDetailWorkspaceView: View {
             notifyMode: notifyMode
         )
         let pinnedCount = messages.filter { $0.pinned && !$0.recalled }.count
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 12) {
-                Text("消息中心")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Text("未读 \(effectiveUnread)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("@我未读 \(mentionCount)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("置顶 \(pinnedCount)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            Text("计数按当前已加载消息统计")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
-        .background(Color.secondary.opacity(0.05))
+        return (unread: effectiveUnread, mentions: mentionCount, pinned: pinnedCount)
     }
 
     private var scheduledForChannel: [ScheduledChannelPost] {
@@ -5084,36 +5088,6 @@ public struct ChannelDetailWorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
-    }
-
-    // MARK: - 成员行（218 统一版式第 6 段：成员 chips＋通知 chip）
-    private var membersStrip: some View {
-        let notifyMode = UserDefaults.standard.string(forKey: "channel.notify_mode.\(currentChannelId)") ?? "全部消息"
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(members) { member in
-                    Text(member.role.isEmpty || member.role == "平台参与者"
-                         ? member.name
-                         : "\(member.name) · \(channelRoleLabel(member.role))")
-                        .font(.caption2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.white, in: Capsule())
-                        .overlay(Capsule().stroke(Color(red: 0.88, green: 0.87, blue: 0.85), lineWidth: 1))
-                }
-                Spacer(minLength: 8)
-                Button {
-                    showChannelSettingsSheet = true
-                } label: {
-                    Text("通知：\(notifyMode)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-        }
     }
 
     // MARK: - №12 工具行（218 自 ChannelChatView 搬入：搜索/过滤/工具/浏览）
@@ -5211,26 +5185,6 @@ public struct ChannelDetailWorkspaceView: View {
             }
             .padding(.horizontal, 16)
         }
-        .padding(.vertical, 2)
-    }
-
-    private var toolsBar: some View {
-        HStack(spacing: 12) {
-            Button("跳到日期") { showingDatePicker = true }
-                .font(.caption)
-            Spacer()
-            if canManageHistory {
-                Button("新成员看历史：\(historyVisibleNow ? "开" : "关")") {
-                    Task { await setHistoryVisible(!historyVisibleNow) }
-                }
-                .font(.caption)
-            } else {
-                Text("新成员看历史：\(historyVisibleNow ? "开" : "关")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 16)
         .padding(.vertical, 2)
     }
 
