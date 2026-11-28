@@ -267,15 +267,20 @@ object ClaudeSeatScripts {
             """ce.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true})); """ +
             """return 'enter'; })()"""
 
-    fun extract(beforeCount: Int): String =
+    /**
+     * 读「最后一行 assistant 回复」：返回行数与最后一行正文。
+     * 按下标定位在页面过渡期会错位（新对话导航未落定时行数会瞬时
+     * 变化），改以最后一行正文与发送前快照比对判定新回复。
+     */
+    const val EXTRACT_LAST: String =
         """(() => { const stop = Array.from(document.querySelectorAll('button'))""" +
             """.some(x => /stop|停止/i.test(x.getAttribute('aria-label') || '')); """ +
             """const asst = document.querySelectorAll('[data-testid="assistant-message"]'); """ +
             """let last = ''; """ +
-            """if (asst.length > $beforeCount) { const row = asst[$beforeCount]; """ +
+            """if (asst.length > 0) { const row = asst[asst.length - 1]; """ +
             """const md = row.querySelector('[class*="standard-markdown"]') || row.querySelector('.prose'); """ +
             """last = ((md ? md.innerText : '') || '').trim(); } """ +
-            """return JSON.stringify({stop: stop, text: last, href: location.href}); })()"""
+            """return JSON.stringify({stop: stop, count: asst.length, text: last, href: location.href}); })()"""
 
     /** /new 页有输入框且没被弹去登录页，就算已登录（与 iOS 同判据）。 */
     fun probeLooksLoggedIn(href: String, composer: Boolean): Boolean =

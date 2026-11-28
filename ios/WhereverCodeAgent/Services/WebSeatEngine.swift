@@ -46,6 +46,9 @@ public final class WebSeatEngine: ObservableObject {
         var msgRoot: [String: String] = [:]
         var attempts: [String: Int] = [:]
         var dmChannels: Set<String> = []
+        /// Channels whose cursor was initialised (a nil cursor is
+        /// a valid "nothing seen yet" state, so track this apart).
+        var initializedChannels: Set<String> = []
     }
 
     public init(store: WebSeatStore, endpoint: URL, ownerAgentId: String, appClient: McpClient?) {
@@ -208,45 +211,86 @@ public final class WebSeatEngine: ObservableObject {
         return ChannelTransport(client: client)
     }
 
+    /// Scan the platform channel list and add newly appeared DMs
+    /// to the watched set. Only DMs between the owner and this
+    /// seat count (the seat is not a member of other agents' DMs;
+    /// polling those just earns 403s). Runs once at start and
+    /// again every poll cycle, so a DM created after the seat
+    /// started is discovered without restarting the seat (the
+    /// old code scanned only once at start — new DMs never
+    /// arrived; one of the silent-DM root causes).
+    private func discoverChannels(
+        _ seat: WebSeatRecord, runtime: SeatRuntime,
+        transport: ChannelTransport, watched: inout [String]
+    ) async {
+        guard let channels = try? await transport.listChannels() else { return }
+        runtime.dmChannels = Set(channels.filter {
+            $0.kind == "dm" && $0.participants.contains(ownerAgentId)
+                && $0.participants.contains(seat.platformAgentId)
+        }.map { $0.id })
+        for id in seat.channelIds where !watched.contains(id) { watched.append(id) }
+        for dm in runtime.dmChannels where !watched.contains(dm) { watched.append(dm) }
+        for channelId in watched where !runtime.initializedChannels.contains(channelId) {
+            try? await transport.joinChannel(channelID: channelId)
+            await initCursor(transport: transport, runtime: runtime, channelId: channelId)
+            runtime.initializedChannels.insert(channelId)
+        }
+    }
+
+    /// Initial cursor for a newly watched channel: stop at the
+    /// last message older than 120 seconds — older history is
+    /// never replayed, but fresh messages (e.g. a DM sent while
+    /// the seat was resting) are left for the poll loop instead
+    /// of being skipped by the cursor.
+    private func initCursor(
+        transport: ChannelTransport, runtime: SeatRuntime, channelId: String
+    ) async {
+        let page = (try? await transport.pollMessages(channelID: channelId, afterID: nil)) ?? []
+        let cutoff = Date().timeIntervalSince1970 - 120.0
+        runtime.cursors[channelId] = page.last { $0.createdAtSeconds <= cutoff }?.id
+    }
+
     private func runSeat(_ seat: WebSeatRecord, runtime: SeatRuntime) async {
         guard let site = seat.site else { return }
         let transport = self.transport(for: seat)
-        // Join watched channels and DM channels; start cursors at
-        // the latest message (never replay history into the seat).
-        var watched = seat.channelIds
-        if let channels = try? await transport.listChannels() {
-            runtime.dmChannels = Set(channels.filter {
-                $0.kind == "dm" && $0.participants.contains(ownerAgentId)
-            }.map { $0.id })
-            watched += runtime.dmChannels.filter { !watched.contains($0) }
-        }
-        for channelId in watched {
-            try? await transport.joinChannel(channelID: channelId)
-            if runtime.cursors[channelId] == nil,
-               let page = try? await transport.pollMessages(channelID: channelId, afterID: nil) {
-                runtime.cursors[channelId] = page.last?.id
-            }
-        }
+        var watched: [String] = []
+        await discoverChannels(seat, runtime: runtime, transport: transport, watched: &watched)
         let loggedIn = await session(for: seat).probeLogin()
         statuses[seat.seatId] = loggedIn ? .online : .needsLogin
         while !Task.isCancelled && running {
+            await discoverChannels(seat, runtime: runtime, transport: transport, watched: &watched)
             for channelId in watched {
                 let fresh = (try? await transport.pollMessages(
                     channelID: channelId, afterID: runtime.cursors[channelId])) ?? []
                 for message in fresh {
-                    await handle(seat, site: site, runtime: runtime,
-                                 transport: transport, channelId: channelId, message: message)
-                    runtime.cursors[channelId] = message.id
+                    // On failure the cursor does NOT advance: the
+                    // next cycle re-reads the message, and after 3
+                    // attempts handle posts an explicit failure
+                    // notice. The old code advanced unconditionally,
+                    // so one failure lost the message forever and
+                    // the retry/failure-notice path never fired.
+                    let done = await handle(seat, site: site, runtime: runtime,
+                                            transport: transport, channelId: channelId, message: message)
+                    if done {
+                        runtime.cursors[channelId] = message.id
+                    } else {
+                        break
+                    }
                 }
             }
             try? await Task.sleep(nanoseconds: 15_000_000_000)
         }
     }
 
+    /// Handle one message. Returns true when the message can be
+    /// passed over (not for this seat, answered, or an explicit
+    /// failure notice was posted); false on failure — the cursor
+    /// must not advance, the next cycle retries (3 attempts,
+    /// then the failure notice fires inside).
     private func handle(
         _ seat: WebSeatRecord, site: WebSeatSite, runtime: SeatRuntime,
         transport: ChannelTransport, channelId: String, message: ChannelMessage
-    ) async {
+    ) async -> Bool {
         let root = message.replyTo.flatMap { runtime.msgRoot[$0] }
         let isDM = runtime.dmChannels.contains(channelId)
         let hit = WebSeatGate.shouldRespond(
@@ -261,7 +305,7 @@ public final class WebSeatEngine: ObservableObject {
         if let root, message.agentId == ownerAgentId {
             runtime.msgRoot[message.id] = root
         }
-        guard hit else { return }
+        guard hit else { return true }
         let effectiveRoot = root ?? (message.replyTo ?? message.id)
         let stripped = WebSeatGate.stripMentions(message.text, handles: site.mentionHandles)
         let question = stripped.isEmpty ? message.text : stripped
@@ -280,6 +324,7 @@ public final class WebSeatEngine: ObservableObject {
             runtime.msgRoot[message.id] = effectiveRoot
             runtime.attempts.removeValue(forKey: message.id)
             statuses[seat.seatId] = .online
+            return true
         } catch {
             if (runtime.attempts[message.id] ?? 0) >= 3 {
                 _ = try? await transport.postMessageEx(
@@ -288,7 +333,9 @@ public final class WebSeatEngine: ObservableObject {
                     replyTo: message.id,
                     effectKey: "webseat-fail-\(seat.seatId)-\(message.id)")
                 runtime.attempts.removeValue(forKey: message.id)
+                return true
             }
+            return false
         }
     }
 
