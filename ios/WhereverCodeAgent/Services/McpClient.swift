@@ -192,7 +192,37 @@ public struct McpClient {
         guard !text.isEmpty else {
             return .transport("平台返回 HTTP \(statusCode)")
         }
+        // 平台的错误体常是整段 JSON-RPC 信封：只取里面的人话
+        // （result.content 的 text 或 error.message），不把协议
+        // 报文整段糊到用户界面上（2026-11-28 Funk 真机反馈）。
+        if let human = humanErrorText(fromBody: text) {
+            return .transport("平台返回 HTTP \(statusCode)：\(human)")
+        }
         return .transport("平台返回 HTTP \(statusCode)：\(String(text.prefix(200)))")
+    }
+
+    /// Extract the human sentence from a platform error body, when
+    /// the body is a JSON envelope. Returns nil for plain-text
+    /// bodies (the caller then shows the text itself, truncated).
+    public static func humanErrorText(fromBody text: String) -> String? {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let dict = json as? [String: Any] else {
+            return nil
+        }
+        if let error = dict["error"] as? [String: Any],
+           let message = error["message"] as? String, !message.isEmpty {
+            return String(message.prefix(200))
+        }
+        if let result = dict["result"] as? [String: Any],
+           let content = result["content"] as? [[String: Any]] {
+            for item in content where item["type"] as? String == "text" {
+                if let value = item["text"] as? String, !value.isEmpty {
+                    return String(value.prefix(200))
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - Private helpers

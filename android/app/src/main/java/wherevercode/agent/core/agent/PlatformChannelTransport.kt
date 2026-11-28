@@ -238,11 +238,18 @@ class UrlConnectionPlatformHttpClient(
          * 在服务端错误体里（服务端只在成功返回里给令牌明文）。
          */
         fun httpErrorMessage(status: Int, body: String): String {
+            // 2026-11-28 与 iOS humanErrorText 同口径：result.content
+            // 的 text 取不到时，再取 JSON-RPC error.message，两种信封
+            // 都只给人话，绝不把整段协议报文糊到界面上。
             val detail = try {
-                JSONObject(body).optJSONObject("result")
+                val obj = JSONObject(body)
+                obj.optJSONObject("result")
                     ?.optJSONArray("content")
                     ?.optJSONObject(0)?.optString("text", "")
                     ?.takeIf { it.isNotBlank() }
+                    ?: obj.optJSONObject("error")
+                        ?.optString("message", "")
+                        ?.takeIf { it.isNotBlank() }
             } catch (_: Exception) {
                 null
             }?.take(200)

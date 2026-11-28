@@ -81,4 +81,24 @@ final class McpClientTests: XCTestCase {
         let transport = McpError.transport("网络请求失败：The Internet connection appears to be offline.")
         XCTAssertFalse(transport.message.contains("secret-token-value"))
     }
+
+    // 2026-11-28: 平台 403 的 JSON-RPC 信封不得整段糊到界面上，
+    // 只取信封里的人话（Funk 真机反馈的红字大段报文）。
+    func testHttpErrorExtractsHumanTextFromJsonRpcEnvelope() {
+        let body = #"{"jsonrpc": "2.0", "id": 7, "result": {"content": [{"type": "text", "text": "只有频道 owner / 协调者才能管理 Webhook"}], "isError": true}}"#
+        let err = McpClient.httpError(statusCode: 403, body: Data(body.utf8))
+        XCTAssertEqual(err.message, "平台返回 HTTP 403：只有频道 owner / 协调者才能管理 Webhook")
+        XCTAssertFalse(err.message.contains("jsonrpc"))
+    }
+
+    func testHttpErrorExtractsErrorMessageField() {
+        let body = #"{"jsonrpc": "2.0", "id": 7, "error": {"code": -32600, "message": "请求格式不对"}}"#
+        let err = McpClient.httpError(statusCode: 400, body: Data(body.utf8))
+        XCTAssertEqual(err.message, "平台返回 HTTP 400：请求格式不对")
+    }
+
+    func testHttpErrorPlainTextBodyPassesThrough() {
+        let err = McpClient.httpError(statusCode: 500, body: Data("服务内部错误".utf8))
+        XCTAssertEqual(err.message, "平台返回 HTTP 500：服务内部错误")
+    }
 }

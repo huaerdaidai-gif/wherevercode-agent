@@ -4814,16 +4814,16 @@ public struct ChannelDetailWorkspaceView: View {
                                 Text("查看连接诊断")
                                     .font(.caption2.weight(.medium))
                             }
-                            .foregroundStyle(.red)
+                            .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
                         if showConnectionDiagnostics {
                             Text(err)
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.red.opacity(0.85))
+                                .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                                 .padding(4)
-                                .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 4))
+                                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                         }
                     }
                 }
@@ -4952,9 +4952,12 @@ public struct ChannelDetailWorkspaceView: View {
                     showsScrollToBottomButton: !isShowingSearchResults && !isBrowsing,
                     bottomTargetID: displayedMessages.last?.id
                 ) {
-                    ForEach(displayedMessages) { msg in
-                        messageRow(msg)
-                            .id(msg.id)
+                    ForEach(Array(displayedMessages.enumerated()), id: \.element.id) { pair in
+                        if dayDividerNeeded(at: pair.offset) {
+                            dayDividerView(label: channelDayLabel(pair.element))
+                        }
+                        messageRow(pair.element)
+                            .id(pair.element.id)
                     }
                 } trailing: {
                     EmptyView()
@@ -5335,6 +5338,63 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    /// 日期分隔（主流聊天形态）：新的一天第一条消息上方插居中胶囊
+    /// 日期条，文案与列表行时间规范同源（今天／昨天／近 7 天星期几／
+    /// 更早 yyyy-MM-dd）。此前对话内消息平铺无分隔，跨天频道打开
+    /// 是一坨（2026-11-28 Funk 真机反馈补齐）。
+    /// 视图消息只有 fullDateTime 字符串（yyyy-MM-dd HH:mm:ss），
+    /// 按它还原日期做按天分隔。
+    private func messageDay(_ msg: V5ChannelMessage) -> Date? {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return fmt.date(from: msg.fullDateTime)
+    }
+
+    private func dayDividerNeeded(at index: Int) -> Bool {
+        guard let current = messageDay(displayedMessages[index]) else { return false }
+        guard index > 0 else { return true }
+        guard let previous = messageDay(displayedMessages[index - 1]) else { return true }
+        return !Calendar.current.isDate(previous, inSameDayAs: current)
+    }
+
+    private func channelDayLabel(_ msg: V5ChannelMessage) -> String {
+        guard let date = messageDay(msg) else { return "" }
+        let calendar = Calendar.current
+        let dayDiff = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: date),
+            to: calendar.startOfDay(for: Date())
+        ).day ?? 0
+        switch dayDiff {
+        case ..<1:
+            return "今天"
+        case 1:
+            return "昨天"
+        case 2..<7:
+            let weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
+            return weekdays[calendar.component(.weekday, from: date) - 1]
+        default:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: date)
+        }
+    }
+
+    private func dayDividerView(label: String) -> some View {
+        HStack {
+            Spacer()
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(Color.secondary.opacity(0.15), in: Capsule())
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+
     private func messageRow(_ msg: V5ChannelMessage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 10) {
@@ -5540,6 +5600,33 @@ public struct ChannelDetailWorkspaceView: View {
         }
     }
 
+    /// 新开还是续话的明示（2026-11-28 Funk 问「@某某时到底是新开
+    /// 对话还是旧对话，怎么感觉没有区分开」）：规则本就存在——一
+    /// 条话题线＝一个持续对话——但界面从没标出来。在话题线里回
+    /// 复＝续上文；主频道带 @ 发送＝新开话题（对方那边新开一个
+    /// 对话、不带上文）。发送前先让用户看见自己在哪种。
+    @ViewBuilder private var topicContextHint: some View {
+        if activeTopicThreadRootId != nil || replyingTo != nil {
+            HStack {
+                Text("在话题中回复 · 续上文")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        } else if composerText.contains("@") {
+            HStack {
+                Text("主频道发送 · 将新开一个话题")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+    }
+
     // MARK: - 输入框区域（对话组件收敛：与单聊共用 DialogComposerView，
     // inline 排布；发送方式/回复横幅/附件条走 above 插槽，「＋」菜单走
     // leading 插槽，超限提示/边界文案走 below 插槽，内容逐字不变）
@@ -5557,6 +5644,7 @@ public struct ChannelDetailWorkspaceView: View {
             sendAccessibilityID: "channel.composer.send"
         ) {
             mentionBar
+            topicContextHint
             // 发送方式（批D，与安卓频道发送区同构）：仅讨论 / 作为任务发送。
             Picker("发送方式", selection: $sendAsTask) {
                 Text("仅讨论").tag(false)
@@ -5784,6 +5872,50 @@ public struct ChannelDetailWorkspaceView: View {
         return channel.participantDetails.contains {
             $0.canMentionAll && ($0.isSelf || $0.id == appState.channelSenderID)
         }
+    }
+
+    /// 发送成功回显（2026-11-28 Funk 真机反馈修）：此前发送后完全
+    /// 靠 feed 回推显示，推送断开／轮询兜底时自己发的消息迟迟不
+    /// 出现、要切走再切回才看得到。用平台返回的真实 message id
+    /// 立即把这条消息并入列表（不是本地假消息：id 与内容都来自
+    /// 已落帖的发送结果）；feed 之后带回同一条时按 id 合并、
+    /// 不会重复。
+    private func appendLocalEcho(id: String, text: String, replyTo: String?, attachmentRef: String?) {
+        guard !id.isEmpty, !messages.contains(where: { $0.id == id }) else { return }
+        guard let selfParticipant = channelParticipants.first(where: { $0.isSelf }) else { return }
+        let now = Date()
+        let fullFmt = DateFormatter()
+        fullFmt.locale = Locale(identifier: "en_US_POSIX")
+        fullFmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let timeFmt = DateFormatter()
+        timeFmt.locale = Locale(identifier: "en_US_POSIX")
+        timeFmt.dateFormat = "HH:mm"
+        let quote: String? = {
+            guard let parentId = replyTo,
+                  let parent = messages.first(where: { $0.id == parentId }) else { return nil }
+            let text = parent.recalled ? ChannelExtras.recalledPlaceholder : parent.text
+            return String(text.replacingOccurrences(of: "\n", with: " ").prefix(40))
+        }()
+        messages.append(V5ChannelMessage(
+            id: id,
+            senderId: selfParticipant.id,
+            senderName: selfParticipant.name,
+            isAgent: ChannelExtras.displayedIsAgent(
+                platformIsAgent: nil,
+                senderIsSelf: true),
+            text: text,
+            timestamp: timeFmt.string(from: now),
+            fullDateTime: fullFmt.string(from: now),
+            replyToId: replyTo,
+            replyToText: quote,
+            recalled: false,
+            pinned: false,
+            reactions: [],
+            attachmentRef: attachmentRef,
+            forwardOf: nil,
+            platformIsAgent: nil
+        ))
+        messages.sort { $0.fullDateTime < $1.fullDateTime }
     }
 
     private func recordChannelPost(_ id: String) {
@@ -6020,6 +6152,7 @@ public struct ChannelDetailWorkspaceView: View {
                     channelID: channelID, text: postText, replyTo: replyTo,
                     effectKey: effectKey, attachmentRef: attachmentRef)
                 recordChannelPost(postedID)
+                appendLocalEcho(id: postedID, text: postText, replyTo: replyTo, attachmentRef: attachmentRef)
                 composerText = ""
                 composerFocused = false
                 replyingTo = nil
@@ -6032,6 +6165,7 @@ public struct ChannelDetailWorkspaceView: View {
                         channelID: channelID, text: postText, replyTo: replyTo,
                         effectKey: effectKey, attachmentRef: attachmentRef)
                     recordChannelPost(postedID)
+                    appendLocalEcho(id: postedID, text: postText, replyTo: replyTo, attachmentRef: attachmentRef)
                     composerText = ""
                     composerFocused = false
                     replyingTo = nil
@@ -7052,6 +7186,9 @@ public struct ChannelSettingsSheet: View {
     }
     @State private var webhookRows: [ChannelWebhookRow] = []
     @State private var createdWebhookText: String?
+    /// 无管理权限（普通成员）时 Webhook 区的静默说明行：打开设置
+    /// 不该被平台的权限拒绝糊一脸红字（2026-11-28 Funk 真机反馈）。
+    @State private var webhookPermissionNote: String?
 
     @ViewBuilder private var channelWebhooksSection: some View {
         if channel != nil {
@@ -7069,7 +7206,11 @@ public struct ChannelSettingsSheet: View {
                         Button("删除", role: .destructive) { Task { await deleteWebhook(hook) } }
                     }
                 }
-                Button("创建入帖 Webhook") { Task { await createWebhook() } }
+                if let webhookPermissionNote {
+                    Text(webhookPermissionNote).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Button("创建入帖 Webhook") { Task { await createWebhook() } }
+                }
                 if let createdWebhookText {
                     Text(createdWebhookText).font(.caption).textSelection(.enabled)
                 }
@@ -7096,7 +7237,15 @@ public struct ChannelSettingsSheet: View {
                     urlPath: item["url_path"] as? String ?? "")
             }
         } catch {
-            errorText = (error as? McpError)?.message ?? error.localizedDescription
+            let message = (error as? McpError)?.message ?? error.localizedDescription
+            if message.contains("owner") || message.contains("协调者") || message.contains("403") {
+                // 普通成员没有 Webhook 管理权：这是常态不是故障，
+                // 区内给一行灰字说明，不进全局红色错误区。
+                webhookPermissionNote = "入帖 Webhook 由频道创建者／协调者管理。"
+                webhookRows = []
+            } else {
+                errorText = message
+            }
         }
     }
 

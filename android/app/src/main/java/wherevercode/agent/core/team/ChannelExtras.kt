@@ -50,6 +50,43 @@ object ChannelExtras {
         }
     }
 
+    /** 日界（本地时区当天 0 点，毫秒）。无效时间返回 Long.MIN_VALUE。 */
+    fun dayStartMillis(epochSeconds: Double): Long {
+        if (epochSeconds <= 0) return Long.MIN_VALUE
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = (epochSeconds * 1000).toLong()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    /**
+     * 消息流日期分隔条文案（2026-11-28，与 iOS channelDayLabel 同
+     * 规则）：今天「今天」；昨天「昨天」；近 7 天内（不含今天/昨天）
+     * 星期几；更早 yyyy-MM-dd。无效时间返回空串——不出分隔条、
+     * 不编造日期。
+     */
+    fun dayDividerLabel(epochSeconds: Double, nowSeconds: Double): String {
+        if (epochSeconds <= 0) return ""
+        val dayMillis = 86_400_000L
+        val diffDays = (dayStartMillis(nowSeconds) - dayStartMillis(epochSeconds)) / dayMillis
+        val date = java.util.Date((epochSeconds * 1000).toLong())
+        return when {
+            diffDays <= 0L -> "今天"
+            diffDays == 1L -> "昨天"
+            diffDays < 7L -> {
+                val cal = java.util.Calendar.getInstance()
+                cal.timeInMillis = (epochSeconds * 1000).toLong()
+                listOf("星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六")[
+                    cal.get(java.util.Calendar.DAY_OF_WEEK) - 1
+                ]
+            }
+            else -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(date)
+        }
+    }
+
     /** 撤回消息在界面上的占位文案（正文已被平台清空）。 */
     const val RECALLED_PLACEHOLDER: String = "此消息已撤回"
 

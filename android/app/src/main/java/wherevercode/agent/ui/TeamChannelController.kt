@@ -277,6 +277,17 @@ class TeamChannelController(
         setOnClickListener { clearReply() }
     }
 
+    /**
+     * 新开/续上文提示（2026-11-28 与 iOS 对齐，Funk 问「@某某时到底
+     * 是新开对话还是旧对话，怎么感觉没有区分开」）：规则双端一致——
+     * 话题线内回复＝续上文；主频道带 @ 发送＝新开话题——但界面必须
+     * 明示，发送前让用户看见自己在哪种。
+     */
+    private val topicHintLine: TextView = UiKit.text(context, "", 11f, R.color.text_secondary).apply {
+        visibility = View.GONE
+        setPadding(dp(16), 0, dp(16), dp(2))
+    }
+
     private val typingBanner: TextView = UiKit.text(context, "", 11f, R.color.text_secondary).apply {
         visibility = View.GONE
         setPadding(dp(16), 0, dp(16), dp(2))
@@ -411,6 +422,7 @@ class TeamChannelController(
         root.addView(messageListView)
         root.addView(typingBanner)
         root.addView(mentionScroller)
+        root.addView(topicHintLine)
         // 全量对齐批：回复条移到输入栏正上方（iOS 回复条同位，此前在列表上方）。
         root.addView(replyBanner)
         inputBar = buildInputBar()
@@ -418,7 +430,10 @@ class TeamChannelController(
         composer.input.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) { updateMentionBar() }
+            override fun afterTextChanged(s: android.text.Editable?) {
+                updateMentionBar()
+                updateTopicHint()
+            }
         })
     }
 
@@ -438,6 +453,7 @@ class TeamChannelController(
         noticeLine.visibility = v
         inputBar.visibility = v
         if (!visible) mentionScroller.visibility = View.GONE
+        if (!visible) topicHintLine.visibility = View.GONE
     }
 
     private fun buildInputBar(): LinearLayout {
@@ -563,6 +579,57 @@ class TeamChannelController(
         }
     }
 
+    /** 话题提示文案与可见性：话题内/回复态优先，其次主频道带 @。 */
+    private fun updateTopicHint() {
+        val inThread = snapshot?.activeTopicThreadRootId != null || replyingTo != null
+        val text = composer.input.text?.toString().orEmpty()
+        when {
+            inThread -> {
+                topicHintLine.text = "在话题中回复 · 续上文"
+                topicHintLine.visibility = View.VISIBLE
+            }
+            text.contains("@") -> {
+                topicHintLine.text = "主频道发送 · 将新开一个话题"
+                topicHintLine.visibility = View.VISIBLE
+            }
+            else -> topicHintLine.visibility = View.GONE
+        }
+    }
+
+    /** 日期分隔条（2026-11-28 与 iOS 对齐）：居中灰字胶囊，跨天才出。 */
+    private fun dayDividerView(label: String): View {
+        val pill = UiKit.text(context, label, 11f, R.color.text_secondary).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(
+                    androidx.core.content.ContextCompat.getColor(context, R.color.surface_alt),
+                )
+                cornerRadius = dp(9).toFloat()
+            }
+            setPadding(dp(10), dp(2), dp(10), dp(2))
+        }
+        return UiKit.horizontal(context).apply {
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(2))
+            addView(pill)
+        }
+    }
+
+    /**
+     * 跨天判定：与 prevDayStart 不同日且时间有效时返回（分隔条视图,
+     * 新日界）；同日或无效时间返回（null, 原日界）——无效时间的消息
+     * 不出条、也不打断日期链（与 iOS 同口径）。
+     */
+    private fun dayDividerIfNeeded(
+        createdAtSeconds: Double,
+        prevDayStart: Long,
+        nowSec: Double,
+    ): Pair<View?, Long> {
+        val ds = ChannelExtras.dayStartMillis(createdAtSeconds)
+        if (ds == Long.MIN_VALUE || ds == prevDayStart) return null to prevDayStart
+        val label = ChannelExtras.dayDividerLabel(createdAtSeconds, nowSec)
+        return (if (label.isEmpty()) null else dayDividerView(label)) to ds
+    }
+
     private fun sendMessage() {
         val text = composer.input.text.toString().trim()
         if (asTask) {
@@ -616,6 +683,8 @@ class TeamChannelController(
 
     fun render(snapshot: TeamChannelSnapshot) {
         this.snapshot = snapshot
+        updateTopicHint()
+        val dividerNowSec = System.currentTimeMillis() / 1000.0
         val diagnostic = snapshot.connectionError?.takeIf { it.isNotBlank() }
         val certificateFailure = diagnostic?.let(::isCertificateFailure) == true
         connectionLine.text = channelConnectionStateLabel(snapshot.connectionState) +
@@ -776,7 +845,12 @@ class TeamChannelController(
                 )
             } else {
                 // 全量对齐批：iOS 搜索结果上方无结果说明行，此处不再加。
+                var searchPrevDayStart = Long.MIN_VALUE
                 searchResults.forEach { raw ->
+                    val (divider, newDayStart) =
+                        dayDividerIfNeeded(raw.createdAtSeconds, searchPrevDayStart, dividerNowSec)
+                    searchPrevDayStart = newDayStart
+                    divider?.let { bodyContainer.addView(it) }
                     val rowView = messageRow(
                         teamMessageFromChannel(raw, snapshot.trustedAttributionPosterIds),
                         ChannelExtras.replyQuote(searchResults, raw),
@@ -832,7 +906,12 @@ class TeamChannelController(
             }
             bodyContainer.addView(threadHeader)
             val msgs = activeThread?.messages ?: allViews.filter { it.messageId == activeRootId || it.replyToId == activeRootId }
+            var threadPrevDayStart = Long.MIN_VALUE
             msgs.forEach { view ->
+                val (divider, newDayStart) =
+                    dayDividerIfNeeded(view.createdAtSeconds, threadPrevDayStart, dividerNowSec)
+                threadPrevDayStart = newDayStart
+                divider?.let { bodyContainer.addView(it) }
                 val raw = snapshot.messages.firstOrNull { it.id == view.messageId }
                 bodyContainer.addView(
                     messageRow(
@@ -845,7 +924,12 @@ class TeamChannelController(
         } else {
             // 221 与 iOS 对齐：主消息流平铺——不按任务分串、不加串头，
             // 每条一张卡片按时间顺序排；话题聚焦走话题分支与话题清单。
+            var flowPrevDayStart = Long.MIN_VALUE
             snapshot.messages.forEach { raw ->
+                val (divider, newDayStart) =
+                    dayDividerIfNeeded(raw.createdAtSeconds, flowPrevDayStart, dividerNowSec)
+                flowPrevDayStart = newDayStart
+                divider?.let { bodyContainer.addView(it) }
                 val view = teamMessageFromChannel(raw, snapshot.trustedAttributionPosterIds)
                 bodyContainer.addView(
                     messageRow(
@@ -1644,7 +1728,13 @@ class TeamChannelController(
             col.addView(note("这一段没有消息。"))
         }
         var highlightView: View? = null
+        var browsePrevDayStart = Long.MIN_VALUE
+        val browseNowSec = System.currentTimeMillis() / 1000.0
         browse.forEach { raw ->
+            val (divider, newDayStart) =
+                dayDividerIfNeeded(raw.createdAtSeconds, browsePrevDayStart, browseNowSec)
+            browsePrevDayStart = newDayStart
+            divider?.let { col.addView(it) }
             val rowView = messageRow(
                 teamMessageFromChannel(raw, snapshot.trustedAttributionPosterIds),
                 ChannelExtras.replyQuote(browse, raw),
