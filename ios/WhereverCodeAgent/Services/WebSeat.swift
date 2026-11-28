@@ -8,9 +8,10 @@
 // 本文件：站点目录、席位记录与存储、触发闸（纯函数）、Claude 驱动
 // 的页面脚本与 WebView 会话。频道轮询与回帖在 WebSeatEngine.swift。
 //
-// 触发纪律与 Mac 上的网页腿桥一致（Funk 2026-11-28 立规）：席位只
-// 认机主（App 自己的平台身份）发的消息——@谁谁回答，其他 Agent
-// 的发言永不触发回复，杜绝机器人互接话。
+// 触发纪律与 Mac 上的网页腿桥一致（Funk 2026-11-28 立规）：席位
+// 之间可以交流，但必须带 @——@ 相当于按门铃，谁按都算数；不带 @
+// 的消息只有机主发的能触发（私聊与话题内跟进），其他席位不带 @
+// 的发言永不触发，杜绝机器人互接话。
 
 import Foundation
 import WebKit
@@ -148,12 +149,14 @@ public final class WebSeatStore {
 // MARK: - Trigger gate (pure; unit-tested)
 
 public enum WebSeatGate {
-    /// The seat answers only its owner. `senderId` must be the App's
-    /// own platform agent id; every other sender — above all other
-    /// agent seats — never triggers a reply. Inside that rule: a DM
-    /// always counts as addressed; in a channel, an explicit @ of
-    /// this seat counts, and a reply inside a thread the seat is
-    /// part of counts unless it @s only someone else.
+    /// Doorbell rule (Funk, 2026-11-28): seats may talk to each
+    /// other, but an inter-seat message must carry an explicit @ of
+    /// this seat — the @ is the doorbell, whoever sends it. A
+    /// message without an @ triggers only from the owner (the App's
+    /// own platform agent id): his DMs always count, and his reply
+    /// inside a thread the seat is part of continues the
+    /// conversation unless it @s only someone else. @-less messages
+    /// from other seats never trigger — no chain-talking.
     public static func shouldRespond(
         senderId: String,
         ownerAgentId: String,
@@ -165,10 +168,10 @@ public enum WebSeatGate {
         otherHandles: [String]
     ) -> Bool {
         if senderId == seatAgentId { return false }
-        if senderId != ownerAgentId { return false }
-        if isDM { return true }
         let mentioned = handles.contains { text.contains($0) }
         if mentioned { return true }
+        if senderId != ownerAgentId { return false }
+        if isDM { return true }
         let otherOnly = otherHandles.contains { text.contains($0) }
         return threadRoot != nil && !otherOnly
     }
@@ -292,7 +295,8 @@ public final class WebSeatSession {
     public init(seat: WebSeatRecord) {
         self.seat = seat
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = WKWebsiteDataStore(forIdentifier: seat.dataStoreId)
+        config.websiteDataStore = WKWebsiteDataStore(
+            forIdentifier: UUID(uuidString: seat.dataStoreId) ?? UUID())
         self.webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: config)
     }

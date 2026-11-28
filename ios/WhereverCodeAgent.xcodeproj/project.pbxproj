@@ -93,6 +93,7 @@
 			91067B38E1192DA78C1A0C00,
 		); name = App; path = App; sourceTree = "<group>"; };
 		DC0D1A100000000000000002 = {isa = PBXBuildFile; fileRef = DC0D1A100000000000000001; };
+		DA000000000000000000F608 = {isa = PBXBuildFile; fileRef = DA000000000000000000F607; };
 		F17729830897440A9E54F002 = {isa = PBXBuildFile; fileRef = F17729830897440A9E54F001; };
 		2A3B9E2C913ADDDB16F1CD99 = {isa = PBXBuildFile; fileRef = 892AEB362C95AAE0B8B13531; };
 		2FAFA8646A910CE4490E1BBD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
@@ -186,6 +187,7 @@
 				1C0DE00000000000000000A2,
 				1C0DE00000000000000000A4,
 			DC0D1A100000000000000002,
+			DA000000000000000000F608,
 			9CCD70432011961B094C8FCE,
 			DA0000000000000000000074,
 			DA0000000000000000000084,
@@ -326,6 +328,7 @@
 		98E3434F859B0C281501C824 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhereverCodeAgent.entitlements; sourceTree = "<group>"; };
 		9CCD70432011961B094C8FCE = {isa = PBXBuildFile; fileRef = 91067B38E1192DA78C1A0C00; };
 		DC0D1A100000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogComponents.swift; sourceTree = "<group>"; };
+		DA000000000000000000F607 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSeatViews.swift; sourceTree = "<group>"; };
 		ABD4D6AD9705B560B2E73A9F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
 			A3F100000000000000000008,
 				1C0DE00000000000000000A6,
@@ -405,6 +408,7 @@
 		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			DC0D1A100000000000000001,
+			DA000000000000000000F607,
 			918CC59A2183C5FAA462994B,
 			DA0000000000000000000E11,
 			0EC43C27AE6A9F51433ABA31,

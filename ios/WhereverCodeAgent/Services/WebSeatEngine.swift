@@ -28,6 +28,7 @@ public enum WebSeatStatus: Equatable, Sendable {
 @MainActor
 public final class WebSeatEngine: ObservableObject {
     @Published public private(set) var statuses: [String: WebSeatStatus] = [:]
+    @Published public private(set) var seats: [WebSeatRecord] = []
 
     private let store: WebSeatStore
     private let endpoint: URL
@@ -66,8 +67,10 @@ public final class WebSeatEngine: ObservableObject {
     // MARK: - Lifecycle
 
     public func start() {
+        guard !running else { return }
         running = true
-        let seats = (try? store.listSeats()) ?? []
+        reloadSeats()
+        let seats = self.seats
         for seat in seats {
             refreshStatus(seat)
             if seat.enabled && store.hasToken(seatId: seat.seatId) {
@@ -106,6 +109,10 @@ public final class WebSeatEngine: ObservableObject {
         statuses[seat.seatId] = ok ? .online : .needsLogin
     }
 
+    public func reloadSeats() {
+        seats = (try? store.listSeats()) ?? []
+    }
+
     // MARK: - Seat management
 
     /// Create a seat for a site and issue its platform token with
@@ -118,6 +125,7 @@ public final class WebSeatEngine: ObservableObject {
             dataStoreId: UUID().uuidString)
         record.channelIds = channelIds
         try? store.saveSeat(record)
+        reloadSeats()
         let error = await provision(record)
         refreshStatus(record)
         if running && error == nil { startLoop(record) }
@@ -153,12 +161,14 @@ public final class WebSeatEngine: ObservableObject {
         sessions.removeValue(forKey: seat.seatId)
         statuses.removeValue(forKey: seat.seatId)
         try? store.deleteSeat(seatId: seat.seatId)
+        reloadSeats()
     }
 
     public func setEnabled(_ seat: WebSeatRecord, enabled: Bool) {
         var updated = seat
         updated.enabled = enabled
         try? store.saveSeat(updated)
+        reloadSeats()
         if enabled {
             refreshStatus(updated)
             if running && store.hasToken(seatId: seat.seatId) { startLoop(updated) }
@@ -173,6 +183,7 @@ public final class WebSeatEngine: ObservableObject {
         var updated = seat
         updated.channelIds = channelIds
         try? store.saveSeat(updated)
+        reloadSeats()
         if running && updated.enabled && store.hasToken(seatId: seat.seatId) {
             loops[seat.seatId]?.cancel()
             startLoop(updated)
@@ -216,9 +227,8 @@ public final class WebSeatEngine: ObservableObject {
                 runtime.cursors[channelId] = page.last?.id
             }
         }
-        if statuses[seat.seatId] != .needsLogin {
-            statuses[seat.seatId] = .online
-        }
+        let loggedIn = await session(for: seat).probeLogin()
+        statuses[seat.seatId] = loggedIn ? .online : .needsLogin
         while !Task.isCancelled && running {
             for channelId in watched {
                 let fresh = (try? await transport.pollMessages(
@@ -284,7 +294,7 @@ public final class WebSeatEngine: ObservableObject {
 
     /// Split an over-long reply into channel-sized chunks
     /// (server limit 4000; keep headroom).
-    public static func chunkText(_ text: String, limit: Int = 3900) -> [String] {
+    public nonisolated static func chunkText(_ text: String, limit: Int = 3900) -> [String] {
         guard text.count > limit else { return [text] }
         var chunks: [String] = []
         var rest = Substring(text)

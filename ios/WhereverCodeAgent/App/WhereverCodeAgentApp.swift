@@ -38,6 +38,7 @@ public enum PlatformConnectionStatus: Equatable {
 @main
 struct WhereverCodeAgentApp: App {
     @StateObject private var appState = AppState()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -52,7 +53,17 @@ struct WhereverCodeAgentApp: App {
                 }
                 .task {
                     appState.armSeatUplink()
+                    appState.startWebSeats()
                     await appState.refreshConnectionStatus()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // 网页席位只在前台应声：回前台重启引擎，
+                    // 退后台停转、状态如实变「休息中」。
+                    if phase == .active {
+                        appState.startWebSeats()
+                    } else if phase == .background {
+                        appState.stopWebSeats()
+                    }
                 }
         }
     }
@@ -161,6 +172,42 @@ public final class AppState: ObservableObject {
         // 零配置可用（见 makeChannelMcpClient）。
         LocalPlatform.install()
         syncLocalPlatformAgents()
+    }
+
+    // MARK: 网页版 Agent 席位（chat 模式，方案便签 №21）
+
+    /// 席位记录存储（本地 kv）；席位令牌只进钥匙串（见 WebSeatStore）。
+    public lazy var webSeatStore = WebSeatStore(kv: data.kv)
+    @Published public private(set) var webSeatEngine: WebSeatEngine?
+    @Published public private(set) var webSeatHostGeneration = 0
+
+    /// 远程平台没配地址时返回 nil：网页席位是平台功能，没有平台
+    /// 就如实不可用，不回落本地账本冒充。
+    @discardableResult
+    public func makeWebSeatEngine() -> WebSeatEngine? {
+        if let webSeatEngine { return webSeatEngine }
+        guard let endpoint = settings.mcpEndpoint else { return nil }
+        let ownerId = (try? data.agents.platformAgent())??.platformAgentId ?? "app"
+        let engine = WebSeatEngine(
+            store: webSeatStore,
+            endpoint: endpoint,
+            ownerAgentId: ownerId,
+            appClient: makeMcpClient())
+        webSeatEngine = engine
+        return engine
+    }
+
+    public func startWebSeats() {
+        makeWebSeatEngine()?.start()
+    }
+
+    public func stopWebSeats() {
+        webSeatEngine?.stop()
+    }
+
+    /// 登录页关掉后，把席位 WebView 重新挂回壳里的隐藏宿主。
+    public func bumpWebSeatHost() {
+        webSeatHostGeneration += 1
     }
 
     public func rebuildBrainStack() {

@@ -33,10 +33,16 @@ final class WebSeatTests: XCTestCase {
         XCTAssertTrue(gate(sender: "app", text: "@所有人 都看看"))
     }
 
-    func testBotMentionNeverTriggers() {
-        XCTAssertFalse(gate(sender: "gpt-chat", text: "@Claude Chat 你怎么看"))
-        XCTAssertFalse(gate(sender: "agy", text: "@Claude Chat 回一下"))
-        XCTAssertFalse(gate(sender: "claude-chat", text: "@Claude Chat 继续"))
+    func testBotMentionTriggersDoorbell() {
+        // Seats may talk to each other — with an @ as the doorbell.
+        XCTAssertTrue(gate(sender: "gpt-chat", text: "@Claude Chat 你怎么看"))
+        XCTAssertTrue(gate(sender: "agy", text: "@Claude Chat 回一下"))
+        XCTAssertTrue(gate(sender: "gemini", text: "@所有人 都看一下"))
+    }
+
+    func testBotPlainMessageNeverTriggers() {
+        XCTAssertFalse(gate(sender: "gpt-chat", text: "我先说一句"))
+        XCTAssertFalse(gate(sender: "agy", text: "补充一个数据"))
     }
 
     func testSeatNeverAnswersItself() {

@@ -1412,6 +1412,7 @@ private struct CollaborationAndAgentsScreen: View {
 
     @State private var agents: [AgentRecord] = []
     @State private var showAddAgentSheet = false
+    @State private var showWebSeats = false
     @State private var bannerMsg: String? = nil
     @State private var testingAgentId: String? = nil
     @State private var testResultMsg: String? = nil
@@ -1450,6 +1451,21 @@ private struct CollaborationAndAgentsScreen: View {
             } header: {
                 // 渲染层修正（A5）：List 分节头默认把拉丁字母转大写，与安卓「Agent」大小写不一致，故显式关闭大小写转换
                 Text("添加 Agent").textCase(nil)
+            }
+
+            // 网页版 Agent 席位（chat 模式，方案便签 №21）：住在
+            // App 内嵌浏览器里，登录用户自己的网页账号应声。
+            Section {
+                Button {
+                    showWebSeats = true
+                } label: {
+                    Label("网页版 Agent（Claude 等）", systemImage: "globe")
+                        .font(.subheadline.weight(.semibold))
+                }
+            } header: {
+                Text("网页版 Agent").textCase(nil)
+            } footer: {
+                Text("席位住在 App 内嵌浏览器里，你登录自己的账号，打开 App 时在频道里应声。")
             }
 
             // 块二：已添加的 Agent
@@ -1576,6 +1592,11 @@ private struct CollaborationAndAgentsScreen: View {
         } message: {
             if let ag = agentPendingDelete {
                 Text("确定移除 \(ag.displayName) 吗？它的独立会话与已指派任务不受影响。")
+            }
+        }
+        .sheet(isPresented: $showWebSeats) {
+            NavigationStack {
+                WebSeatManagerView(appState: appState)
             }
         }
         .sheet(isPresented: $showAddAgentSheet) {
