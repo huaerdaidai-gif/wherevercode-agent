@@ -247,3 +247,34 @@ private struct WebSeatBrowserView: View {
         }
     }
 }
+
+/// 「已添加的 Agent」里的网页席位行（Agent 页块二，与普通 Agent 同列）：
+/// 名称＋状态＋启用开关，点「管理」进管理页（登录/频道/删除都在那里）。
+public struct WebSeatAddedRows: View {
+    @ObservedObject var engine: WebSeatEngine
+    var onOpen: () -> Void
+
+    public init(engine: WebSeatEngine, onOpen: @escaping () -> Void) {
+        self.engine = engine
+        self.onOpen = onOpen
+    }
+
+    public var body: some View {
+        ForEach(engine.seats) { seat in
+            HStack {
+                Image(systemName: "globe").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(seat.displayName).font(.subheadline.weight(.semibold))
+                    Text(engine.statuses[seat.seatId]?.label ?? (seat.enabled ? "休息中" : "已停用"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("启用", isOn: Binding(
+                    get: { seat.enabled },
+                    set: { engine.setEnabled(seat, enabled: $0) }
+                )).labelsHidden()
+                Button("管理") { onOpen() }.font(.caption)
+            }
+        }
+    }
+}
