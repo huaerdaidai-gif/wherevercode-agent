@@ -531,6 +531,28 @@ class AgentScreenController(
         PairingState.REVOKED -> "已撤销（不可用）"
     }
 
+    /**
+     * 网页版 Agent 分节（2026-11-28 与 iOS 对齐，位置在「添加
+     * Agent」与「已添加的 Agent」之间）：入口一行 + 一句说明，
+     * 管理页本体在 WebSeatManager。
+     */
+    fun renderWebSeatSection(onOpen: () -> Unit) {
+        list.addView(sectionTitle("网页版 Agent"))
+        val entry = UiKit.text(context, "网页版 Agent（Claude 等）", 15f, R.color.accent, bold = true).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setOnClickListener { onOpen() }
+        }
+        list.addView(entry)
+        list.addView(
+            UiKit.text(
+                context,
+                "席位住在 App 内嵌浏览器里，你登录自己的账号，打开 App 时在频道里应声。",
+                12f, R.color.text_secondary,
+            ).apply { setPadding(0, dp(6), 0, 0) },
+        )
+    }
+
     private fun sectionTitle(text: String): TextView =
         UiKit.text(context, text, 13f, R.color.text_primary, bold = true).apply {
             setPadding(0, dp(10), 0, dp(6))

@@ -139,6 +139,11 @@ import wherevercode.agent.core.agent.PlatformChannelMessage
 import wherevercode.agent.core.agent.PlatformChannelMcpTransport
 import wherevercode.agent.core.agent.PlatformEndpointPinning
 import wherevercode.agent.core.agent.PlatformTokenIssuer
+import wherevercode.agent.core.agent.BrainKeyStoreAgentSecretStore
+import wherevercode.agent.core.webseat.WebSeatEngine
+import wherevercode.agent.core.webseat.WebSeatStore
+import wherevercode.agent.ui.WebSeatHost
+import wherevercode.agent.ui.WebSeatManager
 import wherevercode.agent.core.agent.IssueTokenResult
 import wherevercode.agent.core.agent.PlatformChatPort
 import wherevercode.agent.core.agent.PlatformProbeResult
@@ -1009,6 +1014,40 @@ class MainActivity : AppCompatActivity() {
     }
     private val platformConnectionStore: PlatformConnectionStore by lazy {
         PlatformConnectionStore(applicationContext)
+    }
+
+    /**
+     * 网页版 Agent 席位（2026-11-28，与 iOS 同构）：记录在
+     * [WebSeatStore]、令牌只进 Keystore；引擎在前台跑、退后台
+     * 停转如实标「休息中」；管理页与浏览器页在 [WebSeatManager]。
+     */
+    private val webSeatStore: WebSeatStore by lazy {
+        WebSeatStore(
+            applicationContext,
+            BrainKeyStoreAgentSecretStore(BrainKeyStore(applicationContext)),
+        )
+    }
+    private val webSeatHost: WebSeatHost by lazy { WebSeatHost(this) }
+    private val webSeatEngine: WebSeatEngine by lazy {
+        WebSeatEngine(
+            store = webSeatStore,
+            host = webSeatHost,
+            endpointProvider = { PlatformAgent.mcpEndpoint(resolvedPlatformHost()) },
+            appTransportProvider = {
+                if (platformCredentialStore.loadPlatformToken() != null) mcpPlatformTransport() else null
+            },
+        )
+    }
+    private val webSeatManager: WebSeatManager by lazy {
+        WebSeatManager(
+            activity = this,
+            engine = webSeatEngine,
+            store = webSeatStore,
+            host = webSeatHost,
+            appTransportProvider = {
+                if (platformCredentialStore.loadPlatformToken() != null) mcpPlatformTransport() else null
+            },
+        )
     }
 
     /** 云端 Agent 凭证存储（V5，2026-11-11）：每云端 Agent 一把随机 Bearer 钥匙，只存本机 Keystore。 */
@@ -11300,6 +11339,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
+                    agentController.renderWebSeatSection { webSeatManager.show() }
                     agentController.renderAddedAgents(added)
                 }
             }
@@ -16980,6 +17020,14 @@ class MainActivity : AppCompatActivity() {
         // №12 WS 修复：回前台时频道 feed 若在轮询兜底，立刻重试 WS，
         // 不等 45 秒重连点；断档消息由轮询游标静默补读。
         teamChannelFeed?.reconnectNow()
+        // 网页席位：回前台引擎起转（席位在线），与 iOS 同口径。
+        webSeatEngine.start()
+    }
+
+    override fun onPause() {
+        // 网页席位：退后台引擎停转，席位如实变「休息中」。
+        webSeatEngine.stop()
+        super.onPause()
     }
 
     override fun onDestroy() {
