@@ -22,6 +22,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.json.JSONTokener
 import wherevercode.agent.core.agent.IssueTokenResult
@@ -86,11 +87,16 @@ class WebSeatSession(
     }
 
     private suspend fun evalString(script: String): String? {
-        val raw = withContext(Dispatchers.Main) {
-            val view = webViewOnMain()
-            suspendCancellableCoroutine<String?> { cont ->
-                view.evaluateJavascript(script) { value ->
-                    if (cont.isActive) cont.resume(value)
+        // 后台 WebView 渲染进程被冻结时 evaluateJavascript 的回调可能
+        // 永不触发：加 10 秒超时，让调用方拿到 null 走重试，而不是
+        // 把整个席位轮询协程永久挂死（一问一答全堵在这一条上）。
+        val raw = withTimeoutOrNull(10_000) {
+            withContext(Dispatchers.Main) {
+                val view = webViewOnMain()
+                suspendCancellableCoroutine<String?> { cont ->
+                    view.evaluateJavascript(script) { value ->
+                        if (cont.isActive) cont.resume(value)
+                    }
                 }
             }
         } ?: return null
@@ -103,15 +109,28 @@ class WebSeatSession(
     }
 
     private suspend fun evalInt(script: String): Int {
-        val raw = withContext(Dispatchers.Main) {
-            val view = webViewOnMain()
-            suspendCancellableCoroutine<String?> { cont ->
-                view.evaluateJavascript(script) { value ->
-                    if (cont.isActive) cont.resume(value)
+        val raw = withTimeoutOrNull(10_000) {
+            withContext(Dispatchers.Main) {
+                val view = webViewOnMain()
+                suspendCancellableCoroutine<String?> { cont ->
+                    view.evaluateJavascript(script) { value ->
+                        if (cont.isActive) cont.resume(value)
+                    }
                 }
             }
         }
         return raw?.trim('"')?.toIntOrNull() ?: 0
+    }
+
+    /** 读最后一行 assistant 回复的正文（没有回复行时为空串）。 */
+    private suspend fun lastAssistantText(): String {
+        val raw = evalString(ClaudeSeatScripts.EXTRACT_LAST) ?: return ""
+        val obj = try {
+            JSONObject(raw)
+        } catch (e: Exception) {
+            return ""
+        }
+        return obj.optString("text", "")
     }
 
     data class Probe(val href: String, val composer: Boolean, val messageCount: Int)
@@ -168,12 +187,23 @@ class WebSeatSession(
      */
     suspend fun ask(question: String, target: String): Pair<String, String> {
         val want = if (target == "new") "https://claude.ai/new" else target
+        // 席位 WebView 平时挂在后台保活容器里，渲染进程可能被系统
+        // 降频/冻结：提问前先唤醒它（与打开管理页看页面时等效）。
+        withContext(Dispatchers.Main) {
+            val view = webViewOnMain()
+            view.onResume()
+            view.resumeTimers()
+        }
         withContext(Dispatchers.Main) { webViewOnMain().loadUrl(want) }
         if (!verifyPage(target)) {
             withContext(Dispatchers.Main) { webViewOnMain().loadUrl(want) }
             if (!verifyPage(target)) throw WebSeatException("页面未就绪（新对话校验未通过）。")
         }
-        val before = evalInt(ClaudeSeatScripts.ASSISTANT_COUNT)
+        val beforeCount = evalInt(ClaudeSeatScripts.ASSISTANT_COUNT)
+        // 发送前最后一行回复的快照：新回复的判定以「最后一行变了」
+        // 为准，而不是「第 N 行」——新对话导航落定前行数会瞬时变化，
+        // 按下标取行会读错行甚至永远读不到（私聊不回的实测根因）。
+        val beforeLast = lastAssistantText()
         val inserted = evalString(ClaudeSeatScripts.insert(question))
         if (inserted != "ok") throw WebSeatException("输入问题失败（${inserted ?: "nil"}）。")
         delay(1000)
@@ -186,23 +216,27 @@ class WebSeatSession(
         var href = want
         repeat(80) {
             delay(3000)
-            val raw = evalString(ClaudeSeatScripts.extract(before)) ?: return@repeat
+            val raw = evalString(ClaudeSeatScripts.EXTRACT_LAST) ?: return@repeat
             val obj = try {
                 JSONObject(raw)
             } catch (e: Exception) {
                 return@repeat
             }
-            val text = obj.optString("text", "")
+            val count = obj.optInt("count", 0)
+            val rowText = obj.optString("text", "")
             val stop = obj.optBoolean("stop", false)
             val h = obj.optString("href", "")
             if (h.isNotEmpty()) href = h
-            if (text.isNotEmpty() && text == lastText && !stop) {
+            // 新回复 = 行数比发送前多，或最后一行正文与快照不同。
+            val candidate =
+                if (rowText.isNotEmpty() && (count > beforeCount || rowText != beforeLast)) rowText else ""
+            if (candidate.isNotEmpty() && candidate == lastText && !stop) {
                 stable += 1
-                if (stable >= 2) return Pair(text, href)
+                if (stable >= 2) return Pair(candidate, href)
             } else {
                 stable = 0
             }
-            if (text.isNotEmpty()) lastText = text
+            if (candidate.isNotEmpty()) lastText = candidate
         }
         if (lastText.isNotEmpty()) return Pair(lastText, href)
         throw WebSeatException("等待回复超时。")
@@ -398,49 +432,86 @@ class WebSeatEngine(
         loops[seat.seatId] = scope.launch { runSeat(seat, runtime) }
     }
 
+    /**
+     * 扫一遍平台频道列表，把新出现的私聊补进观看集。
+     * 私聊只认「机主与本席位之间」的：别人的私聊席位不是成员，
+     * 读了只会一直 403。启动时调一次、轮询里每轮再调，让席位
+     * 启动之后新建的私聊不用重启席位就能被发现（旧版只在启动
+     * 时扫一次，新私聊永远进不来——实测根因之一）。
+     */
+    private suspend fun discoverChannels(
+        seat: WebSeatRecord,
+        runtime: SeatRuntime,
+        transport: PlatformChannelMcpTransport,
+        watched: MutableList<String>,
+    ) {
+        val channels = try {
+            transport.listChannels()
+        } catch (e: Exception) {
+            return // 列表拿不到时只看已配置频道，下一轮再补。
+        }
+        runtime.dmChannels = channels
+            .filter {
+                it.kind == "dm" &&
+                    it.participantIds.contains(ownerAgentId) &&
+                    it.participantIds.contains(seat.platformAgentId)
+            }
+            .map { it.id }
+            .toSet()
+        for (id in seat.channelIds) {
+            if (id !in watched) watched.add(id)
+        }
+        for (dm in runtime.dmChannels) {
+            if (dm !in watched) watched.add(dm)
+        }
+        for (channelId in watched.toList()) {
+            if (!runtime.cursors.containsKey(channelId)) {
+                try {
+                    transport.callTool(
+                        "agent_channel_join",
+                        JSONObject().put("channel_id", channelId),
+                    )
+                } catch (e: Exception) {
+                    // 加入失败不致命：发帖会自动入频，读不到再下一轮重试。
+                }
+                initCursor(transport, runtime, channelId)
+            }
+        }
+    }
+
+    /**
+     * 新频道游标初始化：停在「120 秒前最后一条」处——更早的历史
+     * 绝不重放，最近两分钟内的新消息留给轮询处理（席位休息期间
+     * 发来的私聊，重新打开 App 后能补答，而不是被游标跳过）。
+     */
+    private suspend fun initCursor(
+        transport: PlatformChannelMcpTransport,
+        runtime: SeatRuntime,
+        channelId: String,
+    ) {
+        val page = try {
+            transport.pollMessages(
+                channelId = channelId, afterId = null, limit = 50,
+                onlyUnread = false, markRead = false,
+            )
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val cutoff = System.currentTimeMillis() / 1000.0 - 120.0
+        runtime.cursors[channelId] = page.lastOrNull { it.createdAtSeconds <= cutoff }?.id
+    }
+
     private suspend fun runSeat(seat: WebSeatRecord, runtime: SeatRuntime) {
         val site = seat.site ?: return
         val transport = transportFor(seat)
-        // 加入要看的频道与私聊；游标从最新一条起，绝不重放历史。
-        var watched = seat.channelIds.toMutableList()
-        try {
-            val channels = transport.listChannels()
-            runtime.dmChannels = channels
-                .filter { it.kind == "dm" && it.participantIds.contains(ownerAgentId) }
-                .map { it.id }
-                .toSet()
-            for (dm in runtime.dmChannels) {
-                if (dm !in watched) watched.add(dm)
-            }
-        } catch (e: Exception) {
-            // 列表拿不到时只看已配置频道，下一轮再补。
-        }
-        for (channelId in watched) {
-            try {
-                transport.callTool(
-                    "agent_channel_join",
-                    JSONObject().put("channel_id", channelId),
-                )
-            } catch (e: Exception) {
-                // 加入失败不致命：发帖会自动入频，读不到再下一轮重试。
-            }
-            if (!runtime.cursors.containsKey(channelId)) {
-                val page = try {
-                    transport.pollMessages(
-                        channelId = channelId, afterId = null, limit = 50,
-                        onlyUnread = false, markRead = false,
-                    )
-                } catch (e: Exception) {
-                    emptyList()
-                }
-                runtime.cursors[channelId] = page.lastOrNull()?.id
-            }
-        }
+        val watched = mutableListOf<String>()
+        discoverChannels(seat, runtime, transport, watched)
         val loggedIn = sessionFor(seat).probeLogin()
         statuses[seat.seatId] = if (loggedIn) WebSeatStatus.ONLINE else WebSeatStatus.NEEDS_LOGIN
         notifyChanged()
         while (running && loops[seat.seatId]?.isActive == true) {
-            for (channelId in watched) {
+            discoverChannels(seat, runtime, transport, watched)
+            for (channelId in watched.toList()) {
                 val fresh = try {
                     transport.pollMessages(
                         channelId = channelId, afterId = runtime.cursors[channelId],
@@ -450,14 +521,27 @@ class WebSeatEngine(
                     emptyList()
                 }
                 for (message in fresh) {
-                    handle(seat, site, runtime, transport, channelId, message)
-                    runtime.cursors[channelId] = message.id
+                    // 处理失败时不推进游标：下一轮重新读到这条，
+                    // 累计 3 次失败后 handle 会发明示失败通知。
+                    // 旧版无条件推进游标，失败一次就永久丢失，
+                    // 3 次重试与失败通知永远触发不到。
+                    val done = handle(seat, site, runtime, transport, channelId, message)
+                    if (done) {
+                        runtime.cursors[channelId] = message.id
+                    } else {
+                        break
+                    }
                 }
             }
             delay(15_000)
         }
     }
 
+    /**
+     * 处理一条消息。返回 true = 这条可以越过（不归席位答、已答、
+     * 或已发明示失败通知）；false = 本次失败，游标不要推进，
+     * 下一轮重试（累计 3 次后转明示失败通知）。
+     */
     private suspend fun handle(
         seat: WebSeatRecord,
         site: WebSeatSite,
@@ -465,7 +549,7 @@ class WebSeatEngine(
         transport: PlatformChannelMcpTransport,
         channelId: String,
         message: wherevercode.agent.core.agent.PlatformChannelMessage,
-    ) {
+    ): Boolean {
         val root = message.replyTo?.let { runtime.msgRoot[it] }
         val isDM = runtime.dmChannels.contains(channelId)
         val hit = WebSeatGate.shouldRespond(
@@ -481,7 +565,7 @@ class WebSeatEngine(
         if (root != null && message.agentId == ownerAgentId) {
             runtime.msgRoot[message.id] = root
         }
-        if (!hit) return
+        if (!hit) return true
         val effectiveRoot = root ?: (message.replyTo ?: message.id)
         val stripped = WebSeatGate.stripMentions(message.text, site.mentionHandles)
         val question = stripped.ifEmpty { message.text }
@@ -506,6 +590,7 @@ class WebSeatEngine(
             runtime.attempts.remove(message.id)
             statuses[seat.seatId] = WebSeatStatus.ONLINE
             notifyChanged()
+            return true
         } catch (e: Exception) {
             if ((runtime.attempts[message.id] ?: 0) >= 3) {
                 try {
@@ -519,7 +604,9 @@ class WebSeatEngine(
                     // 失败通知也发不出去时不再重试，避免刷屏。
                 }
                 runtime.attempts.remove(message.id)
+                return true
             }
+            return false
         }
     }
 }

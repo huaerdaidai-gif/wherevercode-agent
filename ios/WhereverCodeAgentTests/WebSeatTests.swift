@@ -123,10 +123,11 @@ final class WebSeatTests: XCTestCase {
         XCTAssertTrue(js.contains("\\u") || js.contains("\\n") || js.contains("\\\""))
     }
 
-    func testExtractScriptTargetsNewRow() {
-        let js = ClaudeSeatScripts.extract(beforeCount: 3)
-        XCTAssertTrue(js.contains("asst[3]"))
+    func testExtractScriptTargetsLastRow() {
+        let js = ClaudeSeatScripts.extractLast
+        XCTAssertTrue(js.contains("asst[asst.length - 1]"))
         XCTAssertTrue(js.contains("standard-markdown"))
+        XCTAssertTrue(js.contains("count: asst.length"))
     }
 
     // MARK: Record coding

@@ -226,18 +226,21 @@ public enum ClaudeSeatScripts {
         return 'enter'; })()
         """
 
-    public static func extract(beforeCount: Int) -> String {
-        """
+    /// Read the LAST assistant row: returns the row count and the
+    /// last row's body text. Locating the reply by index breaks
+    /// while a fresh-conversation navigation is still settling
+    /// (row counts flicker); the engine instead compares the last
+    /// row's text against a pre-send snapshot.
+    public static let extractLast = """
         (() => { const stop = Array.from(document.querySelectorAll('button'))\
         .some(x => /stop|停止/i.test(x.getAttribute('aria-label') || '')); \
         const asst = document.querySelectorAll('[data-testid="assistant-message"]'); \
         let last = ''; \
-        if (asst.length > \(beforeCount)) { const row = asst[\(beforeCount)]; \
+        if (asst.length > 0) { const row = asst[asst.length - 1]; \
         const md = row.querySelector('[class*="standard-markdown"]') || row.querySelector('.prose'); \
         last = ((md ? md.innerText : '') || '').trim(); } \
-        return JSON.stringify({stop: stop, text: last, href: location.href}); })()
+        return JSON.stringify({stop: stop, count: asst.length, text: last, href: location.href}); })()
         """
-    }
 
     /// Logged-in heuristic on the /new page: a composer is present
     /// and we were not bounced to a login URL.
@@ -334,6 +337,15 @@ public final class WebSeatSession {
         return (value as? NSNumber)?.intValue ?? 0
     }
 
+    /// Body text of the last assistant row ("" when there is none).
+    private func lastAssistantText() async -> String {
+        guard let raw = await evalString(ClaudeSeatScripts.extractLast),
+              let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let dict = obj as? [String: Any] else { return "" }
+        return dict["text"] as? String ?? ""
+    }
+
     /// True when the seat's browser profile is logged in at
     /// claude.ai (composer reachable on /new, no login bounce).
     public func probeLogin() async -> Bool {
@@ -377,7 +389,13 @@ public final class WebSeatSession {
                 throw WebSeatError.pageNotVerified
             }
         }
-        let before = await assistantCount()
+        let beforeCount = await assistantCount()
+        // Snapshot of the last reply before sending: the new reply
+        // is recognised by "the last row changed", not by index —
+        // row counts flicker while a fresh-conversation navigation
+        // settles, and index-based extraction can read the wrong
+        // row or no row at all (the silent-DM root cause).
+        let beforeLast = await lastAssistantText()
         let inserted = await evalString(ClaudeSeatScripts.insert(question: question))
         guard inserted == "ok" else {
             throw WebSeatError.insertFailed(inserted ?? "nil")
@@ -392,20 +410,23 @@ public final class WebSeatSession {
         var href = want
         for _ in 0..<80 {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard let raw = await evalString(ClaudeSeatScripts.extract(beforeCount: before)),
+            guard let raw = await evalString(ClaudeSeatScripts.extractLast),
                   let data = raw.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data),
                   let dict = obj as? [String: Any] else { continue }
-            let text = dict["text"] as? String ?? ""
+            let count = (dict["count"] as? NSNumber)?.intValue ?? 0
+            let rowText = dict["text"] as? String ?? ""
             let stop = dict["stop"] as? Bool ?? false
             if let h = dict["href"] as? String, !h.isEmpty { href = h }
-            if !text.isEmpty && text == lastText && !stop {
+            let candidate =
+                (!rowText.isEmpty && (count > beforeCount || rowText != beforeLast)) ? rowText : ""
+            if !candidate.isEmpty && candidate == lastText && !stop {
                 stable += 1
-                if stable >= 2 { return (text, href) }
+                if stable >= 2 { return (candidate, href) }
             } else {
                 stable = 0
             }
-            if !text.isEmpty { lastText = text }
+            if !candidate.isEmpty { lastText = candidate }
         }
         if !lastText.isEmpty { return (lastText, href) }
         throw WebSeatError.timeoutNoReply
