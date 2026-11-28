@@ -801,30 +801,27 @@ class TeamChannelController(
         if (!snapshot.dmMode) {
             // 238 对齐批：频道选择行（iOS topWorkspaceHeader 同位）。
             bodyContainer.addView(channelSelectorRow(snapshot))
-            bodyContainer.addView(sectionTabsRow(snapshot))
         }
-        bodyContainer.addView(membersRow(snapshot))
+        // 全页化（Funk 2026-11-28 批准效果图，与 iOS 同构）：去掉常驻
+        // 分段（消息/文件/任务）、成员行、工具行与消息中心条，消息
+        // 占满整页；文件/任务从标题行 ⋯ 菜单进全页（页内带返回行、
+        // 输入栏整套藏起，与 iOS sheet 同式）；搜索/过滤行仅在菜单
+        // 开启搜索或已有搜索结果时出现；消息中心计数进 ⋯ 菜单。
         if (!snapshot.dmMode && snapshot.sectionTab == 1) {
+            bodyContainer.addView(sectionBackRow("频道文件"))
             bodyContainer.addView(filesSection(snapshot))
-            setDialogChromeVisible(true, diagnostic != null)
+            setDialogChromeVisible(false, diagnostic != null)
             return
         }
         if (!snapshot.dmMode && snapshot.sectionTab == 2) {
+            bodyContainer.addView(sectionBackRow("任务列表"))
             bodyContainer.addView(tasksSection(snapshot))
-            setDialogChromeVisible(true, diagnostic != null)
+            setDialogChromeVisible(false, diagnostic != null)
             return
         }
-        if (!snapshot.dmMode) {
+        if (!snapshot.dmMode && (searchToolsVisible || snapshot.searchResults != null)) {
             bodyContainer.addView(searchRow(snapshot))
             bodyContainer.addView(filterRow(snapshot))
-            bodyContainer.addView(toolsRow(snapshot))
-            snapshot.messageCenter?.let {
-                // 全量对齐批：计数随当前显示集（搜索/筛选结果集优先），与 iOS 同口径。
-                val countScope = snapshot.searchResults ?: snapshot.messages
-                bodyContainer.addView(
-                    messageCenterSection(it, ChannelExtras.pinnedMessages(countScope).size),
-                )
-            }
         }
         if (snapshot.unreadCount > 0) {
             bodyContainer.addView(unreadRow(snapshot))
@@ -963,58 +960,6 @@ class TeamChannelController(
         setDialogChromeVisible(true, diagnostic != null)
     }
 
-    private fun membersRow(snapshot: TeamChannelSnapshot): LinearLayout {
-        val row = UiKit.horizontal(context).apply {
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, dp(4), 0, dp(8))
-        }
-        // 238 对齐批：与 iOS membersStrip 同形——无「成员」标签，成员是
-        // 白底描边胶囊（11sp），右侧「通知：…」纯文字（点按循环切换）。
-        // 成员是全部 Agent（8 位以上也常见），芯片行放进横滑容器，不怕人多。
-        val scroller = HorizontalScrollView(context).apply {
-            isHorizontalScrollBarEnabled = false
-            layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f,
-            )
-        }
-        val chips = UiKit.horizontal(context)
-        snapshot.members.forEach { member ->
-            chips.addView(
-                UiKit.text(
-                    context,
-                    member.displayName +
-                        channelRoleLabel(member.role).let { if (it.isEmpty()) "" else " · $it" },
-                    11f,
-                    R.color.text_primary,
-                ).apply {
-                    setBackgroundResource(R.drawable.bg_capsule_btn)
-                    setPadding(dp(8), dp(3), dp(8), dp(3))
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { rightMargin = dp(6) }
-                    setOnClickListener {
-                        if (!member.isLocalApp) onOpenChatWithAgent(member.agentId)
-                    }
-                },
-            )
-        }
-        // 逐频道通知档（本机偏好）：与 iOS membersStrip 同位——「通知：…」
-        // 纯文字紧跟最后一个成员芯片、同在横滑流内；点按进频道设置页改档
-        // （设置页内有通知节，与此前点按循环切换等价可达）。
-        chips.addView(
-            UiKit.text(context, "通知：${snapshot.notifyMode}", 11f, R.color.text_secondary).apply {
-                setPadding(dp(2), dp(3), 0, dp(3))
-                setOnClickListener { onChannelSettings(snapshot.activeChannelId) }
-            },
-        )
-        scroller.addView(chips)
-        row.addView(scroller)
-        return row
-    }
-
     private fun unreadRow(snapshot: TeamChannelSnapshot): LinearLayout {
         val row = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(8)) }
         row.addView(
@@ -1105,7 +1050,7 @@ class TeamChannelController(
 
     /**
      * 频道选择行（238 对齐批，iOS topWorkspaceHeader 同位同形）：
-     * 「# 频道名 ⌄」（点开切换面板）＋层级副标，右侧 ⋯ 进频道设置。
+     * 「# 频道名 ⌄」（点开切换面板）＋层级副标，右侧 ⋯ 打开频道菜单（文件/任务/搜索/话题/日期/历史/计数/设置）。
      * 只在频道对话层出现；私聊对话层不用。
      */
     private fun channelSelectorRow(snapshot: TeamChannelSnapshot): LinearLayout {
@@ -1150,9 +1095,89 @@ class TeamChannelController(
                 gravity = android.view.Gravity.CENTER
                 setBackgroundResource(R.drawable.bg_circle_btn)
                 layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
-                setOnClickListener { onChannelSettings(snapshot.activeChannelId) }
+                setOnClickListener { showChannelMenu(it, snapshot) }
             },
         )
+        return row
+    }
+
+    /** 标题行 ⋯ 菜单（全页化，与 iOS 同目）：文件/任务全页、搜索开关、话题、跳日期、历史开关、消息中心计数、频道设置。 */
+    private fun showChannelMenu(anchor: View, snapshot: TeamChannelSnapshot) {
+        val menu = android.widget.PopupMenu(context, anchor)
+        menu.menu.add(0, 1, 0, "频道文件")
+        menu.menu.add(0, 2, 1, "任务列表")
+        menu.menu.add(0, 3, 2, "搜索消息")
+        val topicCount = groupTopicThreads(
+            snapshot.messages.map { teamMessageFromChannel(it, snapshot.trustedAttributionPosterIds) },
+        ).size
+        menu.menu.add(0, 4, 3, if (topicCount > 0) "话题列表 ($topicCount)" else "话题列表")
+        menu.menu.add(0, 5, 4, "跳到日期")
+        if (snapshot.showHistoryToggle) {
+            menu.menu.add(0, 6, 5, if (snapshot.historyVisible) "新成员看历史：开" else "新成员看历史：关")
+        }
+        snapshot.messageCenter?.let { center ->
+            // 计数随当前显示集（搜索/筛选结果集优先），与 iOS 同口径。
+            val countScope = snapshot.searchResults ?: snapshot.messages
+            val pinned = ChannelExtras.pinnedMessages(countScope).size
+            menu.menu.add(0, 7, 6, "未读 ${center.unreadCount} · @我未读 ${center.unreadMentionCount} · 置顶 $pinned（按当前已加载消息统计）").isEnabled = false
+        }
+        menu.menu.add(0, 8, 7, "频道设置")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> onSectionTabChange(1)
+                2 -> onSectionTabChange(2)
+                3 -> {
+                    searchToolsVisible = !searchToolsVisible
+                    render(snapshot)
+                }
+                4 -> showTopicThreadsDialog(snapshot)
+                5 -> showJumpToDateDialog()
+                6 -> {
+                    if (snapshot.canManageHistory) {
+                        onHistoryVisibleChange(!snapshot.historyVisible)
+                    } else {
+                        noticeLine.text = "只有频道 owner/协调员能改“新成员看历史”开关。"
+                        noticeLine.visibility = View.VISIBLE
+                    }
+                }
+                8 -> onChannelSettings(snapshot.activeChannelId)
+            }
+            true
+        }
+        menu.show()
+    }
+
+    /** 跳到日期（原工具行同逻辑）：选一天 → onJumpToDate(当天零点秒)。 */
+    private fun showJumpToDateDialog() {
+        val cal = java.util.Calendar.getInstance()
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val picked = java.util.Calendar.getInstance().apply {
+                    set(year, month, day, 0, 0, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                onJumpToDate(picked.timeInMillis / 1000)
+            },
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH),
+            cal.get(java.util.Calendar.DAY_OF_MONTH),
+        ).show()
+    }
+
+    /** 文件/任务全页顶行：‹ 返回 + 标题（点返回回到消息页）。 */
+    private fun sectionBackRow(title: String): LinearLayout {
+        val row = UiKit.horizontal(context).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(8))
+        }
+        row.addView(
+            UiKit.text(context, "‹ 返回", 14f, R.color.accent, bold = true).apply {
+                setPadding(0, dp(4), dp(12), dp(4))
+                setOnClickListener { onSectionTabChange(0) }
+            },
+        )
+        row.addView(UiKit.text(context, title, 16f, R.color.text_primary, bold = true))
         return row
     }
 
@@ -1160,6 +1185,9 @@ class TeamChannelController(
 
     /** 列表页搜索过滤词（频道按名称＋成员名、私聊按名称＋成员名/角色；本机过滤，不查服务端）。 */
     private var channelListQuery: String = ""
+
+    /** 搜索/过滤行可见性（全页化：默认收起，从标题行 ⋯ 菜单开启；已有搜索结果时强制显示）。 */
+    private var searchToolsVisible: Boolean = false
 
     /** 列表容器（搜索输入只重填它，不整页重渲染，保住输入焦点）。 */
     private var channelListContainer: LinearLayout? = null
@@ -1668,52 +1696,6 @@ class TeamChannelController(
     }
 
     /** 工具行（238 对齐批，与 iOS toolsBar 同形）：无「工具：」标签，跳到日期在左、新成员历史开关右对齐。 */
-    private fun toolsRow(snapshot: TeamChannelSnapshot): View {
-        val inner = UiKit.horizontal(context).apply {
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(8))
-        }
-        inner.addView(smallChip("跳到日期", first = true) {
-            val cal = java.util.Calendar.getInstance()
-            android.app.DatePickerDialog(
-                context,
-                { _, year, month, day ->
-                    val picked = java.util.Calendar.getInstance().apply {
-                        set(year, month, day, 0, 0, 0)
-                        set(java.util.Calendar.MILLISECOND, 0)
-                    }
-                    onJumpToDate(picked.timeInMillis / 1000)
-                },
-                cal.get(java.util.Calendar.YEAR),
-                cal.get(java.util.Calendar.MONTH),
-                cal.get(java.util.Calendar.DAY_OF_MONTH),
-            ).show()
-        })
-        inner.addView(
-            View(context).apply {
-                // 高度必须给死值：空 View 配 WRAP_CONTENT 时按 AT_MOST
-                // 规格取满可用高度（238 装机实测把工具行撑到 866px，
-                // 消息中心与消息空态被顶出可视区）。
-                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-            },
-        )
-        if (snapshot.showHistoryToggle) {
-            val label = if (snapshot.historyVisible) {
-                "新成员看历史：开"
-            } else {
-                "新成员看历史：关"
-            }
-            inner.addView(smallChip(label) {
-                if (snapshot.canManageHistory) {
-                    onHistoryVisibleChange(!snapshot.historyVisible)
-                } else {
-                    noticeLine.text = "只有频道 owner/协调员能改“新成员看历史”开关。"
-                }
-            })
-        }
-        return inner
-    }
-
     /** 历史浏览窗口（搜索跳原文 / 日期跳转共用）：横幅 + 翻页 + 高亮目标。 */
     private fun browseSection(
         snapshot: TeamChannelSnapshot,
@@ -1889,29 +1871,6 @@ class TeamChannelController(
     }
 
     /** 218 分段二（与 iOS 的消息/文件/任务分段同位同名；220 改分段条形态，与 iOS 同形）。 */
-    private fun sectionTabsRow(snapshot: TeamChannelSnapshot): LinearLayout {
-        val outer = UiKit.horizontal(context).apply { setPadding(0, 0, 0, dp(8)) }
-        val track = segmentedTrack()
-        val labels = listOf("消息", "文件", "任务")
-        labels.forEachIndexed { index, label ->
-            val active = snapshot.sectionTab == index
-            track.addView(
-                UiKit.text(context, label, 13f, R.color.text_primary, bold = active).apply {
-                    gravity = android.view.Gravity.CENTER
-                    styleSegment(this, active)
-                    setPadding(dp(14), dp(6), dp(14), dp(6))
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f,
-                    )
-                    setOnClickListener { onSectionTabChange(index) }
-                },
-            )
-        }
-        outer.addView(track)
-        return outer
-    }
     /**
      * 文件分段（全量对齐批，与 iOS 文件页签同结构）：「频道文件汇总 (N)」
      * 标题 + 条目；空态文案与 iOS 同文「暂无共享文件」。条目仍是服务端
@@ -2351,33 +2310,6 @@ class TeamChannelController(
     /** 消息中心（聚合 @我 与未读；点条目不跳转，只呈现，频道补全三期）。
      *  218 计数口径 B（与 iOS 同定义同注记）：置顶并入本行；三项均为
      *  当前已加载消息内统计，行下明示范围，不冒充全局数。 */
-    private fun messageCenterSection(center: MessageCenter, pinnedCount: Int): LinearLayout {
-        val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(8)) }
-        // 238 对齐批：与 iOS messageCenterStrip 同形——「消息中心」半粗 +
-        // 三个计数灰字横排（空格分隔、无圆点），空时不显示「暂无 @我」行。
-        val head = UiKit.horizontal(context)
-        head.addView(
-            UiKit.text(context, "消息中心", 12f, R.color.text_primary, bold = true),
-        )
-        listOf(
-            "未读 ${center.unreadCount}",
-            "@我未读 ${center.unreadMentionCount}",
-            "置顶 $pinnedCount",
-        ).forEach { label ->
-            head.addView(
-                UiKit.text(context, label, 12f, R.color.text_secondary).apply {
-                    setPadding(dp(12), 0, 0, 0)
-                },
-            )
-        }
-        col.addView(head)
-        col.addView(
-            UiKit.text(context, "计数按当前已加载消息统计", 10f, R.color.text_tertiary),
-        )
-        // 全量对齐批：去掉计数行下的 @我预览行（iOS 对话页无此行）。
-        return col
-    }
-
     /** 待发定时消息区（发送前可取消，频道补全二期）。 */
     private fun scheduledSection(items: List<ScheduledChannelPost>): LinearLayout {
         val col = UiKit.vertical(context).apply { setPadding(0, 0, 0, dp(8)) }
