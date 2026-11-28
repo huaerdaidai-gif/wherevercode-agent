@@ -73,6 +73,7 @@
 			892AEB362C95AAE0B8B13531,
 			F17729830897440A9E54F001,
 			47FFE0ECCF7C83A806454DF9,
+			DA000000000000000000F605,
 			00600EE2EA71EC2F6623B155,
 			AF29026DEB46CEBD6478E0B0,
 			DA000000000000000000D301,
@@ -92,9 +93,12 @@
 			91067B38E1192DA78C1A0C00,
 		); name = App; path = App; sourceTree = "<group>"; };
 		DC0D1A100000000000000002 = {isa = PBXBuildFile; fileRef = DC0D1A100000000000000001; };
+		DA000000000000000000F608 = {isa = PBXBuildFile; fileRef = DA000000000000000000F607; };
 		F17729830897440A9E54F002 = {isa = PBXBuildFile; fileRef = F17729830897440A9E54F001; };
 		2A3B9E2C913ADDDB16F1CD99 = {isa = PBXBuildFile; fileRef = 892AEB362C95AAE0B8B13531; };
 		2FAFA8646A910CE4490E1BBD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
+		DA000000000000000000F601 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSeat.swift; sourceTree = "<group>"; };
+		DA000000000000000000F603 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSeatEngine.swift; sourceTree = "<group>"; };
 		1C0DE00000000000000000A1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCenterRules.swift; sourceTree = "<group>"; };
 		1C0DE00000000000000000A3 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCenterView.swift; sourceTree = "<group>"; };
 		1C0DE00000000000000000A5 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCenterTests.swift; sourceTree = "<group>"; };
@@ -137,6 +141,7 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			}; name = Debug; };
 		47FFE0ECCF7C83A806454DF9 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpClientTests.swift; sourceTree = "<group>"; };
+		DA000000000000000000F605 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSeatTests.swift; sourceTree = "<group>"; };
 		49C827D627120C9B5B9F3A01 = {isa = PBXBuildFile; fileRef = 5B13EA927360ADAE195EE80B; };
 		DA0000000000000000000B42 = {isa = PBXBuildFile; fileRef = DA0000000000000000000B41; };
 		537589441B76EA165F23EABC = {isa = PBXGroup; children = (
@@ -182,6 +187,7 @@
 				1C0DE00000000000000000A2,
 				1C0DE00000000000000000A4,
 			DC0D1A100000000000000002,
+			DA000000000000000000F608,
 			9CCD70432011961B094C8FCE,
 			DA0000000000000000000074,
 			DA0000000000000000000084,
@@ -203,6 +209,8 @@
 			DA000000000000000000CACF,
 			1E69D22CB70873DDBFF041B3,
 			BB35B5B26176D7E09841F13F,
+			DA000000000000000000F602,
+			DA000000000000000000F604,
 			DA0000000000000000000C02,
 			DA0000000000000000000C04,
 				DA0000000000000000000D02,
@@ -291,6 +299,7 @@
 			}; name = Release; };
 		7667F7CA498D0ED82757FFC2 = {isa = PBXBuildFile; fileRef = AF29026DEB46CEBD6478E0B0; };
 		7F749415C58C7FDDBBA14398 = {isa = PBXBuildFile; fileRef = 47FFE0ECCF7C83A806454DF9; };
+		DA000000000000000000F606 = {isa = PBXBuildFile; fileRef = DA000000000000000000F605; };
 		828B51501A8E088E7BC25411 = {isa = PBXBuildFile; fileRef = 918CC59A2183C5FAA462994B; };
 		DA0000000000000000000E12 = {isa = PBXBuildFile; fileRef = DA0000000000000000000E11; };
 		844C8F533FE271C19FE543DF = {isa = PBXBuildFile; fileRef = 00600EE2EA71EC2F6623B155; };
@@ -319,6 +328,7 @@
 		98E3434F859B0C281501C824 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhereverCodeAgent.entitlements; sourceTree = "<group>"; };
 		9CCD70432011961B094C8FCE = {isa = PBXBuildFile; fileRef = 91067B38E1192DA78C1A0C00; };
 		DC0D1A100000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogComponents.swift; sourceTree = "<group>"; };
+		DA000000000000000000F607 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSeatViews.swift; sourceTree = "<group>"; };
 		ABD4D6AD9705B560B2E73A9F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
 			A3F100000000000000000008,
 				1C0DE00000000000000000A6,
@@ -339,6 +349,7 @@
 			2A3B9E2C913ADDDB16F1CD99,
 			F17729830897440A9E54F002,
 			7F749415C58C7FDDBBA14398,
+			DA000000000000000000F606,
 			844C8F533FE271C19FE543DF,
 			7667F7CA498D0ED82757FFC2,
 			DA000000000000000000D302,
@@ -361,6 +372,8 @@
 			DA0000000000000000000039,
 			1979B6204A28ED3B41351A82,
 			2FAFA8646A910CE4490E1BBD,
+			DA000000000000000000F601,
+			DA000000000000000000F603,
 			90A876B7A773B795F59F07C2,
 			C938E01FDB5D371FF097BED0,
 			DA000000000000000000D101,
@@ -380,6 +393,8 @@
 				DA0000000000000000000E07,
 		); name = Services; path = Services; sourceTree = "<group>"; };
 		BB35B5B26176D7E09841F13F = {isa = PBXBuildFile; fileRef = 2FAFA8646A910CE4490E1BBD; };
+		DA000000000000000000F602 = {isa = PBXBuildFile; fileRef = DA000000000000000000F601; };
+		DA000000000000000000F604 = {isa = PBXBuildFile; fileRef = DA000000000000000000F603; };
 		BEB0DA9A7B8738232918BE47 = {isa = PBXGroup; children = (
 			212B3758D9A02E43B3111A45,
 			537589441B76EA165F23EABC,
@@ -393,6 +408,7 @@
 		); name = WhereverCodeAgent; path = WhereverCodeAgent; sourceTree = "<group>"; };
 		C3E649AE6FBC41A1C5956252 = {isa = PBXGroup; children = (
 			DC0D1A100000000000000001,
+			DA000000000000000000F607,
 			918CC59A2183C5FAA462994B,
 			DA0000000000000000000E11,
 			0EC43C27AE6A9F51433ABA31,

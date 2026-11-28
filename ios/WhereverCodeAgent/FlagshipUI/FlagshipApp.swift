@@ -539,6 +539,7 @@ public struct FlagshipShellView: View {
 
     public var body: some View {
         ZStack(alignment: .leading) {
+            WebSeatHostView(appState: appState)
             NavigationStack {
                 Group {
                     switch selectedMenu {
