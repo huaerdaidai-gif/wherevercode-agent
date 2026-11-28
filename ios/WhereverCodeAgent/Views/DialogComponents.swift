@@ -67,8 +67,98 @@ extension View {
 /// （Lazy）VStack，统一两页的列表结构与滚底口径。
 /// - 单聊：VStack、消息数变化时滚到最后一条；问候/发送中/错误行
 ///   经 content / trailing 插槽进来。
-/// - 频道：LazyVStack、不主动滚底（scrollTargetID 传 nil，与
-///   现状一致——原 ScrollViewReader 的 proxy 本就未用）。
+/// - 频道：LazyVStack、scrollTargetID 传 nil（不无条件滚底）；
+///   showsScrollToBottomButton 开时另有口径：贴底时新消息保持
+///   贴底、离底时右下角出 ↓ 拉底按钮（滚到 bottomTargetID）。
+/// ↓ 拉底按钮的几何量测通道（DialogMessageListView 内部用）。
+
+/// 贴底探针：挂在滚动内容背景上，沿 superview 链找到底层
+/// UIScrollView，KVO 观察 contentOffset 与 contentSize，
+/// offset + 视口高 >= 内容高 - 24 即贴底（内容比视口矮时恒贴底）。
+/// 只在值变化时回报。SwiftUI 上报通道在本列表全灭后的兜底硬信号
+/// （见 DialogMessageListView.isAtBottom 的教训记录）。
+private struct DialogScrollProbe: UIViewRepresentable {
+    var onAtBottom: (Bool) -> Void
+    var onMetrics: ((String) -> Void)? = nil
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        context.coordinator.onAtBottom = onAtBottom
+        context.coordinator.onMetrics = onMetrics
+        DispatchQueue.main.async { context.coordinator.attach(from: view) }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onAtBottom = onAtBottom
+        context.coordinator.onMetrics = onMetrics
+        if context.coordinator.scrollView == nil {
+            DispatchQueue.main.async { context.coordinator.attach(from: uiView) }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var onAtBottom: ((Bool) -> Void)?
+        var onMetrics: ((String) -> Void)?
+        weak var scrollView: UIScrollView?
+        private weak var probeView: UIView?
+        private var retryPending = false
+        private var attachAttempts = 0
+        private var offsetObservation: NSKeyValueObservation?
+        private var sizeObservation: NSKeyValueObservation?
+        private var lastValue: Bool?
+
+        func attach(from view: UIView) {
+            guard scrollView == nil else { return }
+            probeView = view
+            var node: UIView? = view.superview
+            while let current = node {
+                if let sv = current as? UIScrollView {
+                    scrollView = sv
+                    let handler: (UIScrollView, Any) -> Void = { [weak self] sv, _ in
+                        self?.evaluate(sv)
+                    }
+                    offsetObservation = sv.observe(\.contentOffset, options: [.initial, .new], changeHandler: handler)
+                    sizeObservation = sv.observe(\.contentSize, options: [.initial, .new], changeHandler: handler)
+                    return
+                }
+                node = current.superview
+            }
+            // 没找到：链还没建好，自重试（0.3s 一次、上限 40 次），
+            // 不依赖父视图再渲染——静止后没人再调 updateUIView。
+            guard !retryPending, attachAttempts < 40 else { return }
+            retryPending = true
+            attachAttempts += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                self.retryPending = false
+                if self.scrollView == nil, let view = self.probeView {
+                    self.attach(from: view)
+                }
+            }
+        }
+
+        private func evaluate(_ sv: UIScrollView) {
+            // 指标回报不可省：它的状态写入让父视图在滚动期间持续
+            // 重渲染，updateUIView 的 attach 重试才不会饿死——去掉
+            // 回报通道后探针会偶发整体哑火（2026-11-27 二分实测：
+            // 带回报 = 双向正确，去回报 = 按钮常显）。
+            let dbg = "off \(Int(sv.contentOffset.y)) b \(Int(sv.bounds.height)) cs \(Int(sv.contentSize.height))"
+            let dbgCallback = onMetrics
+            DispatchQueue.main.async { dbgCallback?(dbg) }
+            let atBottom = sv.contentOffset.y + sv.bounds.height >= sv.contentSize.height - 24
+            guard atBottom != lastValue else { return }
+            lastValue = atBottom
+            let callback = onAtBottom
+            DispatchQueue.main.async { callback?(atBottom) }
+        }
+    }
+}
+
 public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var lazy: Bool
     public var spacing: CGFloat
@@ -81,6 +171,22 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
     public var scrollTargetID: String?
     /// 点内容区回调（单聊收键盘用）；nil = 不装手势。
     public var onTapContent: (() -> Void)?
+    /// ↓ 拉底按钮开关（频道用，2026-11-27）：开时栈尾放哨兵跟踪
+    /// 是否贴底，离底显示按钮、贴底时新消息自动跟随。默认关。
+    public var showsScrollToBottomButton: Bool
+    /// 拉底目标（最后一条消息的 id）；按钮与贴底跟随都滚到它。
+    public var bottomTargetID: String?
+    /// 贴底判定由底层 UIScrollView 的 contentOffset/contentSize
+    /// 实测（DialogScrollProbe 的 KVO 回报），不用 SwiftUI 上报
+    /// 通道——教训（2026-11-27，iOS 17.2 模拟器逐项实测）：
+    /// PreferenceKey 两个键恒不投递（状态恒 0）、scrollPosition
+    /// (id:) 绑定恒为 nil（加 scrollTargetLayout 也不投递）、哨兵
+    /// onAppear 按 LazyVStack 预实现窗口触发会误判。四路皆不可靠，
+    /// 只剩 UIKit 层 KVO 是硬信号。
+    @State private var probeAtBottom = false
+    @State private var probeMetrics = ""
+
+    private var isAtBottom: Bool { probeAtBottom }
     public var content: () -> Content
     public var trailing: () -> Trailing
 
@@ -93,6 +199,8 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         scrollTrigger: Int,
         scrollTargetID: String? = nil,
         onTapContent: (() -> Void)? = nil,
+        showsScrollToBottomButton: Bool = false,
+        bottomTargetID: String? = nil,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
@@ -104,18 +212,37 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         self.scrollTrigger = scrollTrigger
         self.scrollTargetID = scrollTargetID
         self.onTapContent = onTapContent
+        self.showsScrollToBottomButton = showsScrollToBottomButton
+        self.bottomTargetID = bottomTargetID
         self.content = content
         self.trailing = trailing
     }
 
     public var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                stack
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.top, topPadding)
-                    .padding(.bottom, bottomPadding)
-                    .dialogTapContent(onTapContent)
+        // 依赖锚（不可删）：body 必须真读一次 probeMetrics，探针的
+        // 指标写入才会触发重渲染、updateUIView 的 attach 重试才不
+        // 会饿死。只写不读的 @State 在 SwiftUI 里不使视图失效——
+        // 2026-11-27 二分实测：去掉这次读，探针整体哑火、按钮常显。
+        let _ = probeMetrics
+        return ScrollViewReader { proxy in
+            ZStack(alignment: .bottomTrailing) {
+                scrollView
+                if showsScrollToBottomButton, !isAtBottom, bottomTargetID != nil {
+                    Button {
+                        scrollToBottom(proxy)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Color(red: 0.16, green: 0.15, blue: 0.14), in: Circle())
+                            .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    .accessibilityIdentifier("dialog.scrollToBottom")
+                }
             }
             #if compiler(>=6.0)
             .onChange(of: scrollTrigger) { _, _ in scrollToTarget(proxy) }
@@ -125,24 +252,74 @@ public struct DialogMessageListView<Content: View, Trailing: View>: View {
         }
     }
 
+    /// 消息滚动区：拉底按钮开启时挂 scrollPosition 跟踪贴底
+    /// （判定见 isAtBottom）；关闭时就是普通滚动区，零影响。
+    @ViewBuilder
+    private var scrollView: some View {
+        if showsScrollToBottomButton {
+            ScrollView {
+                paddedStack
+                    .background {
+                        DialogScrollProbe(onAtBottom: { atBottom in
+                            if probeAtBottom != atBottom { probeAtBottom = atBottom }
+                        }, onMetrics: { probeMetrics = $0 })
+                    }
+            }
+        } else {
+            ScrollView { paddedStack }
+        }
+    }
+
+    private var paddedStack: some View {
+        stack
+            .padding(.horizontal, horizontalPadding)
+            .padding(.top, topPadding)
+            .padding(.bottom, bottomPadding)
+            .dialogTapContent(onTapContent)
+    }
+
     @ViewBuilder
     private var stack: some View {
         if lazy {
             LazyVStack(spacing: spacing) {
                 content()
                 trailing()
+                bottomSentinel
             }
         } else {
             VStack(spacing: spacing) {
                 content()
                 trailing()
+                bottomSentinel
             }
         }
     }
 
+    /// 栈尾哨兵（仅拉底按钮开启时）：只作滚底落点（scrollTo 目标），
+    /// 不再承担贴底量测（量测改走栈帧，见 isAtBottom 的教训记录）。
+    @ViewBuilder
+    private var bottomSentinel: some View {
+        if showsScrollToBottomButton {
+            Color.clear
+                .frame(height: 1)
+                .id("dialog.bottomSentinel")
+        }
+    }
+
     private func scrollToTarget(_ proxy: ScrollViewProxy) {
-        guard let scrollTargetID else { return }
-        withAnimation { proxy.scrollTo(scrollTargetID, anchor: .bottom) }
+        if let scrollTargetID {
+            withAnimation { proxy.scrollTo(scrollTargetID, anchor: .bottom) }
+        } else if showsScrollToBottomButton, isAtBottom {
+            // 频道口径：贴底时新消息保持贴底；离底不打扰，
+            // 由 ↓ 按钮等用户点（与主流聊天软件一致）。
+            scrollToBottom(proxy)
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        // 滚哨兵本身而不是最后一条消息：消息底边对齐视口下沿时哨兵
+        // 还差一截间距未入视野，到位后按钮迟迟不消失（2026-11-27 实测）。
+        withAnimation { proxy.scrollTo("dialog.bottomSentinel", anchor: .bottom) }
     }
 }
 
@@ -295,7 +472,14 @@ public struct DialogComposerView<Above: View, Leading: View, Accessory: View, Be
             .dialogAccessibilityID(inputAccessibilityID)
             .dialogOnTextChange(text, onTextChange)
         case .inline:
-            TextField(placeholder, text: $text)
+            Group {
+                if let focused {
+                    TextField(placeholder, text: $text)
+                        .focused(focused)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
+            }
                 .font(.system(size: 14))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -421,6 +605,11 @@ func mentionToken(in text: String) -> String? {
 /// Members matching the trailing @token (at most 8).
 func mentionMatches(in text: String, memberNames: [String]) -> [String] {
     guard let token = mentionToken(in: text) else { return [] }
+    // 只打了「@」还没输名字时列全员（与安卓 updateMentionBar 同口径；
+    // localizedCaseInsensitiveContains("") 恒为 false，必须特判）。
+    if token.isEmpty {
+        return Array(memberNames.filter { !$0.isEmpty }.prefix(8))
+    }
     return Array(
         memberNames.filter {
             $0.localizedCaseInsensitiveContains(token) &&
