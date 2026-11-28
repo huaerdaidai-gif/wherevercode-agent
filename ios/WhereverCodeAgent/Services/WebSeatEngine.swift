@@ -300,12 +300,15 @@ public final class WebSeatEngine: ObservableObject {
         var rest = Substring(text)
         while rest.count > limit {
             let cut = rest.index(rest.startIndex, offsetBy: limit)
-            var split = cut
             if let newline = rest[..<cut].lastIndex(of: "\n") {
-                split = newline
+                // Split at the newline and drop it; a hard cut must
+                // not drop any character.
+                chunks.append(String(rest[..<newline]))
+                rest = rest[rest.index(after: newline)...]
+            } else {
+                chunks.append(String(rest[..<cut]))
+                rest = rest[cut...]
             }
-            chunks.append(String(rest[..<split]))
-            rest = rest[rest.index(after: split)...]
         }
         if !rest.isEmpty { chunks.append(String(rest)) }
         return chunks
