@@ -116,3 +116,5 @@ class WebSeatGateTest {
         assertFalse(ClaudeSeatScripts.probeLooksLoggedIn("https://claude.ai/new", false))
     }
 }
+
+// CI 触发用空行（上一提交误带 [skip ci]，本提交补跑安卓 CI）。
