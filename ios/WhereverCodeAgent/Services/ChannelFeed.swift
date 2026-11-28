@@ -273,7 +273,17 @@ public final class ChannelFeed {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(Self.pingIntervalSeconds * 1_000_000_000))
                 guard let self, self.running else { return }
-                task.sendPing { _ in }
+                task.sendPing { error in
+                    // 半开套接字（服务器已悄悄断开、receive 永远
+                    // 等不到帧）靠 ping 失败现形：主动关掉套接字，
+                    // 让 receive 抛错、主循环落回轮询兜底，而不是
+                    // 永久卡在「连接中」再也不拉新消息（2026-11-28
+                    // Funk 真机反馈：自己发的消息要切走再切回才
+                    // 看得到）。
+                    if error != nil {
+                        task.cancel(with: .abnormalClosure, reason: nil)
+                    }
+                }
             }
         }
         defer {
