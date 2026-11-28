@@ -1413,6 +1413,8 @@ private struct CollaborationAndAgentsScreen: View {
     @State private var agents: [AgentRecord] = []
     @State private var showAddAgentSheet = false
     @State private var showWebSeats = false
+    @State private var pendingWebSeats = false
+    @State private var webSeats: [WebSeatRecord] = []
     @State private var bannerMsg: String? = nil
     @State private var testingAgentId: String? = nil
     @State private var testResultMsg: String? = nil
@@ -1453,24 +1455,9 @@ private struct CollaborationAndAgentsScreen: View {
                 Text("添加 Agent").textCase(nil)
             }
 
-            // 网页版 Agent 席位（chat 模式，方案便签 №21）：住在
-            // App 内嵌浏览器里，登录用户自己的网页账号应声。
-            Section {
-                Button {
-                    showWebSeats = true
-                } label: {
-                    Label("网页版 Agent（Claude 等）", systemImage: "globe")
-                        .font(.subheadline.weight(.semibold))
-                }
-            } header: {
-                Text("网页版 Agent").textCase(nil)
-            } footer: {
-                Text("席位住在 App 内嵌浏览器里，你登录自己的账号，打开 App 时在频道里应声。")
-            }
-
             // 块二：已添加的 Agent
             Section {
-                if agents.isEmpty {
+                if agents.isEmpty && webSeats.isEmpty {
                     Text("还没有添加 Agent。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -1568,10 +1555,28 @@ private struct CollaborationAndAgentsScreen: View {
                             }
                         }
                     }
+                    // 网页版 Agent 席位同列「已添加」（Funk 2026-11-28 纠正：
+                    // Agent 页只留添加＋已添加两块，席位不单独分节）。
+                    if let engine = appState.webSeatEngine {
+                        WebSeatAddedRows(engine: engine, onOpen: { showWebSeats = true })
+                    } else {
+                        ForEach(webSeats) { seat in
+                            HStack {
+                                Image(systemName: "globe").foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(seat.displayName).font(.subheadline.weight(.semibold))
+                                    Text(seat.enabled ? "休息中" : "已停用")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("管理") { showWebSeats = true }.font(.caption)
+                            }
+                        }
+                    }
                 }
             } header: {
                 // 渲染层修正（A5）：同上，关闭分节头默认大写转换
-                Text("已添加的 Agent（\(agents.count)）").textCase(nil)
+                Text("已添加的 Agent（\(agents.count + webSeats.count)）").textCase(nil)
             }
 
             if route.id != "agents" && route.id != "team" {
@@ -1594,12 +1599,17 @@ private struct CollaborationAndAgentsScreen: View {
                 Text("确定移除 \(ag.displayName) 吗？它的独立会话与已指派任务不受影响。")
             }
         }
-        .sheet(isPresented: $showWebSeats) {
+        .sheet(isPresented: $showWebSeats, onDismiss: reload) {
             NavigationStack {
                 WebSeatManagerView(appState: appState)
             }
         }
-        .sheet(isPresented: $showAddAgentSheet) {
+        .sheet(isPresented: $showAddAgentSheet, onDismiss: {
+            if pendingWebSeats {
+                pendingWebSeats = false
+                showWebSeats = true
+            }
+        }) {
             AddAgentSheet(
                 onSaved: { addedName in
                     reload()
@@ -1608,6 +1618,10 @@ private struct CollaborationAndAgentsScreen: View {
                 onBatchAdded: { count in
                     reload()
                     bannerMsg = "已添加 \(count) 个 Agent。"
+                },
+                onOpenWebSeats: {
+                    pendingWebSeats = true
+                    showAddAgentSheet = false
                 }
             )
         }
@@ -1759,12 +1773,14 @@ private struct CollaborationAndAgentsScreen: View {
         let all = (try? LocalData.shared.agents.listAgents()) ?? []
         // 过滤掉纯设备记录与模型记录，确保 Agent 列表中只有纯正智能体，不与设备和模型混淆
         agents = all.filter { !$0.isDeviceHost && $0.kind != .localModel }
+        webSeats = (try? appState.webSeatStore.listSeats()) ?? []
     }
 }
 
 private struct AddAgentSheet: View {
     var onSaved: (String) -> Void
     var onBatchAdded: (Int) -> Void
+    var onOpenWebSeats: () -> Void = {}
     var editing: AgentRecord? = nil
     @Environment(\.dismiss) private var dismiss
 
@@ -1843,6 +1859,23 @@ private struct AddAgentSheet: View {
                     }
                 } header: { Text("自动发现").textCase(nil) } footer: {
                     Text("从已配对的设备中批量扫描并一键勾选添加 Agent。")
+                }
+
+                if editing == nil {
+                    Section {
+                        Button {
+                            onOpenWebSeats()
+                        } label: {
+                            HStack {
+                                Label("网页版 Agent（Claude 等）", systemImage: "globe")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                    } header: { Text("网页版 Agent").textCase(nil) } footer: {
+                        Text("席位住在 App 内嵌浏览器里，你登录自己的账号，打开 App 时在频道里应声。")
+                    }
                 }
 
                 Section {

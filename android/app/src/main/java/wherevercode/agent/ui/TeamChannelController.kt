@@ -226,6 +226,25 @@ class TeamChannelController(
     /** 消息 + 扇出区容器：每次 render() 重建。固定头与输入栏不在其中。 */
     private val bodyContainer: LinearLayout = messageListView.content
 
+    /** 自动拉底上下文（当前消息流的频道+话题标识）：与上次不同 = 刚进入/切换，无条件落到最新。 */
+    private var flowContextKey: String? = null
+
+    /** 本人刚发出一条消息：下一次 render 无条件拉底（不等贴底判定）。 */
+    private var forceStickAfterSend = false
+
+    /** 「回到最新」悬浮钮（与 iOS ↓、安卓单聊同口径）：离底才出现，点按拉底。 */
+    private val scrollBottomButton: TextView = UiKit.text(context, "↓", 18f, R.color.on_accent).apply {
+        gravity = android.view.Gravity.CENTER
+        background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(
+                androidx.core.content.ContextCompat.getColor(context, R.color.accent),
+            )
+        }
+        visibility = View.GONE
+        setOnClickListener { messageListView.scrollToBottom() }
+    }
+
     private val connectionLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val roundLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
     private val noticeLine: TextView = UiKit.text(context, "", 11f, R.color.text_tertiary)
@@ -419,7 +438,30 @@ class TeamChannelController(
         root.addView(roundLine)
         noticeLine.setPadding(dp(16), 0, dp(16), dp(6))
         root.addView(noticeLine)
-        root.addView(messageListView)
+        // 消息列表 + 「回到最新」悬浮钮（钮叠在列表右下角，与 iOS ↓ 同位）。
+        val listHost = android.widget.FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            )
+            messageListView.layoutParams = android.widget.FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+            )
+            addView(messageListView)
+            addView(
+                scrollBottomButton,
+                android.widget.FrameLayout.LayoutParams(dp(40), dp(40)).apply {
+                    gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
+                    setMargins(0, 0, dp(16), dp(16))
+                },
+            )
+        }
+        root.addView(listHost)
+        messageListView.scrollView.setOnScrollChangeListener { _, _, _, _, _ ->
+            updateScrollBottomButton()
+        }
         root.addView(typingBanner)
         root.addView(mentionScroller)
         root.addView(topicHintLine)
@@ -674,6 +716,7 @@ class TeamChannelController(
         val attachment = pendingAttachmentRef
         clearReply()
         pendingAttachmentRef = null
+        forceStickAfterSend = true
         if (onPostEx != null && (replyId != null || attachment != null)) {
             onPostEx.invoke(text, replyId, attachment)
         } else {
@@ -683,6 +726,14 @@ class TeamChannelController(
 
     fun render(snapshot: TeamChannelSnapshot) {
         this.snapshot = snapshot
+        // 自动拉底判定要在重建内容之前取：此刻列表里还是上一帧消息，
+        // 是否贴底决定新消息到达时跟不跟随（与安卓单聊 stickToBottom 同口径）。
+        val stickBeforeRender = messageListView.isNearBottom()
+        val flowKey = flowContextKeyOf(snapshot)
+        if (flowKey == null) {
+            flowContextKey = null
+            scrollBottomButton.visibility = View.GONE
+        }
         updateTopicHint()
         val dividerNowSec = System.currentTimeMillis() / 1000.0
         val diagnostic = snapshot.connectionError?.takeIf { it.isNotBlank() }
@@ -958,6 +1009,16 @@ class TeamChannelController(
         }
         // 配好后对话框铬整套回来（含诊断钮按有无诊断显隐）。
         setDialogChromeVisible(true, diagnostic != null)
+        // 自动拉底（Funk 2026-11-28 点名缺失，补齐与 iOS 频道页同口径）：
+        // 进入/切换频道或话题落到最新；贴底时新消息跟随；本人刚发送无条件拉底。
+        if (flowKey != null) {
+            if (flowKey != flowContextKey || forceStickAfterSend || stickBeforeRender) {
+                messageListView.scrollToBottom()
+            }
+            flowContextKey = flowKey
+        }
+        forceStickAfterSend = false
+        updateScrollBottomButton()
     }
 
     private fun unreadRow(snapshot: TeamChannelSnapshot): LinearLayout {
@@ -2620,6 +2681,21 @@ class TeamChannelController(
         val normalized = error.lowercase(Locale.ROOT)
         return listOf("certificate", "certpath", "trust anchor", "sslhandshake", "证书", "证书链")
             .any(normalized::contains)
+    }
+
+    /** 当前快照是否正显示消息流本体（非频道列表/文件/任务/搜索/浏览态）；
+     *  是则返回其上下文标识（频道 + 话题），否则 null。 */
+    private fun flowContextKeyOf(snapshot: TeamChannelSnapshot): String? {
+        if (!snapshot.configured || snapshot.listMode) return null
+        if (!snapshot.dmMode && snapshot.sectionTab != 0) return null
+        if (snapshot.searchResults != null || snapshot.browseMessages != null) return null
+        return snapshot.activeChannelId + "|" + (snapshot.activeTopicThreadRootId ?: "")
+    }
+
+    /** 「回到最新」钮显隐：消息流内且已离底才显示（与单聊 updateScrollBottomButton 同口径）。 */
+    private fun updateScrollBottomButton() {
+        scrollBottomButton.visibility =
+            if (flowContextKey != null && !messageListView.isNearBottom()) View.VISIBLE else View.GONE
     }
 
     private fun dp(value: Int): Int = UiKit.dp(context, value)

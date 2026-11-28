@@ -76,9 +76,13 @@ class AgentScreenController(
         list.removeAllViews()
     }
 
-    fun renderAddedAgents(agents: List<AgentRecord>) {
-        list.addView(sectionTitle("已添加的 Agent（${agents.size}）"))
-        if (agents.isEmpty()) {
+    fun renderAddedAgents(
+        agents: List<AgentRecord>,
+        webSeats: List<WebSeatRowUi> = emptyList(),
+        onOpenWebSeat: (String) -> Unit = {},
+    ) {
+        list.addView(sectionTitle("已添加的 Agent（${agents.size + webSeats.size}）"))
+        if (agents.isEmpty() && webSeats.isEmpty()) {
             list.addView(
                 UiKit.text(context, "还没有添加 Agent。", 11f, R.color.text_tertiary).apply {
                     setBackgroundResource(R.drawable.bg_system_note)
@@ -88,6 +92,43 @@ class AgentScreenController(
             return
         }
         agents.forEach { list.addView(addedCard(it)) }
+        webSeats.forEach { list.addView(webSeatCard(it, onOpenWebSeat)) }
+    }
+
+    /** 网页版 Agent 席位在「已添加」里的一行（与普通 Agent 同列，不单独分节）。 */
+    data class WebSeatRowUi(
+        val seatId: String,
+        val displayName: String,
+        val statusLabel: String,
+    )
+
+    private fun webSeatCard(seat: WebSeatRowUi, onOpen: (String) -> Unit): LinearLayout {
+        val card = UiKit.vertical(context).apply {
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(8) }
+            setOnClickListener { onOpen(seat.seatId) }
+        }
+        val top = UiKit.horizontal(context)
+        top.addView(UiKit.text(context, seat.displayName, 14f, R.color.text_primary, bold = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        top.addView(
+            UiKit.text(context, "网页版", 10f, R.color.text_secondary).apply {
+                setBackgroundResource(R.drawable.bg_chip)
+                setPadding(dp(9), dp(4), dp(9), dp(4))
+            },
+        )
+        card.addView(top)
+        card.addView(
+            UiKit.text(context, seat.statusLabel + " · 点开管理（登录 / 频道 / 删除）", 11f, R.color.text_secondary).apply {
+                setPadding(0, dp(5), 0, 0)
+            },
+        )
+        return card
     }
 
     /**
@@ -529,28 +570,6 @@ class AgentScreenController(
         PairingState.CONFIRMED -> "已配对"
         PairingState.REJECTED -> "已拒绝（不可用）"
         PairingState.REVOKED -> "已撤销（不可用）"
-    }
-
-    /**
-     * 网页版 Agent 分节（2026-11-28 与 iOS 对齐，位置在「添加
-     * Agent」与「已添加的 Agent」之间）：入口一行 + 一句说明，
-     * 管理页本体在 WebSeatManager。
-     */
-    fun renderWebSeatSection(onOpen: () -> Unit) {
-        list.addView(sectionTitle("网页版 Agent"))
-        val entry = UiKit.text(context, "网页版 Agent（Claude 等）", 15f, R.color.accent, bold = true).apply {
-            setBackgroundResource(R.drawable.bg_card)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            setOnClickListener { onOpen() }
-        }
-        list.addView(entry)
-        list.addView(
-            UiKit.text(
-                context,
-                "席位住在 App 内嵌浏览器里，你登录自己的账号，打开 App 时在频道里应声。",
-                12f, R.color.text_secondary,
-            ).apply { setPadding(0, dp(6), 0, 0) },
-        )
     }
 
     private fun sectionTitle(text: String): TextView =

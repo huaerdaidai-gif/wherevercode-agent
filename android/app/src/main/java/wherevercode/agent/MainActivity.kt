@@ -142,6 +142,7 @@ import wherevercode.agent.core.agent.PlatformTokenIssuer
 import wherevercode.agent.core.agent.BrainKeyStoreAgentSecretStore
 import wherevercode.agent.core.webseat.WebSeatEngine
 import wherevercode.agent.core.webseat.WebSeatStore
+import wherevercode.agent.core.webseat.WebSeatStatus
 import wherevercode.agent.ui.WebSeatHost
 import wherevercode.agent.ui.WebSeatManager
 import wherevercode.agent.core.agent.IssueTokenResult
@@ -11339,8 +11340,25 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Agent 页只列已添加的 Agent（2026-11-11：沙箱扫描区已删）。
                     agentController.clearAgents()
-                    agentController.renderWebSeatSection { webSeatManager.show() }
-                    agentController.renderAddedAgents(added)
+                    // 网页版席位同列「已添加」（Funk 2026-11-28 纠正：Agent 页
+                    // 只留添加＋已添加两块，席位不单独分节；状态读引擎现值，
+                    // 不碰 Keystore）。
+                    val seatRows = try {
+                        webSeatStore.listSeats().map { seat ->
+                            AgentScreenController.WebSeatRowUi(
+                                seatId = seat.seatId,
+                                displayName = seat.displayName,
+                                statusLabel = if (!seat.enabled) {
+                                    WebSeatStatus.OFF.label
+                                } else {
+                                    webSeatEngine.statuses[seat.seatId]?.label ?: WebSeatStatus.RESTING.label
+                                },
+                            )
+                        }
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                    agentController.renderAddedAgents(added, seatRows) { webSeatManager.show() }
                 }
             }
         }.start()
@@ -11483,6 +11501,7 @@ class MainActivity : AppCompatActivity() {
      * 保存前跑 AgentRecord.validate()，非法不落盘。
      */
     private fun showAgentForm(existing: AgentRecord?) {
+        var agentFormDialog: AlertDialog? = null
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
@@ -11842,6 +11861,27 @@ class MainActivity : AppCompatActivity() {
         manusBox.setOnCheckedChangeListener { _, _ -> refreshVisibility() }
         refreshVisibility()
 
+        if (existing == null) {
+            // 网页版 Agent 入口并进本对话框（Funk 2026-11-28 纠正：全 App
+            // 只此一个添加入口，Agent 页不再单独分节）：点行关本框、开席位管理。
+            val webSeatEntry = UiKit.text(this, "网页版 Agent（Claude 等）", 15f, R.color.accent, bold = true).apply {
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                setOnClickListener {
+                    agentFormDialog?.dismiss()
+                    webSeatManager.show()
+                }
+            }
+            form.addView(webSeatEntry, 0)
+            form.addView(
+                UiKit.text(
+                    this,
+                    "席位住在 App 内嵌浏览器里，你登录自己的账号，打开 App 时在频道里应声。",
+                    12f, R.color.text_secondary,
+                ).apply { setPadding(0, dp(6), 0, dp(10)) },
+                1,
+            )
+        }
         val scroll = ScrollView(this).apply { addView(form) }
         val formBuilder = AlertDialog.Builder(this)
             .setTitle(if (existing == null) "添加 Agent" else "编辑 Agent")
@@ -11852,6 +11892,7 @@ class MainActivity : AppCompatActivity() {
             formBuilder.setNeutralButton("自动发现") { _, _ -> discoverAgentsFromDevices() }
         }
         val dialog = formBuilder.create()
+        agentFormDialog = dialog
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val kind = currentKind()
